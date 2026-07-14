@@ -15,13 +15,17 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 from graphiti_core import Graphiti
+from graphiti_core.driver.driver import GraphProvider
 from graphiti_core.edges import EntityEdge
+from graphiti_core.errors import NodeNotFoundError
+from graphiti_core.models.nodes.node_db_queries import get_entity_node_save_query
 from graphiti_core.nodes import EntityNode, EpisodeType, SagaNode
 from graphiti_core.search.search_filters import SearchFilters
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
+from typing_extensions import LiteralString
 
 from config.schema import GraphitiConfig, ServerConfig
 from models.response_types import (
@@ -31,6 +35,7 @@ from models.response_types import (
     EpisodeSearchResponse,
     ErrorResponse,
     FactSearchResponse,
+    NodeResult,
     NodeSearchResponse,
     SagaSummaryResponse,
     StatusResponse,
@@ -155,6 +160,8 @@ Core tools:
 - build_communities: detect entity communities and produce higher-level community summaries.
 - get_episode_entities: trace provenance — the entities and facts created by specific episode UUIDs.
 - get_entity_edge / get_episodes: retrieve specific facts or episodes.
+- update_entity: directly repair an entity's name, summary, attributes, or labels. Prefer add_memory
+  for normal knowledge corrections because direct updates do not create temporal history or provenance.
 - delete_episode: remove an episode and cascade-delete the entities/facts it solely created.
 - delete_entity_edge / clear_graph: remove a fact, or clear a group's data.
 
@@ -629,6 +636,124 @@ async def search_memory_facts(
         error_msg = str(e)
         logger.error(f'Error searching facts: {error_msg}')
         return ErrorResponse(error=f'Error searching facts: {error_msg}')
+
+
+@mcp.tool()
+async def update_entity(
+    uuid: str,
+    name: str | None = None,
+    summary: str | None = None,
+    attributes: dict[str, Any] | None = None,
+    labels: list[str] | None = None,
+) -> NodeResult | ErrorResponse:
+    """Directly repair an existing entity without creating an episode.
+
+    Prefer add_memory for normal knowledge corrections so Graphiti preserves temporal history and
+    provenance. This administrative tool keeps uuid, group_id, created_at, and name_embedding
+    immutable. Attributes are merged; labels replace the current entity-type labels.
+
+    Args:
+        uuid: UUID of the entity node to update.
+        name: Replacement entity name. Blank names are rejected.
+        summary: Replacement summary. Pass an empty string to clear it.
+        attributes: Attribute keys to merge into the existing attributes.
+        labels: Replacement entity-type labels. Pass an empty list to clear custom labels.
+    """
+    global graphiti_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+
+    if name is None and summary is None and attributes is None and labels is None:
+        return ErrorResponse(error='At least one entity field must be provided')
+
+    if name is not None and not name.strip():
+        return ErrorResponse(error='Entity name must not be blank')
+
+    invalid_attribute_keys = sorted(
+        key
+        for key in (attributes or {})
+        if key in EntityNode.model_fields or 'embedding' in key.lower()
+    )
+    if invalid_attribute_keys:
+        return ErrorResponse(
+            error=f'Reserved or embedding attribute keys are not allowed: {invalid_attribute_keys}'
+        )
+
+    try:
+        client = await graphiti_service.get_client()
+        entity = await EntityNode.get_by_uuid(client.driver, uuid)
+
+        normalized_name = name.strip() if name is not None else entity.name
+        name_changed = name is not None and normalized_name != entity.name
+        if entity.name_embedding is None and not name_changed:
+            await entity.load_name_embedding(client.driver)
+
+        if name_changed:
+            entity.name = normalized_name
+            await entity.generate_name_embedding(client.embedder)
+
+        if summary is not None:
+            entity.summary = summary
+        if attributes is not None:
+            entity.attributes = {**(entity.attributes or {}), **attributes}
+        if labels is not None:
+            previous_labels = list(
+                dict.fromkeys(label for label in entity.labels if label != 'Entity')
+            )
+            entity.labels = list(dict.fromkeys(label for label in labels if label != 'Entity'))
+            if client.driver.provider == GraphProvider.NEO4J:
+                entity_node_ops = client.driver.entity_node_ops
+                if entity_node_ops is None:
+                    raise RuntimeError('Entity node operations are unavailable')
+                async with client.driver.transaction() as tx:
+                    if previous_labels:
+                        await tx.run(
+                            'MATCH (n:Entity {uuid: $uuid}) REMOVE n:$($labels)',
+                            uuid=entity.uuid,
+                            labels=previous_labels,
+                        )
+                    await entity_node_ops.save(client.driver, entity, tx=tx)
+                return to_node_result(entity)
+            if client.driver.provider == GraphProvider.FALKORDB:
+                entity_data = {
+                    'uuid': entity.uuid,
+                    'name': entity.name,
+                    'name_embedding': entity.name_embedding,
+                    'group_id': entity.group_id,
+                    'summary': entity.summary,
+                    'created_at': entity.created_at,
+                    **(entity.attributes or {}),
+                }
+                save_query = get_entity_node_save_query(
+                    GraphProvider.FALKORDB, ':'.join(entity.labels + ['Entity'])
+                )
+                remove_labels = ':'.join(previous_labels)
+                replace_labels_query: LiteralString = (  # type: ignore[assignment]
+                    'MATCH (n:Entity {uuid: $entity_data.uuid}) '
+                    f'WITH n AS existing REMOVE existing:{remove_labels} '
+                    + save_query
+                )
+                await client.driver.execute_query(
+                    replace_labels_query,
+                    entity_data=entity_data,
+                )
+                return to_node_result(entity)
+            if previous_labels:
+                remove_labels = ':'.join(previous_labels)
+                remove_labels_query: LiteralString = (  # type: ignore[assignment]
+                    f'MATCH (n:Entity {{uuid: $uuid}}) REMOVE n:{remove_labels}'
+                )
+                await client.driver.execute_query(remove_labels_query, uuid=entity.uuid)
+
+        await entity.save(client.driver)
+        return to_node_result(entity)
+    except NodeNotFoundError:
+        return ErrorResponse(error=f'Entity with UUID {uuid} not found')
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f'Error updating entity: {error_msg}')
+        return ErrorResponse(error=f'Error updating entity: {error_msg}')
 
 
 @mcp.tool()

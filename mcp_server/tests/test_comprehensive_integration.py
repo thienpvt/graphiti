@@ -162,6 +162,7 @@ class TestCoreOperations:
                 'delete_episode',
                 'delete_entity_edge',
                 'get_entity_edge',
+                'update_entity',
                 'clear_graph',
                 'get_status',
             }
