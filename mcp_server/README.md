@@ -563,6 +563,12 @@ The Graphiti MCP server exposes the following tools:
 - `delete_entity_edge`: Delete an entity edge from the knowledge graph.
 - `delete_episode`: Delete an episode and cascade-delete the entities/facts it solely created.
 - `get_entity_edge`: Get an entity edge by its UUID.
+- `update_entity`: Directly repair an existing entity's name, summary, attributes, or labels by UUID.
+  Attributes merge with existing values; labels replace existing custom labels. Neo4j label replacement is
+  transactional; FalkorDB uses its supported literal-label `REMOVE` syntax. The entity UUID, group,
+  creation time, and embedding are not caller-editable; renaming regenerates the embedding automatically.
+  This administrative operation does not create episode provenance or temporal history, so prefer
+  `add_memory` for normal knowledge corrections.
 - `get_episodes`: Get the most recent episodes for a specific group.
 - `clear_graph`: Clear all data from the knowledge graph for the given group(s).
 - `get_status`: Get the status of the Graphiti MCP server and database connection.

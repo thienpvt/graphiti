@@ -1,0 +1,354 @@
+# Neo4j remains cluster-internal. Graphiti MCP is exposed on every node at port 30080.
+# Security: NodePort provides no TLS or application authentication. Restrict it with a
+# firewall/VPN, or replace it with an authenticated TLS ingress before internet exposure.
+# Keep Neo4j at one replica. Confirm nfs01 supports the locking and fsync semantics Neo4j needs.
+#
+# Create the namespace and credentials before applying this manifest:
+# kubectl create namespace graphiti --dry-run=client -o yaml | kubectl apply -f -
+# kubectl -n graphiti create secret generic graphiti-secrets \
+#   --from-literal=NEO4J_USER=neo4j \
+#   --from-literal=NEO4J_PASSWORD='<strong-password>' \
+#   --from-literal=OPENAI_API_KEY='<api-key>' \
+#   --dry-run=client -o yaml | kubectl apply -f -
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: graphiti
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: graphiti-mcp-config
+  namespace: graphiti
+data:
+  config.yaml: |
+    server:
+      transport: "http"
+      host: "0.0.0.0"
+      port: 8000
+
+    llm:
+      provider: "openai"
+      model: ${MODEL_NAME:gpt-5.5}
+      max_tokens: 200000
+
+      providers:
+        openai:
+          api_key: ${OPENAI_API_KEY}
+          api_url: ${OPENAI_API_URL:https://api.openai.com/v1}
+          organization_id: ${OPENAI_ORGANIZATION_ID:}
+
+        azure_openai:
+          api_key: ${AZURE_OPENAI_API_KEY}
+          api_url: ${AZURE_OPENAI_ENDPOINT}
+          api_version: ${AZURE_OPENAI_API_VERSION:2024-10-21}
+          deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
+          use_azure_ad: ${USE_AZURE_AD:false}
+
+        anthropic:
+          api_key: ${ANTHROPIC_API_KEY}
+          api_url: ${ANTHROPIC_API_URL:https://api.anthropic.com}
+          max_retries: 3
+
+        gemini:
+          api_key: ${GOOGLE_API_KEY}
+          project_id: ${GOOGLE_PROJECT_ID:}
+          location: ${GOOGLE_LOCATION:us-central1}
+
+        groq:
+          api_key: ${GROQ_API_KEY}
+          api_url: ${GROQ_API_URL:https://api.groq.com/openai/v1}
+
+    embedder:
+      provider: "openai"
+      model: ${EMBEDDER_MODEL:text-embedding-3-small}
+      dimensions: 1536
+
+      providers:
+        openai:
+          api_key: ${OPENAI_API_KEY}
+          api_url: ${OPENAI_API_URL:https://api.openai.com/v1}
+          organization_id: ${OPENAI_ORGANIZATION_ID:}
+
+        azure_openai:
+          api_key: ${AZURE_OPENAI_API_KEY}
+          api_url: ${AZURE_OPENAI_EMBEDDINGS_ENDPOINT}
+          api_version: ${AZURE_OPENAI_API_VERSION:2024-10-21}
+          deployment_name: ${AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT}
+          use_azure_ad: ${USE_AZURE_AD:false}
+
+        gemini:
+          api_key: ${GOOGLE_API_KEY}
+          project_id: ${GOOGLE_PROJECT_ID:}
+          location: ${GOOGLE_LOCATION:us-central1}
+
+        voyage:
+          api_key: ${VOYAGE_API_KEY}
+          api_url: ${VOYAGE_API_URL:https://api.voyageai.com/v1}
+          model: "voyage-3"
+
+    database:
+      provider: "neo4j"
+
+      providers:
+        neo4j:
+          uri: ${NEO4J_URI:bolt://neo4j:7687}
+          username: ${NEO4J_USER:neo4j}
+          password: ${NEO4J_PASSWORD}
+          database: ${NEO4J_DATABASE:neo4j}
+          use_parallel_runtime: ${USE_PARALLEL_RUNTIME:false}
+
+    graphiti:
+      group_id: ${GRAPHITI_GROUP_ID:main}
+      episode_id_prefix: ${EPISODE_ID_PREFIX:}
+      user_id: ${USER_ID:mcp_user}
+      entity_types:
+        - name: "Preference"
+          description: "User preferences, choices, opinions, or selections (PRIORITIZE over most other types except User/Assistant)"
+        - name: "Requirement"
+          description: "Specific needs, features, or functionality that must be fulfilled"
+        - name: "Procedure"
+          description: "Standard operating procedures and sequential instructions"
+        - name: "Location"
+          description: "Physical or virtual places where activities occur"
+        - name: "Event"
+          description: "Time-bound activities, occurrences, or experiences"
+        - name: "Organization"
+          description: "Companies, institutions, groups, or formal entities"
+        - name: "Document"
+          description: "Information content in various forms (books, articles, reports, etc.)"
+        - name: "Topic"
+          description: "Subject of conversation, interest, or knowledge domain (use as last resort)"
+        - name: "Object"
+          description: "Physical items, tools, devices, or possessions (use as last resort)"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-data
+  namespace: graphiti
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs01
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-logs
+  namespace: graphiti
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs01
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j
+  namespace: graphiti
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: neo4j
+          image: neo4j:5.26.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 7474
+            - name: bolt
+              containerPort: 7687
+          env:
+            - name: NEO4J_USER
+              valueFrom:
+                secretKeyRef:
+                  name: graphiti-secrets
+                  key: NEO4J_USER
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: graphiti-secrets
+                  key: NEO4J_PASSWORD
+            - name: NEO4J_AUTH
+              value: "$(NEO4J_USER)/$(NEO4J_PASSWORD)"
+            - name: NEO4J_server_memory_heap_initial__size
+              value: 512m
+            - name: NEO4J_server_memory_heap_max__size
+              value: 1G
+            - name: NEO4J_server_memory_pagecache_size
+              value: 512m
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /logs
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: neo4j-data
+        - name: logs
+          persistentVolumeClaim:
+            claimName: neo4j-logs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j
+  namespace: graphiti
+spec:
+  type: ClusterIP
+  selector:
+    app: neo4j
+  ports:
+    - name: bolt
+      port: 7687
+      targetPort: bolt
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: graphiti-mcp
+  namespace: graphiti
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: graphiti-mcp
+  template:
+    metadata:
+      labels:
+        app: graphiti-mcp
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: graphiti-mcp
+          image: ghcr.io/thienpvt/graphiti-mcp:standalone
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: NEO4J_URI
+              value: bolt://neo4j:7687
+            - name: NEO4J_USER
+              valueFrom:
+                secretKeyRef:
+                  name: graphiti-secrets
+                  key: NEO4J_USER
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: graphiti-secrets
+                  key: NEO4J_PASSWORD
+            - name: NEO4J_DATABASE
+              value: neo4j
+            - name: GRAPHITI_GROUP_ID
+              value: main
+            - name: SEMAPHORE_LIMIT
+              value: "10"
+            - name: CONFIG_PATH
+              value: /app/mcp/config/config.yaml
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: graphiti-secrets
+                  key: OPENAI_API_KEY
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: config
+              mountPath: /app/mcp/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: graphiti-mcp-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: graphiti-mcp
+  namespace: graphiti
+spec:
+  type: NodePort
+  selector:
+    app: graphiti-mcp
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      nodePort: 30080

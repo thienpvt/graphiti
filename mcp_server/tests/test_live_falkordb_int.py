@@ -187,6 +187,7 @@ async def test_server_lists_core_tools():
             'search_memory_facts',
             'get_episodes',
             'get_entity_edge',
+            'update_entity',
             'delete_entity_edge',
             'delete_episode',
             'clear_graph',
