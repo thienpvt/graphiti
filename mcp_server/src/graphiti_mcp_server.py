@@ -5,6 +5,7 @@ Graphiti MCP Server - Exposes Graphiti functionality through the Model Context P
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -22,6 +23,7 @@ from graphiti_core.models.nodes.node_db_queries import get_entity_node_save_quer
 from graphiti_core.nodes import EntityNode, EpisodeType, SagaNode
 from graphiti_core.search.search_filters import SearchFilters
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
@@ -129,7 +131,7 @@ def configure_uvicorn_logging():
 logger = logging.getLogger(__name__)
 
 # Create global config instance - will be properly initialized later
-config: GraphitiConfig
+config= GraphitiConfig()
 
 # MCP server instructions
 GRAPHITI_MCP_INSTRUCTIONS = """
@@ -175,9 +177,22 @@ server requires a configured database and valid API keys for language-model oper
 """
 
 # MCP server instance
+allowed_hosts_raw = os.getenv(
+    "FASTMCP_HTTP_ALLOWED_HOSTS",
+    '["localhost:*", "127.0.0.1:*", "[::1]:*"]',
+)
+
+allowed_hosts = json.loads(allowed_hosts_raw)
+
 mcp = FastMCP(
-    'Graphiti Agent Memory',
+    "Graphiti Agent Memory",
     instructions=GRAPHITI_MCP_INSTRUCTIONS,
+    host=config.server.host or "0.0.0.0",
+    port=config.server.port,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+    ),
 )
 
 # Global services
