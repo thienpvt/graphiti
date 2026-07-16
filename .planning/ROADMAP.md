@@ -29,7 +29,7 @@ Add synchronous, typed, deterministic Neo4j catalog-upsert tools to the existing
   4. Existing `search_nodes` and `search_memory_facts` retrieve catalog entities and facts created only under `oracle-catalog-tool-test` with expected type filters
   5. Phase 1 quality gate is green: focused unit tests, Neo4j integration on `oracle-catalog-tool-test` only, format/lint/changed-code typecheck, MCP tool-schema listing, relevant existing MCP regressions, and a short Phase 1 report that explicitly gates Phase 2
 
-**Plans:** 2/6 plans executed
+**Plans:** 4/6 plans executed
 
 Plans:
 **Wave 1**
@@ -42,11 +42,11 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-03-PLAN.md — resolve_typed_entities + verify_catalog_batch read-only (TDD)
+- [x] 01-03-PLAN.md — resolve_typed_entities + verify_catalog_batch read-only (TDD)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 01-04-PLAN.md — upsert_typed_edges with exact endpoints (TDD)
+- [x] 01-04-PLAN.md — upsert_typed_edges with exact endpoints (TDD)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -78,7 +78,7 @@ Phases execute in numeric order: 1 → 2. Phase 2 must not start until Phase 1 g
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Typed Catalog Primitives | 2/6 | In Progress|  |
+| 1. Typed Catalog Primitives | 4/6 | In Progress |  |
 | 2. Provenance and Atomic Batch | 0/TBD | Not started | - |
 
 ## Coverage
