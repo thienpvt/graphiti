@@ -173,9 +173,12 @@ None. Entity path fully wired under unit mocks. Live Neo4j coverage deferred to 
 
 - RED commits: `2f5b8e9`, `8235a78`
 - GREEN commits after RED: `7b1fe35`, `6a51724`
-- Diagnostic fix: see latest `fix(01-02)` commit
+- Diagnostic fix: `af807d8` fix(01-02): clear pyright diagnostics on catalog entity path
+- Third diagnostic pass (reopen): confirmed on disk — no `prepared_ok` param/call-site mismatch; `SimpleNamespace` imported in store unit tests; `rg prepared_ok` empty
+- Verification: `cd mcp_server && uv run pyright src/graphiti_mcp_server.py src/services/catalog_store.py src/services/catalog_service.py tests/test_catalog_store_unit.py tests/test_catalog_service.py` → 0 errors
+- Verification: `uv run --directory mcp_server pyright src/graphiti_mcp_server.py src/services/catalog_store.py src/services/catalog_service.py tests/test_catalog_store_unit.py tests/test_catalog_service.py` → 0 errors
+- Note: paths prefixed with `mcp_server/` under `uv run --directory mcp_server` resolve as `mcp_server/mcp_server/...` and are invalid; use `src/...` / `tests/...` relative to package root
 - Verification: `uv run --directory mcp_server pytest tests/test_catalog_store_unit.py tests/test_catalog_service.py -q` → 34 passed
-- Verification: `uv run --directory mcp_server pyright src/graphiti_mcp_server.py src/config/schema.py src/models src/services/catalog_identity.py src/services/catalog_store.py src/services/catalog_service.py tests/test_catalog_store_unit.py tests/test_catalog_service.py` → 0 errors
 
 ## Self-Check: PASSED
 
@@ -184,4 +187,6 @@ None. Entity path fully wired under unit mocks. Live Neo4j coverage deferred to 
 - FOUND: `mcp_server/src/graphiti_mcp_server.py` (`upsert_typed_entities`)
 - FOUND: `mcp_server/tests/test_catalog_store_unit.py`
 - FOUND: `mcp_server/tests/test_catalog_service.py`
-- FOUND commits: `2f5b8e9`, `7b1fe35`, `8235a78`, `6a51724`
+- FOUND commits: `2f5b8e9`, `7b1fe35`, `8235a78`, `6a51724`, `af807d8`
+- `prepared_ok`: absent from signature and all call sites
+- `SimpleNamespace`: imported from `types` in both catalog unit test modules
