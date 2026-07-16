@@ -693,6 +693,39 @@ async def test_resolve_mixed_twin_anomalies_are_not_hidden(catalog_client):
     assert 'wrong_type' in r0.anomalies
 
 
+async def test_verify_wrong_type_sibling_with_typed_present_live(catalog_client):
+    ctx = catalog_client
+    entity = _six_entities()[2]
+    response = await _upsert_entities(ctx, [entity])
+    assert response.results[0].uuid
+    await ctx.driver.execute_query(
+        """
+        CREATE (w:Entity:View {
+          uuid: $wrong_uuid,
+          group_id: $g,
+          name: $key,
+          graph_key: $key,
+          batch_id: $batch_id
+        })
+        """,
+        params={
+            'wrong_uuid': str(uuid.uuid4()),
+            'g': GROUP,
+            'key': entity.graph_key,
+            'batch_id': BATCH,
+        },
+    )
+    resp = await ctx.service.verify_catalog_batch(
+        client=ctx.client,
+        request=VerifyCatalogBatchRequest(
+            group_id=GROUP,
+            entities=[VerifyEntityRef(entity_type='Table', graph_key=entity.graph_key)],
+        ),
+    )
+    assert resp.entities.found == 1
+    assert entity.graph_key in resp.entities.wrong_type
+
+
 async def test_verify_physical_duplicate_edge_is_preserved_and_reported(catalog_client):
     ctx = catalog_client
     await _upsert_entities(ctx, [_six_entities()[1], _six_entities()[2]])
