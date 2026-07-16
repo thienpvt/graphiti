@@ -10,16 +10,20 @@ import json
 import re
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
-from models.catalog_common import CATALOG_ENTITY_TYPES, ENTITY_TYPE_PREFIXES, PROTECTED_ENTITY_PROPERTIES
+from models.catalog_common import (
+    CATALOG_EDGE_TYPES,
+    CATALOG_ENTITY_TYPES,
+    ENTITY_TYPE_PREFIXES,
+    PROTECTED_ENTITY_PROPERTIES,
+)
 
 # Mirror graphiti_core.helpers.SAFE_CYPHER_IDENTIFIER_PATTERN without importing core.
 _SAFE_LABEL = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 # Fixed map: entity_type -> Neo4j label literal (identity with allowlist keys).
-_ENTITY_LABELS: dict[str, str] = {
-    t: t for t in ENTITY_TYPE_PREFIXES if _SAFE_LABEL.match(t)
-}
+_ENTITY_LABELS: dict[str, str] = {t: t for t in ENTITY_TYPE_PREFIXES if _SAFE_LABEL.match(t)}
 
 
 class CatalogStoreError(ValueError):
@@ -66,41 +70,27 @@ class CatalogNeo4jStore:
         return label
 
     def build_entity_upsert_cypher(self, entity_type: str) -> str:
-        """Build MERGE Cypher with ON CREATE / conditional ON MATCH for one entity type.
+        """Build MERGE Cypher with create-once identity and zero-mutation unchanged path.
 
         Labels are server-resolved literals only. Values are parameters.
-        Identical content_sha256 leaves properties (including batch_id) untouched.
+        Create path sets full props + per-write $create_token marker.
+        Status derived from token presence + pre-update hash compare — never timestamps.
+        Matched unchanged: no SET of content props, no vector rewrite.
+        Token REMOVEd before RETURN (create-only; never client authority).
+        Cross-group same UUID rejected via WHERE n.group_id = $group_id (empty row).
         """
         label = self.resolve_entity_label(entity_type)
-        # Conditional SET: only apply mutable fields when content hash differs.
-        # CASE WHEN n.content_sha256 = $content_sha256 THEN n.<prop> ELSE $prop END
-        mutable = (
-            'name',
-            'graph_key',
-            'name_raw',
-            'name_canonical',
-            'database_qualified_name',
-            'summary',
-            'attributes',
-            'source_refs',
-            'confidence',
-            'batch_id',
-            'content_sha256',
-            'labels',
-            'group_id',
-        )
-        on_match_lines = [
-            (
-                f'n.{prop} = CASE WHEN n.content_sha256 = $content_sha256 '
-                f'THEN n.{prop} ELSE ${prop} END'
-            )
-            for prop in mutable
-        ]
-        on_match_lines.append(
-            'n.updated_at = CASE WHEN n.content_sha256 = $content_sha256 '
-            'THEN n.updated_at ELSE $updated_at END'
-        )
-        on_match = ',\n                '.join(on_match_lines)
+        # Updated-only content fields (identity/preservation never rewritten on match).
+        updated_set = """
+                n.database_qualified_name = $database_qualified_name,
+                n.summary = $summary,
+                n.attributes = $attributes,
+                n.source_refs = $source_refs,
+                n.confidence = $confidence,
+                n.batch_id = $batch_id,
+                n.content_sha256 = $content_sha256,
+                n.updated_at = $updated_at
+        """.strip()
 
         return f"""
             MERGE (n:Entity {{uuid: $uuid}})
@@ -121,21 +111,40 @@ class CatalogNeo4jStore:
                 n.content_sha256 = $content_sha256,
                 n.labels = $labels,
                 n.created_at = $created_at,
-                n.updated_at = $updated_at
-            ON MATCH SET
-                {on_match}
+                n.updated_at = $updated_at,
+                n._catalog_create_token = $create_token
             WITH n
-            CALL db.create.setNodeVectorProperty(n, 'name_embedding', $name_embedding)
+            WHERE n.group_id = $group_id
+            WITH n,
+                 coalesce(n._catalog_create_token, '') = $create_token AS created,
+                 n.content_sha256 = $content_sha256 AS same
+            WITH n, created, same,
+                 CASE
+                   WHEN created THEN 'created'
+                   WHEN same THEN 'unchanged'
+                   ELSE 'updated'
+                 END AS status
+            FOREACH (_ IN CASE WHEN status = 'updated' THEN [1] ELSE [] END |
+              SET {updated_set}
+            )
+            REMOVE n._catalog_create_token
+            WITH n, status
+            CALL {{
+              WITH n, status
+              WITH n, status WHERE status IN ['created', 'updated']
+              CALL db.create.setNodeVectorProperty(n, 'name_embedding', $name_embedding)
+              RETURN 1 AS _
+              UNION
+              WITH n, status
+              WITH n, status WHERE status = 'unchanged'
+              RETURN 0 AS _
+            }}
             RETURN n.uuid AS uuid,
                    n.content_sha256 AS content_sha256,
                    n.batch_id AS batch_id,
                    n.created_at AS created_at,
                    n.updated_at AS updated_at,
-                   CASE WHEN n.created_at = $created_at THEN 'created'
-                        WHEN n.content_sha256 = $content_sha256
-                             AND n.updated_at = $updated_at THEN 'unchanged'
-                        ELSE 'updated'
-                   END AS status
+                   status
             """
 
     def build_get_entity_by_uuid_cypher(self) -> str:
@@ -217,6 +226,8 @@ class CatalogNeo4jStore:
             'source_refs': serialize_nested_json(source_refs),
             'confidence': confidence,
             'labels': ['Entity', label],
+            # Per-write create marker only; never client authority, never persisted.
+            'create_token': uuid4().hex,
         }
 
     async def upsert_entity_item(
@@ -226,17 +237,25 @@ class CatalogNeo4jStore:
         entity_type: str,
         params: dict[str, Any],
     ) -> dict[str, Any]:
-        """Execute entity MERGE inside an open transaction. Returns first record dict."""
+        """Execute entity MERGE inside an open transaction. Returns first record dict.
+
+        Empty/missing uuid means group-scope miss or write failure — never success.
+        """
         cypher = self.build_entity_upsert_cypher(entity_type)
         result = await tx.run(cypher, **params)
-        # neo4j AsyncResult or mock
+        row: dict[str, Any] = {}
         if hasattr(result, 'data'):
             rows = await result.data()
-            return rows[0] if rows else {}
-        if hasattr(result, 'single'):
+            row = rows[0] if rows else {}
+        elif hasattr(result, 'single'):
             record = await result.single()
-            return dict(record) if record is not None else {}
-        return {}
+            row = dict(record) if record is not None else {}
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'entity upsert returned no row (missing, group mismatch, or write failure)',
+                code='neo4j_transaction_failed',
+            )
+        return row
 
     async def get_entity_by_uuid(
         self,
@@ -274,8 +293,9 @@ class CatalogNeo4jStore:
         if tx is not None:
             result = await tx.run(cypher, **params)
             return await self._first_from_tx_result(result)
-        # Neo4jDriver.execute_query -> EagerResult, a tuple of (records, summary, keys).
-        result = await executor.execute_query(cypher, **params)
+        # Neo4jDriver.execute_query binds Cypher values only via params=; other kwargs
+        # are AsyncDriver execute options. Never splat property maps as **kwargs.
+        result = await executor.execute_query(cypher, params=params)
         return self._first_from_execute_query_result(result)
 
     @staticmethod
@@ -354,7 +374,8 @@ class CatalogNeo4jStore:
                 rows = await result.data()
                 return [r if isinstance(r, dict) else dict(r) for r in (rows or [])]
             return []
-        result = await executor.execute_query(cypher, **params)
+        # Live Neo4jDriver contract: Cypher values only via params=
+        result = await executor.execute_query(cypher, params=params)
         return self._all_from_execute_query_result(result)
 
     def build_match_entities_for_resolve_cypher(self) -> str:
@@ -571,3 +592,300 @@ class CatalogNeo4jStore:
         cypher = self.build_match_provenance_presence_cypher()
         params = {'group_id': group_id, 'target_uuids': list(target_uuids)}
         return await self._read_many(executor, cypher, params, tx=tx)
+
+    # ------------------------------------------------------------------
+    # Typed edge endpoint resolution + edge upsert
+    # ------------------------------------------------------------------
+
+    def resolve_edge_type(self, edge_type: str) -> str:
+        """Re-validate edge_type against the fixed server allowlist (EDGE-02)."""
+        if edge_type not in CATALOG_EDGE_TYPES:
+            raise CatalogStoreError(
+                f'edge_type not allowlisted: {edge_type!r}',
+                code='validation_error',
+            )
+        if not _SAFE_LABEL.match(edge_type):
+            raise CatalogStoreError(
+                f'edge_type unsafe: {edge_type!r}',
+                code='validation_error',
+            )
+        return edge_type
+
+    def build_resolve_endpoint_typed_cypher(self, entity_type: str) -> str:
+        """MATCH-only endpoint lookup by group_id + name; never CREATE/MERGE/SET."""
+        # Validate allowlist (raises if unknown). Label not interpolated into Cypher:
+        # MATCH returns all Entity rows for name so classify can distinguish generic vs typed.
+        self.resolve_entity_label(entity_type)
+        return """
+            MATCH (n:Entity {group_id: $group_id, name: $name})
+            RETURN n.uuid AS uuid,
+                   n.group_id AS group_id,
+                   n.name AS name,
+                   n.graph_key AS graph_key,
+                   n.labels AS labels,
+                   labels(n) AS neo4j_labels,
+                   n.content_sha256 AS content_sha256
+            """
+
+    def classify_endpoint_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        expected_type: str,
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        """Classify endpoint MATCH rows into status codes (EDGE-03/04).
+
+        Returns (error_code or None, chosen_row or None).
+        Never creates or relabels nodes.
+        """
+        if not rows:
+            return 'missing_endpoint', None
+
+        typed: list[dict[str, Any]] = []
+        generic: list[dict[str, Any]] = []
+        wrong: list[dict[str, Any]] = []
+        for row in rows:
+            labels = row.get('neo4j_labels') or row.get('labels') or []
+            if isinstance(labels, str):
+                labels = [labels]
+            custom = [lb for lb in labels if lb != 'Entity']
+            if not custom:
+                generic.append(row)
+            elif set(custom) == {expected_type}:
+                # Exactly Entity + one expected custom label; extra labels are wrong_type.
+                typed.append(row)
+            else:
+                wrong.append(row)
+
+        if typed:
+            return None, typed[0]
+        if wrong:
+            return 'endpoint_type_mismatch', wrong[0]
+        if generic:
+            return 'generic_endpoint_conflict', generic[0]
+        return 'missing_endpoint', None
+
+    async def resolve_endpoint_typed(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        graph_key: str,
+        entity_type: str,
+        tx: Any | None = None,
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        """Resolve exact endpoint by group_id + graph_key + entity_type.
+
+        MATCH only; never CREATE. Returns (error_code|None, row|None).
+        """
+        # Validate type early (raises CatalogStoreError if unknown)
+        self.resolve_entity_label(entity_type)
+        cypher = self.build_resolve_endpoint_typed_cypher(entity_type)
+        params = {'group_id': group_id, 'name': graph_key}
+        rows = await self._read_many(executor, cypher, params, tx=tx)
+        return self.classify_endpoint_rows(rows, expected_type=entity_type)
+
+    def build_edge_upsert_cypher(self) -> str:
+        """MERGE RELATES_TO by uuid; e.name is parameterized allowlisted edge type.
+
+        Endpoints MATCH is group-scoped. Create-token status classification:
+        zero property mutation on matched unchanged; vector only on created/updated.
+        Identity fields set only ON CREATE.
+        """
+        updated_set = """
+                e.fact = $fact,
+                e.evidence = $evidence,
+                e.attributes = $attributes,
+                e.confidence = $confidence,
+                e.batch_id = $batch_id,
+                e.content_sha256 = $content_sha256,
+                e.updated_at = $updated_at
+        """.strip()
+
+        return f"""
+            MATCH (source:Entity {{uuid: $source_uuid}})
+            WHERE source.group_id = $group_id
+            MATCH (target:Entity {{uuid: $target_uuid}})
+            WHERE target.group_id = $group_id
+            MERGE (source)-[e:RELATES_TO {{uuid: $uuid}}]->(target)
+            ON CREATE SET
+                e.uuid = $uuid,
+                e.group_id = $group_id,
+                e.name = $name,
+                e.edge_key = $edge_key,
+                e.fact = $fact,
+                e.evidence = $evidence,
+                e.attributes = $attributes,
+                e.confidence = $confidence,
+                e.batch_id = $batch_id,
+                e.content_sha256 = $content_sha256,
+                e.source_node_uuid = $source_node_uuid,
+                e.target_node_uuid = $target_node_uuid,
+                e.created_at = $created_at,
+                e.updated_at = $updated_at,
+                e._catalog_create_token = $create_token
+            WITH e,
+                 coalesce(e._catalog_create_token, '') = $create_token AS created,
+                 e.content_sha256 = $content_sha256 AS same
+            WITH e, created, same,
+                 CASE
+                   WHEN created THEN 'created'
+                   WHEN same THEN 'unchanged'
+                   ELSE 'updated'
+                 END AS status
+            FOREACH (_ IN CASE WHEN status = 'updated' THEN [1] ELSE [] END |
+              SET {updated_set}
+            )
+            REMOVE e._catalog_create_token
+            WITH e, status
+            CALL {{
+              WITH e, status
+              WITH e, status WHERE status IN ['created', 'updated']
+              CALL db.create.setRelationshipVectorProperty(e, 'fact_embedding', $fact_embedding)
+              RETURN 1 AS _
+              UNION
+              WITH e, status
+              WITH e, status WHERE status = 'unchanged'
+              RETURN 0 AS _
+            }}
+            RETURN e.uuid AS uuid,
+                   e.content_sha256 AS content_sha256,
+                   e.batch_id AS batch_id,
+                   e.created_at AS created_at,
+                   e.updated_at AS updated_at,
+                   e.name AS name,
+                   e.edge_key AS edge_key,
+                   e.source_node_uuid AS source_uuid,
+                   e.target_node_uuid AS target_uuid,
+                   status
+            """
+
+    def build_get_edge_by_uuid_cypher(self) -> str:
+        return """
+            MATCH (s:Entity)-[e:RELATES_TO {uuid: $uuid}]->(t:Entity)
+            WHERE e.group_id = $group_id
+            RETURN e.uuid AS uuid,
+                   e.group_id AS group_id,
+                   e.name AS name,
+                   e.edge_key AS edge_key,
+                   e.fact AS fact,
+                   e.content_sha256 AS content_sha256,
+                   e.batch_id AS batch_id,
+                   e.created_at AS created_at,
+                   e.updated_at AS updated_at,
+                   e.fact_embedding IS NOT NULL AS has_fact_embedding,
+                   coalesce(e.source_node_uuid, s.uuid) AS source_uuid,
+                   coalesce(e.target_node_uuid, t.uuid) AS target_uuid,
+                   s.uuid AS source_node_uuid,
+                   t.uuid AS target_node_uuid
+            """
+
+    def prepare_edge_params(
+        self,
+        *,
+        edge_type: str,
+        uuid: str,
+        group_id: str,
+        batch_id: str,
+        edge_key: str,
+        source_uuid: str,
+        target_uuid: str,
+        fact: str,
+        content_sha256: str,
+        created_at: datetime,
+        updated_at: datetime,
+        fact_embedding: list[float],
+        evidence: str | None = None,
+        attributes: dict[str, Any] | None = None,
+        confidence: float | None = None,
+    ) -> dict[str, Any]:
+        """Build parameterized property map for edge upsert.
+
+        e.name is the allowlisted edge_type. Nested maps JSON-serialized.
+        """
+        name = self.resolve_edge_type(edge_type)
+        cleaned_attrs = _strip_protected_attributes(attributes)
+        return {
+            'uuid': uuid,
+            'group_id': group_id,
+            'batch_id': batch_id,
+            'name': name,
+            'edge_key': edge_key,
+            'source_uuid': source_uuid,
+            'target_uuid': target_uuid,
+            'source_node_uuid': source_uuid,
+            'target_node_uuid': target_uuid,
+            'fact': fact,
+            'evidence': evidence,
+            'content_sha256': content_sha256,
+            'created_at': created_at,
+            'updated_at': updated_at,
+            'fact_embedding': fact_embedding,
+            'attributes': serialize_nested_json(cleaned_attrs),
+            'confidence': confidence,
+            # Per-write create marker only; never client authority, never persisted.
+            'create_token': uuid4().hex,
+        }
+
+    def detect_edge_identity_conflict(
+        self,
+        existing: dict[str, Any],
+        *,
+        edge_type: str,
+        edge_key: str,
+        source_uuid: str,
+        target_uuid: str,
+    ) -> str | None:
+        """Return edge_identity_conflict when uuid exists with conflicting fields."""
+        existing_name = existing.get('name')
+        existing_key = existing.get('edge_key')
+        existing_src = existing.get('source_uuid') or existing.get('source_node_uuid')
+        existing_tgt = existing.get('target_uuid') or existing.get('target_node_uuid')
+        if (
+            (existing_name is not None and existing_name != edge_type)
+            or (existing_key is not None and existing_key != edge_key)
+            or (existing_src is not None and str(existing_src) != str(source_uuid))
+            or (existing_tgt is not None and str(existing_tgt) != str(target_uuid))
+        ):
+            return 'edge_identity_conflict'
+        return None
+
+    async def get_edge_by_uuid(
+        self,
+        executor: Any,
+        *,
+        uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        cypher = self.build_get_edge_by_uuid_cypher()
+        params = {'uuid': uuid, 'group_id': group_id}
+        return await self._read_one(executor, cypher, params, tx=tx)
+
+    async def upsert_edge_item(
+        self,
+        tx: Any,
+        *,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute edge MERGE inside an open transaction. Returns first record dict.
+
+        Empty/missing uuid (endpoint group miss or write failure) raises — never {}.
+        """
+        # Re-validate edge type from params['name'] at builder boundary
+        self.resolve_edge_type(str(params.get('name') or ''))
+        cypher = self.build_edge_upsert_cypher()
+        result = await tx.run(cypher, **params)
+        row: dict[str, Any] = {}
+        if hasattr(result, 'data'):
+            rows = await result.data()
+            row = rows[0] if rows else {}
+        elif hasattr(result, 'single'):
+            record = await result.single()
+            row = dict(record) if record is not None else {}
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'edge upsert returned no row (endpoint miss, group mismatch, or write failure)',
+                code='neo4j_transaction_failed',
+            )
+        return row

@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from config.schema import CatalogConfig  # noqa: E402
 from models.catalog_common import CatalogErrorCode  # noqa: E402
+from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
 from models.catalog_entities import (  # noqa: E402
     CatalogEntityItem,
     ResolveEntityRef,
@@ -26,7 +27,11 @@ from models.catalog_entities import (  # noqa: E402
     VerifyEdgeRef,
     VerifyEntityRef,
 )
-from services.catalog_identity import canonical_sha256, catalog_entity_uuid  # noqa: E402
+from services.catalog_identity import (  # noqa: E402
+    canonical_sha256,
+    catalog_edge_uuid,
+    catalog_entity_uuid,
+)
 from services.catalog_service import CatalogService  # noqa: E402
 
 FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
@@ -199,9 +204,7 @@ async def test_entity_dry_run_embeds_but_never_writes_or_persists_batch_id():
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
     service._store.upsert_entity_item = AsyncMock()
-    resp = await service.upsert_typed_entities(
-        client=client, request=_request(dry_run=True)
-    )
+    resp = await service.upsert_typed_entities(client=client, request=_request(dry_run=True))
     assert 'embed' in client.call_order
     assert 'transaction' not in client.call_order
     service._store.upsert_entity_item.assert_not_awaited()
@@ -218,7 +221,9 @@ async def test_entity_create_persists_request_batch_id():
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
     captured: dict = {}
 
-    async def _upsert(tx, *, entity_type, params):
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
         captured.update(params)
         return {
             'uuid': params['uuid'],
@@ -237,9 +242,7 @@ async def test_entity_create_persists_request_batch_id():
 @pytest.mark.asyncio
 async def test_entity_identical_hash_unchanged_leaves_batch_id():
     entity = _entity()
-    ent_uuid = catalog_entity_uuid(
-        FIXED_NS, GROUP, entity.entity_type, entity.graph_key
-    )
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
     payload = CatalogService.entity_canonical_payload(entity)
     digest = canonical_sha256(payload)
     existing = {
@@ -266,9 +269,7 @@ async def test_entity_identical_hash_unchanged_leaves_batch_id():
 @pytest.mark.asyncio
 async def test_entity_changed_update_passes_request_batch_id():
     entity = _entity(summary='Changed summary')
-    ent_uuid = catalog_entity_uuid(
-        FIXED_NS, GROUP, entity.entity_type, entity.graph_key
-    )
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
     existing = {
         'uuid': ent_uuid,
         'content_sha256': 'b' * 64,
@@ -282,7 +283,9 @@ async def test_entity_changed_update_passes_request_batch_id():
     service._store.get_entity_by_uuid = AsyncMock(return_value=existing)
     captured: dict = {}
 
-    async def _upsert(tx, *, entity_type, params):
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
         captured.update(params)
         return {
             'uuid': params['uuid'],
@@ -305,7 +308,9 @@ async def test_entity_atomic_rollback_on_store_failure():
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
 
-    async def _upsert(tx, *, entity_type, params):
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
         if params['graph_key'] == 'TABLE::A.T2':
             raise RuntimeError('neo4j boom')
         return {
@@ -345,14 +350,13 @@ async def test_entity_content_hash_mismatch():
 @pytest.mark.asyncio
 async def test_entity_entity_type_conflict_no_mutation():
     entity = _entity()
-    ent_uuid = catalog_entity_uuid(
-        FIXED_NS, GROUP, entity.entity_type, entity.graph_key
-    )
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
     existing = {
         'uuid': ent_uuid,
         'content_sha256': 'd' * 64,
         'batch_id': 'old',
         'labels': ['Entity', 'View'],  # wrong custom type
+        'neo4j_labels': ['Entity', 'View'],
         'name': entity.graph_key,
         'group_id': GROUP,
     }
@@ -418,7 +422,9 @@ async def test_entity_preserves_input_order_and_deterministic_uuid():
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
 
-    async def _upsert(tx, *, entity_type, params):
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
         return {
             'uuid': params['uuid'],
             'content_sha256': params['content_sha256'],
@@ -427,15 +433,11 @@ async def test_entity_preserves_input_order_and_deterministic_uuid():
         }
 
     service._store.upsert_entity_item = AsyncMock(side_effect=_upsert)
-    resp = await service.upsert_typed_entities(
-        client=client, request=_request([e1, e2])
-    )
+    resp = await service.upsert_typed_entities(client=client, request=_request([e1, e2]))
     assert [r.index for r in resp.results] == [0, 1]
     assert resp.results[0].graph_key == 'TABLE::A.T1'
     assert resp.results[1].graph_key == 'TABLE::A.T2'
-    assert resp.results[0].uuid == catalog_entity_uuid(
-        FIXED_NS, GROUP, 'Table', 'TABLE::A.T1'
-    )
+    assert resp.results[0].uuid == catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::A.T1')
     assert resp.results[0].content_sha256 is not None
     assert len(resp.results[0].content_sha256) == 64
 
@@ -456,9 +458,7 @@ async def test_entity_coalesce_same_identity_same_hash():
         }
     )
     service._store.upsert_entity_item = upsert
-    resp = await service.upsert_typed_entities(
-        client=client, request=_request([e1, e2])
-    )
+    resp = await service.upsert_typed_entities(client=client, request=_request([e1, e2]))
     # One physical write, two results
     assert upsert.await_count == 1
     assert len(resp.results) == 2
@@ -473,9 +473,7 @@ async def test_entity_same_identity_different_hash_is_conflict():
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
     service._store.upsert_entity_item = AsyncMock()
-    resp = await service.upsert_typed_entities(
-        client=client, request=_request([e1, e2])
-    )
+    resp = await service.upsert_typed_entities(client=client, request=_request([e1, e2]))
     assert any(
         r.error_code
         in (
@@ -514,8 +512,7 @@ async def test_resolve_feature_disabled_no_write_no_embed():
     service._store.match_entities_for_resolve = AsyncMock()
     resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
     assert any(
-        getattr(r, 'error_code', None) == CatalogErrorCode.feature_disabled
-        for r in resp.results
+        getattr(r, 'error_code', None) == CatalogErrorCode.feature_disabled for r in resp.results
     )
     assert 'transaction' not in client.call_order
     assert 'embed' not in client.call_order
@@ -531,8 +528,7 @@ async def test_resolve_non_neo4j_backend_unavailable():
     service._store.match_entities_for_resolve = AsyncMock()
     resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
     assert any(
-        getattr(r, 'error_code', None) == CatalogErrorCode.backend_unavailable
-        for r in resp.results
+        getattr(r, 'error_code', None) == CatalogErrorCode.backend_unavailable for r in resp.results
     )
     service._store.match_entities_for_resolve.assert_not_awaited()
     assert 'embed' not in client.call_order
@@ -561,7 +557,8 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
     service = CatalogService(catalog_config=_enabled_config())
     resolve_call: dict = {}
 
-    async def _match_resolve(*_args, **kwargs):
+    async def _match_resolve(executor=None, **kwargs):
+        _ = executor
         resolve_call.clear()
         resolve_call.update(kwargs)
         return [
@@ -689,6 +686,63 @@ async def test_resolve_wrong_custom_label_and_absent_embedding():
 
 
 @pytest.mark.asyncio
+async def test_resolve_expected_plus_extra_label_is_wrong_type():
+    """Entity+Table+View is not typed Table — exact custom label contract."""
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(
+        return_value=[
+            {
+                'uuid': ent_uuid,
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity', 'Table', 'View'],
+                'neo4j_labels': ['Entity', 'Table', 'View'],
+                'content_sha256': 'f' * 64,
+                'has_name_embedding': True,
+                'batch_id': BATCH,
+            }
+        ]
+    )
+    resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
+    r0 = resp.results[0]
+    assert r0.found is True
+    assert r0.status == 'wrong_type'
+    assert 'wrong_type' in r0.anomalies
+    assert r0.verified_type == 'View'
+    client.embedder.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_verify_expected_plus_extra_label_is_wrong_type():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    key = 'TABLE::HR.EMPLOYEES'
+    service._store.match_entities_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': catalog_entity_uuid(FIXED_NS, GROUP, 'Table', key),
+                'graph_key': key,
+                'name': key,
+                'labels': ['Entity', 'Table', 'View'],
+                'neo4j_labels': ['Entity', 'Table', 'View'],
+                'has_name_embedding': True,
+                'batch_id': BATCH,
+            }
+        ]
+    )
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    req = _verify_request(
+        entities=[VerifyEntityRef(entity_type='Table', graph_key=key)],
+        edges=[],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert key in resp.entities.wrong_type
+    assert key not in (resp.entities.typed_duplicate or [])
+
+
+@pytest.mark.asyncio
 async def test_resolve_never_opens_write_transaction():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -759,12 +813,14 @@ async def test_verify_batch_scoped_match_uses_group_and_batch_id():
     ent_call: dict = {}
     edge_call: dict = {}
 
-    async def _match_entities(*_args, **kwargs):
+    async def _match_entities(executor=None, **kwargs):
+        _ = executor
         ent_call.clear()
         ent_call.update(kwargs)
         return []
 
-    async def _match_edges(*_args, **kwargs):
+    async def _match_edges(executor=None, **kwargs):
+        _ = executor
         edge_call.clear()
         edge_call.update(kwargs)
         return []
@@ -855,9 +911,7 @@ async def test_verify_edge_counts_and_anomaly_lists():
     req = _verify_request(
         entities=[],
         edges=[
-            VerifyEdgeRef(
-                edge_type='Contains', edge_key='CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
-            ),
+            VerifyEdgeRef(edge_type='Contains', edge_key='CONTAINS::HR.SCHEMA->HR.EMPLOYEES'),
             VerifyEdgeRef(edge_type='DependsOn', edge_key='DEPENDS::MISSING'),
         ],
     )
@@ -925,3 +979,778 @@ async def test_mcp_tool_verify_catalog_batch_registered():
     server = _mcp_server()
     assert hasattr(server, 'verify_catalog_batch')
     assert callable(server.verify_catalog_batch)
+
+
+# ---------------------------------------------------------------------------
+# upsert_typed_edges
+# ---------------------------------------------------------------------------
+
+EDGE_BATCH = 'batch-edge-001'
+
+
+def _edge(**overrides) -> CatalogEdgeItem:
+    data = {
+        'edge_type': 'ForeignKeyTo',
+        'edge_key': 'FK::HR.EMPLOYEES->HR.DEPARTMENTS',
+        'source_graph_key': 'TABLE::HR.EMPLOYEES',
+        'source_entity_type': 'Table',
+        'target_graph_key': 'TABLE::HR.DEPARTMENTS',
+        'target_entity_type': 'Table',
+        'fact': 'employees.dept_id references departments.dept_id',
+        'evidence': None,
+        'attributes': {'on_delete': 'CASCADE'},
+        'confidence': 0.9,
+    }
+    data.update(overrides)
+    return CatalogEdgeItem.model_validate(data)
+
+
+def _edge_request(
+    edges: list[CatalogEdgeItem] | None = None,
+    *,
+    dry_run: bool = False,
+    atomic: bool = True,
+    batch_id: str = EDGE_BATCH,
+    strict_endpoints: bool = True,
+) -> UpsertTypedEdgesRequest:
+    return UpsertTypedEdgesRequest(
+        group_id=GROUP,
+        batch_id=batch_id,
+        edges=edges or [_edge()],
+        dry_run=dry_run,
+        atomic=atomic,
+        strict_endpoints=strict_endpoints,
+    )
+
+
+def _typed_endpoint(uuid: str, graph_key: str, entity_type: str = 'Table') -> dict:
+    return {
+        'uuid': uuid,
+        'name': graph_key,
+        'graph_key': graph_key,
+        'labels': ['Entity', entity_type],
+        'neo4j_labels': ['Entity', entity_type],
+        'group_id': GROUP,
+    }
+
+
+def _wire_ok_endpoints(service: CatalogService, src_uuid: str = 'src-u', tgt_uuid: str = 'tgt-u'):
+    async def _resolve(executor, *, group_id, graph_key, entity_type, tx=None, **kwargs):
+        _ = (executor, group_id, entity_type, tx, kwargs)
+        if graph_key == 'TABLE::HR.EMPLOYEES':
+            return None, _typed_endpoint(src_uuid, graph_key)
+        if graph_key == 'TABLE::HR.DEPARTMENTS':
+            return None, _typed_endpoint(tgt_uuid, graph_key)
+        return 'missing_endpoint', None
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    return src_uuid, tgt_uuid
+
+
+@pytest.mark.asyncio
+async def test_edge_feature_disabled_returns_structured_error_without_write():
+    client = _make_client()
+    service = CatalogService(catalog_config=_disabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock()
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert any(r.error_code == CatalogErrorCode.feature_disabled for r in resp.results)
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+    service._store.resolve_endpoint_typed.assert_not_awaited()
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_missing_endpoint_before_embed_no_write():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock(return_value=('missing_endpoint', None))
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert any(r.error_code == CatalogErrorCode.missing_endpoint for r in resp.results)
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_source_endpoint_read_failure_is_internal_error_not_missing():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=RuntimeError('db down'))
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.internal_error
+    assert resp.results[0].error_code != CatalogErrorCode.missing_endpoint
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_target_endpoint_read_failure_is_internal_error_not_missing():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+
+    async def _resolve(
+        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+    ):
+        _ = (executor, group_id, entity_type, tx, kwargs)
+        assert graph_key is not None
+        if graph_key == 'TABLE::HR.EMPLOYEES':
+            return None, _typed_endpoint('src-u', graph_key)
+        raise RuntimeError('db down')
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.internal_error
+    assert 'target' in (resp.results[0].error_message or '')
+    assert 'embed' not in client.call_order
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_endpoint_read_failure_atomic_rolls_back_batch():
+    e1 = _edge(edge_key='FK::A.T1->A.T2', fact='fk one')
+    e2 = _edge(edge_key='FK::A.T3->A.T4', fact='fk two')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=RuntimeError('db down'))
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    resp = await service.upsert_typed_edges(
+        client=client, request=_edge_request([e1, e2], atomic=True)
+    )
+    assert resp.failed >= 1
+    assert all(r.status in ('error', 'rolled_back') for r in resp.results)
+    assert any(r.error_code == CatalogErrorCode.internal_error for r in resp.results)
+    service._store.upsert_edge_item.assert_not_awaited()
+    assert 'embed' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_edge_endpoint_type_mismatch_and_generic_conflict_no_create():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+
+    async def _resolve(
+        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+    ):
+        _ = (executor, group_id, entity_type, tx, kwargs)
+        assert graph_key is not None
+        if graph_key == 'TABLE::HR.EMPLOYEES':
+            return 'endpoint_type_mismatch', {
+                'uuid': 'wrong',
+                'neo4j_labels': ['Entity', 'View'],
+            }
+        return 'generic_endpoint_conflict', {
+            'uuid': 'gen',
+            'neo4j_labels': ['Entity'],
+        }
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    codes = {r.error_code for r in resp.results}
+    assert CatalogErrorCode.endpoint_type_mismatch in codes or (
+        CatalogErrorCode.generic_endpoint_conflict in codes
+    )
+    assert 'embed' not in client.call_order
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_embed_before_transaction_order():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_edge_item = AsyncMock(
+        return_value={
+            'uuid': 'e1',
+            'content_sha256': 'a' * 64,
+            'batch_id': EDGE_BATCH,
+            'status': 'created',
+        }
+    )
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert client.call_order.index('embed') < client.call_order.index('transaction')
+    assert resp.results[0].status in ('created', 'updated', 'unchanged')
+
+
+@pytest.mark.asyncio
+async def test_edge_dry_run_embeds_but_never_writes_or_persists_batch_id():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request(dry_run=True))
+    assert 'embed' in client.call_order
+    assert 'transaction' not in client.call_order
+    service._store.upsert_edge_item.assert_not_awaited()
+    assert resp.dry_run is True
+    assert resp.results[0].status in ('created', 'updated', 'unchanged')
+    assert resp.results[0].uuid is not None
+
+
+@pytest.mark.asyncio
+async def test_edge_create_persists_request_batch_id():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    src, tgt = _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    captured: dict = {}
+
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
+        captured.update(params)
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'created',
+        }
+
+    service._store.upsert_edge_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert captured.get('batch_id') == EDGE_BATCH
+    assert captured.get('source_uuid') == src
+    assert captured.get('target_uuid') == tgt
+    assert captured.get('name') == 'ForeignKeyTo'
+    assert resp.results[0].status == 'created'
+    assert resp.created == 1
+
+
+@pytest.mark.asyncio
+async def test_edge_identical_hash_unchanged_leaves_batch_id():
+    edge = _edge()
+    edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
+    payload = CatalogService.edge_canonical_payload(edge)
+    digest = canonical_sha256(payload)
+    src, tgt = 'src-u', 'tgt-u'
+    existing = {
+        'uuid': edge_uuid,
+        'content_sha256': digest,
+        'batch_id': 'prior-edge-batch',
+        'name': edge.edge_type,
+        'edge_key': edge.edge_key,
+        'source_uuid': src,
+        'target_uuid': tgt,
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service, src, tgt)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=existing)
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([edge]))
+    assert resp.results[0].status == 'unchanged'
+    assert resp.unchanged == 1
+    service._store.upsert_edge_item.assert_not_awaited()
+    assert resp.results[0].uuid == edge_uuid
+    assert resp.results[0].content_sha256 == digest
+
+
+@pytest.mark.asyncio
+async def test_edge_changed_update_passes_request_batch_id():
+    edge = _edge(fact='changed fact text about fk')
+    edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
+    src, tgt = 'src-u', 'tgt-u'
+    existing = {
+        'uuid': edge_uuid,
+        'content_sha256': 'b' * 64,
+        'batch_id': 'old-edge-batch',
+        'name': edge.edge_type,
+        'edge_key': edge.edge_key,
+        'source_uuid': src,
+        'target_uuid': tgt,
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service, src, tgt)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=existing)
+    captured: dict = {}
+
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
+        captured.update(params)
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'updated',
+        }
+
+    service._store.upsert_edge_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([edge]))
+    assert resp.results[0].status == 'updated'
+    assert captured.get('batch_id') == EDGE_BATCH
+
+
+@pytest.mark.asyncio
+async def test_edge_identity_conflict_no_mutation():
+    edge = _edge()
+    edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
+    existing = {
+        'uuid': edge_uuid,
+        'content_sha256': 'c' * 64,
+        'batch_id': 'old',
+        'name': 'Contains',  # wrong type for same uuid
+        'edge_key': edge.edge_key,
+        'source_uuid': 'src-u',
+        'target_uuid': 'tgt-u',
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=existing)
+    # use real store method for conflict detection
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([edge]))
+    assert any(r.error_code == CatalogErrorCode.edge_identity_conflict for r in resp.results)
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_two_foreign_key_same_endpoints_different_keys():
+    e1 = _edge(edge_key='FK::HR.EMPLOYEES.DEPT->HR.DEPARTMENTS')
+    e2 = _edge(edge_key='FK::HR.EMPLOYEES.MGR_DEPT->HR.DEPARTMENTS', fact='mgr dept fk')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+
+    def _upsert_side(tx, *, params):
+        _ = tx
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'created',
+        }
+
+    upsert = AsyncMock(side_effect=_upsert_side)
+    service._store.upsert_edge_item = upsert
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([e1, e2]))
+    assert upsert.await_count == 2
+    assert resp.created == 2
+    assert resp.results[0].uuid != resp.results[1].uuid
+    assert resp.results[0].edge_key == e1.edge_key
+    assert resp.results[1].edge_key == e2.edge_key
+
+
+@pytest.mark.asyncio
+async def test_edge_atomic_rollback_on_store_failure():
+    e1 = _edge(edge_key='FK::A.T1->A.T2', fact='fk one')
+    e2 = _edge(edge_key='FK::A.T3->A.T4', fact='fk two')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+
+    async def _resolve(
+        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+    ):
+        _ = (executor, group_id, entity_type, tx, kwargs)
+        assert graph_key is not None
+        return None, _typed_endpoint(f'u-{graph_key}', graph_key)
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
+        if params['edge_key'] == 'FK::A.T3->A.T4':
+            raise RuntimeError('neo4j boom')
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'created',
+        }
+
+    service._store.upsert_edge_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_edges(
+        client=client, request=_edge_request([e1, e2], atomic=True)
+    )
+    statuses = [r.status for r in resp.results]
+    assert 'error' in statuses
+    assert 'rolled_back' in statuses
+    assert resp.rolled_back >= 1
+    err = next(r for r in resp.results if r.status == 'error')
+    assert err.error_code in (
+        CatalogErrorCode.neo4j_transaction_failed,
+        CatalogErrorCode.internal_error,
+    )
+
+
+@pytest.mark.asyncio
+async def test_edge_no_queue_or_llm_calls():
+    client = _make_client()
+    queue = MagicMock()
+    queue.add_episode = AsyncMock()
+    llm = MagicMock()
+    llm.generate_response = AsyncMock()
+    client.llm_client = llm
+    service = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_edge_item = AsyncMock(
+        return_value={
+            'uuid': 'x',
+            'content_sha256': 'a' * 64,
+            'batch_id': EDGE_BATCH,
+            'status': 'created',
+        }
+    )
+    await service.upsert_typed_edges(client=client, request=_edge_request())
+    queue.add_episode.assert_not_awaited()
+    llm.generate_response.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_edge_preserves_input_order_and_deterministic_uuid():
+    e1 = _edge(edge_key='FK::A.T1->A.T2', fact='one')
+    e2 = _edge(edge_key='FK::A.T3->A.T4', fact='two')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+
+    async def _resolve(
+        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+    ):
+        _ = (executor, group_id, entity_type, tx, kwargs)
+        assert graph_key is not None
+        return None, _typed_endpoint(f'u-{graph_key}', graph_key)
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'created',
+        }
+
+    service._store.upsert_edge_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([e1, e2]))
+    assert [r.index for r in resp.results] == [0, 1]
+    assert resp.results[0].edge_key == e1.edge_key
+    assert resp.results[1].edge_key == e2.edge_key
+    assert resp.results[0].uuid == catalog_edge_uuid(FIXED_NS, GROUP, e1.edge_type, e1.edge_key)
+    assert resp.results[0].content_sha256 is not None
+    assert len(resp.results[0].content_sha256) == 64
+
+
+@pytest.mark.asyncio
+async def test_edge_empty_upsert_row_fails_not_created():
+    """Empty upsert row must not report created (TOCTOU / failed MATCH)."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_edge_item = AsyncMock(return_value={})
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.neo4j_transaction_failed
+    assert resp.created == 0
+
+
+@pytest.mark.asyncio
+async def test_edge_prefers_db_status_when_present():
+    """DB create-token status is authoritative when present."""
+    edge = _edge(fact='changed fact text about fk')
+    edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
+    src, tgt = 'src-u', 'tgt-u'
+    existing = {
+        'uuid': edge_uuid,
+        'content_sha256': 'b' * 64,
+        'batch_id': 'old-edge-batch',
+        'name': edge.edge_type,
+        'edge_key': edge.edge_key,
+        'source_uuid': src,
+        'target_uuid': tgt,
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service, src, tgt)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=existing)
+
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'updated',
+        }
+
+    service._store.upsert_edge_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([edge]))
+    assert resp.results[0].status == 'updated'
+    assert resp.updated == 1
+
+
+@pytest.mark.asyncio
+async def test_edge_in_tx_endpoint_race_rolls_back():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    call_n = {'n': 0}
+
+    async def _resolve(
+        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+    ):
+        _ = (executor, group_id, entity_type, kwargs)
+        assert graph_key is not None
+        call_n['n'] += 1
+        # Pre-tx resolves OK; in-tx (tx is not None) races to missing
+        if tx is not None:
+            return 'missing_endpoint', None
+        return None, _typed_endpoint(f'u-{graph_key}', graph_key)
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_edge_item = AsyncMock(
+        return_value={'uuid': 'x', 'content_sha256': 'a' * 64, 'batch_id': EDGE_BATCH}
+    )
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.missing_endpoint
+    service._store.upsert_edge_item.assert_not_awaited()
+    assert call_n['n'] >= 3  # 2 pre-tx + at least 1 in-tx
+
+
+@pytest.mark.asyncio
+async def test_entity_empty_upsert_row_fails_not_created():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_entity_item = AsyncMock(return_value={})
+    resp = await service.upsert_typed_entities(client=client, request=_request())
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.neo4j_transaction_failed
+    assert resp.created == 0
+
+
+@pytest.mark.asyncio
+async def test_entity_prefers_db_status_when_present():
+    entity = _entity(summary='Changed summary')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
+    existing = {
+        'uuid': ent_uuid,
+        'content_sha256': 'b' * 64,
+        'batch_id': 'old-batch',
+        'labels': ['Entity', 'Table'],
+        'neo4j_labels': ['Entity', 'Table'],
+        'name': entity.graph_key,
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(return_value=existing)
+
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'updated',
+        }
+
+    service._store.upsert_entity_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_entities(client=client, request=_request([entity]))
+    assert resp.results[0].status == 'updated'
+    assert resp.updated == 1
+
+
+@pytest.mark.asyncio
+async def test_entity_falls_back_to_projected_when_db_status_absent():
+    entity = _entity(summary='Changed summary')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
+    existing = {
+        'uuid': ent_uuid,
+        'content_sha256': 'b' * 64,
+        'batch_id': 'old-batch',
+        'labels': ['Entity', 'Table'],
+        'neo4j_labels': ['Entity', 'Table'],
+        'name': entity.graph_key,
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(return_value=existing)
+
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+        }
+
+    service._store.upsert_entity_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_entities(client=client, request=_request([entity]))
+    assert resp.results[0].status == 'updated'
+    assert resp.updated == 1
+
+
+@pytest.mark.asyncio
+async def test_entity_pre_read_failure_fails_closed_not_create():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(side_effect=RuntimeError('db down'))
+    service._store.upsert_entity_item = AsyncMock()
+    resp = await service.upsert_typed_entities(client=client, request=_request())
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.internal_error
+    assert resp.created == 0
+    service._store.upsert_entity_item.assert_not_awaited()
+    assert 'embed' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_edge_pre_read_failure_fails_closed_not_create():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(side_effect=RuntimeError('db down'))
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.internal_error
+    assert resp.created == 0
+    service._store.upsert_edge_item.assert_not_awaited()
+    assert 'embed' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_entity_exact_label_rejects_extra_custom_labels():
+    entity = _entity()
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
+    existing = {
+        'uuid': ent_uuid,
+        'content_sha256': 'd' * 64,
+        'batch_id': 'old',
+        'labels': ['Entity', 'Table', 'View'],
+        'neo4j_labels': ['Entity', 'Table', 'View'],
+        'name': entity.graph_key,
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(return_value=existing)
+    service._store.upsert_entity_item = AsyncMock()
+    resp = await service.upsert_typed_entities(client=client, request=_request([entity]))
+    assert any(r.error_code == CatalogErrorCode.entity_type_conflict for r in resp.results)
+    service._store.upsert_entity_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_entity_generic_only_is_type_conflict():
+    entity = _entity()
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
+    existing = {
+        'uuid': ent_uuid,
+        'content_sha256': 'd' * 64,
+        'batch_id': 'old',
+        'labels': ['Entity'],
+        'neo4j_labels': ['Entity'],
+        'name': entity.graph_key,
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(return_value=existing)
+    service._store.upsert_entity_item = AsyncMock()
+    resp = await service.upsert_typed_entities(client=client, request=_request([entity]))
+    assert any(r.error_code == CatalogErrorCode.entity_type_conflict for r in resp.results)
+    service._store.upsert_entity_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_entity_in_tx_label_race_rolls_back():
+    entity = _entity()
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    call_n = {'n': 0}
+
+    async def _get(executor=None, *, uuid=None, group_id=None, tx=None):
+        _ = (executor, uuid, group_id)
+        call_n['n'] += 1
+        if tx is None:
+            return None  # pre-read: absent
+        # in-tx: raced into wrong-type entity
+        return {
+            'uuid': uuid,
+            'labels': ['Entity', 'View'],
+            'neo4j_labels': ['Entity', 'View'],
+            'group_id': GROUP,
+            'content_sha256': 'e' * 64,
+        }
+
+    service._store.get_entity_by_uuid = AsyncMock(side_effect=_get)
+    service._store.upsert_entity_item = AsyncMock(
+        return_value={
+            'uuid': 'x',
+            'content_sha256': 'a' * 64,
+            'batch_id': BATCH,
+            'status': 'created',
+        }
+    )
+    resp = await service.upsert_typed_entities(client=client, request=_request([entity]))
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.entity_type_conflict
+    service._store.upsert_entity_item.assert_not_awaited()
+    assert call_n['n'] >= 2
+
+
+@pytest.mark.asyncio
+async def test_verify_edge_uuid_mismatch_reported():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    service._store.match_edges_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': 'wrong-uuid-not-deterministic',
+                'edge_key': edge_key,
+                'edge_type': 'Contains',
+                'has_fact_embedding': True,
+                'batch_id': BATCH,
+            },
+        ]
+    )
+    req = _verify_request(
+        entities=[],
+        edges=[VerifyEdgeRef(edge_type='Contains', edge_key=edge_key)],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert edge_key in resp.edges.uuid_mismatch
+    assert resp.edges.found == 1
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_upsert_typed_edges_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'upsert_typed_edges')
+    assert callable(server.upsert_typed_edges)

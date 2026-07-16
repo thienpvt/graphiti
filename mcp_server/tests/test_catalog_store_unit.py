@@ -19,7 +19,6 @@ from services.catalog_store import (  # noqa: E402
     serialize_nested_json,
 )
 
-
 FIXED_TS = datetime(2026, 7, 16, 12, 0, 0, tzinfo=timezone.utc)
 GROUP = 'oracle-catalog-tool-test'
 BATCH = 'batch-001'
@@ -92,11 +91,20 @@ def test_build_entity_upsert_cypher_has_on_create_and_on_match():
     store = CatalogNeo4jStore()
     cypher = store.build_entity_upsert_cypher('Schema')
     assert 'ON CREATE SET' in cypher
-    assert 'ON MATCH SET' in cypher
+    # Create-token status: no ON MATCH marker mutation (zero-mutation unchanged)
+    assert 'ON MATCH SET' not in cypher
+    assert 'n.group_id = $group_id' in cypher or 'WHERE n.group_id = $group_id' in cypher
     assert 'batch_id' in cypher
     assert 'created_at' in cypher
     assert 'updated_at' in cypher
     assert 'content_sha256' in cypher
+    assert '$create_token' in cypher
+    assert '_catalog_create_token' in cypher
+    assert 'REMOVE n._catalog_create_token' in cypher
+    assert 'status' in cypher
+    # Vector only on created/updated
+    assert "status IN ['created', 'updated']" in cypher or 'status IN' in cypher
+    assert 'setNodeVectorProperty' in cypher
 
 
 def test_on_create_and_changed_match_include_batch_id():
@@ -104,9 +112,11 @@ def test_on_create_and_changed_match_include_batch_id():
     cypher = store.build_entity_upsert_cypher('View')
     # batch_id must appear in property assignment lists
     assert 'n.batch_id = $batch_id' in cypher or 'n.batch_id=$batch_id' in cypher
-    # identical-hash path must preserve existing batch_id via CASE or equivalent
+    # status derived from create token + pre-update hash
     assert 'content_sha256' in cypher
     assert 'CASE' in cypher.upper() or 'WHEN' in cypher.upper()
+    assert '_catalog_create_token' in cypher
+    assert 'ON MATCH SET' not in cypher
 
 
 def test_cypher_parameterizes_values_not_client_identifiers():
@@ -157,6 +167,9 @@ def test_prepare_entity_params_name_equals_graph_key():
     # Protected keys never come from client attributes map as top-level overrides
     assert params['uuid'] == UUID
     assert params['group_id'] == GROUP
+    # Server-generated create token for status classification
+    assert isinstance(params.get('create_token'), str)
+    assert len(params['create_token']) >= 16
 
 
 def test_prepare_entity_params_rejects_unknown_type():
@@ -201,16 +214,29 @@ def test_build_get_entity_by_group_name_type_uses_allowlisted_label():
 
 
 def test_identical_hash_noop_clause_preserves_batch_id():
-    """Generated ON MATCH must not blindly overwrite batch_id on identical hash."""
+    """Unchanged path must not SET content props; update path gated by status."""
     store = CatalogNeo4jStore()
     cypher = store.build_entity_upsert_cypher('Function')
-    # The identical path leaves batch_id untouched: CASE WHEN existing hash equals
-    assert 'n.content_sha256' in cypher
-    # Ensure we do not have unconditional n.batch_id = $batch_id only on MATCH without CASE
-    # (ON CREATE may set unconditionally; ON MATCH must be conditional)
-    on_match_idx = cypher.index('ON MATCH SET')
-    on_match_section = cypher[on_match_idx:]
-    assert 'CASE' in on_match_section.upper()
+    assert 'CASE' in cypher.upper()
+    # Identity/preservation fields not rewritten after create
+    assert 'n.graph_key = CASE' not in cypher
+    assert 'n.group_id = CASE' not in cypher
+    assert 'n.labels = CASE' not in cypher
+    assert 'n.name_raw = CASE' not in cypher
+    assert 'n.name_canonical = CASE' not in cypher
+    assert "status = 'updated'" in cypher or "status = 'updated'" in cypher.replace(' ', '')
+    assert 'REMOVE n._catalog_create_token' in cypher
+    assert 'ON MATCH SET' not in cypher
+
+
+def test_entity_upsert_cypher_scopes_group_and_preserves_identity():
+    store = CatalogNeo4jStore()
+    cypher = store.build_entity_upsert_cypher('Table')
+    assert 'WHERE n.group_id = $group_id' in cypher
+    assert '_catalog_create_token' in cypher
+    assert 'REMOVE n._catalog_create_token' in cypher
+    assert 'n._catalog_create_token AS' not in cypher
+    assert 'ON MATCH SET' not in cypher
 
 
 def test_first_from_execute_query_result_uses_tuple_contract():
@@ -226,3 +252,309 @@ def test_first_from_execute_query_result_uses_tuple_contract():
     }
     # Non-tuple objects (including fake .records attrs) are rejected
     assert parse(SimpleNamespace(records=[{'uuid': 'nope'}])) is None
+
+
+# ---------------------------------------------------------------------------
+# Edge endpoint resolution + edge upsert Cypher (EDGE-02..09)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_edge_type_allowlisted():
+    store = CatalogNeo4jStore()
+    assert store.resolve_edge_type('ForeignKeyTo') == 'ForeignKeyTo'
+    assert store.resolve_edge_type('Contains') == 'Contains'
+
+
+def test_resolve_edge_type_rejects_unknown():
+    store = CatalogNeo4jStore()
+    with pytest.raises(CatalogStoreError) as exc:
+        store.resolve_edge_type('Evil; DROP')
+    assert 'not allowlisted' in str(exc.value).lower()
+
+
+def test_edge_build_resolve_endpoint_typed_cypher_is_match_only_no_create():
+    store = CatalogNeo4jStore()
+    cypher = store.build_resolve_endpoint_typed_cypher('Table')
+    assert 'MATCH' in cypher
+    assert 'CREATE' not in cypher.upper().replace('CREATED_AT', '')
+    assert 'MERGE' not in cypher
+    assert 'SET ' not in cypher  # read-only
+    # MATCH all Entity by group+name; classify_endpoint_rows applies custom label
+    assert 'Entity' in cypher
+    assert '$group_id' in cypher
+    assert '$name' in cypher or '$graph_key' in cypher
+
+
+def test_edge_build_resolve_endpoint_typed_rejects_unknown_type():
+    store = CatalogNeo4jStore()
+    with pytest.raises(CatalogStoreError):
+        store.build_resolve_endpoint_typed_cypher('NotAType')
+
+
+def test_edge_classify_endpoint_missing_wrong_label_generic():
+    store = CatalogNeo4jStore()
+    # missing
+    code, _ = store.classify_endpoint_rows([], expected_type='Table')
+    assert code == 'missing_endpoint'
+    # wrong custom label
+    code, row = store.classify_endpoint_rows(
+        [
+            {
+                'uuid': 'u1',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity', 'View'],
+                'labels': ['Entity', 'View'],
+            }
+        ],
+        expected_type='Table',
+    )
+    assert code == 'endpoint_type_mismatch'
+    assert row is not None
+    # generic-only Entity
+    code, row = store.classify_endpoint_rows(
+        [
+            {
+                'uuid': 'u2',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity'],
+                'labels': ['Entity'],
+            }
+        ],
+        expected_type='Table',
+    )
+    assert code == 'generic_endpoint_conflict'
+    # correct typed
+    code, row = store.classify_endpoint_rows(
+        [
+            {
+                'uuid': 'u3',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity', 'Table'],
+                'labels': ['Entity', 'Table'],
+            }
+        ],
+        expected_type='Table',
+    )
+    assert code is None
+    assert row is not None and row['uuid'] == 'u3'
+    # expected type + extra custom label is wrong_type (exact label contract)
+    code, row = store.classify_endpoint_rows(
+        [
+            {
+                'uuid': 'u4',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity', 'Table', 'View'],
+                'labels': ['Entity', 'Table', 'View'],
+            }
+        ],
+        expected_type='Table',
+    )
+    assert code == 'endpoint_type_mismatch'
+    assert row is not None and row['uuid'] == 'u4'
+
+
+def test_classify_endpoint_extra_label_not_typed_when_exact_also_present():
+    """Duplicates: exact typed preferred; multi-label siblings stay wrong_type."""
+    store = CatalogNeo4jStore()
+    code, row = store.classify_endpoint_rows(
+        [
+            {
+                'uuid': 'extra',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity', 'Table', 'View'],
+                'labels': ['Entity', 'Table', 'View'],
+            },
+            {
+                'uuid': 'exact',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity', 'Table'],
+                'labels': ['Entity', 'Table'],
+            },
+        ],
+        expected_type='Table',
+    )
+    assert code is None
+    assert row is not None and row['uuid'] == 'exact'
+
+
+def test_build_edge_upsert_cypher_uses_relates_to_and_param_name():
+    store = CatalogNeo4jStore()
+    cypher = store.build_edge_upsert_cypher()
+    assert 'RELATES_TO' in cypher
+    assert 'MERGE' in cypher
+    assert 'e.name = $name' in cypher or 'e.name=$name' in cypher
+    assert 'SET e = $' not in cypher  # no full-map replace
+    assert 'ON CREATE SET' in cypher
+    assert 'ON MATCH SET' not in cypher
+    assert 'batch_id' in cypher
+    assert 'fact_embedding' in cypher or 'setRelationshipVectorProperty' in cypher
+    assert '$source_uuid' in cypher
+    assert '$target_uuid' in cypher
+    assert '$uuid' in cypher
+    # both endpoints group-scoped
+    assert 'source.group_id = $group_id' in cypher
+    assert 'target.group_id = $group_id' in cypher
+    # edge type never interpolated as relationship type
+    assert ':[ForeignKeyTo]' not in cypher
+    assert '_catalog_create_token' in cypher
+    assert 'REMOVE e._catalog_create_token' in cypher
+    assert '$create_token' in cypher
+
+
+def test_edge_on_create_and_changed_match_include_batch_id():
+    store = CatalogNeo4jStore()
+    cypher = store.build_edge_upsert_cypher()
+    assert 'e.batch_id = $batch_id' in cypher or 'e.batch_id=$batch_id' in cypher
+    assert '_catalog_create_token' in cypher
+    assert 'CASE' in cypher.upper()
+    assert 'content_sha256' in cypher
+    assert 'ON MATCH SET' not in cypher
+
+
+def test_edge_identical_hash_noop_preserves_batch_id():
+    store = CatalogNeo4jStore()
+    cypher = store.build_edge_upsert_cypher()
+    assert 'CASE' in cypher.upper()
+    # identity/endpoint fields not rewritten on content change
+    assert 'e.name = CASE' not in cypher
+    assert 'e.edge_key = CASE' not in cypher
+    assert 'e.source_node_uuid = CASE' not in cypher
+    assert 'e.target_node_uuid = CASE' not in cypher
+    assert 'e.group_id = CASE' not in cypher
+    assert 'REMOVE e._catalog_create_token' in cypher
+    assert 'ON MATCH SET' not in cypher
+
+
+def test_edge_upsert_cypher_scopes_endpoint_group_id():
+    store = CatalogNeo4jStore()
+    cypher = store.build_edge_upsert_cypher()
+    assert 'source.group_id = $group_id' in cypher
+    assert 'target.group_id = $group_id' in cypher
+    assert 'MATCH (source:Entity {uuid: $source_uuid})' in cypher
+    assert 'MATCH (target:Entity {uuid: $target_uuid})' in cypher
+
+
+@pytest.mark.asyncio
+async def test_read_one_uses_params_kwarg_not_splat():
+    """Neo4jDriver.execute_query binds Cypher values only via params=."""
+    store = CatalogNeo4jStore()
+    calls: list[tuple] = []
+
+    class _Exec:
+        async def execute_query(self, cypher, **kwargs):
+            calls.append((cypher, kwargs))
+            return ([{'uuid': 'u1'}], None, ['uuid'])
+
+    row = await store._read_one(_Exec(), 'RETURN 1', {'group_id': GROUP, 'uuid': 'u1'}, tx=None)
+    assert row == {'uuid': 'u1'}
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert 'params' in kwargs
+    assert kwargs['params'] == {'group_id': GROUP, 'uuid': 'u1'}
+    assert 'group_id' not in kwargs
+    assert 'uuid' not in kwargs
+
+
+def test_prepare_edge_params_sets_name_to_edge_type():
+    store = CatalogNeo4jStore()
+    params = store.prepare_edge_params(
+        edge_type='ForeignKeyTo',
+        uuid=UUID,
+        group_id=GROUP,
+        batch_id=BATCH,
+        edge_key='FK::HR.EMPLOYEES->HR.DEPARTMENTS',
+        source_uuid='src-uuid',
+        target_uuid='tgt-uuid',
+        fact='employees.dept_id references departments.id',
+        evidence=None,
+        content_sha256=HASH,
+        created_at=FIXED_TS,
+        updated_at=FIXED_TS,
+        fact_embedding=[0.1, 0.2],
+        attributes={'on_delete': 'CASCADE'},
+        confidence=0.9,
+    )
+    assert params['name'] == 'ForeignKeyTo'
+    assert params['edge_key'] == 'FK::HR.EMPLOYEES->HR.DEPARTMENTS'
+    assert params['source_uuid'] == 'src-uuid'
+    assert params['target_uuid'] == 'tgt-uuid'
+    assert params['batch_id'] == BATCH
+    assert params['fact'] == 'employees.dept_id references departments.id'
+    assert isinstance(params.get('attributes'), (str, type(None)))
+    assert isinstance(params.get('create_token'), str)
+    assert len(params['create_token']) >= 16
+
+
+def test_prepare_edge_params_rejects_unknown_edge_type():
+    store = CatalogNeo4jStore()
+    with pytest.raises(CatalogStoreError):
+        store.prepare_edge_params(
+            edge_type='NotAnEdge',
+            uuid=UUID,
+            group_id=GROUP,
+            batch_id=BATCH,
+            edge_key='X',
+            source_uuid='s',
+            target_uuid='t',
+            fact='f',
+            evidence=None,
+            content_sha256=HASH,
+            created_at=FIXED_TS,
+            updated_at=FIXED_TS,
+            fact_embedding=[0.1],
+        )
+
+
+def test_detect_edge_identity_conflict():
+    store = CatalogNeo4jStore()
+    existing = {
+        'uuid': UUID,
+        'name': 'Contains',
+        'edge_key': 'CONTAINS::A->B',
+        'source_uuid': 's1',
+        'target_uuid': 't1',
+        'group_id': GROUP,
+    }
+    # matching identity fields: no conflict
+    assert (
+        store.detect_edge_identity_conflict(
+            existing,
+            edge_type='Contains',
+            edge_key='CONTAINS::A->B',
+            source_uuid='s1',
+            target_uuid='t1',
+        )
+        is None
+    )
+    # type mismatch
+    assert (
+        store.detect_edge_identity_conflict(
+            existing,
+            edge_type='ForeignKeyTo',
+            edge_key='CONTAINS::A->B',
+            source_uuid='s1',
+            target_uuid='t1',
+        )
+        == 'edge_identity_conflict'
+    )
+    # source mismatch
+    assert (
+        store.detect_edge_identity_conflict(
+            existing,
+            edge_type='Contains',
+            edge_key='CONTAINS::A->B',
+            source_uuid='s2',
+            target_uuid='t1',
+        )
+        == 'edge_identity_conflict'
+    )
+
+
+def test_build_get_edge_by_uuid_cypher_parameterized():
+    store = CatalogNeo4jStore()
+    cypher = store.build_get_edge_by_uuid_cypher()
+    assert 'MATCH' in cypher
+    assert 'RELATES_TO' in cypher
+    assert '$uuid' in cypher
+    assert '$group_id' in cypher
+    assert 'SET e = $' not in cypher

@@ -30,6 +30,17 @@ from starlette.responses import JSONResponse
 from typing_extensions import LiteralString
 
 from config.schema import GraphitiConfig, ServerConfig
+from models.catalog_edges import UpsertTypedEdgesRequest
+from models.catalog_entities import (
+    ResolveTypedEntitiesRequest,
+    UpsertTypedEntitiesRequest,
+    VerifyCatalogBatchRequest,
+)
+from models.catalog_responses import (
+    CatalogWriteResponse,
+    ResolveTypedEntitiesResponse,
+    VerifyCatalogBatchResponse,
+)
 from models.response_types import (
     BuildCommunitiesResponse,
     CommunityResult,
@@ -43,16 +54,6 @@ from models.response_types import (
     StatusResponse,
     SuccessResponse,
     TripletResponse,
-)
-from models.catalog_entities import (
-    ResolveTypedEntitiesRequest,
-    UpsertTypedEntitiesRequest,
-    VerifyCatalogBatchRequest,
-)
-from models.catalog_responses import (
-    CatalogWriteResponse,
-    ResolveTypedEntitiesResponse,
-    VerifyCatalogBatchResponse,
 )
 from services.catalog_service import CatalogService
 from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
@@ -1308,6 +1309,36 @@ async def verify_catalog_batch(
             type(e).__name__,
         )
         return ErrorResponse(error='catalog verify_catalog_batch failed')
+
+
+@mcp.tool()
+async def upsert_typed_edges(
+    request: UpsertTypedEdgesRequest,
+) -> CatalogWriteResponse | ErrorResponse:
+    """Deterministic typed catalog edge upsert (synchronous, Neo4j-only).
+
+    Requires both endpoints to pre-exist with exact group_id + graph_key + entity_type.
+    Server-derived UUIDv5 identity, fact_embedding before write, no LLM, no queue.
+    Never creates or relabels endpoints.
+    """
+    global graphiti_service, catalog_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+
+    try:
+        client = await graphiti_service.get_client()
+        return await catalog_service.upsert_typed_edges(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'upsert_typed_edges failed batch_id=%s count=%s reason=%s',
+            getattr(request, 'batch_id', None),
+            len(getattr(request, 'edges', []) or []),
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog upsert_typed_edges failed')
 
 
 @mcp.custom_route('/health', methods=['GET'])
