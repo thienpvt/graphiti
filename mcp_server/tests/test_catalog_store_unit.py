@@ -409,6 +409,7 @@ def test_edge_on_create_and_changed_match_include_batch_id():
     assert 'CASE' in cypher.upper()
     assert 'content_sha256' in cypher
     assert 'ON MATCH SET' not in cypher
+    assert 'e.episodes = $episodes' in cypher
 
 
 def test_edge_identical_hash_noop_preserves_batch_id():
@@ -483,6 +484,7 @@ def test_prepare_edge_params_sets_name_to_edge_type():
     assert isinstance(params.get('attributes'), (str, type(None)))
     assert isinstance(params.get('create_token'), str)
     assert len(params['create_token']) >= 16
+    assert params.get('episodes') == []
 
 
 def test_prepare_edge_params_rejects_unknown_edge_type():
