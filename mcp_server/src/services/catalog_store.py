@@ -318,3 +318,256 @@ class CatalogNeo4jStore:
             return dict(first)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _all_from_execute_query_result(result: Any) -> list[dict[str, Any]]:
+        """Parse all records from Neo4jDriver.execute_query / EagerResult."""
+        if result is None:
+            return []
+        if not isinstance(result, tuple) or not result:
+            return []
+        records = result[0] or []
+        out: list[dict[str, Any]] = []
+        for row in records:
+            if isinstance(row, dict):
+                out.append(row)
+            else:
+                try:
+                    out.append(dict(row))
+                except (TypeError, ValueError):
+                    continue
+        return out
+
+    async def _read_many(
+        self,
+        executor: Any,
+        cypher: str,
+        params: dict[str, Any],
+        *,
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        if tx is not None:
+            result = await tx.run(cypher, **params)
+            if result is None:
+                return []
+            if hasattr(result, 'data'):
+                rows = await result.data()
+                return [r if isinstance(r, dict) else dict(r) for r in (rows or [])]
+            return []
+        result = await executor.execute_query(cypher, **params)
+        return self._all_from_execute_query_result(result)
+
+    def build_match_entities_for_resolve_cypher(self) -> str:
+        """MATCH Entity nodes by group_id and name/graph_key in requested keys only."""
+        return """
+            MATCH (n:Entity)
+            WHERE n.group_id = $group_id
+              AND (n.name IN $graph_keys OR n.graph_key IN $graph_keys)
+            RETURN n.uuid AS uuid,
+                   n.group_id AS group_id,
+                   n.name AS name,
+                   n.graph_key AS graph_key,
+                   n.labels AS labels,
+                   labels(n) AS neo4j_labels,
+                   n.content_sha256 AS content_sha256,
+                   n.batch_id AS batch_id,
+                   n.name_embedding IS NOT NULL AS has_name_embedding
+            """
+
+    async def match_entities_for_resolve(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        graph_keys: list[str],
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read-only MATCH for resolve; scoped to group_id + requested keys."""
+        if not graph_keys:
+            return []
+        cypher = self.build_match_entities_for_resolve_cypher()
+        params = {'group_id': group_id, 'graph_keys': list(graph_keys)}
+        return await self._read_many(executor, cypher, params, tx=tx)
+
+    def build_match_entities_for_verify_by_batch_cypher(self) -> str:
+        return """
+            MATCH (n:Entity)
+            WHERE n.group_id = $group_id
+              AND n.batch_id = $batch_id
+            RETURN n.uuid AS uuid,
+                   n.group_id AS group_id,
+                   n.name AS name,
+                   n.graph_key AS graph_key,
+                   n.labels AS labels,
+                   labels(n) AS neo4j_labels,
+                   n.content_sha256 AS content_sha256,
+                   n.batch_id AS batch_id,
+                   n.name_embedding IS NOT NULL AS has_name_embedding
+            """
+
+    def build_match_entities_for_verify_by_keys_cypher(self) -> str:
+        return """
+            MATCH (n:Entity)
+            WHERE n.group_id = $group_id
+              AND (n.name IN $graph_keys OR n.graph_key IN $graph_keys)
+            RETURN n.uuid AS uuid,
+                   n.group_id AS group_id,
+                   n.name AS name,
+                   n.graph_key AS graph_key,
+                   n.labels AS labels,
+                   labels(n) AS neo4j_labels,
+                   n.content_sha256 AS content_sha256,
+                   n.batch_id AS batch_id,
+                   n.name_embedding IS NOT NULL AS has_name_embedding
+            """
+
+    async def match_entities_for_verify(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        batch_id: str | None = None,
+        graph_keys: list[str] | None = None,
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read-only entity MATCH for verify; exact group_id + batch_id and/or keys."""
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        if batch_id:
+            cypher = self.build_match_entities_for_verify_by_batch_cypher()
+            batch_rows = await self._read_many(
+                executor,
+                cypher,
+                {'group_id': group_id, 'batch_id': batch_id},
+                tx=tx,
+            )
+            for row in batch_rows:
+                key = str(row.get('uuid') or '')
+                if key and key not in seen:
+                    seen.add(key)
+                    rows.append(row)
+
+        if graph_keys:
+            cypher = self.build_match_entities_for_verify_by_keys_cypher()
+            key_rows = await self._read_many(
+                executor,
+                cypher,
+                {'group_id': group_id, 'graph_keys': list(graph_keys)},
+                tx=tx,
+            )
+            for row in key_rows:
+                key = str(row.get('uuid') or '')
+                if key and key not in seen:
+                    seen.add(key)
+                    rows.append(row)
+        return rows
+
+    def build_match_edges_for_verify_by_batch_cypher(self) -> str:
+        return """
+            MATCH (s:Entity)-[e:RELATES_TO]->(t:Entity)
+            WHERE e.group_id = $group_id
+              AND e.batch_id = $batch_id
+            RETURN e.uuid AS uuid,
+                   e.group_id AS group_id,
+                   e.name AS edge_type,
+                   e.edge_key AS edge_key,
+                   e.batch_id AS batch_id,
+                   e.fact_embedding IS NOT NULL AS has_fact_embedding,
+                   s.uuid AS source_uuid,
+                   s.name AS source_name,
+                   s.graph_key AS source_graph_key,
+                   labels(s) AS source_labels,
+                   t.uuid AS target_uuid,
+                   t.name AS target_name,
+                   t.graph_key AS target_graph_key,
+                   labels(t) AS target_labels
+            """
+
+    def build_match_edges_for_verify_by_keys_cypher(self) -> str:
+        return """
+            MATCH (s:Entity)-[e:RELATES_TO]->(t:Entity)
+            WHERE e.group_id = $group_id
+              AND e.edge_key IN $edge_keys
+            RETURN e.uuid AS uuid,
+                   e.group_id AS group_id,
+                   e.name AS edge_type,
+                   e.edge_key AS edge_key,
+                   e.batch_id AS batch_id,
+                   e.fact_embedding IS NOT NULL AS has_fact_embedding,
+                   s.uuid AS source_uuid,
+                   s.name AS source_name,
+                   s.graph_key AS source_graph_key,
+                   labels(s) AS source_labels,
+                   t.uuid AS target_uuid,
+                   t.name AS target_name,
+                   t.graph_key AS target_graph_key,
+                   labels(t) AS target_labels
+            """
+
+    async def match_edges_for_verify(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        batch_id: str | None = None,
+        edge_keys: list[str] | None = None,
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read-only edge MATCH for verify; exact group_id + batch_id and/or keys."""
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        if batch_id:
+            cypher = self.build_match_edges_for_verify_by_batch_cypher()
+            batch_rows = await self._read_many(
+                executor,
+                cypher,
+                {'group_id': group_id, 'batch_id': batch_id},
+                tx=tx,
+            )
+            for row in batch_rows:
+                key = str(row.get('uuid') or row.get('edge_key') or '')
+                if key and key not in seen:
+                    seen.add(key)
+                    rows.append(row)
+
+        if edge_keys:
+            cypher = self.build_match_edges_for_verify_by_keys_cypher()
+            key_rows = await self._read_many(
+                executor,
+                cypher,
+                {'group_id': group_id, 'edge_keys': list(edge_keys)},
+                tx=tx,
+            )
+            for row in key_rows:
+                key = str(row.get('uuid') or row.get('edge_key') or '')
+                if key and key not in seen:
+                    seen.add(key)
+                    rows.append(row)
+        return rows
+
+    def build_match_provenance_presence_cypher(self) -> str:
+        """Report whether requested entity/edge UUIDs have any MENTIONS provenance."""
+        return """
+            UNWIND $target_uuids AS target_uuid
+            OPTIONAL MATCH (ep:Episodic)-[:MENTIONS]->(n {uuid: target_uuid})
+            WHERE n.group_id = $group_id OR n IS NULL
+            WITH target_uuid, count(ep) AS mention_count
+            RETURN target_uuid AS uuid, mention_count > 0 AS has_provenance
+            """
+
+    async def match_provenance_presence(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        target_uuids: list[str],
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read-only provenance presence check; no writes."""
+        if not target_uuids:
+            return []
+        cypher = self.build_match_provenance_presence_cypher()
+        params = {'group_id': group_id, 'target_uuids': list(target_uuids)}
+        return await self._read_many(executor, cypher, params, tx=tx)

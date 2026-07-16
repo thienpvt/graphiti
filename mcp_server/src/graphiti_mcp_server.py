@@ -44,8 +44,16 @@ from models.response_types import (
     SuccessResponse,
     TripletResponse,
 )
-from models.catalog_entities import UpsertTypedEntitiesRequest
-from models.catalog_responses import CatalogWriteResponse
+from models.catalog_entities import (
+    ResolveTypedEntitiesRequest,
+    UpsertTypedEntitiesRequest,
+    VerifyCatalogBatchRequest,
+)
+from models.catalog_responses import (
+    CatalogWriteResponse,
+    ResolveTypedEntitiesResponse,
+    VerifyCatalogBatchResponse,
+)
 from services.catalog_service import CatalogService
 from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
 from services.queue_service import QueueService
@@ -1250,6 +1258,56 @@ async def upsert_typed_entities(
             type(e).__name__,
         )
         return ErrorResponse(error='catalog upsert_typed_entities failed')
+
+
+@mcp.tool()
+async def resolve_typed_entities(
+    request: ResolveTypedEntitiesRequest,
+) -> ResolveTypedEntitiesResponse | ErrorResponse:
+    """Read-only resolve of typed catalog entities (no writes, no embeddings)."""
+    global graphiti_service, catalog_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+
+    try:
+        client = await graphiti_service.get_client()
+        return await catalog_service.resolve_typed_entities(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'resolve_typed_entities failed group_id=%s count=%s reason=%s',
+            getattr(request, 'group_id', None),
+            len(getattr(request, 'entities', []) or []),
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog resolve_typed_entities failed')
+
+
+@mcp.tool()
+async def verify_catalog_batch(
+    request: VerifyCatalogBatchRequest,
+) -> VerifyCatalogBatchResponse | ErrorResponse:
+    """Read-only catalog batch verification (no writes, no embeddings)."""
+    global graphiti_service, catalog_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+
+    try:
+        client = await graphiti_service.get_client()
+        return await catalog_service.verify_catalog_batch(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'verify_catalog_batch failed group_id=%s batch_id=%s reason=%s',
+            getattr(request, 'group_id', None),
+            getattr(request, 'batch_id', None),
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog verify_catalog_batch failed')
 
 
 @mcp.custom_route('/health', methods=['GET'])
