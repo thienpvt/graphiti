@@ -1505,20 +1505,18 @@ class CatalogService:
                     section.typed_duplicate.append(ent.graph_key)
                 if typed:
                     found_count += 1
-                    primary = next(
-                        (r for r in typed if str(r.get('uuid')) == expected_uuid),
-                        typed[0],
-                    )
-                    if str(primary.get('uuid')) != expected_uuid:
+                    if any(str(row.get('uuid')) != expected_uuid for row in typed):
                         section.uuid_mismatch.append(ent.graph_key)
-                    if not primary.get('has_name_embedding'):
+                    if any(not row.get('has_name_embedding') for row in typed):
                         section.missing_embedding.append(ent.graph_key)
                 elif wrong:
                     found_count += 1
-                    if not wrong[0].get('has_name_embedding'):
+                    if any(not row.get('has_name_embedding') for row in wrong):
                         section.missing_embedding.append(ent.graph_key)
                 elif generic:
                     found_count += 1
+                    if any(not row.get('has_name_embedding') for row in generic):
+                        section.missing_embedding.append(ent.graph_key)
             section.found = found_count
         else:
             # batch-scoped only: report rows under batch without per-key expected list
