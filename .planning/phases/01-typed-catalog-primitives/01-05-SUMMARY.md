@@ -137,6 +137,7 @@ Production composite identity uniqueness + live GATE-02 suite under `oracle-cata
 - `catalog_relates_to_identity_unique` FOR ()-[e:RELATES_TO]-() REQUIRE (e.uuid, e.group_id) IS UNIQUE
 - CREATE IF NOT EXISTS only; never DROP INDEX / DROP CONSTRAINT / data repair
 - Async once-ready lock; product path never branches on unittest.mock — test doubles supply real async execute_query
+- Fail-closed schema verify: after CREATE always SHOW; named constraints must match UNIQUENESS + entityType + label + exact `{uuid, group_id}` props
 - Entity/edge MERGE keys: `{uuid, group_id}` (match constraint)
 
 ### Schema ensure timing
@@ -167,7 +168,7 @@ Exactly two `_ensure_schema` call sites:
 | Gate | Result |
 |------|--------|
 | Live int (`CATALOG_INT_REQUIRED=1`) | **20 passed** |
-| Unit store+service | **102 passed** |
+| Unit store+service | **104 passed** |
 | Ruff check (touched files) | **All checks passed** |
 | Ruff format | **5 files already formatted** |
 | Pyright (catalog_service/store) | **0 errors** |
