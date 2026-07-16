@@ -5,7 +5,7 @@ status: complete
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-17
 ---
 
 # Phase 01 — Validation Strategy
@@ -37,7 +37,7 @@ updated: 2026-07-16
 
 ## Per-Task Verification Map
 
-Seven plans; plan 07 closes independent CONF-04, SAFE-03, and VERI-03 gaps. Waves match plan frontmatter.
+Eight plans; plan 08 closes remaining RESO-03 and VERI-02 twin aggregation gaps. Waves match plan frontmatter.
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
@@ -53,9 +53,12 @@ Seven plans; plan 07 closes independent CONF-04, SAFE-03, and VERI-03 gaps. Wave
 | 01-05-02 | 05 | 5 | ENTY-12, GATE-03 | T-01-06 | Conflicts, concurrency, rollback, search; no LLM/queue | integration | `cd mcp_server && CATALOG_INT_REQUIRED=1 uv run pytest tests/test_catalog_neo4j_int.py -m 'integration and requires_neo4j' -q` | ✅ | ✅ green |
 | 01-06-01 | 06 | 6 | GATE-04 | — | Format, lint, typecheck, schema list, MCP regressions | tooling | catalog-scoped ruff/pyright + tool list + MCP unit regressions | ✅ | ✅ green |
 | 01-06-02 | 06 | 6 | GATE-05 | — | Phase 1 report PASS only when all gates green; block Phase 2 | tooling/doc | `01-PHASE1-REPORT.md` Overall PASS; Phase 2 allowed only after verification | ✅ | ✅ green |
-| 01-07-01 | 07 | 7 | CONF-04, SAFE-03 | T-01-07-01, T-01-07-02 | Hard transport/config ceilings plus bounded iterative JSON validation | unit | full catalog unit suite | ✅ | ✅ 192 units |
-| 01-07-02 | 07 | 7 | VERI-03 | T-01-07-03, T-01-07-04 | All physical edge/entity rows, exact anomalies, group-scoped provenance | unit/live | store/service units plus `CATALOG_INT_REQUIRED=1` live suite | ✅ | ✅ 192 units; 25 live |
-| 01-07-03 | 07 | 7 | GATE-01, GATE-05 | — | Full rerun and corrected report | tooling/doc | 192 units; 25 live; 217 combined; Ruff/Pyright; 86 regressions; 18 tools | ✅ | ✅ green |
+| 01-07-01 | 07 | 7 | CONF-04, SAFE-03 | T-01-07-01, T-01-07-02 | Hard transport/config ceilings plus bounded iterative JSON validation | unit | full catalog unit suite | ✅ | ✅ 196 units |
+| 01-07-02 | 07 | 7 | VERI-03 | T-01-07-03, T-01-07-04 | All physical edge/entity rows, exact anomalies, group-scoped provenance | unit/live | store/service units plus `CATALOG_INT_REQUIRED=1` live suite | ✅ | ✅ 196 units; 27 live |
+| 01-07-03 | 07 | 7 | GATE-01, GATE-05 | — | Full rerun and corrected report | tooling/doc | 196 units; 27 live; 223 combined; Ruff/Pyright; 86 regressions; 18 tools | ✅ | ✅ green |
+| 01-08-01 | 08 | 8 | RESO-03 | T-01-08-01 | Resolve aggregates all-row twin anomalies | unit/live | resolve mixed-twin unit + live | ✅ | ✅ green |
+| 01-08-02 | 08 | 8 | VERI-02 | T-01-08-02 | Verify wrong_type with typed present; entity elementId physical rows | unit/live | verify wrong_type/element unit + live | ✅ | ✅ green |
+| 01-08-03 | 08 | 8 | GATE-01, GATE-05 | — | Full rerun and corrected report | tooling/doc | 196 units; 27 live; 223 combined; Ruff/Pyright; 86 regressions; 18 tools | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠ flaky*
 
@@ -77,7 +80,7 @@ Seven plans; plan 07 closes independent CONF-04, SAFE-03, and VERI-03 gaps. Wave
 
 | Behavior | Requirement | Why Manual | Test Instructions | Status |
 |----------|-------------|------------|-------------------|--------|
-| Live Neo4j 5.26+ availability and exact integration result | GATE-02 | Requires authorized running Neo4j | Run the integration command; record unskipped pass counts in `01-PHASE1-REPORT.md`. | ✅ 25 passed unskipped |
+| Live Neo4j 5.26+ availability and exact integration result | GATE-02 | Requires authorized running Neo4j | Run the integration command; record unskipped pass counts in `01-PHASE1-REPORT.md`. | ✅ 27 passed unskipped |
 | Phase 2 remains blocked until all commands pass and independent verification accepts the report | GATE-05 | Milestone workflow gate | Confirm report states `PASS` only when every required command passed; await independent verifier before completion. | ✅ executor PASS; verifier pending |
 
 ---
@@ -91,4 +94,4 @@ Seven plans; plan 07 closes independent CONF-04, SAFE-03, and VERI-03 gaps. Wave
 - [x] Unit feedback latency <60 seconds.
 - [x] `nyquist_compliant: true` set after validation audit.
 
-**Approval:** Executor gates green per corrected `01-PHASE1-REPORT.md` (2026-07-16); independent verifier pending.
+**Approval:** Executor gates green per corrected `01-PHASE1-REPORT.md` (2026-07-17); independent verifier pending. Phase 2 blocked.

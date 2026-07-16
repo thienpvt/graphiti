@@ -1176,6 +1176,8 @@ class CatalogService:
         anomalies: list[str] = []
         if generic_dups:
             anomalies.append('generic_duplicate')
+        if wrong_type_nodes:
+            anomalies.append('wrong_type')
 
         primary: dict[str, Any] | None = None
         typed_dups: list[str] = []
@@ -1194,9 +1196,16 @@ class CatalogService:
                     typed_dups.append(u)
             if len(typed_nodes) > 1:
                 anomalies.append('typed_duplicate')
+            # All-row: any typed UUID differing from expected is a mismatch,
+            # even when the preferred primary is the expected row.
+            if any(str(row.get('uuid') or '') != expected_uuid for row in typed_nodes):
+                anomalies.append('uuid_mismatch')
+            if any(not row.get('has_name_embedding') for row in typed_nodes):
+                anomalies.append('missing_embedding')
         elif wrong_type_nodes:
             primary = wrong_type_nodes[0]
-            anomalies.append('wrong_type')
+            if any(not row.get('has_name_embedding') for row in wrong_type_nodes):
+                anomalies.append('missing_embedding')
         elif generic_dups:
             # only bare generics — found as anomaly state, not verified typed
             primary = next(
@@ -1204,6 +1213,12 @@ class CatalogService:
                 matches[0],
             )
             anomalies.append('missing')  # no typed node
+            if any(
+                not row.get('has_name_embedding')
+                for row in matches
+                if not self._custom_labels(self._node_labels(row))
+            ):
+                anomalies.append('missing_embedding')
 
         if primary is None:
             return ResolveEntityResult(
@@ -1229,12 +1244,12 @@ class CatalogService:
         has_emb = bool(primary.get('has_name_embedding'))
         uuid_val = str(primary.get('uuid') or '') or None
 
-        if uuid_val and uuid_val != expected_uuid:
-            anomalies.append('uuid_mismatch')
-        if not has_emb:
-            anomalies.append('missing_embedding')
-        if custom and not exact_typed and 'wrong_type' not in anomalies:
-            anomalies.append('wrong_type')
+        # Primary-only fallbacks when no typed rows (wrong/generic primary path).
+        if not typed_nodes:
+            if uuid_val and uuid_val != expected_uuid:
+                anomalies.append('uuid_mismatch')
+            if not has_emb and 'missing_embedding' not in anomalies:
+                anomalies.append('missing_embedding')
 
         # Deduplicate anomaly tags while preserving order
         seen_a: set[str] = set()
@@ -1499,7 +1514,7 @@ class CatalogService:
                         wrong.append(row)
                 if generic:
                     section.generic_duplicate.append(ent.graph_key)
-                if wrong and not typed:
+                if wrong:
                     section.wrong_type.append(ent.graph_key)
                 if len(typed) > 1:
                     section.typed_duplicate.append(ent.graph_key)

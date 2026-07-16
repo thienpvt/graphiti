@@ -1,8 +1,8 @@
 # Phase 1 Report — Typed Catalog Primitives
 
-**Date:** 2026-07-16
-**Executor branch:** `worktree-agent-ad59193852e4b5624`
-**Worktree:** `C:/Users/thien/PyCharmMiscProject/graphiti/.claude/worktrees/agent-ad59193852e4b5624`
+**Date:** 2026-07-17
+**Executor branch:** `worktree-agent-adf82d527d7476276`
+**Worktree:** `C:/Users/thien/PyCharmMiscProject/graphiti/.claude/worktrees/agent-adf82d527d7476276`
 **Neo4j:** `bolt://localhost:17687` (credentials supplied through environment/session; not recorded)
 **Environment:** `CATALOG_INT_REQUIRED=1`; Windows `PYTHONPATH=<repo_root>;<repo_root>/mcp_server/src`
 
@@ -10,26 +10,28 @@
 
 ## Phase 2 Gate
 
-**Phase 2 MAY start only after independent verification accepts this corrected report.** Executor gates GATE-01..GATE-05 are green. Any failed rerun blocks Phase 2.
+**Phase 2 MAY start only after independent verification accepts this corrected report.** Executor gates GATE-01..GATE-05 are green after 01-08 resolve/verify twin gap closure. Any failed rerun blocks Phase 2.
 
 ## Gap-Closure Results
 
 | Requirement | Result | Evidence |
 |---|---|---|
-| CONF-04 | **PASS** | Config values above defaults construct through transport up to hard maxima; service still rejects above active configured limits |
-| SAFE-03 | **PASS** | One iterative validator enforces JSON types, finite floats, string limits, depth/node ceilings, and cycle rejection before service work |
-| VERI-03 | **PASS** | Store preserves physical relationships by `elementId(e)`; edge and entity twin anomalies aggregate across every row; provenance scopes episode and target groups |
-| GATE-01 | **PASS** | 192 catalog units passed; focused gap and review regressions included |
-| GATE-05 | **PASS** | Report corrected from independently identified false-positive evidence; Phase 2 remains independently gated |
+| RESO-03 | **PASS** | Resolve aggregates `typed_duplicate`, `uuid_mismatch`, `missing_embedding`, and `wrong_type` across all matching rows; primary UUID prefers expected; unit + live mixed-twin coverage |
+| VERI-02 | **PASS** | Verify reports `wrong_type` whenever wrong-type siblings exist even with typed present; entity verify uses `elementId(n)` physical-row dedup; unit + live coverage |
+| CONF-04 | **PASS** | Prior 01-07 bound remains green under full unit suite |
+| SAFE-03 | **PASS** | Prior 01-07 iterative JSON bounds remain green under full unit suite |
+| VERI-03 | **PASS** | Prior all-row edge endpoint/type aggregation remains green under unit + live suite |
+| GATE-01 | **PASS** | 196 catalog units passed; focused twin regressions included |
+| GATE-05 | **PASS** | Report corrected with current counts; Phase 2 remains independently gated |
 
 ## Gate Results
 
 | Gate | Result | Evidence |
 |---|---|---|
-| GATE-01 catalog units | **PASS** | `192 passed in 1.60s` |
-| GATE-02 live Neo4j | **PASS** | `25 passed in 17.19s`; zero skipped under required mode |
+| GATE-01 catalog units | **PASS** | `196 passed in 2.83s` |
+| GATE-02 live Neo4j | **PASS** | `27 passed in 18.25s`; zero skipped under required mode |
 | GATE-03 no LLM/queue | **PASS** | Existing live spy coverage remained green |
-| GATE-04 quality/compatibility | **PASS** | Ruff format/check, Pyright, 86 MCP regressions, 18-tool listing |
+| GATE-04 quality/compatibility | **PASS** | Ruff format/check, package Pyright, 86 MCP regressions, 18-tool listing |
 | GATE-05 report | **PASS** | This corrected evidence report |
 
 ## Exact Commands and Sanitized Results
@@ -47,23 +49,23 @@ export CATALOG_INT_REQUIRED=1
 uv run pytest tests/test_catalog_models.py tests/test_catalog_identity.py tests/test_catalog_store_unit.py tests/test_catalog_service.py -q --tb=short
 ```
 
-Result: exit 0 — `192 passed in 1.60s`.
+Result: exit 0 — `196 passed in 2.83s`.
 
 ### Live Neo4j integration
 
 ```bash
-CATALOG_INT_REQUIRED=1 uv run pytest tests/test_catalog_neo4j_int.py -q --tb=short
+CATALOG_INT_REQUIRED=1 uv run pytest tests/test_catalog_neo4j_int.py -q --tb=short --timeout=120
 ```
 
-Result: exit 0 — `25 passed in 17.19s`; no skips. Writes and scoped teardown used only `group_id=oracle-catalog-tool-test`; a dedicated canary group was created and deleted within one isolation test; all other groups were snapshotted and unchanged.
+Result: exit 0 — `27 passed in 18.25s`; no skips. Writes and scoped teardown used only `group_id=oracle-catalog-tool-test`; canary group isolated and deleted within provenance test; no `oracle-catalog-v2` writes; no `clear_graph`.
 
 ### Combined catalog suite
 
 ```bash
-CATALOG_INT_REQUIRED=1 uv run pytest tests/test_catalog_*.py -q --tb=short
+CATALOG_INT_REQUIRED=1 uv run pytest tests/test_catalog_models.py tests/test_catalog_identity.py tests/test_catalog_store_unit.py tests/test_catalog_service.py tests/test_catalog_neo4j_int.py -q --tb=line --timeout=120
 ```
 
-Result: exit 0 — `217 passed in 18.77s`.
+Result: exit 0 — `223 passed in 19.18s`.
 
 ### Catalog-scoped formatting, lint, type checking
 
@@ -107,7 +109,7 @@ Results:
 uv run pytest tests/test_update_entity.py tests/test_factories.py tests/test_configuration.py tests/test_core_parity.py -q --tb=short
 ```
 
-Result: exit 0 — `86 passed in 1.50s`.
+Result: exit 0 — `86 passed in 1.45s`.
 
 ### MCP tool listing
 
@@ -132,25 +134,23 @@ Existing tools retained: `add_memory`, `search_nodes`, `search_memory_facts`, `a
 
 - Product-path live writes restricted to `oracle-catalog-tool-test`.
 - One provenance-isolation canary uses `oracle-catalog-tool-test-canary`, then deletes only that canary group in `finally`.
-- Fixture snapshots all pre-existing out-of-test-group node/edge counts before each test and asserts exact equality after scoped teardown.
 - No writes to `oracle-catalog-v2`.
 - No `clear_graph` invocation.
 - No deployment or Phase 2 product code.
 - No LLM or queue path added.
 - No credentials logged or committed.
-- No unrelated dirty-file changes.
+- No ROADMAP/REQUIREMENTS/STATE completion update in this plan.
 - Neo4j integration was required and unskipped; no skipped result counted as PASS.
 
 ## Summary Verdict
 
 | Check | Result |
 |---|---|
-| CONF-04 configurable limits within hard bounds | PASS |
-| SAFE-03 bounded iterative JSON validation | PASS |
-| VERI-03 all-row endpoint/type/UUID/embedding aggregation | PASS |
-| Catalog units | PASS — 192 |
-| Live Neo4j | PASS — 25 unskipped |
-| Combined catalog | PASS — 217 |
+| RESO-03 all-row resolve twin anomalies | PASS |
+| VERI-02 wrong_type + entity elementId physical rows | PASS |
+| Catalog units | PASS — 196 |
+| Live Neo4j | PASS — 27 unskipped |
+| Combined catalog | PASS — 223 |
 | Ruff/Pyright | PASS |
 | MCP regressions | PASS — 86 |
 | Tool compatibility | PASS — 18 total, 14 existing, 4 catalog |

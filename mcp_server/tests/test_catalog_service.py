@@ -821,6 +821,60 @@ async def test_verify_expected_plus_extra_label_is_wrong_type():
 
 
 @pytest.mark.asyncio
+async def test_resolve_mixed_twin_aggregates_all_row_anomalies():
+    """Typed expected + rogue typed + wrong-type sibling: report every anomaly."""
+    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(
+        return_value=[
+            {
+                'uuid': expected_uuid,
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'content_sha256': 'a' * 64,
+                'has_name_embedding': True,
+                'batch_id': BATCH,
+            },
+            {
+                'uuid': 'rogue-typed-uuid',
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'content_sha256': 'b' * 64,
+                'has_name_embedding': False,
+                'batch_id': BATCH,
+            },
+            {
+                'uuid': 'wrong-type-uuid',
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity', 'View'],
+                'neo4j_labels': ['Entity', 'View'],
+                'content_sha256': 'c' * 64,
+                'has_name_embedding': True,
+                'batch_id': BATCH,
+            },
+        ]
+    )
+    resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
+    r0 = resp.results[0]
+    assert r0.found is True
+    assert r0.status == 'found'
+    assert r0.uuid == expected_uuid
+    assert 'typed_duplicate' in r0.anomalies
+    assert 'uuid_mismatch' in r0.anomalies
+    assert 'missing_embedding' in r0.anomalies
+    assert 'wrong_type' in r0.anomalies
+    assert 'rogue-typed-uuid' in r0.typed_duplicates
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
 async def test_resolve_never_opens_write_transaction():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -1002,6 +1056,45 @@ async def test_verify_entity_aggregates_anomalies_across_typed_twins():
     assert resp.entities.typed_duplicate == [key]
     assert resp.entities.uuid_mismatch == [key]
     assert resp.entities.missing_embedding == [key]
+
+
+@pytest.mark.asyncio
+async def test_verify_entity_wrong_type_with_typed_present_is_reported():
+    """Wrong-type sibling must surface even when exact typed rows exist."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    key = 'TABLE::HR.EMPLOYEES'
+    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', key)
+    service._store.match_entities_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': expected_uuid,
+                'graph_key': key,
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'has_name_embedding': True,
+            },
+            {
+                'uuid': str(uuid.uuid4()),
+                'graph_key': key,
+                'labels': ['Entity', 'View'],
+                'neo4j_labels': ['Entity', 'View'],
+                'has_name_embedding': True,
+            },
+        ]
+    )
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    resp = await service.verify_catalog_batch(
+        client=client,
+        request=_verify_request(
+            batch_id=None,
+            entities=[VerifyEntityRef(entity_type='Table', graph_key=key)],
+            edges=[],
+        ),
+    )
+    assert resp.entities.found == 1
+    assert key in resp.entities.wrong_type
+    assert {'kind': 'wrong_type', 'graph_key': key} in resp.anomalies
 
 
 @pytest.mark.asyncio

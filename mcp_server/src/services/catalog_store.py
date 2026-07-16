@@ -589,7 +589,8 @@ class CatalogNeo4jStore:
             MATCH (n:Entity)
             WHERE n.group_id = $group_id
               AND n.batch_id = $batch_id
-            RETURN n.uuid AS uuid,
+            RETURN elementId(n) AS element_id,
+                   n.uuid AS uuid,
                    n.group_id AS group_id,
                    n.name AS name,
                    n.graph_key AS graph_key,
@@ -605,7 +606,8 @@ class CatalogNeo4jStore:
             MATCH (n:Entity)
             WHERE n.group_id = $group_id
               AND (n.name IN $graph_keys OR n.graph_key IN $graph_keys)
-            RETURN n.uuid AS uuid,
+            RETURN elementId(n) AS element_id,
+                   n.uuid AS uuid,
                    n.group_id AS group_id,
                    n.name AS name,
                    n.graph_key AS graph_key,
@@ -629,6 +631,10 @@ class CatalogNeo4jStore:
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
 
+        def _row_identity(row: dict[str, Any]) -> str:
+            # Prefer physical element_id; UUID fallback only for legacy mocks.
+            return str(row.get('element_id') or row.get('uuid') or '')
+
         if batch_id:
             cypher = self.build_match_entities_for_verify_by_batch_cypher()
             batch_rows = await self._read_many(
@@ -638,7 +644,7 @@ class CatalogNeo4jStore:
                 tx=tx,
             )
             for row in batch_rows:
-                key = str(row.get('uuid') or '')
+                key = _row_identity(row)
                 if key and key not in seen:
                     seen.add(key)
                     rows.append(row)
@@ -652,7 +658,7 @@ class CatalogNeo4jStore:
                 tx=tx,
             )
             for row in key_rows:
-                key = str(row.get('uuid') or '')
+                key = _row_identity(row)
                 if key and key not in seen:
                     seen.add(key)
                     rows.append(row)

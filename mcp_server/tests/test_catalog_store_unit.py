@@ -625,6 +625,47 @@ async def test_verify_edge_overlap_dedup_uses_element_id_and_preserves_twins():
     assert [row['element_id'] for row in rows] == ['rel-1', 'rel-2']
 
 
+def test_verify_entity_queries_return_physical_identity():
+    store = CatalogNeo4jStore()
+    for cypher in (
+        store.build_match_entities_for_verify_by_batch_cypher(),
+        store.build_match_entities_for_verify_by_keys_cypher(),
+    ):
+        assert 'elementId(n) AS element_id' in cypher
+
+
+@pytest.mark.asyncio
+async def test_verify_entity_overlap_dedup_uses_element_id_and_preserves_twins():
+    store = CatalogNeo4jStore()
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = params, kwargs
+            rows = [
+                {
+                    'element_id': 'node-1',
+                    'uuid': 'same',
+                    'graph_key': 'TABLE::HR.EMPLOYEES',
+                },
+                {
+                    'element_id': 'node-2',
+                    'uuid': 'same',
+                    'graph_key': 'TABLE::HR.EMPLOYEES',
+                },
+            ]
+            if '$batch_id' in cypher:
+                return (rows, None, [])
+            return ([rows[0]], None, [])
+
+    rows = await store.match_entities_for_verify(
+        _Exec(),
+        group_id=GROUP,
+        batch_id=BATCH,
+        graph_keys=['TABLE::HR.EMPLOYEES'],
+    )
+    assert [row['element_id'] for row in rows] == ['node-1', 'node-2']
+
+
 def test_identity_uniqueness_constraint_statements_are_fixed_create_only():
     stmts = CatalogNeo4jStore.identity_uniqueness_constraint_statements()
     assert len(stmts) == 2
