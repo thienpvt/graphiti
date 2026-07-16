@@ -480,26 +480,23 @@ Env: nested delimiter `__` already configured [VERIFIED: schema.py:290]. Map `GR
 | A6 | Nested `source_refs` serialize as JSON string property | ENTY-06 | Neo4j nested map limits |
 | A7 | Phase 1 `require_provenance` only reports absence | VERI-04 | Matches CONTEXT deferred provenance |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Public Graphiti client driver access for custom Cypher**
-   - What we know: MCP uses `Graphiti` client; `Neo4jDriver.transaction` exists.
-   - What's unclear: Whether any public helper wraps multi-statement catalog MERGEs.
-   - Recommendation: Use `client.driver`; gate `provider == NEO4J`.
+1. **Public Graphiti client driver access for custom Cypher** — RESOLVED
+   - Decision: Use `client.driver` (`Neo4jDriver.transaction`) for catalog multi-statement MERGEs. Gate writes when `provider == NEO4J`. No public multi-statement catalog helper required.
+   - Evidence: MCP Graphiti client exposes driver; `Neo4jDriver.transaction` is the established write boundary (Pattern 2, Architecture Patterns).
 
-2. **Exact property names for edge type in hybrid search**
-   - What we know: Entity edges use `name` as relation name and `fact` as text [VERIFIED: EntityEdge].
-   - What's unclear: Whether catalog should also set `attributes` or dedicated `edge_type` property.
-   - Recommendation: Set `e.name` to allowlisted edge type; store `edge_key`, `content_sha256`, `batch_id`; verify EDGE-12 in integration.
+2. **Exact property names for edge type in hybrid search** — RESOLVED
+   - Decision: Persist allowlisted edge type in `e.name`; searchable text in `e.fact`; vector in `e.fact_embedding`. Also store `edge_key`, `content_sha256`, `batch_id`. No separate `edge_type` property required for Phase 1.
+   - Evidence: EntityEdge / edge search filters use `e.name in $edge_types` and hybrid fact search uses `fact` + `fact_embedding` (Search Compatibility, EDGE-12).
 
-3. **Dry-run embedding cost**
-   - What we know: CONTEXT requires embedding generation on dry-run for readiness validation.
-   - What's unclear: CI without API keys.
-   - Recommendation: Honor CONTEXT; unit tests mock embedder.
+3. **Dry-run embedding cost** — RESOLVED
+   - Decision: Dry-run still generates embeddings for readiness validation (CONTEXT mandatory write rules). Unit tests mock the embedder; integration may use mock or require key. Never open a write transaction on dry-run.
+   - Evidence: CONTEXT requires embed-before-tx including dry-run readiness; CI without API keys uses AsyncMock.
 
-4. **Cleanup strategy for integration tests**
-   - What we know: Must not broad-clear shared DBs.
-   - Recommendation: Scoped DELETE for `group_id='oracle-catalog-tool-test'` in fixture teardown only.
+4. **Cleanup strategy for integration tests** — RESOLVED
+   - Decision: Integration fixture teardown deletes only `group_id='oracle-catalog-tool-test'`. Never `clear_graph`, never delete other groups or live data.
+   - Evidence: Project constraints Isolation / Operations; PATTERNS Test Pattern.
 
 ## Environment Availability
 
