@@ -1,10 +1,10 @@
 # Phase 1 Report — Typed Catalog Primitives
 
-**Date:** 2026-07-16  
-**Executor branch:** `worktree-agent-a6765d358a7b2be48`  
-**Worktree:** `C:/Users/thien/PyCharmMiscProject/graphiti/.claude/worktrees/agent-a6765d358a7b2be48`  
-**Neo4j:** `bolt://localhost:17687` (user `neo4j`; password not logged)  
-**Env:** `CATALOG_INT_REQUIRED=1`, `PYTHONPATH=<repo_root>:<repo_root>/mcp_server/src`
+**Date:** 2026-07-16
+**Executor branch:** `worktree-agent-a6765d358a7b2be48`
+**Worktree:** `C:/Users/thien/PyCharmMiscProject/graphiti/.claude/worktrees/agent-a6765d358a7b2be48`
+**Neo4j:** `bolt://localhost:17687` (user `neo4j`; password supplied via environment, not recorded)
+**Env:** `CATALOG_INT_REQUIRED=1`, Windows `PYTHONPATH=<repo_root>;<repo_root>/mcp_server/src` (semicolon separator)
 
 ---
 
@@ -36,13 +36,19 @@ Working directory for MCP commands: `mcp_server/` unless noted.
 
 ### Environment
 
+Secrets are supplied via environment variables and are **not** recorded in this report.
+
 ```bash
-export PYTHONPATH="<repo_root>:<repo_root>/mcp_server/src"
+export PYTHONPATH="<repo_root>;<repo_root>/mcp_server/src"   # Windows: use ';'
 export CATALOG_INT_REQUIRED=1
 export NEO4J_URI=bolt://localhost:17687
 export NEO4J_USER=neo4j
-export NEO4J_PASSWORD=catalogtest123
+export NEO4J_PASSWORD=<redacted>
 ```
+
+Notes:
+- On Windows, `PYTHONPATH` entries must be semicolon-separated. Colon-joined values are treated as a single invalid path and fall through to site-packages.
+- Prefer monorepo `graphiti_core` on `PYTHONPATH` (or venv python with that path) so `graphiti_core.embedder.ollama` resolves for MCP factories tests. Stale published site-packages packages omit `ollama` and must not be accepted as the regression baseline.
 
 ### GATE-04 — Ruff format (catalog-scoped)
 
@@ -112,7 +118,8 @@ cd mcp_server && uv run pyright \
 ### GATE-04 — MCP tool schema listing (18 tools, four additive)
 
 ```bash
-cd mcp_server && uv run python - <<'PY'
+cd mcp_server && PYTHONPATH="<repo_root>;<repo_root>/mcp_server/src" \
+  .venv/Scripts/python.exe - <<'PY'
 # asyncio list_tools on graphiti_mcp_server.mcp
 # required existing 14 + catalog 4
 PY
@@ -132,26 +139,31 @@ TOOL_LIST_OK
 ### GATE-04 — Existing MCP regressions (no live external services)
 
 ```bash
-cd mcp_server && uv run pytest \
-  tests/test_update_entity.py \
-  tests/test_configuration.py \
-  tests/test_core_parity.py \
-  -q --tb=line
+cd mcp_server && \
+  PYTHONPATH="<repo_root>;<repo_root>/mcp_server/src" \
+  .venv/Scripts/python.exe -m pytest \
+    tests/test_update_entity.py \
+    tests/test_factories.py \
+    tests/test_configuration.py \
+    tests/test_core_parity.py \
+    -q --tb=line
 ```
 
-**Result:** exit 0 — `59 passed in 1.14s`
+**Result:** exit 0 — `86 passed in 1.37s`
 
-**Note on `tests/test_factories.py`:** collection fails with pre-existing `ModuleNotFoundError: No module named 'graphiti_core.embedder.ollama'`. Cause: mcp_server venv resolves published `graphiti-core` from site-packages (no `ollama` module), while the monorepo source tree has `graphiti_core/embedder/ollama.py`. Failure is unrelated to Phase 1 catalog code; not introduced by catalog tools. Applicable MCP regression set for GATE-04 is the three files above (59 passed).
+Path check before run: monorepo `graphiti_core` first on `sys.path`; `from graphiti_core.embedder.ollama import OllamaEmbedder` succeeds. All four regression files included (no exclusions).
 
 ### GATE-01 — Catalog unit suite
 
 ```bash
-cd mcp_server && uv run pytest \
-  tests/test_catalog_models.py \
-  tests/test_catalog_identity.py \
-  tests/test_catalog_service.py \
-  tests/test_catalog_store_unit.py \
-  -q --tb=line
+cd mcp_server && \
+  PYTHONPATH="<repo_root>;<repo_root>/mcp_server/src" \
+  uv run pytest \
+    tests/test_catalog_models.py \
+    tests/test_catalog_identity.py \
+    tests/test_catalog_service.py \
+    tests/test_catalog_store_unit.py \
+    -q --tb=line
 ```
 
 **Result:** exit 0 — `159 passed in 3.18s`
@@ -163,8 +175,8 @@ cd mcp_server && \
   CATALOG_INT_REQUIRED=1 \
   NEO4J_URI=bolt://localhost:17687 \
   NEO4J_USER=neo4j \
-  NEO4J_PASSWORD=catalogtest123 \
-  PYTHONPATH="<repo_root>:<repo_root>/mcp_server/src" \
+  NEO4J_PASSWORD=<redacted> \
+  PYTHONPATH="<repo_root>;<repo_root>/mcp_server/src" \
   uv run pytest tests/test_catalog_neo4j_int.py -m 'integration and requires_neo4j' -q --tb=short
 ```
 
@@ -173,10 +185,12 @@ cd mcp_server && \
 ### Combined catalog suite (unit + integration)
 
 ```bash
-cd mcp_server && uv run pytest tests/test_catalog_*.py -q --tb=line
+cd mcp_server && \
+  PYTHONPATH="<repo_root>;<repo_root>/mcp_server/src" \
+  uv run pytest tests/test_catalog_*.py -q --tb=line
 ```
 
-**Result:** exit 0 — `180 passed in 15.03s`
+**Result:** exit 0 — `180 passed in 15.03s` (re-verified after GATE-04 corrections)
 
 ---
 
@@ -213,7 +227,8 @@ Existing 14 tools retained: `add_memory`, `search_nodes`, `search_memory_facts`,
 | No Phase 2 start before green report | Held (this report is the gate) |
 | No unrelated dirty-file changes (`k8s`, `.codegraph/`, `sample_catalog.json`) | Held |
 | No skipped Neo4j marked as PASS | Held (`CATALOG_INT_REQUIRED=1`, 21 unskipped) |
-| No new packages installed | Held |
+| No credentials recorded in report or logs | Held (`NEO4J_PASSWORD=<redacted>`) |
+| No new product packages required for catalog | Held |
 
 ---
 
@@ -221,7 +236,7 @@ Existing 14 tools retained: `add_memory`, `search_nodes`, `search_memory_facts`,
 
 Commit `0799c41` — `style(01-06): ruff format/lint clean on catalog Phase 1 files`
 
-Files: `catalog_common.py`, `catalog_edges.py`, `catalog_identity.py`, `test_catalog_identity.py`, `test_catalog_models.py`  
+Files: `catalog_common.py`, `catalog_edges.py`, `catalog_identity.py`, `test_catalog_identity.py`, `test_catalog_models.py`
 Behavior-neutral format/lint only.
 
 ---
@@ -237,13 +252,21 @@ Behavior-neutral format/lint only.
 | Package Pyright (`cd mcp_server && uv run pyright` ×13 files) | **0 errors** (uses `[tool.pyright] extraPaths = ["src"]`) |
 | Package Pyright on edges/entities/responses only | **0 errors** |
 | Ruff format/check ×13 | exit 0 |
-| Runtime `PYTHONPATH=src python -c "from models.catalog_edges import ..."` | OK |
+| Runtime with monorepo + `mcp_server/src` on path | OK |
 | `pytest tests/test_catalog_models.py` | **43 passed** |
 | `pytest tests/test_catalog_*.py` | **180 passed** |
 
 Root cause of editor squiggle: IDE opens monorepo / file without `mcp_server` package config (`extraPaths=["src"]`), so bare `models.*` is unresolved in the editor analysis environment. Authoritative package-context Pyright and runtime are green. No path hacks; no import rewrite.
 
 Re-verified: 2026-07-16 after coordinator diagnostic note.
+
+---
+
+## Corrections (coordinator gate review)
+
+1. **Credential redaction:** prior draft logged a Neo4j password literal. Replaced with `<redacted>`; secret only via environment.
+2. **MCP regressions:** re-ran four-file set with Windows `PYTHONPATH=<repo_root>;<repo_root>/mcp_server/src` using venv python. Result **86 passed** (includes `test_factories.py`). Prior 59-count exclusion note was incorrect path setup, not a product failure.
+3. **Trailing whitespace:** removed from report header and body lines flagged by `git diff --check`.
 
 ---
 
@@ -257,8 +280,9 @@ Re-verified: 2026-07-16 after coordinator diagnostic note.
 | Lint green (catalog scope) | Yes |
 | Pyright green (catalog scope) | Yes |
 | MCP tool list 18 / +4 catalog | Yes |
-| Existing MCP regressions | Yes (59; factories pre-existing baseline excluded) |
+| Existing MCP regressions | Yes (**86** — update_entity + factories + configuration + core_parity) |
 | Isolation + prohibitions | Yes |
+| No credentials in report | Yes |
 
-**Overall: PASS**  
+**Overall: PASS**
 **Phase 2: allowed to start after this report is accepted into tracking.**

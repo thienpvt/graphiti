@@ -14,7 +14,7 @@ requires:
 provides:
   - GATE-04 tooling green on Phase 1 catalog files
   - MCP tool listing 18 (14 existing + 4 catalog)
-  - Existing MCP regression evidence (59 passed)
+  - Existing MCP regression evidence (86 passed)
   - 01-PHASE1-REPORT.md Overall PASS with Phase 2 gate language
   - 01-VALIDATION.md nyquist_compliant + wave_0_complete
 affects:
@@ -41,7 +41,7 @@ key-files:
 
 key-decisions:
   - "Catalog-scoped Ruff/Pyright only — global baseline unrelated and out of Phase 1 scope"
-  - "test_factories.py Ollama import failure is pre-existing published-package gap; not a catalog regression"
+  - "Windows PYTHONPATH must use semicolon so monorepo graphiti_core (with ollama) wins over site-packages; MCP regressions 86/86"
   - "Overall PASS only with unskipped 21 Neo4j integration tests under CATALOG_INT_REQUIRED=1"
   - "Phase 2 MAY start after Overall PASS recorded in 01-PHASE1-REPORT.md"
 
@@ -77,11 +77,11 @@ coverage:
         status: pass
     human_judgment: false
   - id: D3
-    description: Existing MCP unit regressions pass (update_entity, configuration, core_parity)
+    description: Existing MCP unit regressions pass (update_entity, factories, configuration, core_parity) — 86 tests
     requirement: GATE-04
     verification:
       - kind: unit
-        ref: mcp_server/tests/test_update_entity.py + test_configuration.py + test_core_parity.py
+        ref: mcp_server/tests/test_update_entity.py + test_factories.py + test_configuration.py + test_core_parity.py
         status: pass
     human_judgment: false
   - id: D4
@@ -113,7 +113,7 @@ metrics:
 
 # Phase 01 Plan 06: GATE-04/05 Phase 1 Quality Gate Summary
 
-Catalog-scoped format/lint/typecheck green, MCP tool list 18 (+4 catalog), 59 MCP regressions, 180 catalog tests (21 live Neo4j unskipped), `01-PHASE1-REPORT.md` Overall PASS — Phase 2 unblocked.
+Catalog-scoped format/lint/typecheck green, MCP tool list 18 (+4 catalog), 86 MCP regressions, 180 catalog tests (21 live Neo4j unskipped), `01-PHASE1-REPORT.md` Overall PASS — Phase 2 unblocked.
 
 ## Performance
 
@@ -128,7 +128,7 @@ Catalog-scoped format/lint/typecheck green, MCP tool list 18 (+4 catalog), 59 MC
 - Ruff format + check + Pyright clean on all Phase 1 catalog sources and tests
 - MCP FastMCP surface: 18 tools; additive catalog quartet present; 14 legacy tools retained
 - Catalog units 159 + integration 21 (CATALOG_INT_REQUIRED=1) + combined 180 all green
-- Existing MCP regressions 59 green (`test_update_entity`, `test_configuration`, `test_core_parity`)
+- Existing MCP regressions **86** green (`test_update_entity`, `test_factories`, `test_configuration`, `test_core_parity`) with Windows monorepo `PYTHONPATH`
 - `01-PHASE1-REPORT.md` records exact commands/results; Overall PASS; Phase 2 may start
 - `01-VALIDATION.md` marked `nyquist_compliant: true`, `wave_0_complete: true`, all task rows green
 
@@ -162,16 +162,16 @@ Full command log: `01-PHASE1-REPORT.md`.
 - **Files modified:** catalog_common.py, catalog_edges.py, catalog_identity.py, test_catalog_identity.py, test_catalog_models.py
 - **Commit:** `0799c41`
 
-**2. [Out of scope] test_factories.py collection error**
-- **Found during:** Task 1
-- **Issue:** `ModuleNotFoundError: graphiti_core.embedder.ollama` from published site-packages package
-- **Action:** Not fixed (pre-existing; not catalog-caused). Documented in report. Applicable regressions still green.
-- **Deferred:** optional monorepo editable install / factories skip for missing ollama
+**2. [Rule 1 - Report accuracy] MCP factories regression path setup**
+- **Found during:** coordinator gate review
+- **Issue:** Colon-joined `PYTHONPATH` on Windows ignored monorepo; site-packages lacked `ollama`; report incorrectly excluded factories (59 count)
+- **Fix:** Re-ran with `PYTHONPATH=<repo_root>;<repo_root>/mcp_server/src` via venv python; **86 passed** including factories. Report/summary corrected; password redacted to `<redacted>`
+- **Files modified:** `01-PHASE1-REPORT.md`, `01-06-SUMMARY.md`
 
 **3. [No code change] Editor unresolved import on catalog_edges.py:11**
 - **Found during:** post-plan coordinator diagnostic
 - **Issue:** IDE reports `models.catalog_common` unresolved
-- **Analysis:** Sibling `catalog_entities` / `catalog_responses` use same import; package Pyright `extraPaths=["src"]` green (0 errors on 13-file set); models 43 + full catalog 180 passed; runtime with `PYTHONPATH=src` OK
+- **Analysis:** Sibling `catalog_entities` / `catalog_responses` use same import; package Pyright `extraPaths=["src"]` green (0 errors on 13-file set); models 43 + full catalog 180 passed
 - **Action:** Document only — no path hacks, no import rewrite
 - **Evidence:** `01-PHASE1-REPORT.md` section "Editor diagnostic"
 

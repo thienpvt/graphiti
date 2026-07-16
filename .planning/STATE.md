@@ -6,7 +6,7 @@ current_phase: 01
 current_phase_name: Typed Catalog Primitives
 status: executing
 stopped_at: Completed 01-06-PLAN.md
-last_updated: "2026-07-16T15:47:18.802Z"
+last_updated: "2026-07-16T15:52:35.340Z"
 last_activity: 2026-07-16
 last_activity_desc: Plans 01-03 and 01-04 completed; merged catalog unit gates green
 progress:
@@ -76,6 +76,7 @@ Recent decisions affecting current work:
 - [Phase ?]: Catalog-scoped Ruff/Pyright only for GATE-04; global baseline out of scope
 - [Phase ?]: Phase 1 Overall PASS; Phase 2 MAY start after 01-PHASE1-REPORT.md
 - [Phase ?]: test_factories Ollama import failure is pre-existing published-package gap
+- [Phase ?]: Windows PYTHONPATH semicolon + monorepo graphiti_core; MCP regressions 86/86; Neo4j password redacted in Phase1 report
 
 ### Pending Todos
 
