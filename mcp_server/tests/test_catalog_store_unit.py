@@ -253,7 +253,8 @@ def test_edge_build_resolve_endpoint_typed_cypher_is_match_only_no_create():
     assert 'CREATE' not in cypher.upper().replace('CREATED_AT', '')
     assert 'MERGE' not in cypher
     assert 'SET ' not in cypher  # read-only
-    assert ':Table' in cypher or 'Table' in cypher
+    # MATCH all Entity by group+name; classify_endpoint_rows applies custom label
+    assert 'Entity' in cypher
     assert '$group_id' in cypher
     assert '$name' in cypher or '$graph_key' in cypher
 

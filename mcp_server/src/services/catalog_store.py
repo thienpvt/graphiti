@@ -11,7 +11,12 @@ import re
 from datetime import datetime
 from typing import Any
 
-from models.catalog_common import CATALOG_ENTITY_TYPES, ENTITY_TYPE_PREFIXES, PROTECTED_ENTITY_PROPERTIES
+from models.catalog_common import (
+    CATALOG_EDGE_TYPES,
+    CATALOG_ENTITY_TYPES,
+    ENTITY_TYPE_PREFIXES,
+    PROTECTED_ENTITY_PROPERTIES,
+)
 
 # Mirror graphiti_core.helpers.SAFE_CYPHER_IDENTIFIER_PATTERN without importing core.
 _SAFE_LABEL = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
@@ -571,3 +576,284 @@ class CatalogNeo4jStore:
         cypher = self.build_match_provenance_presence_cypher()
         params = {'group_id': group_id, 'target_uuids': list(target_uuids)}
         return await self._read_many(executor, cypher, params, tx=tx)
+
+    # ------------------------------------------------------------------
+    # Typed edge endpoint resolution + edge upsert
+    # ------------------------------------------------------------------
+
+    def resolve_edge_type(self, edge_type: str) -> str:
+        """Re-validate edge_type against the fixed server allowlist (EDGE-02)."""
+        if edge_type not in CATALOG_EDGE_TYPES:
+            raise CatalogStoreError(
+                f'edge_type not allowlisted: {edge_type!r}',
+                code='validation_error',
+            )
+        if not _SAFE_LABEL.match(edge_type):
+            raise CatalogStoreError(
+                f'edge_type unsafe: {edge_type!r}',
+                code='validation_error',
+            )
+        return edge_type
+
+    def build_resolve_endpoint_typed_cypher(self, entity_type: str) -> str:
+        """MATCH-only endpoint lookup by group_id + name; never CREATE/MERGE/SET."""
+        # Validate allowlist (raises if unknown). Label not interpolated into Cypher:
+        # MATCH returns all Entity rows for name so classify can distinguish generic vs typed.
+        self.resolve_entity_label(entity_type)
+        return """
+            MATCH (n:Entity {group_id: $group_id, name: $name})
+            RETURN n.uuid AS uuid,
+                   n.group_id AS group_id,
+                   n.name AS name,
+                   n.graph_key AS graph_key,
+                   n.labels AS labels,
+                   labels(n) AS neo4j_labels,
+                   n.content_sha256 AS content_sha256
+            """
+
+    def classify_endpoint_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        expected_type: str,
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        """Classify endpoint MATCH rows into status codes (EDGE-03/04).
+
+        Returns (error_code or None, chosen_row or None).
+        Never creates or relabels nodes.
+        """
+        if not rows:
+            return 'missing_endpoint', None
+
+        typed: list[dict[str, Any]] = []
+        generic: list[dict[str, Any]] = []
+        wrong: list[dict[str, Any]] = []
+        for row in rows:
+            labels = row.get('neo4j_labels') or row.get('labels') or []
+            if isinstance(labels, str):
+                labels = [labels]
+            custom = [lb for lb in labels if lb != 'Entity']
+            if not custom:
+                generic.append(row)
+            elif expected_type in custom:
+                typed.append(row)
+            else:
+                wrong.append(row)
+
+        if typed:
+            return None, typed[0]
+        if wrong:
+            return 'endpoint_type_mismatch', wrong[0]
+        if generic:
+            return 'generic_endpoint_conflict', generic[0]
+        return 'missing_endpoint', None
+
+    async def resolve_endpoint_typed(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        graph_key: str,
+        entity_type: str,
+        tx: Any | None = None,
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        """Resolve exact endpoint by group_id + graph_key + entity_type.
+
+        MATCH only; never CREATE. Returns (error_code|None, row|None).
+        """
+        # Validate type early (raises CatalogStoreError if unknown)
+        self.resolve_entity_label(entity_type)
+        cypher = self.build_resolve_endpoint_typed_cypher(entity_type)
+        params = {'group_id': group_id, 'name': graph_key}
+        rows = await self._read_many(executor, cypher, params, tx=tx)
+        return self.classify_endpoint_rows(rows, expected_type=entity_type)
+
+    def build_edge_upsert_cypher(self) -> str:
+        """MERGE RELATES_TO by uuid; e.name is parameterized allowlisted edge type.
+
+        ON CREATE sets created_at + batch_id; ON MATCH CASE preserves identical hash
+        including batch_id; changed hash updates mutable fields + batch_id + updated_at.
+        """
+        mutable = (
+            'name',
+            'edge_key',
+            'fact',
+            'evidence',
+            'attributes',
+            'confidence',
+            'batch_id',
+            'content_sha256',
+            'group_id',
+            'source_node_uuid',
+            'target_node_uuid',
+        )
+        on_match_lines = [
+            (
+                f'e.{prop} = CASE WHEN e.content_sha256 = $content_sha256 '
+                f'THEN e.{prop} ELSE ${prop} END'
+            )
+            for prop in mutable
+        ]
+        on_match_lines.append(
+            'e.updated_at = CASE WHEN e.content_sha256 = $content_sha256 '
+            'THEN e.updated_at ELSE $updated_at END'
+        )
+        on_match = ',\n                '.join(on_match_lines)
+
+        return f"""
+            MATCH (source:Entity {{uuid: $source_uuid}})
+            MATCH (target:Entity {{uuid: $target_uuid}})
+            MERGE (source)-[e:RELATES_TO {{uuid: $uuid}}]->(target)
+            ON CREATE SET
+                e.uuid = $uuid,
+                e.group_id = $group_id,
+                e.name = $name,
+                e.edge_key = $edge_key,
+                e.fact = $fact,
+                e.evidence = $evidence,
+                e.attributes = $attributes,
+                e.confidence = $confidence,
+                e.batch_id = $batch_id,
+                e.content_sha256 = $content_sha256,
+                e.source_node_uuid = $source_node_uuid,
+                e.target_node_uuid = $target_node_uuid,
+                e.created_at = $created_at,
+                e.updated_at = $updated_at
+            ON MATCH SET
+                {on_match}
+            WITH e
+            CALL db.create.setRelationshipVectorProperty(e, 'fact_embedding', $fact_embedding)
+            RETURN e.uuid AS uuid,
+                   e.content_sha256 AS content_sha256,
+                   e.batch_id AS batch_id,
+                   e.created_at AS created_at,
+                   e.updated_at AS updated_at,
+                   e.name AS name,
+                   e.edge_key AS edge_key,
+                   e.source_node_uuid AS source_uuid,
+                   e.target_node_uuid AS target_uuid,
+                   CASE WHEN e.created_at = $created_at THEN 'created'
+                        WHEN e.content_sha256 = $content_sha256
+                             AND e.updated_at = $updated_at THEN 'unchanged'
+                        ELSE 'updated'
+                   END AS status
+            """
+
+    def build_get_edge_by_uuid_cypher(self) -> str:
+        return """
+            MATCH (s:Entity)-[e:RELATES_TO {uuid: $uuid}]->(t:Entity)
+            WHERE e.group_id = $group_id
+            RETURN e.uuid AS uuid,
+                   e.group_id AS group_id,
+                   e.name AS name,
+                   e.edge_key AS edge_key,
+                   e.fact AS fact,
+                   e.content_sha256 AS content_sha256,
+                   e.batch_id AS batch_id,
+                   e.created_at AS created_at,
+                   e.updated_at AS updated_at,
+                   e.fact_embedding IS NOT NULL AS has_fact_embedding,
+                   coalesce(e.source_node_uuid, s.uuid) AS source_uuid,
+                   coalesce(e.target_node_uuid, t.uuid) AS target_uuid,
+                   s.uuid AS source_node_uuid,
+                   t.uuid AS target_node_uuid
+            """
+
+    def prepare_edge_params(
+        self,
+        *,
+        edge_type: str,
+        uuid: str,
+        group_id: str,
+        batch_id: str,
+        edge_key: str,
+        source_uuid: str,
+        target_uuid: str,
+        fact: str,
+        content_sha256: str,
+        created_at: datetime,
+        updated_at: datetime,
+        fact_embedding: list[float],
+        evidence: str | None = None,
+        attributes: dict[str, Any] | None = None,
+        confidence: float | None = None,
+    ) -> dict[str, Any]:
+        """Build parameterized property map for edge upsert.
+
+        e.name is the allowlisted edge_type. Nested maps JSON-serialized.
+        """
+        name = self.resolve_edge_type(edge_type)
+        cleaned_attrs = _strip_protected_attributes(attributes)
+        return {
+            'uuid': uuid,
+            'group_id': group_id,
+            'batch_id': batch_id,
+            'name': name,
+            'edge_key': edge_key,
+            'source_uuid': source_uuid,
+            'target_uuid': target_uuid,
+            'source_node_uuid': source_uuid,
+            'target_node_uuid': target_uuid,
+            'fact': fact,
+            'evidence': evidence,
+            'content_sha256': content_sha256,
+            'created_at': created_at,
+            'updated_at': updated_at,
+            'fact_embedding': fact_embedding,
+            'attributes': serialize_nested_json(cleaned_attrs),
+            'confidence': confidence,
+        }
+
+    def detect_edge_identity_conflict(
+        self,
+        existing: dict[str, Any],
+        *,
+        edge_type: str,
+        edge_key: str,
+        source_uuid: str,
+        target_uuid: str,
+    ) -> str | None:
+        """Return edge_identity_conflict when uuid exists with conflicting fields."""
+        existing_name = existing.get('name')
+        existing_key = existing.get('edge_key')
+        existing_src = existing.get('source_uuid') or existing.get('source_node_uuid')
+        existing_tgt = existing.get('target_uuid') or existing.get('target_node_uuid')
+        if (
+            (existing_name is not None and existing_name != edge_type)
+            or (existing_key is not None and existing_key != edge_key)
+            or (existing_src is not None and str(existing_src) != str(source_uuid))
+            or (existing_tgt is not None and str(existing_tgt) != str(target_uuid))
+        ):
+            return 'edge_identity_conflict'
+        return None
+
+    async def get_edge_by_uuid(
+        self,
+        executor: Any,
+        *,
+        uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        cypher = self.build_get_edge_by_uuid_cypher()
+        params = {'uuid': uuid, 'group_id': group_id}
+        return await self._read_one(executor, cypher, params, tx=tx)
+
+    async def upsert_edge_item(
+        self,
+        tx: Any,
+        *,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute edge MERGE inside an open transaction. Returns first record dict."""
+        # Re-validate edge type from params['name'] at builder boundary
+        self.resolve_edge_type(str(params.get('name') or ''))
+        cypher = self.build_edge_upsert_cypher()
+        result = await tx.run(cypher, **params)
+        if hasattr(result, 'data'):
+            rows = await result.data()
+            return rows[0] if rows else {}
+        if hasattr(result, 'single'):
+            record = await result.single()
+            return dict(record) if record is not None else {}
+        return {}
