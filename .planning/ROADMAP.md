@@ -11,7 +11,7 @@ Add synchronous, typed, deterministic Neo4j catalog-upsert tools to the existing
 - Integer phases (1, 2): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: Typed Catalog Primitives** - Config, identity, entity/edge upsert, resolve, verify, and Phase 1 quality gate
+- [x] **Phase 1: Typed Catalog Primitives** - Config, identity, entity/edge upsert, resolve, verify, and Phase 1 quality gate
 - [ ] **Phase 2: Provenance and Atomic Batch** - Provenance, batch status, atomic catalog batch, docs, final verification
 
 ## Phase Details
@@ -29,7 +29,7 @@ Add synchronous, typed, deterministic Neo4j catalog-upsert tools to the existing
   4. Existing `search_nodes` and `search_memory_facts` retrieve catalog entities and facts created only under `oracle-catalog-tool-test` with expected type filters
   5. Phase 1 quality gate is green: focused unit tests, Neo4j integration on `oracle-catalog-tool-test` only, format/lint/changed-code typecheck, MCP tool-schema listing, relevant existing MCP regressions, and a short Phase 1 report that explicitly gates Phase 2
 
-**Plans:** 6/6 plans executed
+**Plans:** 8/8 plans executed (6 planned + 2 gap-closure)
 
 Plans:
 **Wave 1**
@@ -56,6 +56,14 @@ Plans:
 
 - [x] 01-06-PLAN.md — format/lint/typecheck/schema/regressions + Phase 1 report (GATE-04/05)
 
+**Wave 7** *(gap closure after independent verify)*
+
+- [x] 01-07-PLAN.md — CONF-04/SAFE-03/VERI-03 bounds, all-row edge verify, isolation
+
+**Wave 8** *(gap closure after 01-07 re-verify)*
+
+- [x] 01-08-PLAN.md — RESO-03/VERI-02 all-row resolve + entity elementId
+
 ### Phase 2: Provenance and Atomic Batch
 
 **Goal**: Operators can attach installed-schema provenance, observe restart-safe non-Entity batch status, and commit complete catalog batches atomically with documented operator guidance
@@ -78,7 +86,7 @@ Phases execute in numeric order: 1 → 2. Phase 2 must not start until Phase 1 g
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Typed Catalog Primitives | 6/6 | In Progress|  |
+| 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
 | 2. Provenance and Atomic Batch | 0/TBD | Not started | - |
 
 ## Coverage
