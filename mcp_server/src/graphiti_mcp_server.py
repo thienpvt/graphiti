@@ -44,6 +44,9 @@ from models.response_types import (
     SuccessResponse,
     TripletResponse,
 )
+from models.catalog_entities import UpsertTypedEntitiesRequest
+from models.catalog_responses import CatalogWriteResponse
+from services.catalog_service import CatalogService
 from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
 from services.queue_service import QueueService
 from utils.formatting import format_fact_result, to_edge_result, to_node_result
@@ -198,6 +201,7 @@ mcp = FastMCP(
 # Global services
 graphiti_service: Optional['GraphitiService'] = None
 queue_service: QueueService | None = None
+catalog_service: CatalogService | None = None
 
 # Global client for backward compatibility
 graphiti_client: Graphiti | None = None
@@ -1219,6 +1223,35 @@ async def get_status() -> StatusResponse:
         )
 
 
+@mcp.tool()
+async def upsert_typed_entities(
+    request: UpsertTypedEntitiesRequest,
+) -> CatalogWriteResponse | ErrorResponse:
+    """Deterministic typed catalog entity upsert (synchronous, Neo4j-only).
+
+    Server-derived UUIDv5 identity, configured embeddings before write, no LLM
+    extraction, no ingestion queue. Returns only after Neo4j commit or structured error.
+    """
+    global graphiti_service, catalog_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+
+    try:
+        client = await graphiti_service.get_client()
+        return await catalog_service.upsert_typed_entities(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'upsert_typed_entities failed batch_id=%s count=%s reason=%s',
+            getattr(request, 'batch_id', None),
+            len(getattr(request, 'entities', []) or []),
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog upsert_typed_entities failed')
+
+
 @mcp.custom_route('/health', methods=['GET'])
 async def health_check(request) -> JSONResponse:
     """Health check endpoint for Docker and load balancers."""
@@ -1227,7 +1260,7 @@ async def health_check(request) -> JSONResponse:
 
 async def initialize_server() -> ServerConfig:
     """Parse CLI arguments and initialize the Graphiti server configuration."""
-    global config, graphiti_service, queue_service, graphiti_client, semaphore
+    global config, graphiti_service, queue_service, catalog_service, graphiti_client, semaphore
 
     parser = argparse.ArgumentParser(
         description='Run the Graphiti MCP server with YAML configuration support'
@@ -1360,6 +1393,7 @@ async def initialize_server() -> ServerConfig:
     # Initialize services
     graphiti_service = GraphitiService(config, SEMAPHORE_LIMIT)
     queue_service = QueueService()
+    catalog_service = CatalogService(catalog_config=config.catalog_upsert)
     await graphiti_service.initialize()
 
     # Set global client for backward compatibility
