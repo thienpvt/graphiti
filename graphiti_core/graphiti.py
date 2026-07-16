@@ -300,6 +300,8 @@ class Graphiti:
             return 'gemini'
         elif 'groq' in class_name:
             return 'groq'
+        elif 'ollama' in class_name:
+            return 'ollama'
         # Database providers
         elif 'neo4j' in class_name:
             return 'neo4j'
@@ -341,7 +343,10 @@ class Graphiti:
             finally:
                 graphiti.close()
         """
-        await self.driver.close()
+        try:
+            await self.driver.close()
+        finally:
+            await self.embedder.close()
 
     async def _get_or_create_saga(
         self, saga_name: str, group_id: str, created_at: datetime

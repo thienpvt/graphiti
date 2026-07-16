@@ -15,7 +15,7 @@ limitations under the License.
 """
 
 from datetime import datetime, timedelta
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import numpy as np
 import pytest
@@ -93,6 +93,18 @@ def mock_llm_client():
     }
 
     return mock_llm
+
+
+@pytest.mark.asyncio
+async def test_close_releases_driver_and_embedder():
+    graphiti = Graphiti.__new__(Graphiti)
+    graphiti.driver = Mock(close=AsyncMock())
+    graphiti.embedder = Mock(close=AsyncMock())
+
+    await graphiti.close()
+
+    graphiti.driver.close.assert_awaited_once()
+    graphiti.embedder.close.assert_awaited_once()
 
 
 @pytest.fixture

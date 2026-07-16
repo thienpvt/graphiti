@@ -9,17 +9,22 @@ import pytest
 # Add the src directory to the path (mirrors the other factory tests)
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
+from graphiti_core.embedder.ollama import OllamaEmbedder
 from graphiti_core.llm_client import OpenAIClient
 from graphiti_core.llm_client.azure_openai_client import AzureOpenAILLMClient
 from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 
 from config.schema import (
     AzureOpenAIProviderConfig,
+    EmbedderConfig,
+    EmbedderProvidersConfig,
     LLMConfig,
     LLMProvidersConfig,
+    OllamaProviderConfig,
     OpenAIProviderConfig,
 )
 from services.factories import (
+    EmbedderFactory,
     LLMClientFactory,
     is_non_openai_provider,
     reasoning_effort_for_model,
@@ -78,6 +83,52 @@ class TestLLMClientFactoryRouting:
     def test_ollama_uses_generic_client(self):
         client = LLMClientFactory.create(self._config('http://localhost:11434/v1'))
         assert isinstance(client, OpenAIGenericClient)
+
+
+class TestOllamaEmbedderFactory:
+    """Tests native Ollama embedder construction."""
+
+    @staticmethod
+    def _config(provider: OllamaProviderConfig | None = None) -> EmbedderConfig:
+        return EmbedderConfig(
+            provider='ollama',
+            model='nomic-embed-text',
+            dimensions=768,
+            providers=EmbedderProvidersConfig(ollama=provider),
+        )
+
+    def test_local_ollama_needs_no_api_key(self):
+        client = EmbedderFactory.create(
+            self._config(
+                OllamaProviderConfig(
+                    api_url='http://ollama:11434',
+                    truncate=False,
+                    keep_alive='5m',
+                    timeout=90,
+                )
+            )
+        )
+
+        assert isinstance(client, OllamaEmbedder)
+        assert client.config.embedding_model == 'nomic-embed-text'
+        assert client.config.embedding_dim == 768
+        assert client.config.base_url == 'http://ollama:11434'
+        assert client.config.api_key is None
+        assert client.config.truncate is False
+        assert client.config.keep_alive == '5m'
+        assert client.config.timeout == 90
+
+    def test_api_key_is_forwarded(self):
+        client = EmbedderFactory.create(
+            self._config(OllamaProviderConfig(api_url='https://ollama.com', api_key='secret'))
+        )
+
+        assert isinstance(client, OllamaEmbedder)
+        assert client.config.api_key == 'secret'
+
+    def test_missing_provider_config_fails(self):
+        with pytest.raises(ValueError, match='Ollama provider configuration not found'):
+            EmbedderFactory.create(self._config())
 
 
 class TestLLMClientReasoningEffort:

@@ -133,6 +133,16 @@ class VoyageProviderConfig(BaseModel):
     model: str = 'voyage-3'
 
 
+class OllamaProviderConfig(BaseModel):
+    """Ollama native embedding provider configuration."""
+
+    api_url: str = 'http://localhost:11434'
+    api_key: str | None = None
+    truncate: bool = True
+    keep_alive: str | None = None
+    timeout: float = Field(default=60.0, gt=0)
+
+
 class LLMProvidersConfig(BaseModel):
     """LLM providers configuration."""
 
@@ -162,6 +172,7 @@ class EmbedderProvidersConfig(BaseModel):
     azure_openai: AzureOpenAIProviderConfig | None = None
     gemini: GeminiProviderConfig | None = None
     voyage: VoyageProviderConfig | None = None
+    ollama: OllamaProviderConfig | None = None
 
 
 class EmbedderConfig(BaseModel):
@@ -169,7 +180,7 @@ class EmbedderConfig(BaseModel):
 
     provider: str = Field(default='openai', description='Embedder provider')
     model: str = Field(default='text-embedding-3-small', description='Model name')
-    dimensions: int = Field(default=1536, description='Embedding dimensions')
+    dimensions: int = Field(default=1536, gt=0, description='Embedding dimensions')
     providers: EmbedderProvidersConfig = Field(default_factory=EmbedderProvidersConfig)
 
 
@@ -298,6 +309,8 @@ class GraphitiConfig(BaseSettings):
 
     def apply_cli_overrides(self, args) -> None:
         """Apply CLI argument overrides to configuration."""
+        previous_embedder_provider = self.embedder.provider
+
         # Override server settings
         if hasattr(args, 'transport') and args.transport:
             self.server.transport = args.transport
@@ -319,6 +332,14 @@ class GraphitiConfig(BaseSettings):
             self.embedder.provider = args.embedder_provider
         if hasattr(args, 'embedder_model') and args.embedder_model:
             self.embedder.model = args.embedder_model
+        elif self.embedder.provider == 'ollama' and previous_embedder_provider != 'ollama':
+            self.embedder.model = 'embeddinggemma'
+        if hasattr(args, 'embedder_dimensions') and args.embedder_dimensions is not None:
+            if args.embedder_dimensions <= 0:
+                raise ValueError('embedder dimensions must be a positive integer')
+            self.embedder.dimensions = args.embedder_dimensions
+        elif self.embedder.provider == 'ollama' and previous_embedder_provider != 'ollama':
+            self.embedder.dimensions = 768
 
         # Override database settings
         if hasattr(args, 'database_provider') and args.database_provider:

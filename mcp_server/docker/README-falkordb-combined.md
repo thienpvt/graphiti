@@ -35,7 +35,7 @@ docker compose -f docker/docker-compose-falkordb-combined.yml up
 ```
 
 3. Access the services:
-   - MCP Server: http://localhost:8000/mcp/
+   - MCP Server: http://localhost:8000/mcp
    - FalkorDB Web UI: http://localhost:3000
    - FalkorDB (Redis): localhost:6379
 

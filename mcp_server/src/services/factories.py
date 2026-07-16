@@ -38,6 +38,13 @@ except ImportError:
     HAS_VOYAGE_EMBEDDER = False
 
 try:
+    from graphiti_core.embedder.ollama import OllamaEmbedder, OllamaEmbedderConfig
+
+    HAS_OLLAMA_EMBEDDER = True
+except ImportError:
+    HAS_OLLAMA_EMBEDDER = False
+
+try:
     from graphiti_core.llm_client.azure_openai_client import AzureOpenAILLMClient
 
     HAS_AZURE_LLM = True
@@ -400,6 +407,27 @@ class EmbedderFactory:
                     embedding_dim=config.dimensions or 1024,
                 )
                 return VoyageAIEmbedder(config=voyage_config)
+
+            case 'ollama':
+                if not HAS_OLLAMA_EMBEDDER:
+                    raise ValueError(
+                        'Ollama embedder not available in current graphiti-core version'
+                    )
+                if not config.providers.ollama:
+                    raise ValueError('Ollama provider configuration not found')
+
+                ollama = config.providers.ollama
+                return OllamaEmbedder(
+                    config=OllamaEmbedderConfig(
+                        embedding_model=config.model,
+                        embedding_dim=config.dimensions,
+                        base_url=ollama.api_url,
+                        api_key=ollama.api_key,
+                        truncate=ollama.truncate,
+                        keep_alive=ollama.keep_alive,
+                        timeout=ollama.timeout,
+                    )
+                )
 
             case _:
                 raise ValueError(f'Unsupported Embedder provider: {provider}')

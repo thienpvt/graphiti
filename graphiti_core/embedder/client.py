@@ -36,3 +36,7 @@ class EmbedderClient(ABC):
 
     async def create_batch(self, input_data_list: list[str]) -> list[list[float]]:
         raise NotImplementedError()
+
+    async def close(self) -> None:
+        """Release resources owned by the embedder."""
+        return None
