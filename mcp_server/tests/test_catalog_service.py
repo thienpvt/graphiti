@@ -480,3 +480,214 @@ async def test_mcp_tool_upsert_typed_entities_registered():
 
     assert hasattr(server, 'upsert_typed_entities')
     assert callable(server.upsert_typed_entities)
+
+
+# ---------------------------------------------------------------------------
+# resolve_typed_entities (read-only)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_request(entities=None, **kwargs):
+    from models.catalog_entities import ResolveEntityRef, ResolveTypedEntitiesRequest
+
+    if entities is None:
+        entities = [
+            ResolveEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
+        ]
+    return ResolveTypedEntitiesRequest(group_id=GROUP, entities=entities, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_resolve_feature_disabled_no_write_no_embed():
+    client = _make_client()
+    service = CatalogService(catalog_config=_disabled_config())
+    service._store.match_entities_for_resolve = AsyncMock()
+    resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
+    assert any(
+        getattr(r, 'error_code', None) == CatalogErrorCode.feature_disabled
+        for r in resp.results
+    )
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+    client.embedder.create.assert_not_awaited()
+    client.embedder.create_batch.assert_not_awaited()
+    service._store.match_entities_for_resolve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_non_neo4j_backend_unavailable():
+    client = _make_client(provider='falkordb')
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock()
+    resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
+    assert any(
+        getattr(r, 'error_code', None) == CatalogErrorCode.backend_unavailable
+        for r in resp.results
+    )
+    service._store.match_entities_for_resolve.assert_not_awaited()
+    assert 'embed' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_resolve_missing_entity_reports_not_found():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(return_value=[])
+    resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
+    r0 = resp.results[0]
+    assert r0.found is False
+    assert 'missing' in r0.anomalies or r0.status == 'missing'
+    assert r0.uuid is None or r0.uuid == catalog_entity_uuid(
+        FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES'
+    )
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_resolve_found_entity_reports_fields_and_no_side_effects():
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(
+        return_value=[
+            {
+                'uuid': ent_uuid,
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'content_sha256': 'a' * 64,
+                'has_name_embedding': True,
+                'batch_id': BATCH,
+            }
+        ]
+    )
+    resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
+    r0 = resp.results[0]
+    assert r0.found is True
+    assert r0.uuid == ent_uuid
+    assert r0.labels is not None and 'Table' in (r0.labels or [])
+    assert r0.verified_type == 'Table'
+    assert r0.content_sha256 == 'a' * 64
+    assert r0.has_name_embedding is True
+    assert r0.generic_duplicates == []
+    assert r0.typed_duplicates == []
+    client.embedder.create.assert_not_awaited()
+    client.embedder.create_batch.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+    # MATCH scoped to group_id + requested keys only
+    call_kwargs = service._store.match_entities_for_resolve.await_args.kwargs
+    assert call_kwargs['group_id'] == GROUP
+    assert 'TABLE::HR.EMPLOYEES' in call_kwargs['graph_keys']
+
+
+@pytest.mark.asyncio
+async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch():
+    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(
+        return_value=[
+            # bare generic Entity with name=graph_key, no Table label
+            {
+                'uuid': 'generic-uuid-1',
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity'],
+                'neo4j_labels': ['Entity'],
+                'content_sha256': 'b' * 64,
+                'has_name_embedding': False,
+                'batch_id': None,
+            },
+            # typed node with wrong uuid
+            {
+                'uuid': 'wrong-uuid',
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'content_sha256': 'c' * 64,
+                'has_name_embedding': True,
+                'batch_id': BATCH,
+            },
+            # second typed duplicate
+            {
+                'uuid': expected_uuid,
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'content_sha256': 'd' * 64,
+                'has_name_embedding': True,
+                'batch_id': BATCH,
+            },
+        ]
+    )
+    resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
+    r0 = resp.results[0]
+    assert r0.found is True
+    assert 'generic-uuid-1' in r0.generic_duplicates
+    assert len(r0.typed_duplicates) >= 1
+    assert any(
+        a in r0.anomalies
+        for a in (
+            'generic_duplicate',
+            'typed_duplicate',
+            'uuid_mismatch',
+            'missing_embedding',
+            'wrong_type',
+        )
+    )
+    assert 'uuid_mismatch' in r0.anomalies or any(
+        u != expected_uuid for u in ([r0.uuid] if r0.uuid else []) + list(r0.typed_duplicates)
+    )
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_resolve_wrong_custom_label_and_absent_embedding():
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(
+        return_value=[
+            {
+                'uuid': ent_uuid,
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity', 'View'],
+                'neo4j_labels': ['Entity', 'View'],
+                'content_sha256': 'e' * 64,
+                'has_name_embedding': False,
+                'batch_id': BATCH,
+            }
+        ]
+    )
+    resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
+    r0 = resp.results[0]
+    assert r0.found is True
+    assert 'wrong_type' in r0.anomalies or r0.verified_type != 'Table'
+    assert 'missing_embedding' in r0.anomalies or r0.has_name_embedding is False
+    client.embedder.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_never_opens_write_transaction():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(return_value=[])
+    service._store.upsert_entity_item = AsyncMock()
+    await service.resolve_typed_entities(client=client, request=_resolve_request())
+    service._store.upsert_entity_item.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_resolve_typed_entities_registered():
+    import graphiti_mcp_server as server
+
+    assert hasattr(server, 'resolve_typed_entities')
+    assert callable(server.resolve_typed_entities)
