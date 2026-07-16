@@ -610,9 +610,12 @@ def test_verify_edge_ref_is_backward_compatible_and_accepts_expected_endpoints()
     )
     assert ref.expected_source_graph_key == 'SCHEMA::HR'
     uppercase = FIXED_NS.upper()
-    assert VerifyEdgeRef(
-        edge_type='Contains', edge_key='CONTAINS::K', expected_source_uuid=uppercase
-    ).expected_source_uuid == FIXED_NS
+    assert (
+        VerifyEdgeRef(
+            edge_type='Contains', edge_key='CONTAINS::K', expected_source_uuid=uppercase
+        ).expected_source_uuid
+        == FIXED_NS
+    )
 
 
 @pytest.mark.parametrize('field', ['expected_source_uuid', 'expected_target_uuid'])
