@@ -194,8 +194,9 @@ None.
 - RED commits present: `bd6290b`, `ec2d9d6`
 - GREEN commits present after RED: `c67e69d`, `fb427db`
 - Diagnostic fix: `361bec2`
-- Verification: `pytest tests/test_catalog_models.py tests/test_catalog_identity.py` → 55 passed
-- Verification: `pyright src/config/schema.py src/models src/services/catalog_identity.py tests/test_catalog_models.py tests/test_catalog_identity.py` → 0 errors
+- Verification: `uv run pytest tests/test_catalog_models.py tests/test_catalog_identity.py` → 55 passed
+- Verification: `uv run pyright src/config/schema.py src/models/catalog_common.py src/models/catalog_entities.py src/models/catalog_edges.py src/models/catalog_responses.py src/services/catalog_identity.py tests/test_catalog_models.py tests/test_catalog_identity.py` → 0 errors
+- Second diagnostic pass: `_validate_group_id` call sites already consistent; test imports resolved via `extraPaths=["src"]`
 
 ## Self-Check: PASSED
 
