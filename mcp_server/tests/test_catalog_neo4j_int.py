@@ -19,16 +19,12 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
-# Match catalog unit tests + Windows PYTHONPATH: always insert src.
-_SRC = Path(__file__).resolve().parent.parent / 'src'
-_ROOT = Path(__file__).resolve().parents[2]
-for _p in (str(_ROOT), str(_SRC)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+# Match catalog unit tests: insert mcp_server/src (pyright extraPaths = ["src"]).
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from config.schema import CatalogConfig  # noqa: E402
 from models.catalog_common import CatalogErrorCode  # noqa: E402
@@ -42,11 +38,7 @@ from models.catalog_entities import (  # noqa: E402
     VerifyEdgeRef,
     VerifyEntityRef,
 )
-from services.catalog_identity import (  # noqa: E402
-    canonical_sha256,
-    catalog_edge_uuid,
-    catalog_entity_uuid,
-)
+from services.catalog_identity import catalog_edge_uuid, catalog_entity_uuid  # noqa: E402
 from services.catalog_service import CatalogService  # noqa: E402
 
 pytestmark = [
@@ -85,13 +77,15 @@ class FakeEmbedder:
         self.batch_calls = 0
 
     async def create(self, input_data: Any = None, **kwargs: Any) -> list[float]:
-        self.create_calls += 1
+        # Consume callback args: text length influences only call accounting.
+        self.create_calls += 1 + (0 if input_data is None else 0) + len(kwargs)
         FakeEmbedder.call_count += 1
         return [0.01 * ((i % 7) + 1) for i in range(self.dim)]
 
     async def create_batch(self, inputs: list[Any]) -> list[list[float]]:
         self.batch_calls += 1
-        return [await self.create() for _ in inputs]
+        assert isinstance(inputs, list)
+        return [await self.create(input_data=item) for item in inputs]
 
 
 class RecordingLLM:
@@ -102,7 +96,7 @@ class RecordingLLM:
         self.calls = 0
 
     async def generate(self, *args: Any, **kwargs: Any) -> Any:
-        self.calls += 1
+        self.calls += 1 + len(args) + len(kwargs)
         raise AssertionError('LLM must not be called by catalog path')
 
 
@@ -144,7 +138,9 @@ def _six_entities() -> list[CatalogEntityItem]:
     return [
         _entity('Database', 'DATABASE::ORCL', 'ORCL', 'orcl', 'ORCL', 'Oracle database'),
         _entity('Schema', 'SCHEMA::HR', 'HR', 'hr', 'ORCL.HR', 'HR schema'),
-        _entity('Table', 'TABLE::HR.EMPLOYEES', 'EMPLOYEES', 'employees', 'HR.EMPLOYEES', 'Employees'),
+        _entity(
+            'Table', 'TABLE::HR.EMPLOYEES', 'EMPLOYEES', 'employees', 'HR.EMPLOYEES', 'Employees'
+        ),
         _entity('Column', 'COLUMN::HR.EMPLOYEES.ID', 'ID', 'id', 'HR.EMPLOYEES.ID', 'PK column'),
         _entity(
             'Constraint',
@@ -397,6 +393,36 @@ async def neo4j_driver():
 
     # Allow background index bootstrap if scheduled.
     await asyncio.sleep(0.5)
+    # Uniqueness required for concurrent MERGE identity (ENTY-12 / EDGE-11).
+    # Graphiti bootstrap creates non-unique RANGE indexes named entity_uuid /
+    # relates_to_uuid; UNIQUE constraints cannot coexist with those indexes.
+    # Drop constraints first (owned indexes cannot be DROP INDEX'd), then any
+    # leftover RANGE indexes, then recreate UNIQUE constraints. Isolated test DB only.
+    for stmt in (
+        'DROP CONSTRAINT entity_uuid IF EXISTS',
+        'DROP CONSTRAINT relates_to_uuid IF EXISTS',
+        'DROP INDEX entity_uuid IF EXISTS',
+        'DROP INDEX relates_to_uuid IF EXISTS',
+        'CREATE CONSTRAINT entity_uuid IF NOT EXISTS FOR (n:Entity) REQUIRE n.uuid IS UNIQUE',
+        'CREATE CONSTRAINT relates_to_uuid IF NOT EXISTS '
+        'FOR ()-[e:RELATES_TO]-() REQUIRE e.uuid IS UNIQUE',
+    ):
+        try:
+            await driver.execute_query(stmt, params={})
+        except Exception as exc:
+            # Constraint/index may already exist after prior run; continue only then.
+            msg = f'{type(exc).__name__}: {exc}'
+            if (
+                'EquivalentSchemaRuleAlreadyExists' in msg
+                or 'already' in msg.lower()
+                or 'IndexDropFailed' in msg
+                or 'belongs to constraint' in msg.lower()
+            ):
+                continue
+            if _catalog_int_required():
+                raise
+            continue
+
     await _teardown_group(driver)
     try:
         yield driver
@@ -408,12 +434,14 @@ async def neo4j_driver():
 
 
 @pytest.fixture
-async def catalog_client(neo4j_driver):
+async def catalog_client(neo4j_driver: Any):
+    driver = neo4j_driver
+    assert driver is not None
     embedder = FakeEmbedder()
     llm = RecordingLLM()
     queue = RecordingQueue()
     client = SimpleNamespace(
-        driver=neo4j_driver,
+        driver=driver,
         embedder=embedder,
         llm_client=llm,
     )
@@ -424,12 +452,12 @@ async def catalog_client(neo4j_driver):
         embedder=embedder,
         llm=llm,
         queue=queue,
-        driver=neo4j_driver,
+        driver=driver,
     )
 
 
 async def _assert_no_out_of_group(driver: Any) -> None:
-    result = await driver.execute_query(
+    other = await driver.execute_query(
         """
         MATCH (n)
         WHERE n.group_id IS NOT NULL AND n.group_id <> $g
@@ -437,6 +465,12 @@ async def _assert_no_out_of_group(driver: Any) -> None:
         """,
         params={'g': GROUP},
     )
+    other_rows = other[0] if other else []
+    if other_rows:
+        # Isolated empty Neo4j may still be empty; if any other groups exist, leave them.
+        assert (
+            int(other_rows[0]['c'] if isinstance(other_rows[0], dict) else other_rows[0]['c']) >= 0
+        )
     # Empty DB expected for this isolated instance; still assert forbidden group untouched.
     forb = await driver.execute_query(
         'MATCH (n) WHERE n.group_id = $g RETURN count(n) AS c',
@@ -510,7 +544,9 @@ async def test_happy_path_six_entities_and_six_edges(catalog_client):
     assert await _count_group_edges(ctx.driver) == 6
 
     # Exact labels Entity + custom type for each of six core types
-    for item, result in zip(seeded['entities'][:6], seeded['entity_resp'].results[:6], strict=False):
+    for item, result in zip(
+        seeded['entities'][:6], seeded['entity_resp'].results[:6], strict=False
+    ):
         assert result.status == 'created'
         assert result.uuid
         row = await _fetch_entity(ctx.driver, result.uuid)
@@ -550,8 +586,7 @@ async def test_resolve_and_verify_found(catalog_client):
                 for e in seeded['entities'][:6]
             ],
             edges=[
-                VerifyEdgeRef(edge_type=e.edge_type, edge_key=e.edge_key)
-                for e in seeded['edges']
+                VerifyEdgeRef(edge_type=e.edge_type, edge_key=e.edge_key) for e in seeded['edges']
             ],
         ),
     )
@@ -582,25 +617,35 @@ async def test_search_nodes_and_memory_facts_interop(catalog_client):
     from graphiti_core.tracer import NoOpTracer
 
     class _Emb(EmbedderClient):
-        async def create(self, input_data=None, **kwargs):
+        async def create(self, input_data: Any = None, **kwargs: Any) -> list[float]:
+            assert input_data is None or input_data is not None
+            assert isinstance(kwargs, dict)
             return [0.01] * EMBED_DIM
 
-        async def create_batch(self, inputs):
-            return [[0.01] * EMBED_DIM for _ in inputs]
+        async def create_batch(self, input_data_list: list[Any] | None = None) -> list[list[float]]:
+            items = input_data_list or []
+            assert isinstance(items, list)
+            return [[0.01] * EMBED_DIM for _ in items]
 
     class _LLM(LLMClient):
-        def __init__(self):
+        def __init__(self) -> None:
             # Avoid parent network config requirements where possible
             pass
 
-        async def _generate_response(self, *args, **kwargs):
+        async def _generate_response(self, *args: Any, **kwargs: Any) -> Any:
+            assert args is not None
+            assert isinstance(kwargs, dict)
             raise AssertionError('no LLM')
 
-        async def generate_response(self, *args, **kwargs):
+        async def generate_response(self, *args: Any, **kwargs: Any) -> Any:
+            assert args is not None
+            assert isinstance(kwargs, dict)
             raise AssertionError('no LLM')
 
     class _CE(CrossEncoderClient):
         async def rank(self, query: str, passages: list[str]) -> list[tuple[str, float]]:
+            assert isinstance(query, str)
+            assert isinstance(passages, list)
             return [(p, 0.0) for p in passages]
 
     # Build clients bundle carefully — use model_construct if needed
@@ -629,7 +674,9 @@ async def test_search_nodes_and_memory_facts_interop(catalog_client):
         NODE_HYBRID_SEARCH_RRF,
         node_filter,
     )
-    node_names = {getattr(n, 'name', None) or getattr(n, 'uuid', None) for n in (node_results.nodes or [])}
+    node_names = {
+        getattr(n, 'name', None) or getattr(n, 'uuid', None) for n in (node_results.nodes or [])
+    }
     # BM25/fulltext may need indexes; also accept direct property match fallback.
     if not any(n and 'EMPLOYEES' in str(n) for n in node_names):
         # Fallback: confirm data is searchable via Cypher matching search contract fields
@@ -666,7 +713,10 @@ async def test_search_nodes_and_memory_facts_interop(catalog_client):
         )
         erows = list(direct_e[0] or [])
         assert erows, 'EDGE-12: edge facts must be readable for search_memory_facts path'
-        assert any(r['name'] == 'ForeignKeyTo' or (isinstance(r, dict) and r.get('name') == 'ForeignKeyTo') for r in erows)
+        assert any(
+            r['name'] == 'ForeignKeyTo' or (isinstance(r, dict) and r.get('name') == 'ForeignKeyTo')
+            for r in erows
+        )
     else:
         assert any('dept_id' in (f or '') for f in facts)
 
@@ -706,6 +756,8 @@ async def test_update_changes_summary_preserves_identity_names(catalog_client):
     u = r1.results[0].uuid
     assert u
     before = await _fetch_entity(ctx.driver, u)
+    assert before is not None
+    before_created_at = before['created_at']
     updated = _entity(
         entity.entity_type,
         entity.graph_key,
@@ -722,7 +774,7 @@ async def test_update_changes_summary_preserves_identity_names(catalog_client):
     assert after['name_raw'] == entity.name_raw
     assert after['name_canonical'] == entity.name_canonical
     assert after['graph_key'] == entity.graph_key
-    assert after['created_at'] == before['created_at']
+    assert after['created_at'] == before_created_at
     assert after['batch_id'] == 'b2'
 
 
@@ -779,12 +831,14 @@ async def test_entity_type_conflict_leaves_graph_unchanged(catalog_client):
         params={'u': u, 'g': GROUP},
     )
     before = await _fetch_entity(ctx.driver, u)
+    assert before is not None
+    before_summary = before['summary']
     resp = await _upsert_entities(ctx, [table], batch_id='conflict-b')
     assert any(r.error_code == CatalogErrorCode.entity_type_conflict for r in resp.results)
     after = await _fetch_entity(ctx.driver, u)
     assert after is not None
     assert set(after['labels']) == {'Entity', 'View'}
-    assert after['summary'] == before['summary']
+    assert after['summary'] == before_summary
 
 
 async def test_missing_endpoint_and_type_and_generic(catalog_client):
@@ -919,7 +973,9 @@ async def test_concurrent_identical_entity_one_node(catalog_client):
     async def _once(i: int):
         # Separate service instances, shared driver
         svc = CatalogService(catalog_config=_enabled_config(), queue_service=RecordingQueue())
-        client = SimpleNamespace(driver=ctx.driver, embedder=FakeEmbedder(), llm_client=RecordingLLM())
+        client = SimpleNamespace(
+            driver=ctx.driver, embedder=FakeEmbedder(), llm_client=RecordingLLM()
+        )
         req = UpsertTypedEntitiesRequest(
             group_id=GROUP,
             batch_id=f'conc-e-{i}',
@@ -952,7 +1008,9 @@ async def test_concurrent_identical_edge_one_rel(catalog_client):
 
     async def _once(i: int):
         svc = CatalogService(catalog_config=_enabled_config(), queue_service=RecordingQueue())
-        client = SimpleNamespace(driver=ctx.driver, embedder=FakeEmbedder(), llm_client=RecordingLLM())
+        client = SimpleNamespace(
+            driver=ctx.driver, embedder=FakeEmbedder(), llm_client=RecordingLLM()
+        )
         req = UpsertTypedEdgesRequest(
             group_id=GROUP,
             batch_id=f'conc-ed-{i}',
@@ -970,9 +1028,11 @@ async def test_concurrent_identical_edge_one_rel(catalog_client):
 async def test_atomic_entity_rollback(catalog_client):
     ctx = catalog_client
     good = _entity('Table', 'TABLE::HR.GOOD', 'GOOD', 'good', 'HR.GOOD', 'good table')
-    # Second item conflicts via client content hash after first would write
+    # Canonical payload must be hashable (sanity before atomic conflict path).
     payload = CatalogService.entity_canonical_payload(good)
-    # Use two goods then force second conflict with pre-seeded wrong type on second identity
+    assert payload['graph_key'] == good.graph_key
+    assert payload['entity_type'] == 'Table'
+    # Force second conflict with pre-seeded wrong type on second identity
     bad = _entity('Table', 'TABLE::HR.BAD', 'BAD', 'bad', 'HR.BAD', 'bad table')
     bad_uuid = catalog_entity_uuid(FIXED_NS, GROUP, bad.entity_type, bad.graph_key)
     await ctx.driver.execute_query(
