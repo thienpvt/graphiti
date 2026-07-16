@@ -21,9 +21,7 @@ def catalog_entity_uuid(
     return str(uuid.uuid5(namespace, f'{group_id}|{entity_type}|{graph_key}'))
 
 
-def catalog_edge_uuid(
-    namespace: uuid.UUID, group_id: str, edge_type: str, edge_key: str
-) -> str:
+def catalog_edge_uuid(namespace: uuid.UUID, group_id: str, edge_type: str, edge_key: str) -> str:
     """Server-derived edge identity: UUIDv5(ns, group_id|edge_type|edge_key)."""
     return str(uuid.uuid5(namespace, f'{group_id}|{edge_type}|{edge_key}'))
 

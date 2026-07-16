@@ -34,7 +34,6 @@ from models.catalog_responses import (  # noqa: E402
     VerifyCatalogBatchResponse,
 )
 
-
 FIXED_NS = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'
 
 
@@ -179,7 +178,7 @@ def test_entity_type_prefixes_has_fifteen_types():
         'Sequence': 'SEQUENCE::',
         'Synonym': 'SYNONYM::',
     }
-    assert ENTITY_TYPE_PREFIXES == expected
+    assert expected == ENTITY_TYPE_PREFIXES
 
 
 def test_catalog_edge_types_has_sixteen():
@@ -250,9 +249,7 @@ def test_catalog_error_code_includes_required_codes():
 
 def test_upsert_entities_requires_group_id():
     with pytest.raises(ValidationError):
-        UpsertTypedEntitiesRequest.model_validate(
-            {'entities': [_entity_kwargs()]}
-        )
+        UpsertTypedEntitiesRequest.model_validate({'entities': [_entity_kwargs()]})
 
 
 def test_upsert_entities_rejects_empty_group_id():

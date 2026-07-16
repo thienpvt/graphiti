@@ -8,6 +8,7 @@ from enum import Enum
 class StrEnum(str, Enum):
     """str Enum compatible with Python 3.10 (stdlib StrEnum is 3.11+)."""
 
+
 # Default batch collection limits (CONF-04)
 DEFAULT_MAX_ENTITIES_PER_BATCH = 500
 DEFAULT_MAX_EDGES_PER_BATCH = 2000
