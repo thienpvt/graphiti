@@ -14,7 +14,7 @@ provides:
   - CATALOG_INT_REQUIRED fail-not-skip policy
   - Production composite (uuid, group_id) UNIQUENESS constraints created by product path only
   - Schema ensure only after embed + non-dry-run on entity/edge write paths
-  - Edge episodes=[] create-path for stock EntityEdge search interop
+  - Edge episodes=[] on create and content-update paths for stock EntityEdge search interop
   - Identity property create-once (name/graph_key/name_raw/name_canonical)
   - Endpoint resolve prefers expected UUIDv5; rejects non-deterministic typed-only rows
 affects:
@@ -29,6 +29,7 @@ tech-stack:
     - Composite MERGE keys match uniqueness: {uuid, group_id}
     - Scoped DETACH DELETE teardown for oracle-catalog-tool-test only
     - Fixture zero DROP — never drops stock Graphiti RANGE indexes or product constraints
+    - Edge updated_set heals e.episodes=[] on content change; unchanged remains zero-mutation
 
 key-files:
   created:
@@ -46,7 +47,7 @@ key-decisions:
   - "Schema ensure only after successful embed and non-dry-run, immediately before real write tx; resolve/verify never ensure"
   - "name/graph_key/name_raw/name_canonical are create-once; mismatch → deterministic_uuid_conflict"
   - "Endpoint resolve prefers expected UUIDv5; wrong-only typed row → deterministic_uuid_conflict"
-  - "Catalog edges set e.episodes=[] on create so graphiti_core search EntityEdge validation succeeds"
+  - "Catalog edges set e.episodes=[] on create and on content update so graphiti_core search EntityEdge validation succeeds; unchanged path still zero-mutation"
   - "CATALOG_INT_REQUIRED=1 hard-fails when Neo4j missing; never report skip as GATE-02 green"
 
 patterns-established:
@@ -54,6 +55,7 @@ patterns-established:
   - "RecordingLLM/RecordingQueue spies prove GATE-03 no LLM/queue path"
   - "Search interop via graphiti_core.search + NODE/EDGE_HYBRID_SEARCH_RRF with FakeEmbedder"
   - "Structured schema failures use type(exc).__name__ only — never raw exception text"
+  - "Legacy null episodes healed only on status=updated content rewrite"
 
 requirements-completed:
   - ENTY-12
@@ -107,27 +109,30 @@ coverage:
         status: pass
     human_judgment: false
   - id: D4
-    description: GATE-03 no LLM/queue; search interop with FakeEmbedder
+    description: GATE-03 no LLM/queue; search interop with FakeEmbedder; null-episodes heal on update
     requirement: GATE-03
     verification:
       - kind: integration
         ref: mcp_server/tests/test_catalog_neo4j_int.py#test_no_llm_or_queue_side_effects
         status: pass
       - kind: integration
-        ref: mcp_server/tests/test_catalog_neo4j_int.py#test_search_nodes_and_facts_interop
+        ref: mcp_server/tests/test_catalog_neo4j_int.py#test_search_nodes_and_memory_facts_interop
+        status: pass
+      - kind: integration
+        ref: mcp_server/tests/test_catalog_neo4j_int.py#test_edge_update_heals_null_episodes_for_search
         status: pass
     human_judgment: false
 
 metrics:
-  duration: reopen-production-constraints
+  duration: reopen-edge-episodes-update
   completed: 2026-07-16
   tasks: 1
-  files_changed: 5
+  files_changed: 4
 ---
 
 # Phase 01 Plan 05: Live Neo4j GATE-02/03 Summary
 
-Production composite identity uniqueness + live GATE-02 suite under `oracle-catalog-tool-test` with FakeEmbedder, real CatalogService, Neo4jDriver.transaction; fixture never manufactures UNIQUE.
+Production composite identity uniqueness + live GATE-02 suite under `oracle-catalog-tool-test` with FakeEmbedder, real CatalogService, Neo4jDriver.transaction; fixture never manufactures UNIQUE. Edge content updates heal null `episodes` for search interop.
 
 ## What Was Built
 
@@ -154,11 +159,17 @@ Exactly two `_ensure_schema` call sites:
 - Create-once identity props: name/graph_key/name_raw/name_canonical → `deterministic_uuid_conflict`
 - Endpoint resolve prefers expected UUIDv5; non-deterministic typed-only → conflict
 - Two exact typed same-key: expected UUID wins when present; wrong-only fails closed
-- Edge create still sets `e.episodes=[]` for stock search interop
+
+### Edge episodes for search interop
+
+- ON CREATE sets `e.episodes = $episodes` with params `episodes: []`
+- Content update (`status = 'updated'` FOREACH) also sets `e.episodes = $episodes`
+- Unchanged path remains zero-mutation (empty FOREACH)
+- Live plant: matching deterministic RELATES_TO with `episodes=null` → content upsert → `updated`, stored `episodes=[]`, graphiti search hydrates
 
 ### Live suite (`test_catalog_neo4j_int.py`)
 
-- 20 tests, `CATALOG_INT_REQUIRED=1`
+- 21 tests, `CATALOG_INT_REQUIRED=1`
 - Fixture: ZERO DROP statements
 - Group teardown only (`oracle-catalog-tool-test`)
 - Fresh-schema rerun: product creates both composites on first real write
@@ -167,13 +178,12 @@ Exactly two `_ensure_schema` call sites:
 
 | Gate | Result |
 |------|--------|
-| Live int (`CATALOG_INT_REQUIRED=1`) | **20 passed** |
+| Live int (`CATALOG_INT_REQUIRED=1`) | **21 passed** |
 | Unit store+service | **104 passed** |
 | Ruff check (touched files) | **All checks passed** |
-| Ruff format | **5 files already formatted** |
+| Ruff format | reformatted int test; others already formatted |
 | Pyright (catalog_service/store) | **0 errors** |
-| SHOW CONSTRAINTS (post-run) | both catalog_* composites present; properties `[uuid, group_id]` |
-| Group teardown | nodes=0, edges=0 |
+| Group residual | nodes/edges cleaned by fixture teardown |
 
 ## Invalid Prior Approach (corrected)
 
@@ -185,7 +195,7 @@ Correct path: product composite UNIQUE + composite MERGE; fixture never DROP; co
 
 ### Auto-fixed Issues
 
-**1. [Rule 1 - Bug] Search ValidationError on episodes=None**
+**1. [Rule 1 - Bug] Search ValidationError on episodes=None (create)**
 - **Found during:** Live search interop
 - **Fix:** ON CREATE set `e.episodes=[]`
 - **Files:** `catalog_store.py`, unit assert
@@ -204,6 +214,12 @@ Correct path: product composite UNIQUE + composite MERGE; fixture never DROP; co
 **4. [Rule 2 - Critical] Identity names updatable / endpoint arbitrary bind**
 - **Fix:** Identity property conflict; expected UUID endpoint preference; live tests updated
 
+**5. [Rule 1 - Bug] Edge update path omitted episodes**
+- **Found during:** Post-gate reopen
+- **Issue:** Pre-existing deterministic RELATES_TO with `episodes=null` stayed unsearchable after content update (updated_set lacked episodes)
+- **Fix:** Add `e.episodes = $episodes` to updated_set only; unit asserts create+updated both set episodes; live plant-null → updated → episodes=[] + search hydration
+- **Files:** `catalog_store.py`, `test_catalog_store_unit.py`, `test_catalog_neo4j_int.py`
+
 ## Known Stubs
 
 None.
@@ -216,6 +232,6 @@ None beyond plan threat model (parameterized Cypher, allowlisted labels, structu
 
 - `mcp_server/tests/test_catalog_neo4j_int.py` FOUND
 - Product constraint names FOUND via SHOW after live run
-- Live 20/20 FOUND
-- Units 102/102 FOUND
-- Group residual 0/0 FOUND
+- Live 21/21 FOUND
+- Units 104/104 FOUND
+- Edge updated_set includes `e.episodes = $episodes` FOUND
