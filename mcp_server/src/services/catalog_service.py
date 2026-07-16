@@ -420,12 +420,8 @@ class CatalogService:
 
         # 5) write
         if request.atomic:
-            return await self._write_atomic(
-                client, request, write_set, early_errors, request_ts
-            )
-        return await self._write_per_item(
-            client, request, write_set, early_errors, request_ts
-        )
+            return await self._write_atomic(client, request, write_set, early_errors, request_ts)
+        return await self._write_per_item(client, request, write_set, early_errors, request_ts)
 
     async def _write_atomic(
         self,
@@ -768,9 +764,7 @@ class CatalogService:
                 by_index[prep.index] = self._success_result(prep, prep.projected_status)
             for ci in prep.coalesced_indices:
                 if ci not in by_index:
-                    by_index[ci] = self._success_result(
-                        prep, prep.projected_status, index=ci
-                    )
+                    by_index[ci] = self._success_result(prep, prep.projected_status, index=ci)
         results: list[CatalogItemResult] = []
         for i, item in enumerate(request.entities):
             if i in by_index:
@@ -1282,15 +1276,11 @@ class CatalogService:
             # Also include expected deterministic UUIDs for missing targets
             for ent in request.entities:
                 target_uuids.append(
-                    catalog_entity_uuid(
-                        namespace, request.group_id, ent.entity_type, ent.graph_key
-                    )
+                    catalog_entity_uuid(namespace, request.group_id, ent.entity_type, ent.graph_key)
                 )
             for edge in request.edges:
                 target_uuids.append(
-                    catalog_edge_uuid(
-                        namespace, request.group_id, edge.edge_type, edge.edge_key
-                    )
+                    catalog_edge_uuid(namespace, request.group_id, edge.edge_type, edge.edge_key)
                 )
             # de-dupe preserve order
             seen_u: set[str] = set()
@@ -1307,11 +1297,7 @@ class CatalogService:
                 )
             except Exception:
                 prov_rows = []
-            present = {
-                str(r.get('uuid'))
-                for r in prov_rows
-                if r.get('has_provenance')
-            }
+            present = {str(r.get('uuid')) for r in prov_rows if r.get('has_provenance')}
             for u in uniq_targets:
                 if u not in present:
                     missing_provenance.append(u)
@@ -1896,9 +1882,7 @@ class CatalogService:
                 by_index[prep.index] = self._edge_success_result(prep, prep.projected_status)
             for ci in prep.coalesced_indices:
                 if ci not in by_index:
-                    by_index[ci] = self._edge_success_result(
-                        prep, prep.projected_status, index=ci
-                    )
+                    by_index[ci] = self._edge_success_result(prep, prep.projected_status, index=ci)
         results: list[CatalogItemResult] = []
         for i, item in enumerate(request.edges):
             if i in by_index:

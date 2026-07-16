@@ -23,9 +23,7 @@ from models.catalog_common import (
 _SAFE_LABEL = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 # Fixed map: entity_type -> Neo4j label literal (identity with allowlist keys).
-_ENTITY_LABELS: dict[str, str] = {
-    t: t for t in ENTITY_TYPE_PREFIXES if _SAFE_LABEL.match(t)
-}
+_ENTITY_LABELS: dict[str, str] = {t: t for t in ENTITY_TYPE_PREFIXES if _SAFE_LABEL.match(t)}
 
 
 class CatalogStoreError(ValueError):

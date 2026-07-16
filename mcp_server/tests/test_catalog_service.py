@@ -204,9 +204,7 @@ async def test_entity_dry_run_embeds_but_never_writes_or_persists_batch_id():
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
     service._store.upsert_entity_item = AsyncMock()
-    resp = await service.upsert_typed_entities(
-        client=client, request=_request(dry_run=True)
-    )
+    resp = await service.upsert_typed_entities(client=client, request=_request(dry_run=True))
     assert 'embed' in client.call_order
     assert 'transaction' not in client.call_order
     service._store.upsert_entity_item.assert_not_awaited()
@@ -244,9 +242,7 @@ async def test_entity_create_persists_request_batch_id():
 @pytest.mark.asyncio
 async def test_entity_identical_hash_unchanged_leaves_batch_id():
     entity = _entity()
-    ent_uuid = catalog_entity_uuid(
-        FIXED_NS, GROUP, entity.entity_type, entity.graph_key
-    )
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
     payload = CatalogService.entity_canonical_payload(entity)
     digest = canonical_sha256(payload)
     existing = {
@@ -273,9 +269,7 @@ async def test_entity_identical_hash_unchanged_leaves_batch_id():
 @pytest.mark.asyncio
 async def test_entity_changed_update_passes_request_batch_id():
     entity = _entity(summary='Changed summary')
-    ent_uuid = catalog_entity_uuid(
-        FIXED_NS, GROUP, entity.entity_type, entity.graph_key
-    )
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
     existing = {
         'uuid': ent_uuid,
         'content_sha256': 'b' * 64,
@@ -356,9 +350,7 @@ async def test_entity_content_hash_mismatch():
 @pytest.mark.asyncio
 async def test_entity_entity_type_conflict_no_mutation():
     entity = _entity()
-    ent_uuid = catalog_entity_uuid(
-        FIXED_NS, GROUP, entity.entity_type, entity.graph_key
-    )
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
     existing = {
         'uuid': ent_uuid,
         'content_sha256': 'd' * 64,
@@ -441,15 +433,11 @@ async def test_entity_preserves_input_order_and_deterministic_uuid():
         }
 
     service._store.upsert_entity_item = AsyncMock(side_effect=_upsert)
-    resp = await service.upsert_typed_entities(
-        client=client, request=_request([e1, e2])
-    )
+    resp = await service.upsert_typed_entities(client=client, request=_request([e1, e2]))
     assert [r.index for r in resp.results] == [0, 1]
     assert resp.results[0].graph_key == 'TABLE::A.T1'
     assert resp.results[1].graph_key == 'TABLE::A.T2'
-    assert resp.results[0].uuid == catalog_entity_uuid(
-        FIXED_NS, GROUP, 'Table', 'TABLE::A.T1'
-    )
+    assert resp.results[0].uuid == catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::A.T1')
     assert resp.results[0].content_sha256 is not None
     assert len(resp.results[0].content_sha256) == 64
 
@@ -470,9 +458,7 @@ async def test_entity_coalesce_same_identity_same_hash():
         }
     )
     service._store.upsert_entity_item = upsert
-    resp = await service.upsert_typed_entities(
-        client=client, request=_request([e1, e2])
-    )
+    resp = await service.upsert_typed_entities(client=client, request=_request([e1, e2]))
     # One physical write, two results
     assert upsert.await_count == 1
     assert len(resp.results) == 2
@@ -487,9 +473,7 @@ async def test_entity_same_identity_different_hash_is_conflict():
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
     service._store.upsert_entity_item = AsyncMock()
-    resp = await service.upsert_typed_entities(
-        client=client, request=_request([e1, e2])
-    )
+    resp = await service.upsert_typed_entities(client=client, request=_request([e1, e2]))
     assert any(
         r.error_code
         in (
@@ -528,8 +512,7 @@ async def test_resolve_feature_disabled_no_write_no_embed():
     service._store.match_entities_for_resolve = AsyncMock()
     resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
     assert any(
-        getattr(r, 'error_code', None) == CatalogErrorCode.feature_disabled
-        for r in resp.results
+        getattr(r, 'error_code', None) == CatalogErrorCode.feature_disabled for r in resp.results
     )
     assert 'transaction' not in client.call_order
     assert 'embed' not in client.call_order
@@ -545,8 +528,7 @@ async def test_resolve_non_neo4j_backend_unavailable():
     service._store.match_entities_for_resolve = AsyncMock()
     resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
     assert any(
-        getattr(r, 'error_code', None) == CatalogErrorCode.backend_unavailable
-        for r in resp.results
+        getattr(r, 'error_code', None) == CatalogErrorCode.backend_unavailable for r in resp.results
     )
     service._store.match_entities_for_resolve.assert_not_awaited()
     assert 'embed' not in client.call_order
@@ -869,9 +851,7 @@ async def test_verify_edge_counts_and_anomaly_lists():
     req = _verify_request(
         entities=[],
         edges=[
-            VerifyEdgeRef(
-                edge_type='Contains', edge_key='CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
-            ),
+            VerifyEdgeRef(edge_type='Contains', edge_key='CONTAINS::HR.SCHEMA->HR.EMPLOYEES'),
             VerifyEdgeRef(edge_type='DependsOn', edge_key='DEPENDS::MISSING'),
         ],
     )
@@ -1040,7 +1020,9 @@ async def test_edge_endpoint_type_mismatch_and_generic_conflict_no_create():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
 
-    async def _resolve(executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs):
+    async def _resolve(
+        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+    ):
         _ = (executor, group_id, entity_type, tx, kwargs)
         assert graph_key is not None
         if graph_key == 'TABLE::HR.EMPLOYEES':
@@ -1090,9 +1072,7 @@ async def test_edge_dry_run_embeds_but_never_writes_or_persists_batch_id():
     _wire_ok_endpoints(service)
     service._store.get_edge_by_uuid = AsyncMock(return_value=None)
     service._store.upsert_edge_item = AsyncMock()
-    resp = await service.upsert_typed_edges(
-        client=client, request=_edge_request(dry_run=True)
-    )
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request(dry_run=True))
     assert 'embed' in client.call_order
     assert 'transaction' not in client.call_order
     service._store.upsert_edge_item.assert_not_awaited()
@@ -1240,9 +1220,7 @@ async def test_edge_two_foreign_key_same_endpoints_different_keys():
         }
     )
     service._store.upsert_edge_item = upsert
-    resp = await service.upsert_typed_edges(
-        client=client, request=_edge_request([e1, e2])
-    )
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([e1, e2]))
     assert upsert.await_count == 2
     assert resp.created == 2
     assert resp.results[0].uuid != resp.results[1].uuid
@@ -1257,7 +1235,9 @@ async def test_edge_atomic_rollback_on_store_failure():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
 
-    async def _resolve(executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs):
+    async def _resolve(
+        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+    ):
         _ = (executor, group_id, entity_type, tx, kwargs)
         assert graph_key is not None
         return None, _typed_endpoint(f'u-{graph_key}', graph_key)
@@ -1323,7 +1303,9 @@ async def test_edge_preserves_input_order_and_deterministic_uuid():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
 
-    async def _resolve(executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs):
+    async def _resolve(
+        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+    ):
         _ = (executor, group_id, entity_type, tx, kwargs)
         assert graph_key is not None
         return None, _typed_endpoint(f'u-{graph_key}', graph_key)
@@ -1342,15 +1324,11 @@ async def test_edge_preserves_input_order_and_deterministic_uuid():
         }
 
     service._store.upsert_edge_item = AsyncMock(side_effect=_upsert)
-    resp = await service.upsert_typed_edges(
-        client=client, request=_edge_request([e1, e2])
-    )
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([e1, e2]))
     assert [r.index for r in resp.results] == [0, 1]
     assert resp.results[0].edge_key == e1.edge_key
     assert resp.results[1].edge_key == e2.edge_key
-    assert resp.results[0].uuid == catalog_edge_uuid(
-        FIXED_NS, GROUP, e1.edge_type, e1.edge_key
-    )
+    assert resp.results[0].uuid == catalog_edge_uuid(FIXED_NS, GROUP, e1.edge_type, e1.edge_key)
     assert resp.results[0].content_sha256 is not None
     assert len(resp.results[0].content_sha256) == 64
 
@@ -1412,7 +1390,9 @@ async def test_edge_in_tx_endpoint_race_rolls_back():
     service = CatalogService(catalog_config=_enabled_config())
     call_n = {'n': 0}
 
-    async def _resolve(executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs):
+    async def _resolve(
+        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+    ):
         _ = (executor, group_id, entity_type, kwargs)
         assert graph_key is not None
         call_n['n'] += 1
@@ -1606,7 +1586,12 @@ async def test_entity_in_tx_label_race_rolls_back():
 
     service._store.get_entity_by_uuid = AsyncMock(side_effect=_get)
     service._store.upsert_entity_item = AsyncMock(
-        return_value={'uuid': 'x', 'content_sha256': 'a' * 64, 'batch_id': BATCH, 'status': 'created'}
+        return_value={
+            'uuid': 'x',
+            'content_sha256': 'a' * 64,
+            'batch_id': BATCH,
+            'status': 'created',
+        }
     )
     resp = await service.upsert_typed_entities(client=client, request=_request([entity]))
     assert resp.results[0].status == 'error'

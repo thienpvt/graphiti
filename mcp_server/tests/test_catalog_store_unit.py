@@ -407,9 +407,7 @@ async def test_read_one_uses_params_kwarg_not_splat():
             calls.append((cypher, kwargs))
             return ([{'uuid': 'u1'}], None, ['uuid'])
 
-    row = await store._read_one(
-        _Exec(), 'RETURN 1', {'group_id': GROUP, 'uuid': 'u1'}, tx=None
-    )
+    row = await store._read_one(_Exec(), 'RETURN 1', {'group_id': GROUP, 'uuid': 'u1'}, tx=None)
     assert row == {'uuid': 'u1'}
     assert len(calls) == 1
     _, kwargs = calls[0]
