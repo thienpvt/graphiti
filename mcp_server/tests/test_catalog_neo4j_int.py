@@ -1244,13 +1244,19 @@ async def test_edge_update_heals_null_episodes_for_search(catalog_client):
             pass
 
         async def _generate_response(self, *args: Any, **kwargs: Any) -> Any:
+            assert args is not None
+            assert isinstance(kwargs, dict)
             raise AssertionError('no LLM')
 
         async def generate_response(self, *args: Any, **kwargs: Any) -> Any:
+            assert args is not None
+            assert isinstance(kwargs, dict)
             raise AssertionError('no LLM')
 
     class _CE(CrossEncoderClient):
         async def rank(self, query: str, passages: list[str]) -> list[tuple[str, float]]:
+            assert isinstance(query, str)
+            assert isinstance(passages, list)
             return [(p, 0.0) for p in passages]
 
     try:
