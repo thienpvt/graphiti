@@ -226,6 +226,27 @@ Behavior-neutral format/lint only.
 
 ---
 
+## Editor diagnostic: `catalog_edges.py` import `models.catalog_common`
+
+**Verdict: editor-only — no code change.**
+
+| Check | Result |
+|-------|--------|
+| Sibling imports identical | `catalog_entities.py:11`, `catalog_responses.py:9`, `catalog_edges.py:11` all use `from models.catalog_common import ...` |
+| Server/runtime convention | `graphiti_mcp_server.py` and `catalog_service.py` same `from models.*` / `from services.*` / `from config.*` with `src` on path |
+| Package Pyright (`cd mcp_server && uv run pyright` ×13 files) | **0 errors** (uses `[tool.pyright] extraPaths = ["src"]`) |
+| Package Pyright on edges/entities/responses only | **0 errors** |
+| Ruff format/check ×13 | exit 0 |
+| Runtime `PYTHONPATH=src python -c "from models.catalog_edges import ..."` | OK |
+| `pytest tests/test_catalog_models.py` | **43 passed** |
+| `pytest tests/test_catalog_*.py` | **180 passed** |
+
+Root cause of editor squiggle: IDE opens monorepo / file without `mcp_server` package config (`extraPaths=["src"]`), so bare `models.*` is unresolved in the editor analysis environment. Authoritative package-context Pyright and runtime are green. No path hacks; no import rewrite.
+
+Re-verified: 2026-07-16 after coordinator diagnostic note.
+
+---
+
 ## Summary verdict
 
 | Check | Pass? |

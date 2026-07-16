@@ -168,6 +168,13 @@ Full command log: `01-PHASE1-REPORT.md`.
 - **Action:** Not fixed (pre-existing; not catalog-caused). Documented in report. Applicable regressions still green.
 - **Deferred:** optional monorepo editable install / factories skip for missing ollama
 
+**3. [No code change] Editor unresolved import on catalog_edges.py:11**
+- **Found during:** post-plan coordinator diagnostic
+- **Issue:** IDE reports `models.catalog_common` unresolved
+- **Analysis:** Sibling `catalog_entities` / `catalog_responses` use same import; package Pyright `extraPaths=["src"]` green (0 errors on 13-file set); models 43 + full catalog 180 passed; runtime with `PYTHONPATH=src` OK
+- **Action:** Document only — no path hacks, no import rewrite
+- **Evidence:** `01-PHASE1-REPORT.md` section "Editor diagnostic"
+
 ## Known Stubs
 
 None.
@@ -183,3 +190,4 @@ None new. Report honesty mitigations T-01-19/T-01-20 held.
 - `01-VALIDATION.md` FOUND with `nyquist_compliant: true`
 - Commit `0799c41` FOUND
 - Overall PASS + Phase 2 language present in report
+- Editor diagnostic: editor-only; package Pyright + tests re-green after investigation
