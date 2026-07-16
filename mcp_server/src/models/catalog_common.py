@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from enum import Enum
 
 
@@ -25,26 +26,56 @@ MAX_FACT_LENGTH = 4096
 MAX_EVIDENCE_LENGTH = 8192
 MAX_ATTRIBUTE_KEYS = 64
 MAX_SOURCE_REFS = 32
+MAX_NESTED_DEPTH = 32
+MAX_NESTED_NODES = 10000
 
 
-def bound_nested_strings(obj: object, path: str = 'value') -> None:
-    """Reject oversized or non-string keys throughout nested JSON-like values."""
-    if isinstance(obj, str):
-        if len(obj) > MAX_EVIDENCE_LENGTH:
-            raise ValueError(f'string exceeds max length ({MAX_EVIDENCE_LENGTH}) at {path}')
-        return
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            if not isinstance(key, str):
-                raise ValueError(f'dict key must be a string at {path}')
-            if len(key) > MAX_SHORT_STRING_LENGTH:
+def validate_nested_json(obj: object, path: str = 'value') -> None:
+    """Iteratively validate bounded, acyclic JSON-compatible nested data."""
+    stack: list[tuple[object, str, int, bool]] = [(obj, path, 0, False)]
+    active_containers: set[int] = set()
+    visited = 0
+    while stack:
+        value, current_path, depth, leaving = stack.pop()
+        if leaving:
+            active_containers.remove(id(value))
+            continue
+        visited += 1
+        if visited > MAX_NESTED_NODES:
+            raise ValueError(f'nested value exceeds max nodes ({MAX_NESTED_NODES})')
+        if value is None or isinstance(value, (bool, int)):
+            continue
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise ValueError(f'non-finite number at {current_path}')
+            continue
+        if isinstance(value, str):
+            if len(value) > MAX_EVIDENCE_LENGTH:
                 raise ValueError(
-                    f'dict key exceeds max length ({MAX_SHORT_STRING_LENGTH}) at {path}'
+                    f'string exceeds max length ({MAX_EVIDENCE_LENGTH}) at {current_path}'
                 )
-            bound_nested_strings(value, f'{path}.{key}')
-    elif isinstance(obj, list):
-        for index, value in enumerate(obj):
-            bound_nested_strings(value, f'{path}[{index}]')
+            continue
+        if not isinstance(value, (dict, list)):
+            raise ValueError(f'non-JSON value at {current_path}: {type(value).__name__}')
+        if depth >= MAX_NESTED_DEPTH:
+            raise ValueError(f'nested value exceeds max depth ({MAX_NESTED_DEPTH})')
+        container_id = id(value)
+        if container_id in active_containers:
+            raise ValueError(f'nested value contains cycle at {current_path}')
+        active_containers.add(container_id)
+        stack.append((value, current_path, depth, True))
+        if isinstance(value, dict):
+            for key, child in reversed(list(value.items())):
+                if not isinstance(key, str):
+                    raise ValueError(f'dict key must be a string at {current_path}')
+                if len(key) > MAX_SHORT_STRING_LENGTH:
+                    raise ValueError(
+                        f'dict key exceeds max length ({MAX_SHORT_STRING_LENGTH}) at {current_path}'
+                    )
+                stack.append((child, f'{current_path}.{key}', depth + 1, False))
+        else:
+            for index in range(len(value) - 1, -1, -1):
+                stack.append((value[index], f'{current_path}[{index}]', depth + 1, False))
 
 
 # Fixed entity type → graph_key prefix map (15 types)

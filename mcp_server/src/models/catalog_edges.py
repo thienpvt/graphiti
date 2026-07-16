@@ -19,7 +19,7 @@ from models.catalog_common import (
     MAX_SHORT_STRING_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
-    bound_nested_strings,
+    validate_nested_json,
 )
 
 
@@ -30,17 +30,6 @@ def _validate_group_id(group_id: str | None) -> bool:
     if not re.match(r'^[a-zA-Z0-9_-]+$', group_id):
         raise ValueError(f'group_id contains invalid characters: {group_id}')
     return True
-
-
-def _reject_non_finite(obj: Any, path: str = 'value') -> None:
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-        raise ValueError(f'non-finite number at {path}')
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            _reject_non_finite(v, f'{path}.{k}')
-    elif isinstance(obj, list):
-        for i, v in enumerate(obj):
-            _reject_non_finite(v, f'{path}[{i}]')
 
 
 class CatalogEdgeItem(BaseModel):
@@ -98,8 +87,7 @@ class CatalogEdgeItem(BaseModel):
         protected = set(v.keys()) & PROTECTED_ENTITY_PROPERTIES
         if protected:
             raise ValueError(f'attributes contain protected keys: {sorted(protected)}')
-        _reject_non_finite(v, 'attributes')
-        bound_nested_strings(v, 'attributes')
+        validate_nested_json(v, 'attributes')
         return v
 
     @field_validator('confidence')

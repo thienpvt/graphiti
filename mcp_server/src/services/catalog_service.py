@@ -1416,8 +1416,25 @@ class CatalogService:
                     group_id=request.group_id,
                     target_uuids=uniq_targets,
                 )
-            except Exception:
-                prov_rows = []
+            except Exception as exc:
+                logger.error(
+                    'catalog verify_catalog_batch provenance_read_failed group_id=%s '
+                    'batch_id=%s reason=%s',
+                    request.group_id,
+                    request.batch_id,
+                    type(exc).__name__,
+                )
+                return VerifyCatalogBatchResponse(
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    entities=entity_section,
+                    edges=edge_section,
+                    missing=missing,
+                    anomalies=anomalies,
+                    require_provenance=True,
+                    error_code=CatalogErrorCode.internal_error,
+                    error_message='verify provenance read failed',
+                )
             present = {str(r.get('uuid')) for r in prov_rows if r.get('has_provenance')}
             for u in uniq_targets:
                 if u not in present:
@@ -1546,27 +1563,28 @@ class CatalogService:
                 found_count += 1
                 if len(matches) > 1:
                     section.duplicate_edge_key.append(edge.edge_key)
-                primary = next(
-                    (r for r in matches if str(r.get('uuid')) == expected_uuid),
-                    matches[0],
-                )
-                if str(primary.get('uuid')) != expected_uuid:
+                if any(str(row.get('uuid')) != expected_uuid for row in matches):
                     section.uuid_mismatch.append(edge.edge_key)
-                row_type = primary.get('edge_type') or primary.get('name')
-                if row_type and row_type != edge.edge_type:
-                    section.edge_type_mismatch.append(edge.edge_key)
-                endpoint_pairs = (
-                    (edge.expected_source_uuid, primary.get('source_uuid')),
-                    (edge.expected_target_uuid, primary.get('target_uuid')),
-                    (edge.expected_source_graph_key, primary.get('source_graph_key')),
-                    (edge.expected_target_graph_key, primary.get('target_graph_key')),
-                )
                 if any(
-                    expected is not None and str(actual) != expected
-                    for expected, actual in endpoint_pairs
+                    not (row.get('edge_type') or row.get('name'))
+                    or (row.get('edge_type') or row.get('name')) != edge.edge_type
+                    for row in matches
+                ):
+                    section.edge_type_mismatch.append(edge.edge_key)
+                if any(
+                    any(
+                        expected is not None and str(row.get(actual_field)) != expected
+                        for expected, actual_field in (
+                            (edge.expected_source_uuid, 'source_uuid'),
+                            (edge.expected_target_uuid, 'target_uuid'),
+                            (edge.expected_source_graph_key, 'source_graph_key'),
+                            (edge.expected_target_graph_key, 'target_graph_key'),
+                        )
+                    )
+                    for row in matches
                 ):
                     section.endpoint_mismatch.append(edge.edge_key)
-                if not primary.get('has_fact_embedding'):
+                if any(not row.get('has_fact_embedding') for row in matches):
                     section.missing_embedding.append(edge.edge_key)
             section.found = found_count
         else:
