@@ -663,7 +663,8 @@ class CatalogNeo4jStore:
             MATCH (s:Entity)-[e:RELATES_TO]->(t:Entity)
             WHERE e.group_id = $group_id
               AND e.batch_id = $batch_id
-            RETURN e.uuid AS uuid,
+            RETURN elementId(e) AS element_id,
+                   e.uuid AS uuid,
                    e.group_id AS group_id,
                    e.name AS edge_type,
                    e.edge_key AS edge_key,
@@ -684,7 +685,8 @@ class CatalogNeo4jStore:
             MATCH (s:Entity)-[e:RELATES_TO]->(t:Entity)
             WHERE e.group_id = $group_id
               AND e.edge_key IN $edge_keys
-            RETURN e.uuid AS uuid,
+            RETURN elementId(e) AS element_id,
+                   e.uuid AS uuid,
                    e.group_id AS group_id,
                    e.name AS edge_type,
                    e.edge_key AS edge_key,
@@ -722,7 +724,7 @@ class CatalogNeo4jStore:
                 tx=tx,
             )
             for row in batch_rows:
-                key = str(row.get('uuid') or row.get('edge_key') or '')
+                key = str(row.get('element_id') or '')
                 if key and key not in seen:
                     seen.add(key)
                     rows.append(row)
@@ -736,7 +738,7 @@ class CatalogNeo4jStore:
                 tx=tx,
             )
             for row in key_rows:
-                key = str(row.get('uuid') or row.get('edge_key') or '')
+                key = str(row.get('element_id') or '')
                 if key and key not in seen:
                     seen.add(key)
                     rows.append(row)
@@ -747,7 +749,7 @@ class CatalogNeo4jStore:
         return """
             UNWIND $target_uuids AS target_uuid
             OPTIONAL MATCH (ep:Episodic)-[:MENTIONS]->(n {uuid: target_uuid})
-            WHERE n.group_id = $group_id OR n IS NULL
+            WHERE ep.group_id = $group_id AND n.group_id = $group_id
             WITH target_uuid, count(ep) AS mention_count
             RETURN target_uuid AS uuid, mention_count > 0 AS has_provenance
             """

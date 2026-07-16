@@ -49,6 +49,7 @@ pytestmark = [
 ]
 
 GROUP = 'oracle-catalog-tool-test'
+CANARY_GROUP = 'oracle-catalog-tool-test-canary'
 FORBIDDEN_GROUP = 'oracle-catalog-v2'
 FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 EMBED_DIM = 8
@@ -288,7 +289,7 @@ async def _count_group_edges(driver: Any, group_id: str = GROUP) -> int:
 async def _snapshot_other_groups(driver: Any) -> tuple[tuple[str, int, int], ...]:
     result = await driver.execute_query(
         """
-        CALL {
+        CALL () {
           MATCH (n)
           WHERE n.group_id IS NOT NULL AND n.group_id <> $g
           RETURN n.group_id AS group_id, count(n) AS node_count, 0 AS edge_count
@@ -456,8 +457,6 @@ async def catalog_client(neo4j_driver: Any):
     )
 
 
-
-
 async def _upsert_entities(ctx, entities: list[CatalogEntityItem], **kw: Any):
     req = UpsertTypedEntitiesRequest(
         group_id=GROUP,
@@ -563,7 +562,6 @@ async def test_happy_path_six_entities_and_six_edges(catalog_client):
         assert row['name'] == item.graph_key
 
 
-
 async def test_resolve_and_verify_found(catalog_client):
     ctx = catalog_client
     seeded = await _seed_happy_graph(ctx)
@@ -663,18 +661,29 @@ async def test_provenance_presence_isolated_by_episode_and_target_group(catalog_
     target_uuid = response.results[0].uuid
     assert target_uuid
 
-    await ctx.driver.execute_query(
-        """
-        MATCH (target:Entity {uuid: $u, group_id: $g})
-        CREATE (ep:Episodic {uuid: $ep_uuid, group_id: 'other-test-group'})
-        CREATE (ep)-[:MENTIONS]->(target)
-        """,
-        params={'u': target_uuid, 'g': GROUP, 'ep_uuid': str(uuid.uuid4())},
-    )
-    rows = await ctx.service._store.match_provenance_presence(
-        ctx.driver, group_id=GROUP, target_uuids=[target_uuid]
-    )
-    assert rows == [{'uuid': target_uuid, 'has_provenance': False}]
+    try:
+        await ctx.driver.execute_query(
+            """
+            MATCH (target:Entity {uuid: $u, group_id: $g})
+            CREATE (ep:Episodic {uuid: $ep_uuid, group_id: $canary_group})
+            CREATE (ep)-[:MENTIONS]->(target)
+            """,
+            params={
+                'u': target_uuid,
+                'g': GROUP,
+                'ep_uuid': str(uuid.uuid4()),
+                'canary_group': CANARY_GROUP,
+            },
+        )
+        rows = await ctx.service._store.match_provenance_presence(
+            ctx.driver, group_id=GROUP, target_uuids=[target_uuid]
+        )
+        assert rows == [{'uuid': target_uuid, 'has_provenance': False}]
+    finally:
+        await ctx.driver.execute_query(
+            'MATCH (n) WHERE n.group_id = $g DETACH DELETE n',
+            params={'g': CANARY_GROUP},
+        )
 
 
 async def test_verify_edge_endpoint_and_type_mismatch_live(catalog_client):
