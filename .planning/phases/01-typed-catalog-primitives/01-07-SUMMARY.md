@@ -62,7 +62,7 @@ coverage:
     requirement: CONF-04
     verification:
       - kind: unit
-        ref: mcp_server/tests/test_catalog_models.py and test_catalog_service.py; 191-unit gate
+        ref: mcp_server/tests/test_catalog_models.py and test_catalog_service.py; 192-unit gate
         status: pass
     human_judgment: false
   - id: D2
@@ -89,7 +89,7 @@ coverage:
     requirement: GATE-05
     verification:
       - kind: other
-        ref: 191 units; 24 live; 215 combined; Ruff/Pyright; 86 MCP regressions; 18-tool listing
+        ref: 192 units; 25 live; 217 combined; Ruff/Pyright; 86 MCP regressions; 18-tool listing
         status: pass
     human_judgment: true
     rationale: Independent verifier must accept executor evidence before phase completion.
@@ -100,7 +100,7 @@ status: complete
 
 # Phase 1 Plan 7: Independent Gap Closure Summary
 
-**Hard-bounded batches, iterative JSON validation, physical edge verification, and group-isolated provenance with 215 catalog tests green**
+**Hard-bounded batches, iterative JSON validation, physical edge verification, and group-isolated provenance with 217 catalog tests green**
 
 ## Performance
 
@@ -133,13 +133,13 @@ status: complete
 |---|---|
 | Focused Task 1 | 13 passed |
 | Focused Task 2 | 25 passed |
-| Catalog units | 191 passed in 1.41s |
-| Live Neo4j required | 24 passed in 16.43s; 0 skipped |
-| Combined catalog | 215 passed in 17.19s |
+| Catalog units | 192 passed in 1.60s |
+| Live Neo4j required | 25 passed in 17.19s; 0 skipped |
+| Combined catalog | 217 passed in 18.77s |
 | Ruff format | 14 files already formatted |
 | Ruff check | All checks passed |
 | Pyright | 0 errors, 0 warnings, 0 informations |
-| MCP regressions | 86 passed in 1.23s |
+| MCP regressions | 86 passed in 1.50s |
 | Tool listing | 18 total; 14 existing; 4 catalog; missing none |
 
 Live writes and scoped teardown used only `oracle-catalog-tool-test`. Credentials stayed in the existing environment/session.
@@ -173,7 +173,7 @@ Live writes and scoped teardown used only `oracle-catalog-tool-test`. Credential
 - **Issue:** Recursive string-only walking allowed non-JSON values, cycles, and resource exhaustion.
 - **Fix:** Added one iterative validator with JSON type, finite-float, string, depth, node, and active-cycle checks.
 - **Files modified:** `catalog_common.py`, entity/edge models, model tests
-- **Verification:** 191 catalog units; 215 combined catalog tests
+- **Verification:** 192 catalog units; 217 combined catalog tests
 - **Committed in:** `4feebfc`
 
 **2. [Rule 1 - Bug] Aggregated every duplicate edge row and failed provenance reads closed**
@@ -181,7 +181,7 @@ Live writes and scoped teardown used only `oracle-catalog-tool-test`. Credential
 - **Issue:** A selected primary row could hide rogue duplicate anomalies; provenance DB exceptions became missing data.
 - **Fix:** Scan all matching rows once per anomaly; return structured `internal_error` on provenance read failure.
 - **Files modified:** `catalog_service.py`, service/live tests
-- **Verification:** 191 catalog units; 24 live Neo4j tests
+- **Verification:** 192 catalog units; 25 live Neo4j tests
 - **Committed in:** `4feebfc`
 
 **3. [Rule 1 - Bug] Preserved physical duplicate relationships and enforced provenance/isolation scope**
@@ -189,10 +189,18 @@ Live writes and scoped teardown used only `oracle-catalog-tool-test`. Credential
 - **Issue:** Verify store dedup collapsed relationships by UUID; provenance did not constrain both groups; isolation assertions were tautological.
 - **Fix:** Return/dedup by `elementId(e)`, scope episode and target groups, snapshot external groups, add scoped canary and AST no-clear check.
 - **Files modified:** `catalog_store.py`, store/live tests, validation/report
-- **Verification:** 191 units; 24 live Neo4j; 215 combined
+- **Verification:** 192 units; 25 live Neo4j; 217 combined
 - **Committed in:** `427323f`
 
-**Total deviations:** 3 auto-fixed (1 missing critical, 2 bugs). No scope creep.
+**4. [Rule 1 - Bug] Aggregated all entity twin anomalies symmetrically**
+- **Found during:** Final symmetry review
+- **Issue:** Primary-only entity checks hid rogue typed UUID and embedding anomalies.
+- **Fix:** Aggregate UUID and missing-embedding anomalies across all typed, wrong, and generic matches.
+- **Files modified:** `catalog_service.py`, service/live tests, validation/report
+- **Verification:** 192 units; 25 live Neo4j; 217 combined
+- **Committed in:** `b069fc7`
+
+**Total deviations:** 4 auto-fixed (1 missing critical, 3 bugs). No scope creep.
 
 ## Issues Encountered
 
@@ -216,7 +224,7 @@ None - existing Neo4j environment/session was sufficient.
 ## Self-Check: PASSED
 
 - Source/test/report files exist.
-- Task/review commits through `027d204` and `427323f` exist.
+- Task/review commits through `db169e8` and `b069fc7` exist.
 - No tracked files deleted.
 - No ROADMAP, REQUIREMENTS, or STATE completion update made.
 
