@@ -43,7 +43,7 @@ key-decisions:
   - "Catalog-scoped Ruff/Pyright only — global baseline unrelated and out of Phase 1 scope"
   - "Windows PYTHONPATH must use semicolon so monorepo graphiti_core (with ollama) wins over site-packages; MCP regressions 86/86"
   - "Overall PASS only with unskipped 21 Neo4j integration tests under CATALOG_INT_REQUIRED=1"
-  - "Phase 2 MAY start after Overall PASS recorded in 01-PHASE1-REPORT.md"
+  - "Executor gate Overall PASS recorded; Phase 2 still blocked until independent goal verification accepts Phase 1"
 
 patterns-established:
   - "GATE-04 commands and exit codes live in 01-PHASE1-REPORT.md, not only SUMMARY"
@@ -108,12 +108,13 @@ metrics:
   duration: ~25min
   completed: 2026-07-16
   tasks: 2
+  # 5 product style files + 3 gate docs (REPORT, SUMMARY, VALIDATION)
   files_changed: 8
 ---
 
 # Phase 01 Plan 06: GATE-04/05 Phase 1 Quality Gate Summary
 
-Catalog-scoped format/lint/typecheck green, MCP tool list 18 (+4 catalog), 86 MCP regressions, 180 catalog tests (21 live Neo4j unskipped), `01-PHASE1-REPORT.md` Overall PASS — Phase 2 unblocked.
+Catalog-scoped format/lint/typecheck green, MCP tool list 18 (+4 catalog), 86 MCP regressions, 180 catalog tests (21 live Neo4j unskipped), `01-PHASE1-REPORT.md` Overall PASS — Phase 2 still awaits independent goal verification.
 
 ## Performance
 
@@ -121,7 +122,7 @@ Catalog-scoped format/lint/typecheck green, MCP tool list 18 (+4 catalog), 86 MC
 - **Started:** 2026-07-16T15:44:17Z
 - **Completed:** 2026-07-16
 - **Tasks:** 2/2
-- **Files modified:** 8
+- **Files modified:** 8 (5 catalog style + REPORT/SUMMARY/VALIDATION)
 
 ## Accomplishments
 
@@ -136,8 +137,8 @@ Catalog-scoped format/lint/typecheck green, MCP tool list 18 (+4 catalog), 86 MC
 
 | Task | Name | Commit | Files |
 |------|------|--------|-------|
-| 1 | Format, lint, typecheck, schema listing, MCP regressions | `0799c41` | catalog model/identity/test style fixes |
-| 2 | Write 01-PHASE1-REPORT.md and update validation | (docs commit) | report + validation + summary |
+| 1 | Format, lint, typecheck, schema listing, MCP regressions | `0799c41` | 5 catalog style files |
+| 2 | Write 01-PHASE1-REPORT.md and update validation | `2aa3e84` (+ follow-ups `755beb2`, `6758e5d`) | REPORT + VALIDATION + SUMMARY |
 
 ## Gate Evidence (abbreviated)
 
@@ -146,7 +147,7 @@ Catalog-scoped format/lint/typecheck green, MCP tool list 18 (+4 catalog), 86 MC
 | GATE-01 units | 159 passed |
 | GATE-02 Neo4j int | 21 passed, 0 skipped |
 | GATE-03 no LLM/queue | covered in int suite |
-| GATE-04 tooling | ruff/pyright/tools/regressions green |
+| GATE-04 tooling | ruff/pyright/tools green; MCP regressions **86** |
 | GATE-05 report | Overall PASS |
 
 Full command log: `01-PHASE1-REPORT.md`.
@@ -185,9 +186,11 @@ None new. Report honesty mitigations T-01-19/T-01-20 held.
 
 ## Self-Check: PASSED
 
-- `01-PHASE1-REPORT.md` FOUND
-- `01-06-SUMMARY.md` FOUND
+- `01-PHASE1-REPORT.md` FOUND — Overall PASS; `NEO4J_PASSWORD=<redacted>`; MCP regressions 86
+- `01-06-SUMMARY.md` FOUND — files_changed 8 = 5 style + 3 docs
 - `01-VALIDATION.md` FOUND with `nyquist_compliant: true`
-- Commit `0799c41` FOUND
-- Overall PASS + Phase 2 language present in report
-- Editor diagnostic: editor-only; package Pyright + tests re-green after investigation
+- Commits `0799c41`, `2aa3e84`, `755beb2`, `6758e5d` FOUND
+- Editor diagnostic: editor-only; package Pyright + tests re-green
+- STATE: total_phases 2, completed_phases 0 until verifier; completed_plans 6
+- ROADMAP Phase 1 remains In Progress until verifier
+- No secret literals; `git diff --check` clean
