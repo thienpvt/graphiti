@@ -18,16 +18,16 @@
 |---|---|---|
 | CONF-04 | **PASS** | Config values above defaults construct through transport up to hard maxima; service still rejects above active configured limits |
 | SAFE-03 | **PASS** | One iterative validator enforces JSON types, finite floats, string limits, depth/node ceilings, and cycle rejection before service work |
-| VERI-03 | **PASS** | Optional expected endpoint refs compare across every matching Neo4j row; type/endpoint/UUID/embedding anomalies aggregate separately |
-| GATE-01 | **PASS** | 189 catalog units passed; focused gap and review regressions included |
+| VERI-03 | **PASS** | Store preserves physical relationships by `elementId(e)`; endpoint/type/UUID/embedding anomalies aggregate across every row; provenance scopes episode and target groups |
+| GATE-01 | **PASS** | 191 catalog units passed; focused gap and review regressions included |
 | GATE-05 | **PASS** | Report corrected from independently identified false-positive evidence; Phase 2 remains independently gated |
 
 ## Gate Results
 
 | Gate | Result | Evidence |
 |---|---|---|
-| GATE-01 catalog units | **PASS** | `189 passed in 1.49s` |
-| GATE-02 live Neo4j | **PASS** | `22 passed in 14.89s`; zero skipped under required mode |
+| GATE-01 catalog units | **PASS** | `191 passed in 1.41s` |
+| GATE-02 live Neo4j | **PASS** | `24 passed in 16.43s`; zero skipped under required mode |
 | GATE-03 no LLM/queue | **PASS** | Existing live spy coverage remained green |
 | GATE-04 quality/compatibility | **PASS** | Ruff format/check, Pyright, 86 MCP regressions, 18-tool listing |
 | GATE-05 report | **PASS** | This corrected evidence report |
@@ -47,7 +47,7 @@ export CATALOG_INT_REQUIRED=1
 uv run pytest tests/test_catalog_models.py tests/test_catalog_identity.py tests/test_catalog_store_unit.py tests/test_catalog_service.py -q --tb=short
 ```
 
-Result: exit 0 — `189 passed in 1.49s`.
+Result: exit 0 — `191 passed in 1.41s`.
 
 ### Live Neo4j integration
 
@@ -55,7 +55,7 @@ Result: exit 0 — `189 passed in 1.49s`.
 CATALOG_INT_REQUIRED=1 uv run pytest tests/test_catalog_neo4j_int.py -q --tb=short
 ```
 
-Result: exit 0 — `22 passed in 14.89s`; no skips. Writes and scoped teardown used only `group_id=oracle-catalog-tool-test`.
+Result: exit 0 — `24 passed in 16.43s`; no skips. Writes and scoped teardown used only `group_id=oracle-catalog-tool-test`; a dedicated canary group was created and deleted within one isolation test; all other groups were snapshotted and unchanged.
 
 ### Combined catalog suite
 
@@ -63,7 +63,7 @@ Result: exit 0 — `22 passed in 14.89s`; no skips. Writes and scoped teardown u
 CATALOG_INT_REQUIRED=1 uv run pytest tests/test_catalog_*.py -q --tb=short
 ```
 
-Result: exit 0 — `211 passed in 15.81s`.
+Result: exit 0 — `215 passed in 17.19s`.
 
 ### Catalog-scoped formatting, lint, type checking
 
@@ -130,7 +130,9 @@ Existing tools retained: `add_memory`, `search_nodes`, `search_memory_facts`, `a
 
 ## Isolation and Prohibitions
 
-- Live writes restricted to `oracle-catalog-tool-test`.
+- Product-path live writes restricted to `oracle-catalog-tool-test`.
+- One provenance-isolation canary uses `oracle-catalog-tool-test-canary`, then deletes only that canary group in `finally`.
+- Fixture snapshots all pre-existing out-of-test-group node/edge counts before each test and asserts exact equality after scoped teardown.
 - No writes to `oracle-catalog-v2`.
 - No `clear_graph` invocation.
 - No deployment or Phase 2 product code.
@@ -146,9 +148,9 @@ Existing tools retained: `add_memory`, `search_nodes`, `search_memory_facts`, `a
 | CONF-04 configurable limits within hard bounds | PASS |
 | SAFE-03 bounded iterative JSON validation | PASS |
 | VERI-03 all-row endpoint/type/UUID/embedding aggregation | PASS |
-| Catalog units | PASS — 189 |
-| Live Neo4j | PASS — 22 unskipped |
-| Combined catalog | PASS — 211 |
+| Catalog units | PASS — 191 |
+| Live Neo4j | PASS — 24 unskipped |
+| Combined catalog | PASS — 215 |
 | Ruff/Pyright | PASS |
 | MCP regressions | PASS — 86 |
 | Tool compatibility | PASS — 18 total, 14 existing, 4 catalog |
