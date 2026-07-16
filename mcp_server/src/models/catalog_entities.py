@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -214,10 +215,18 @@ class VerifyEntityRef(BaseModel):
 
 
 class VerifyEdgeRef(BaseModel):
-    """Optional explicit edge key for verify_catalog_batch."""
+    """Optional explicit edge key and expected endpoints for verify_catalog_batch."""
 
     edge_type: str
     edge_key: str = Field(..., min_length=1, max_length=MAX_GRAPH_KEY_LENGTH)
+    expected_source_graph_key: str | None = Field(
+        default=None, min_length=1, max_length=MAX_GRAPH_KEY_LENGTH
+    )
+    expected_target_graph_key: str | None = Field(
+        default=None, min_length=1, max_length=MAX_GRAPH_KEY_LENGTH
+    )
+    expected_source_uuid: str | None = Field(default=None, min_length=1)
+    expected_target_uuid: str | None = Field(default=None, min_length=1)
 
     @field_validator('edge_type')
     @classmethod
@@ -226,6 +235,16 @@ class VerifyEdgeRef(BaseModel):
 
         if v not in CATALOG_EDGE_TYPES:
             raise ValueError(f'edge_type not allowlisted: {v}')
+        return v
+
+    @field_validator('expected_source_uuid', 'expected_target_uuid')
+    @classmethod
+    def _expected_uuid_valid(cls, v: str | None) -> str | None:
+        if v is not None:
+            try:
+                uuid.UUID(v)
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise ValueError('expected endpoint UUID must be valid') from exc
         return v
 
 

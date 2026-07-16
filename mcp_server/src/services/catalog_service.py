@@ -1374,6 +1374,8 @@ class CatalogService:
             anomalies.append({'kind': 'missing_embedding', 'graph_key': key})
         for key in edge_section.duplicate_edge_key:
             anomalies.append({'kind': 'duplicate_edge_key', 'edge_key': key})
+        for key in edge_section.edge_type_mismatch:
+            anomalies.append({'kind': 'edge_type_mismatch', 'edge_key': key})
         for key in edge_section.endpoint_mismatch:
             anomalies.append({'kind': 'endpoint_mismatch', 'edge_key': key})
         for key in edge_section.uuid_mismatch:
@@ -1550,9 +1552,19 @@ class CatalogService:
                 )
                 if str(primary.get('uuid')) != expected_uuid:
                     section.uuid_mismatch.append(edge.edge_key)
-                # type mismatch when present on row
                 row_type = primary.get('edge_type') or primary.get('name')
                 if row_type and row_type != edge.edge_type:
+                    section.edge_type_mismatch.append(edge.edge_key)
+                endpoint_pairs = (
+                    (edge.expected_source_uuid, primary.get('source_uuid')),
+                    (edge.expected_target_uuid, primary.get('target_uuid')),
+                    (edge.expected_source_graph_key, primary.get('source_graph_key')),
+                    (edge.expected_target_graph_key, primary.get('target_graph_key')),
+                )
+                if any(
+                    expected is not None and str(actual) != expected
+                    for expected, actual in endpoint_pairs
+                ):
                     section.endpoint_mismatch.append(edge.edge_key)
                 if not primary.get('has_fact_embedding'):
                     section.missing_embedding.append(edge.edge_key)
