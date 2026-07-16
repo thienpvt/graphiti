@@ -91,11 +91,20 @@ def test_build_entity_upsert_cypher_has_on_create_and_on_match():
     store = CatalogNeo4jStore()
     cypher = store.build_entity_upsert_cypher('Schema')
     assert 'ON CREATE SET' in cypher
-    assert 'ON MATCH SET' in cypher
+    # Create-token status: no ON MATCH marker mutation (zero-mutation unchanged)
+    assert 'ON MATCH SET' not in cypher
+    assert 'n.group_id = $group_id' in cypher or 'WHERE n.group_id = $group_id' in cypher
     assert 'batch_id' in cypher
     assert 'created_at' in cypher
     assert 'updated_at' in cypher
     assert 'content_sha256' in cypher
+    assert '$create_token' in cypher
+    assert '_catalog_create_token' in cypher
+    assert 'REMOVE n._catalog_create_token' in cypher
+    assert 'status' in cypher
+    # Vector only on created/updated
+    assert "status IN ['created', 'updated']" in cypher or 'status IN' in cypher
+    assert 'setNodeVectorProperty' in cypher
 
 
 def test_on_create_and_changed_match_include_batch_id():
@@ -103,9 +112,11 @@ def test_on_create_and_changed_match_include_batch_id():
     cypher = store.build_entity_upsert_cypher('View')
     # batch_id must appear in property assignment lists
     assert 'n.batch_id = $batch_id' in cypher or 'n.batch_id=$batch_id' in cypher
-    # identical-hash path must preserve existing batch_id via CASE or equivalent
+    # status derived from create token + pre-update hash
     assert 'content_sha256' in cypher
     assert 'CASE' in cypher.upper() or 'WHEN' in cypher.upper()
+    assert '_catalog_create_token' in cypher
+    assert 'ON MATCH SET' not in cypher
 
 
 def test_cypher_parameterizes_values_not_client_identifiers():
@@ -156,6 +167,9 @@ def test_prepare_entity_params_name_equals_graph_key():
     # Protected keys never come from client attributes map as top-level overrides
     assert params['uuid'] == UUID
     assert params['group_id'] == GROUP
+    # Server-generated create token for status classification
+    assert isinstance(params.get('create_token'), str)
+    assert len(params['create_token']) >= 16
 
 
 def test_prepare_entity_params_rejects_unknown_type():
@@ -200,16 +214,29 @@ def test_build_get_entity_by_group_name_type_uses_allowlisted_label():
 
 
 def test_identical_hash_noop_clause_preserves_batch_id():
-    """Generated ON MATCH must not blindly overwrite batch_id on identical hash."""
+    """Unchanged path must not SET content props; update path gated by status."""
     store = CatalogNeo4jStore()
     cypher = store.build_entity_upsert_cypher('Function')
-    # The identical path leaves batch_id untouched: CASE WHEN existing hash equals
-    assert 'n.content_sha256' in cypher
-    # Ensure we do not have unconditional n.batch_id = $batch_id only on MATCH without CASE
-    # (ON CREATE may set unconditionally; ON MATCH must be conditional)
-    on_match_idx = cypher.index('ON MATCH SET')
-    on_match_section = cypher[on_match_idx:]
-    assert 'CASE' in on_match_section.upper()
+    assert 'CASE' in cypher.upper()
+    # Identity/preservation fields not rewritten after create
+    assert 'n.graph_key = CASE' not in cypher
+    assert 'n.group_id = CASE' not in cypher
+    assert 'n.labels = CASE' not in cypher
+    assert 'n.name_raw = CASE' not in cypher
+    assert 'n.name_canonical = CASE' not in cypher
+    assert "status = 'updated'" in cypher or "status = 'updated'" in cypher.replace(' ', '')
+    assert 'REMOVE n._catalog_create_token' in cypher
+    assert 'ON MATCH SET' not in cypher
+
+
+def test_entity_upsert_cypher_scopes_group_and_preserves_identity():
+    store = CatalogNeo4jStore()
+    cypher = store.build_entity_upsert_cypher('Table')
+    assert 'WHERE n.group_id = $group_id' in cypher
+    assert '_catalog_create_token' in cypher
+    assert 'REMOVE n._catalog_create_token' in cypher
+    assert 'n._catalog_create_token AS' not in cypher
+    assert 'ON MATCH SET' not in cypher
 
 
 def test_first_from_execute_query_result_uses_tuple_contract():
@@ -320,35 +347,76 @@ def test_build_edge_upsert_cypher_uses_relates_to_and_param_name():
     assert 'e.name = $name' in cypher or 'e.name=$name' in cypher
     assert 'SET e = $' not in cypher  # no full-map replace
     assert 'ON CREATE SET' in cypher
-    assert 'ON MATCH SET' in cypher
+    assert 'ON MATCH SET' not in cypher
     assert 'batch_id' in cypher
     assert 'fact_embedding' in cypher or 'setRelationshipVectorProperty' in cypher
     assert '$source_uuid' in cypher
     assert '$target_uuid' in cypher
     assert '$uuid' in cypher
+    # both endpoints group-scoped
+    assert 'source.group_id = $group_id' in cypher
+    assert 'target.group_id = $group_id' in cypher
     # edge type never interpolated as relationship type
     assert ':[ForeignKeyTo]' not in cypher
-    assert 'CREATE' not in cypher.split('ON CREATE')[0] or True  # ON CREATE ok
+    assert '_catalog_create_token' in cypher
+    assert 'REMOVE e._catalog_create_token' in cypher
+    assert '$create_token' in cypher
 
 
 def test_edge_on_create_and_changed_match_include_batch_id():
     store = CatalogNeo4jStore()
     cypher = store.build_edge_upsert_cypher()
     assert 'e.batch_id = $batch_id' in cypher or 'e.batch_id=$batch_id' in cypher
-    on_match_idx = cypher.index('ON MATCH SET')
-    on_match_section = cypher[on_match_idx:]
-    assert 'CASE' in on_match_section.upper()
-    assert 'content_sha256' in on_match_section
+    assert '_catalog_create_token' in cypher
+    assert 'CASE' in cypher.upper()
+    assert 'content_sha256' in cypher
+    assert 'ON MATCH SET' not in cypher
 
 
 def test_edge_identical_hash_noop_preserves_batch_id():
     store = CatalogNeo4jStore()
     cypher = store.build_edge_upsert_cypher()
-    on_match_idx = cypher.index('ON MATCH SET')
-    on_match = cypher[on_match_idx:]
-    # conditional batch_id rewrite only when hash differs
-    assert 'e.content_sha256' in on_match
-    assert 'CASE' in on_match.upper()
+    assert 'CASE' in cypher.upper()
+    # identity/endpoint fields not rewritten on content change
+    assert 'e.name = CASE' not in cypher
+    assert 'e.edge_key = CASE' not in cypher
+    assert 'e.source_node_uuid = CASE' not in cypher
+    assert 'e.target_node_uuid = CASE' not in cypher
+    assert 'e.group_id = CASE' not in cypher
+    assert 'REMOVE e._catalog_create_token' in cypher
+    assert 'ON MATCH SET' not in cypher
+
+
+def test_edge_upsert_cypher_scopes_endpoint_group_id():
+    store = CatalogNeo4jStore()
+    cypher = store.build_edge_upsert_cypher()
+    assert 'source.group_id = $group_id' in cypher
+    assert 'target.group_id = $group_id' in cypher
+    assert 'MATCH (source:Entity {uuid: $source_uuid})' in cypher
+    assert 'MATCH (target:Entity {uuid: $target_uuid})' in cypher
+
+
+@pytest.mark.asyncio
+async def test_read_one_uses_params_kwarg_not_splat():
+    """Neo4jDriver.execute_query binds Cypher values only via params=."""
+    store = CatalogNeo4jStore()
+    calls: list[tuple] = []
+
+    class _Exec:
+        async def execute_query(self, cypher, **kwargs):
+            calls.append((cypher, kwargs))
+            return ([{'uuid': 'u1'}], None, ['uuid'])
+
+    row = await store._read_one(
+        _Exec(), 'RETURN 1', {'group_id': GROUP, 'uuid': 'u1'}, tx=None
+    )
+    assert row == {'uuid': 'u1'}
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert 'params' in kwargs
+    assert kwargs['params'] == {'group_id': GROUP, 'uuid': 'u1'}
+    assert 'group_id' not in kwargs
+    assert 'uuid' not in kwargs
 
 
 def test_prepare_edge_params_sets_name_to_edge_type():
@@ -377,6 +445,8 @@ def test_prepare_edge_params_sets_name_to_edge_type():
     assert params['batch_id'] == BATCH
     assert params['fact'] == 'employees.dept_id references departments.id'
     assert isinstance(params.get('attributes'), (str, type(None)))
+    assert isinstance(params.get('create_token'), str)
+    assert len(params['create_token']) >= 16
 
 
 def test_prepare_edge_params_rejects_unknown_edge_type():

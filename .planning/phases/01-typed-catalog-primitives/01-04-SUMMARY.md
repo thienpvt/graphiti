@@ -164,14 +164,21 @@ None - plan executed exactly as written.
 
 1. **Mid-file imports removed** — moved `CatalogEdgeItem`, `UpsertTypedEdgesRequest`, `catalog_edge_uuid` into the existing top-level import block of `test_catalog_service.py` (no function/mid-file static imports).
 2. **Editor import diagnostics** — preserved `mcp_server/pyproject.toml` `extraPaths = ["src"]`; no absolute worktree paths or `py.typed` hacks.
-3. **Unused symbols audit** — ruff F401/F841 clean. Retained required typed annotations (`CatalogEdgeItem`, `UpsertTypedEdgesRequest`, `_PreparedEdge`). No dead edge-path locals. Store `resolve_entity_label` call retained for allowlist validation (label intentionally not interpolated into endpoint MATCH Cypher so classify can see generic vs typed).
-4. **group_id / batch_id / namespace audit** — edge path proven via source: `request.group_id` on endpoint resolve + edge get/params; `request.batch_id` on create/changed write params and logs; `namespace` via `catalog_edge_uuid`; `embedder.create` precedes `transaction`. No ignored-argument defects found; any editor unused-arg warnings are stale.
-5. **Commands / results**
-   - `cd mcp_server && uv run ruff check src/services/catalog_store.py src/services/catalog_service.py src/graphiti_mcp_server.py tests/test_catalog_store_unit.py tests/test_catalog_service.py` → All checks passed
-   - `cd mcp_server && uv run ruff check --select F401,F841 ...` → All checks passed
-   - `cd mcp_server && uv run pyright <catalog files>` → 0 errors, 0 warnings
-   - `uv run --directory mcp_server pyright --project .` → pre-existing non-catalog errors only; **NO catalog_ diagnostics**
-   - catalog unit tests → **131 passed**
+3. **Unused symbols audit** — ruff F401/F841 clean. Callback params explicitly consumed (`_ = (...)`) in service tests.
+4. **group_id / batch_id / namespace audit** — edge path uses `request.group_id` on endpoint resolve + edge get/params; `request.batch_id` on create/changed write params and logs; `namespace` via `catalog_edge_uuid`; `embedder.create` precedes `transaction`.
+5. **Correctness defects fixed (merge-blocking)**
+   - Edge endpoint MATCH group-scoped (`source.group_id`/`target.group_id` = `$group_id`).
+   - Empty upsert row → `CatalogStoreError` / `neo4j_transaction_failed` (never false created).
+   - Create-token status: ON CREATE sets `_catalog_create_token=$create_token`; status derived from token + pre-update hash; no ON MATCH marker; SET mutables only when `status='updated'`; vector procedure only for created/updated; token REMOVEd before RETURN.
+   - Entity identity immutable on match; exact custom labels must equal `{expected}` (generic-only and multi-label conflict).
+   - Pre-read failures fail closed (`internal_error`) — never treated as absent/create.
+   - In-tx recheck: entity labels; edge endpoints + identity before mutation.
+   - `execute_query(..., params=params)` contract (no kwargs splat).
+   - `_verify_edges` reports `uuid_mismatch` via `catalog_edge_uuid`.
+6. **Commands / results**
+   - `uv run ruff check` catalog files → All checks passed
+   - `uv run pyright` catalog source/tests → **0 errors, 0 warnings**
+   - catalog unit tests → **146 passed**
 
 ## Self-Check: PASSED
 

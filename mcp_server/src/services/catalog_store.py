@@ -10,6 +10,7 @@ import json
 import re
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from models.catalog_common import (
     CATALOG_EDGE_TYPES,
@@ -71,41 +72,27 @@ class CatalogNeo4jStore:
         return label
 
     def build_entity_upsert_cypher(self, entity_type: str) -> str:
-        """Build MERGE Cypher with ON CREATE / conditional ON MATCH for one entity type.
+        """Build MERGE Cypher with create-once identity and zero-mutation unchanged path.
 
         Labels are server-resolved literals only. Values are parameters.
-        Identical content_sha256 leaves properties (including batch_id) untouched.
+        Create path sets full props + per-write $create_token marker.
+        Status derived from token presence + pre-update hash compare — never timestamps.
+        Matched unchanged: no SET of content props, no vector rewrite.
+        Token REMOVEd before RETURN (create-only; never client authority).
+        Cross-group same UUID rejected via WHERE n.group_id = $group_id (empty row).
         """
         label = self.resolve_entity_label(entity_type)
-        # Conditional SET: only apply mutable fields when content hash differs.
-        # CASE WHEN n.content_sha256 = $content_sha256 THEN n.<prop> ELSE $prop END
-        mutable = (
-            'name',
-            'graph_key',
-            'name_raw',
-            'name_canonical',
-            'database_qualified_name',
-            'summary',
-            'attributes',
-            'source_refs',
-            'confidence',
-            'batch_id',
-            'content_sha256',
-            'labels',
-            'group_id',
-        )
-        on_match_lines = [
-            (
-                f'n.{prop} = CASE WHEN n.content_sha256 = $content_sha256 '
-                f'THEN n.{prop} ELSE ${prop} END'
-            )
-            for prop in mutable
-        ]
-        on_match_lines.append(
-            'n.updated_at = CASE WHEN n.content_sha256 = $content_sha256 '
-            'THEN n.updated_at ELSE $updated_at END'
-        )
-        on_match = ',\n                '.join(on_match_lines)
+        # Updated-only content fields (identity/preservation never rewritten on match).
+        updated_set = """
+                n.database_qualified_name = $database_qualified_name,
+                n.summary = $summary,
+                n.attributes = $attributes,
+                n.source_refs = $source_refs,
+                n.confidence = $confidence,
+                n.batch_id = $batch_id,
+                n.content_sha256 = $content_sha256,
+                n.updated_at = $updated_at
+        """.strip()
 
         return f"""
             MERGE (n:Entity {{uuid: $uuid}})
@@ -126,21 +113,40 @@ class CatalogNeo4jStore:
                 n.content_sha256 = $content_sha256,
                 n.labels = $labels,
                 n.created_at = $created_at,
-                n.updated_at = $updated_at
-            ON MATCH SET
-                {on_match}
+                n.updated_at = $updated_at,
+                n._catalog_create_token = $create_token
             WITH n
-            CALL db.create.setNodeVectorProperty(n, 'name_embedding', $name_embedding)
+            WHERE n.group_id = $group_id
+            WITH n,
+                 coalesce(n._catalog_create_token, '') = $create_token AS created,
+                 n.content_sha256 = $content_sha256 AS same
+            WITH n, created, same,
+                 CASE
+                   WHEN created THEN 'created'
+                   WHEN same THEN 'unchanged'
+                   ELSE 'updated'
+                 END AS status
+            FOREACH (_ IN CASE WHEN status = 'updated' THEN [1] ELSE [] END |
+              SET {updated_set}
+            )
+            REMOVE n._catalog_create_token
+            WITH n, status
+            CALL {{
+              WITH n, status
+              WITH n, status WHERE status IN ['created', 'updated']
+              CALL db.create.setNodeVectorProperty(n, 'name_embedding', $name_embedding)
+              RETURN 1 AS _
+              UNION
+              WITH n, status
+              WITH n, status WHERE status = 'unchanged'
+              RETURN 0 AS _
+            }}
             RETURN n.uuid AS uuid,
                    n.content_sha256 AS content_sha256,
                    n.batch_id AS batch_id,
                    n.created_at AS created_at,
                    n.updated_at AS updated_at,
-                   CASE WHEN n.created_at = $created_at THEN 'created'
-                        WHEN n.content_sha256 = $content_sha256
-                             AND n.updated_at = $updated_at THEN 'unchanged'
-                        ELSE 'updated'
-                   END AS status
+                   status
             """
 
     def build_get_entity_by_uuid_cypher(self) -> str:
@@ -222,6 +228,8 @@ class CatalogNeo4jStore:
             'source_refs': serialize_nested_json(source_refs),
             'confidence': confidence,
             'labels': ['Entity', label],
+            # Per-write create marker only; never client authority, never persisted.
+            'create_token': uuid4().hex,
         }
 
     async def upsert_entity_item(
@@ -231,17 +239,25 @@ class CatalogNeo4jStore:
         entity_type: str,
         params: dict[str, Any],
     ) -> dict[str, Any]:
-        """Execute entity MERGE inside an open transaction. Returns first record dict."""
+        """Execute entity MERGE inside an open transaction. Returns first record dict.
+
+        Empty/missing uuid means group-scope miss or write failure — never success.
+        """
         cypher = self.build_entity_upsert_cypher(entity_type)
         result = await tx.run(cypher, **params)
-        # neo4j AsyncResult or mock
+        row: dict[str, Any] = {}
         if hasattr(result, 'data'):
             rows = await result.data()
-            return rows[0] if rows else {}
-        if hasattr(result, 'single'):
+            row = rows[0] if rows else {}
+        elif hasattr(result, 'single'):
             record = await result.single()
-            return dict(record) if record is not None else {}
-        return {}
+            row = dict(record) if record is not None else {}
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'entity upsert returned no row (missing, group mismatch, or write failure)',
+                code='neo4j_transaction_failed',
+            )
+        return row
 
     async def get_entity_by_uuid(
         self,
@@ -279,8 +295,9 @@ class CatalogNeo4jStore:
         if tx is not None:
             result = await tx.run(cypher, **params)
             return await self._first_from_tx_result(result)
-        # Neo4jDriver.execute_query -> EagerResult, a tuple of (records, summary, keys).
-        result = await executor.execute_query(cypher, **params)
+        # Neo4jDriver.execute_query binds Cypher values only via params=; other kwargs
+        # are AsyncDriver execute options. Never splat property maps as **kwargs.
+        result = await executor.execute_query(cypher, params=params)
         return self._first_from_execute_query_result(result)
 
     @staticmethod
@@ -359,7 +376,8 @@ class CatalogNeo4jStore:
                 rows = await result.data()
                 return [r if isinstance(r, dict) else dict(r) for r in (rows or [])]
             return []
-        result = await executor.execute_query(cypher, **params)
+        # Live Neo4jDriver contract: Cypher values only via params=
+        result = await executor.execute_query(cypher, params=params)
         return self._all_from_execute_query_result(result)
 
     def build_match_entities_for_resolve_cypher(self) -> str:
@@ -671,38 +689,25 @@ class CatalogNeo4jStore:
     def build_edge_upsert_cypher(self) -> str:
         """MERGE RELATES_TO by uuid; e.name is parameterized allowlisted edge type.
 
-        ON CREATE sets created_at + batch_id; ON MATCH CASE preserves identical hash
-        including batch_id; changed hash updates mutable fields + batch_id + updated_at.
+        Endpoints MATCH is group-scoped. Create-token status classification:
+        zero property mutation on matched unchanged; vector only on created/updated.
+        Identity fields set only ON CREATE.
         """
-        mutable = (
-            'name',
-            'edge_key',
-            'fact',
-            'evidence',
-            'attributes',
-            'confidence',
-            'batch_id',
-            'content_sha256',
-            'group_id',
-            'source_node_uuid',
-            'target_node_uuid',
-        )
-        on_match_lines = [
-            (
-                f'e.{prop} = CASE WHEN e.content_sha256 = $content_sha256 '
-                f'THEN e.{prop} ELSE ${prop} END'
-            )
-            for prop in mutable
-        ]
-        on_match_lines.append(
-            'e.updated_at = CASE WHEN e.content_sha256 = $content_sha256 '
-            'THEN e.updated_at ELSE $updated_at END'
-        )
-        on_match = ',\n                '.join(on_match_lines)
+        updated_set = """
+                e.fact = $fact,
+                e.evidence = $evidence,
+                e.attributes = $attributes,
+                e.confidence = $confidence,
+                e.batch_id = $batch_id,
+                e.content_sha256 = $content_sha256,
+                e.updated_at = $updated_at
+        """.strip()
 
         return f"""
             MATCH (source:Entity {{uuid: $source_uuid}})
+            WHERE source.group_id = $group_id
             MATCH (target:Entity {{uuid: $target_uuid}})
+            WHERE target.group_id = $group_id
             MERGE (source)-[e:RELATES_TO {{uuid: $uuid}}]->(target)
             ON CREATE SET
                 e.uuid = $uuid,
@@ -718,11 +723,32 @@ class CatalogNeo4jStore:
                 e.source_node_uuid = $source_node_uuid,
                 e.target_node_uuid = $target_node_uuid,
                 e.created_at = $created_at,
-                e.updated_at = $updated_at
-            ON MATCH SET
-                {on_match}
-            WITH e
-            CALL db.create.setRelationshipVectorProperty(e, 'fact_embedding', $fact_embedding)
+                e.updated_at = $updated_at,
+                e._catalog_create_token = $create_token
+            WITH e,
+                 coalesce(e._catalog_create_token, '') = $create_token AS created,
+                 e.content_sha256 = $content_sha256 AS same
+            WITH e, created, same,
+                 CASE
+                   WHEN created THEN 'created'
+                   WHEN same THEN 'unchanged'
+                   ELSE 'updated'
+                 END AS status
+            FOREACH (_ IN CASE WHEN status = 'updated' THEN [1] ELSE [] END |
+              SET {updated_set}
+            )
+            REMOVE e._catalog_create_token
+            WITH e, status
+            CALL {{
+              WITH e, status
+              WITH e, status WHERE status IN ['created', 'updated']
+              CALL db.create.setRelationshipVectorProperty(e, 'fact_embedding', $fact_embedding)
+              RETURN 1 AS _
+              UNION
+              WITH e, status
+              WITH e, status WHERE status = 'unchanged'
+              RETURN 0 AS _
+            }}
             RETURN e.uuid AS uuid,
                    e.content_sha256 AS content_sha256,
                    e.batch_id AS batch_id,
@@ -732,11 +758,7 @@ class CatalogNeo4jStore:
                    e.edge_key AS edge_key,
                    e.source_node_uuid AS source_uuid,
                    e.target_node_uuid AS target_uuid,
-                   CASE WHEN e.created_at = $created_at THEN 'created'
-                        WHEN e.content_sha256 = $content_sha256
-                             AND e.updated_at = $updated_at THEN 'unchanged'
-                        ELSE 'updated'
-                   END AS status
+                   status
             """
 
     def build_get_edge_by_uuid_cypher(self) -> str:
@@ -802,6 +824,8 @@ class CatalogNeo4jStore:
             'fact_embedding': fact_embedding,
             'attributes': serialize_nested_json(cleaned_attrs),
             'confidence': confidence,
+            # Per-write create marker only; never client authority, never persisted.
+            'create_token': uuid4().hex,
         }
 
     def detect_edge_identity_conflict(
@@ -845,15 +869,24 @@ class CatalogNeo4jStore:
         *,
         params: dict[str, Any],
     ) -> dict[str, Any]:
-        """Execute edge MERGE inside an open transaction. Returns first record dict."""
+        """Execute edge MERGE inside an open transaction. Returns first record dict.
+
+        Empty/missing uuid (endpoint group miss or write failure) raises — never {}.
+        """
         # Re-validate edge type from params['name'] at builder boundary
         self.resolve_edge_type(str(params.get('name') or ''))
         cypher = self.build_edge_upsert_cypher()
         result = await tx.run(cypher, **params)
+        row: dict[str, Any] = {}
         if hasattr(result, 'data'):
             rows = await result.data()
-            return rows[0] if rows else {}
-        if hasattr(result, 'single'):
+            row = rows[0] if rows else {}
+        elif hasattr(result, 'single'):
             record = await result.single()
-            return dict(record) if record is not None else {}
-        return {}
+            row = dict(record) if record is not None else {}
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'edge upsert returned no row (endpoint miss, group mismatch, or write failure)',
+                code='neo4j_transaction_failed',
+            )
+        return row
