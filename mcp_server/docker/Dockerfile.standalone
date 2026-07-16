@@ -2,20 +2,11 @@
 # Standalone Graphiti MCP Server Image
 # This image runs only the MCP server and connects to an external database (Neo4j or FalkorDB)
 
+FROM ghcr.io/astral-sh/uv:0.8.15 AS uv
 FROM python:3.11-slim-bookworm
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install uv for Python package management
-ADD https://astral.sh/uv/install.sh /uv-installer.sh
-RUN sh /uv-installer.sh && rm /uv-installer.sh
-
-# Add uv to PATH
-ENV PATH="/root/.local/bin:${PATH}"
+# Install uv without fetching an installer during the build.
+COPY --from=uv /uv /uvx /bin/
 
 # Configure uv for optimal Docker usage
 ENV UV_COMPILE_BYTECODE=1 \
@@ -24,22 +15,17 @@ ENV UV_COMPILE_BYTECODE=1 \
     MCP_SERVER_HOST="0.0.0.0" \
     PYTHONUNBUFFERED=1
 
-# Set up MCP server directory
+# Copy graphiti-core from the repository-root build context.
+WORKDIR /app
+COPY pyproject.toml README.md LICENSE ./
+COPY graphiti_core/ ./graphiti_core/
+
+# Set up MCP server directory.
 WORKDIR /app/mcp
 
-# Accept graphiti-core version as build argument
-ARG GRAPHITI_CORE_VERSION=0.29.1
-
-# Copy project files for dependency installation
-COPY pyproject.toml uv.lock ./
-
-# Remove the local path override for graphiti-core in Docker builds
-# Install with BOTH neo4j and falkordb extras for maximum flexibility
-# and regenerate lock file to match the PyPI version
-RUN sed -i '/\[tool\.uv\.sources\]/,/graphiti-core/d' pyproject.toml && \
-    sed -i "s/graphiti-core\[falkordb\][>=]\+[0-9]\+\.[0-9]\+\.[0-9]\+/graphiti-core[neo4j,falkordb]==${GRAPHITI_CORE_VERSION}/" pyproject.toml && \
-    echo "Regenerating lock file for PyPI graphiti-core..." && \
-    rm -f uv.lock && \
+# Keep locked third-party versions, but replace graphiti-core's registry source with /app.
+COPY mcp_server/pyproject.toml mcp_server/uv.lock ./
+RUN printf '\n[tool.uv.sources]\ngraphiti-core = { path = "..", editable = false }\n' >> pyproject.toml && \
     uv lock
 
 # Install runtime dependencies only. Optional LLM providers can use a custom image;
@@ -47,13 +33,14 @@ RUN sed -i '/\[tool\.uv\.sources\]/,/graphiti-core/d' pyproject.toml && \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-group dev
 
-# Store graphiti-core version
-RUN echo "${GRAPHITI_CORE_VERSION}" > /app/mcp/.graphiti-core-version
+# Store version from the copied local project.
+RUN python -c "import tomllib; print(tomllib.load(open('/app/pyproject.toml', 'rb'))['project']['version'])" \
+    > /app/mcp/.graphiti-core-version
 
-# Copy MCP server application code
-COPY main.py ./
-COPY src/ ./src/
-COPY config/ ./config/
+# Copy MCP server application code.
+COPY mcp_server/main.py ./
+COPY mcp_server/src/ ./src/
+COPY mcp_server/config/ ./config/
 
 # Create log directory
 RUN mkdir -p /var/log/graphiti
@@ -68,15 +55,14 @@ LABEL org.opencontainers.image.title="Graphiti MCP Server (Standalone)" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.vendor="Zep AI" \
-      org.opencontainers.image.source="https://github.com/zep-ai/graphiti" \
-      graphiti.core.version="${GRAPHITI_CORE_VERSION}"
+      org.opencontainers.image.source="https://github.com/zep-ai/graphiti"
 
 # Expose MCP server port
 EXPOSE 8000
 
 # Health check - verify MCP server is responding
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"
 
 # Run the MCP server
 CMD ["uv", "run", "--no-sync", "main.py"]

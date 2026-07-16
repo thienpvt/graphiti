@@ -1,33 +1,30 @@
 #!/bin/bash
 # Script to build and push standalone Docker image with both Neo4j and FalkorDB drivers
-# This script queries PyPI for the latest graphiti-core version and includes it in the image tag
+# Run from mcp_server/docker; graphiti-core is installed from repository source.
 
 set -e
 
-# Get MCP server version from pyproject.toml
-MCP_VERSION=$(grep '^version = ' ../pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+REPO_ROOT=$(cd ../.. && pwd)
 
-# Get latest graphiti-core version from PyPI
-echo "Querying PyPI for latest graphiti-core version..."
-GRAPHITI_CORE_VERSION=$(curl -s https://pypi.org/pypi/graphiti-core/json | python3 -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
-echo "Latest graphiti-core version: ${GRAPHITI_CORE_VERSION}"
+# Get project versions from local source.
+MCP_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('${REPO_ROOT}/mcp_server/pyproject.toml', 'rb'))['project']['version'])")
+GRAPHITI_CORE_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('${REPO_ROOT}/pyproject.toml', 'rb'))['project']['version'])")
 
 # Get build metadata
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 VCS_REF=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-# Build the standalone image with explicit graphiti-core version
+# Build standalone image from repository-root context.
 echo "Building standalone Docker image..."
 docker build \
   --build-arg MCP_SERVER_VERSION="${MCP_VERSION}" \
-  --build-arg GRAPHITI_CORE_VERSION="${GRAPHITI_CORE_VERSION}" \
   --build-arg BUILD_DATE="${BUILD_DATE}" \
   --build-arg VCS_REF="${VCS_REF}" \
-  -f Dockerfile.standalone \
+  -f "${REPO_ROOT}/mcp_server/docker/Dockerfile.standalone" \
   -t "zepai/knowledge-graph-mcp:standalone" \
   -t "zepai/knowledge-graph-mcp:${MCP_VERSION}-standalone" \
   -t "zepai/knowledge-graph-mcp:${MCP_VERSION}-graphiti-${GRAPHITI_CORE_VERSION}-standalone" \
-  ..
+  "${REPO_ROOT}"
 
 echo ""
 echo "Build complete!"

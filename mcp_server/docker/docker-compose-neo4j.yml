@@ -25,8 +25,8 @@ services:
     # The Docker Hub image may lag behind the latest release.
     image: zepai/knowledge-graph-mcp:standalone
     build:
-      context: ..
-      dockerfile: docker/Dockerfile.standalone
+      context: ../..
+      dockerfile: mcp_server/docker/Dockerfile.standalone
     env_file:
       - path: ../.env
         required: false

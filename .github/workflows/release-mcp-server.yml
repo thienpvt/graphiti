@@ -26,12 +26,14 @@ jobs:
       matrix:
         variant:
           - name: standalone
+            context: .
             dockerfile: docker/Dockerfile.standalone
             image_suffix: "-standalone"
             tag_latest: "standalone"
             title: "Graphiti MCP Server (Standalone)"
             description: "Standalone Graphiti MCP server for external Neo4j or FalkorDB"
           - name: combined
+            context: ./mcp_server
             dockerfile: docker/Dockerfile
             image_suffix: ""
             tag_latest: "latest"
@@ -86,24 +88,17 @@ jobs:
       - name: Set up Depot CLI
         uses: depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1
 
-      - name: Get latest graphiti-core version from PyPI
+      - name: Resolve graphiti-core version
         id: graphiti
         run: |
-          # Query PyPI for the latest graphiti-core version with error handling
-          set -eo pipefail
-
-          if ! GRAPHITI_VERSION=$(curl -sf https://pypi.org/pypi/graphiti-core/json | python -c "import sys, json; data=json.load(sys.stdin); print(data['info']['version'])"); then
-            echo "Error: Failed to fetch graphiti-core version from PyPI"
-            exit 1
+          if [ "${{ matrix.variant.name }}" = "standalone" ]; then
+            GRAPHITI_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+            echo "Graphiti Core source version: ${GRAPHITI_VERSION}"
+          else
+            GRAPHITI_VERSION=$(curl -sf https://pypi.org/pypi/graphiti-core/json | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
+            echo "Latest Graphiti Core version from PyPI: ${GRAPHITI_VERSION}"
           fi
-
-          if [ -z "$GRAPHITI_VERSION" ]; then
-            echo "Error: Empty version returned from PyPI"
-            exit 1
-          fi
-
           echo "graphiti_version=${GRAPHITI_VERSION}" >> $GITHUB_OUTPUT
-          echo "Latest Graphiti Core version from PyPI: ${GRAPHITI_VERSION}"
 
       - name: Extract metadata
         id: meta
@@ -131,7 +126,7 @@ jobs:
         uses: depot/build-push-action@5f3b3c2e5a00f0093de47f657aeaefcedff27d18 # v1
         with:
           project: v9jv1mlpwc
-          context: ./mcp_server
+          context: ${{ matrix.variant.context }}
           file: ./mcp_server/${{ matrix.variant.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
@@ -139,7 +134,7 @@ jobs:
           labels: ${{ steps.docker_meta.outputs.labels }}
           build-args: |
             MCP_SERVER_VERSION=${{ steps.version.outputs.version }}
-            GRAPHITI_CORE_VERSION=${{ steps.graphiti.outputs.graphiti_version }}
+            GRAPHITI_CORE_VERSION=${{ matrix.variant.name == 'combined' && steps.graphiti.outputs.graphiti_version || '' }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
             VCS_REF=${{ steps.version.outputs.version }}
 
