@@ -15,6 +15,12 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from models.catalog_common import (
+    HARD_MAX_EDGES_PER_BATCH,
+    HARD_MAX_ENTITIES_PER_BATCH,
+    HARD_MAX_PROVENANCE_LINKS_PER_BATCH,
+)
+
 
 class YamlSettingsSource(PydanticBaseSettingsSource):
     """Custom settings source for loading from YAML files."""
@@ -293,9 +299,11 @@ class CatalogConfig(BaseModel):
             'Mapped from GRAPHITI_CATALOG_UUID_NAMESPACE. Never auto-generated.'
         ),
     )
-    max_entities_per_batch: int = Field(default=500, ge=1)
-    max_edges_per_batch: int = Field(default=2000, ge=1)
-    max_provenance_links_per_batch: int = Field(default=5000, ge=1)
+    max_entities_per_batch: int = Field(default=500, ge=1, le=HARD_MAX_ENTITIES_PER_BATCH)
+    max_edges_per_batch: int = Field(default=2000, ge=1, le=HARD_MAX_EDGES_PER_BATCH)
+    max_provenance_links_per_batch: int = Field(
+        default=5000, ge=1, le=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
+    )
 
     @model_validator(mode='before')
     @classmethod
@@ -310,13 +318,11 @@ class CatalogConfig(BaseModel):
         return data
 
     @model_validator(mode='after')
-    def _require_valid_namespace_when_enabled(self) -> 'CatalogConfig':
+    def _require_valid_namespace_when_enabled(self) -> CatalogConfig:
         if not self.enabled:
             return self
         if not self.uuid_namespace:
-            raise ValueError(
-                'uuid_namespace is required when catalog_upsert.enabled is true'
-            )
+            raise ValueError('uuid_namespace is required when catalog_upsert.enabled is true')
         try:
             uuid.UUID(self.uuid_namespace)
         except (ValueError, AttributeError, TypeError) as exc:

@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from models.catalog_common import (
     CATALOG_EDGE_TYPES,
-    DEFAULT_MAX_EDGES_PER_BATCH,
     ENTITY_TYPE_PREFIXES,
+    HARD_MAX_EDGES_PER_BATCH,
     MAX_ATTRIBUTE_KEYS,
     MAX_EVIDENCE_LENGTH,
     MAX_FACT_LENGTH,
@@ -19,6 +19,7 @@ from models.catalog_common import (
     MAX_SHORT_STRING_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
+    bound_nested_strings,
 )
 
 
@@ -98,6 +99,7 @@ class CatalogEdgeItem(BaseModel):
         if protected:
             raise ValueError(f'attributes contain protected keys: {sorted(protected)}')
         _reject_non_finite(v, 'attributes')
+        bound_nested_strings(v, 'attributes')
         return v
 
     @field_validator('confidence')
@@ -133,7 +135,7 @@ class UpsertTypedEdgesRequest(BaseModel):
 
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
-    edges: list[CatalogEdgeItem] = Field(..., min_length=1, max_length=DEFAULT_MAX_EDGES_PER_BATCH)
+    edges: list[CatalogEdgeItem] = Field(..., min_length=1, max_length=HARD_MAX_EDGES_PER_BATCH)
     dry_run: bool = False
     atomic: bool = True
     strict_endpoints: bool = True

@@ -382,7 +382,9 @@ def test_entity_collection_above_default_constructs_within_hard_max():
 
 
 def test_entity_collection_above_hard_max_rejected():
-    entities = [_entity_kwargs(graph_key=f'TABLE::T{i}') for i in range(HARD_MAX_ENTITIES_PER_BATCH + 1)]
+    entities = [
+        _entity_kwargs(graph_key=f'TABLE::T{i}') for i in range(HARD_MAX_ENTITIES_PER_BATCH + 1)
+    ]
     with pytest.raises(ValidationError):
         UpsertTypedEntitiesRequest.model_validate(
             {

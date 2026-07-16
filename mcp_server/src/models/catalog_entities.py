@@ -9,8 +9,9 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from models.catalog_common import (
-    DEFAULT_MAX_ENTITIES_PER_BATCH,
     ENTITY_TYPE_PREFIXES,
+    HARD_MAX_EDGES_PER_BATCH,
+    HARD_MAX_ENTITIES_PER_BATCH,
     MAX_ATTRIBUTE_KEYS,
     MAX_GRAPH_KEY_LENGTH,
     MAX_SHORT_STRING_LENGTH,
@@ -18,6 +19,7 @@ from models.catalog_common import (
     MAX_SUMMARY_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
+    bound_nested_strings,
 )
 
 
@@ -93,6 +95,7 @@ class CatalogEntityItem(BaseModel):
         if protected:
             raise ValueError(f'attributes contain protected keys: {sorted(protected)}')
         _reject_non_finite(v, 'attributes')
+        bound_nested_strings(v, 'attributes')
         return v
 
     @field_validator('source_refs')
@@ -104,6 +107,7 @@ class CatalogEntityItem(BaseModel):
             raise ValueError(f'source_refs exceed max ({MAX_SOURCE_REFS})')
         # JSON-safe nested values only (no NaN/Inf)
         _reject_non_finite(v, 'source_refs')
+        bound_nested_strings(v, 'source_refs')
         return v
 
     @field_validator('confidence')
@@ -154,7 +158,7 @@ class UpsertTypedEntitiesRequest(BaseModel):
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     entities: list[CatalogEntityItem] = Field(
-        ..., min_length=1, max_length=DEFAULT_MAX_ENTITIES_PER_BATCH
+        ..., min_length=1, max_length=HARD_MAX_ENTITIES_PER_BATCH
     )
     dry_run: bool = False
     atomic: bool = True
@@ -173,9 +177,9 @@ class ResolveTypedEntitiesRequest(BaseModel):
 
     group_id: str = Field(..., min_length=1)
     entities: list[ResolveEntityRef] = Field(
-        default_factory=list, max_length=DEFAULT_MAX_ENTITIES_PER_BATCH
+        default_factory=list, max_length=HARD_MAX_ENTITIES_PER_BATCH
     )
-    graph_keys: list[str] | None = Field(default=None, max_length=DEFAULT_MAX_ENTITIES_PER_BATCH)
+    graph_keys: list[str] | None = Field(default=None, max_length=HARD_MAX_ENTITIES_PER_BATCH)
 
     @field_validator('group_id')
     @classmethod
@@ -231,9 +235,9 @@ class VerifyCatalogBatchRequest(BaseModel):
     group_id: str = Field(..., min_length=1)
     batch_id: str | None = Field(default=None, max_length=MAX_SHORT_STRING_LENGTH)
     entities: list[VerifyEntityRef] = Field(
-        default_factory=list, max_length=DEFAULT_MAX_ENTITIES_PER_BATCH
+        default_factory=list, max_length=HARD_MAX_ENTITIES_PER_BATCH
     )
-    edges: list[VerifyEdgeRef] = Field(default_factory=list, max_length=2000)
+    edges: list[VerifyEdgeRef] = Field(default_factory=list, max_length=HARD_MAX_EDGES_PER_BATCH)
     require_provenance: bool = False
 
     @field_validator('group_id')

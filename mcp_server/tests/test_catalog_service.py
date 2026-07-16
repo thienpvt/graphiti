@@ -220,6 +220,22 @@ async def test_entity_non_neo4j_backend_unavailable():
 
 
 @pytest.mark.asyncio
+async def test_entity_service_enforces_configured_limit_below_hard_max():
+    client = _make_client()
+    cfg = CatalogConfig(
+        enabled=True,
+        uuid_namespace=str(FIXED_NS),
+        max_entities_per_batch=1,
+    )
+    service = CatalogService(catalog_config=cfg)
+    request = _request([_entity(), _entity(graph_key='TABLE::HR.DEPARTMENTS')])
+    resp = await service.upsert_typed_entities(client=client, request=request)
+    assert all(r.error_code == CatalogErrorCode.batch_limit_exceeded for r in resp.results)
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
 async def test_entity_embed_before_transaction_order():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -1145,6 +1161,22 @@ async def test_edge_feature_disabled_returns_structured_error_without_write():
     assert 'embed' not in client.call_order
     service._store.resolve_endpoint_typed.assert_not_awaited()
     service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_service_enforces_configured_limit_below_hard_max():
+    client = _make_client()
+    cfg = CatalogConfig(
+        enabled=True,
+        uuid_namespace=str(FIXED_NS),
+        max_edges_per_batch=1,
+    )
+    service = CatalogService(catalog_config=cfg)
+    request = _edge_request([_edge(), _edge(edge_key='FK::SECOND')])
+    resp = await service.upsert_typed_edges(client=client, request=request)
+    assert all(r.error_code == CatalogErrorCode.batch_limit_exceeded for r in resp.results)
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
 
 
 @pytest.mark.asyncio

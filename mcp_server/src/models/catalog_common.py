@@ -13,6 +13,9 @@ class StrEnum(str, Enum):
 DEFAULT_MAX_ENTITIES_PER_BATCH = 500
 DEFAULT_MAX_EDGES_PER_BATCH = 2000
 DEFAULT_MAX_PROVENANCE_LINKS_PER_BATCH = 5000
+HARD_MAX_ENTITIES_PER_BATCH = 5000
+HARD_MAX_EDGES_PER_BATCH = 10000
+HARD_MAX_PROVENANCE_LINKS_PER_BATCH = 20000
 
 # String / raw-text limits (SAFE-03)
 MAX_SHORT_STRING_LENGTH = 512
@@ -22,6 +25,27 @@ MAX_FACT_LENGTH = 4096
 MAX_EVIDENCE_LENGTH = 8192
 MAX_ATTRIBUTE_KEYS = 64
 MAX_SOURCE_REFS = 32
+
+
+def bound_nested_strings(obj: object, path: str = 'value') -> None:
+    """Reject oversized or non-string keys throughout nested JSON-like values."""
+    if isinstance(obj, str):
+        if len(obj) > MAX_EVIDENCE_LENGTH:
+            raise ValueError(f'string exceeds max length ({MAX_EVIDENCE_LENGTH}) at {path}')
+        return
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if not isinstance(key, str):
+                raise ValueError(f'dict key must be a string at {path}')
+            if len(key) > MAX_SHORT_STRING_LENGTH:
+                raise ValueError(
+                    f'dict key exceeds max length ({MAX_SHORT_STRING_LENGTH}) at {path}'
+                )
+            bound_nested_strings(value, f'{path}.{key}')
+    elif isinstance(obj, list):
+        for index, value in enumerate(obj):
+            bound_nested_strings(value, f'{path}[{index}]')
+
 
 # Fixed entity type → graph_key prefix map (15 types)
 ENTITY_TYPE_PREFIXES: dict[str, str] = {
