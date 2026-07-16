@@ -549,8 +549,12 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
     ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
-    service._store.match_entities_for_resolve = AsyncMock(
-        return_value=[
+    resolve_call: dict = {}
+
+    async def _match_resolve(*_args, **kwargs):
+        resolve_call.clear()
+        resolve_call.update(kwargs)
+        return [
             {
                 'uuid': ent_uuid,
                 'graph_key': 'TABLE::HR.EMPLOYEES',
@@ -562,7 +566,8 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
                 'batch_id': BATCH,
             }
         ]
-    )
+
+    service._store.match_entities_for_resolve = AsyncMock(side_effect=_match_resolve)
     resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
     r0 = resp.results[0]
     assert r0.found is True
@@ -576,12 +581,10 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
     client.embedder.create.assert_not_awaited()
     client.embedder.create_batch.assert_not_awaited()
     assert 'transaction' not in client.call_order
-    # MATCH scoped to group_id + requested keys only
-    await_args = service._store.match_entities_for_resolve.await_args
-    assert await_args is not None
-    call_kwargs = await_args.kwargs
-    assert call_kwargs['group_id'] == GROUP
-    assert 'TABLE::HR.EMPLOYEES' in call_kwargs['graph_keys']
+    # MATCH scoped to group_id + requested keys only (captured via side_effect, not optional mock)
+    service._store.match_entities_for_resolve.assert_awaited()
+    assert resolve_call.get('group_id') == GROUP
+    assert 'TABLE::HR.EMPLOYEES' in (resolve_call.get('graph_keys') or [])
 
 
 @pytest.mark.asyncio
@@ -750,19 +753,28 @@ async def test_verify_non_neo4j_backend_unavailable():
 async def test_verify_batch_scoped_match_uses_group_and_batch_id():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
-    service._store.match_entities_for_verify = AsyncMock(return_value=[])
-    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    ent_call: dict = {}
+    edge_call: dict = {}
+
+    async def _match_entities(*_args, **kwargs):
+        ent_call.clear()
+        ent_call.update(kwargs)
+        return []
+
+    async def _match_edges(*_args, **kwargs):
+        edge_call.clear()
+        edge_call.update(kwargs)
+        return []
+
+    service._store.match_entities_for_verify = AsyncMock(side_effect=_match_entities)
+    service._store.match_edges_for_verify = AsyncMock(side_effect=_match_edges)
     await service.verify_catalog_batch(client=client, request=_verify_request())
-    ent_await = service._store.match_entities_for_verify.await_args
-    edge_await = service._store.match_edges_for_verify.await_args
-    assert ent_await is not None
-    assert edge_await is not None
-    ent_kwargs = ent_await.kwargs
-    edge_kwargs = edge_await.kwargs
-    assert ent_kwargs['group_id'] == GROUP
-    assert ent_kwargs['batch_id'] == BATCH
-    assert edge_kwargs['group_id'] == GROUP
-    assert edge_kwargs['batch_id'] == BATCH
+    service._store.match_entities_for_verify.assert_awaited()
+    service._store.match_edges_for_verify.assert_awaited()
+    assert ent_call.get('group_id') == GROUP
+    assert ent_call.get('batch_id') == BATCH
+    assert edge_call.get('group_id') == GROUP
+    assert edge_call.get('batch_id') == BATCH
     client.embedder.create.assert_not_awaited()
     assert 'transaction' not in client.call_order
 

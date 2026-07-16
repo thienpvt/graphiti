@@ -159,6 +159,13 @@ Each task was committed atomically (TDD RED then GREEN):
 - **Files modified:** `catalog_responses.py`, `test_catalog_service.py`
 - **Committed in:** `401dd89`
 
+**3. [Rule 1 - Bug] Optional mock await_args.kwargs still type-unsafe**
+- **Found during:** Pre-merge reopen
+- **Issue:** `await_args` is typed optional; accessing `.kwargs` after `assert is not None` still trips reportOptionalMemberAccess in some analyzers
+- **Fix:** Capture kwargs via AsyncMock `side_effect` dicts; assert_awaited without reading optional await_args
+- **Files modified:** `test_catalog_service.py`
+- **Committed in:** pre-merge diagnostic fix
+
 ## Threat Flags
 
 None beyond plan register. Mitigations T-01-09..11 applied: group_id filter always, zero write commits on read paths, only requested keys/batch.
@@ -173,8 +180,12 @@ None for resolve/verify behavior. Live Neo4j integration deferred to later phase
 - GREEN commit after RED: `e70e8f9`
 - Verify tests: `ee08e13` (implementation already present from Task 1 GREEN; tests authored RED-style against public API)
 - Diagnostic fix: `401dd89`
+- Pre-merge optional-mock fix: capture kwargs via side_effect (no await_args.kwargs)
 - Verification: `cd mcp_server && uv run pytest tests/test_catalog_service.py -k "resolve or verify" -q` → 16 passed
-- Verification: `uv run --directory mcp_server pyright --project pyproject.toml src/services/catalog_store.py src/services/catalog_service.py src/models/catalog_responses.py src/models/catalog_entities.py src/graphiti_mcp_server.py tests/test_catalog_service.py` → 0 errors
+- Verification: `cd mcp_server && uv run pytest tests/test_catalog_service.py -q` → 33 passed
+- Verification (root portable): `uv run --project mcp_server pyright --project mcp_server/pyproject.toml mcp_server/src/graphiti_mcp_server.py mcp_server/src/models/catalog_entities.py mcp_server/src/models/catalog_responses.py mcp_server/src/services/catalog_store.py mcp_server/src/services/catalog_service.py mcp_server/tests/test_catalog_service.py` → 0 errors
+- Verification (package): `cd mcp_server && uv run pyright src/graphiti_mcp_server.py src/models/catalog_entities.py src/models/catalog_responses.py src/services/catalog_store.py src/services/catalog_service.py tests/test_catalog_service.py` → 0 errors
+- Unused imports: `ruff check src/services/catalog_service.py --select F401` → All checks passed
 
 ## Self-Check: PASSED
 
@@ -182,5 +193,6 @@ None for resolve/verify behavior. Live Neo4j integration deferred to later phase
 - FOUND: `mcp_server/src/services/catalog_service.py` (`resolve_typed_entities`, `verify_catalog_batch`)
 - FOUND: `mcp_server/src/graphiti_mcp_server.py` (`resolve_typed_entities`, `verify_catalog_batch`)
 - FOUND: `mcp_server/tests/test_catalog_service.py` (resolve + verify cases)
-- FOUND commits: `fd33ca7`, `e70e8f9`, `ee08e13`, `401dd89`
+- FOUND commits: `fd33ca7`, `e70e8f9`, `ee08e13`, `401dd89` (+ pre-merge fix)
 - STATE.md / ROADMAP.md: not modified (per executor instructions)
+- No `await_args.kwargs` remaining in `test_catalog_service.py`
