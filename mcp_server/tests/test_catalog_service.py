@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from config.schema import CatalogConfig  # noqa: E402
 from models.catalog_common import CatalogErrorCode  # noqa: E402
+from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
 from models.catalog_entities import (  # noqa: E402
     CatalogEntityItem,
     ResolveEntityRef,
@@ -26,7 +27,11 @@ from models.catalog_entities import (  # noqa: E402
     VerifyEdgeRef,
     VerifyEntityRef,
 )
-from services.catalog_identity import canonical_sha256, catalog_entity_uuid  # noqa: E402
+from services.catalog_identity import (  # noqa: E402
+    canonical_sha256,
+    catalog_edge_uuid,
+    catalog_entity_uuid,
+)
 from services.catalog_service import CatalogService  # noqa: E402
 
 FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
@@ -930,9 +935,6 @@ async def test_mcp_tool_verify_catalog_batch_registered():
 # ---------------------------------------------------------------------------
 # upsert_typed_edges
 # ---------------------------------------------------------------------------
-
-from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
-from services.catalog_identity import catalog_edge_uuid  # noqa: E402
 
 EDGE_BATCH = 'batch-edge-001'
 

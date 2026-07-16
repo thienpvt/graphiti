@@ -157,8 +157,21 @@ None - plan executed exactly as written.
 ## Verification
 
 - `uv run pytest tests/test_catalog_store_unit.py tests/test_catalog_service.py tests/test_catalog_models.py tests/test_catalog_identity.py -q` → 131 passed
-- Ruff clean on modified catalog files
-- Pyright 0 errors (mcp_server package + portable root path)
+- Ruff clean on modified catalog files (`ruff check` + F401/F841)
+- Pyright 0 errors on catalog source/tests (package-CWD + `--directory mcp_server`)
+
+## Diagnostic Remediation (pre-merge)
+
+1. **Mid-file imports removed** — moved `CatalogEdgeItem`, `UpsertTypedEdgesRequest`, `catalog_edge_uuid` into the existing top-level import block of `test_catalog_service.py` (no function/mid-file static imports).
+2. **Editor import diagnostics** — preserved `mcp_server/pyproject.toml` `extraPaths = ["src"]`; no absolute worktree paths or `py.typed` hacks.
+3. **Unused symbols audit** — ruff F401/F841 clean. Retained required typed annotations (`CatalogEdgeItem`, `UpsertTypedEdgesRequest`, `_PreparedEdge`). No dead edge-path locals. Store `resolve_entity_label` call retained for allowlist validation (label intentionally not interpolated into endpoint MATCH Cypher so classify can see generic vs typed).
+4. **group_id / batch_id / namespace audit** — edge path proven via source: `request.group_id` on endpoint resolve + edge get/params; `request.batch_id` on create/changed write params and logs; `namespace` via `catalog_edge_uuid`; `embedder.create` precedes `transaction`. No ignored-argument defects found; any editor unused-arg warnings are stale.
+5. **Commands / results**
+   - `cd mcp_server && uv run ruff check src/services/catalog_store.py src/services/catalog_service.py src/graphiti_mcp_server.py tests/test_catalog_store_unit.py tests/test_catalog_service.py` → All checks passed
+   - `cd mcp_server && uv run ruff check --select F401,F841 ...` → All checks passed
+   - `cd mcp_server && uv run pyright <catalog files>` → 0 errors, 0 warnings
+   - `uv run --directory mcp_server pyright --project .` → pre-existing non-catalog errors only; **NO catalog_ diagnostics**
+   - catalog unit tests → **131 passed**
 
 ## Self-Check: PASSED
 
