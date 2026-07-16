@@ -6,6 +6,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -210,3 +211,18 @@ def test_identical_hash_noop_clause_preserves_batch_id():
     on_match_idx = cypher.index('ON MATCH SET')
     on_match_section = cypher[on_match_idx:]
     assert 'CASE' in on_match_section.upper()
+
+
+def test_first_from_execute_query_result_uses_tuple_contract():
+    """Neo4jDriver.execute_query returns EagerResult = (records, summary, keys)."""
+    store = CatalogNeo4jStore()
+    parse = store._first_from_execute_query_result
+
+    assert parse(None) is None
+    assert parse(([], None, [])) is None
+    assert parse(([{'uuid': 'u1', 'group_id': GROUP}], None, ['uuid', 'group_id'])) == {
+        'uuid': 'u1',
+        'group_id': GROUP,
+    }
+    # Non-tuple objects (including fake .records attrs) are rejected
+    assert parse(SimpleNamespace(records=[{'uuid': 'nope'}])) is None

@@ -225,7 +225,6 @@ class CatalogService:
             return self._atomic_fail_response(
                 request,
                 early_errors,
-                prepared_ok=[],
                 trigger_indices=set(early_errors.keys()),
             )
 
@@ -291,7 +290,6 @@ class CatalogService:
             return self._atomic_fail_response(
                 request,
                 early_errors,
-                prepared_ok=[],
                 trigger_indices={p.index for p in conflicted} | set(early_errors.keys()),
             )
 
@@ -450,7 +448,6 @@ class CatalogService:
             return self._atomic_fail_response(
                 request,
                 early_errors,
-                prepared_ok=[],
                 trigger_indices={trigger_idx},
             )
 
@@ -653,7 +650,6 @@ class CatalogService:
         self,
         request: UpsertTypedEntitiesRequest,
         early_errors: dict[int, CatalogItemResult],
-        prepared_ok: list[_PreparedEntity],
         trigger_indices: set[int],
     ) -> CatalogWriteResponse:
         results: list[CatalogItemResult] = []

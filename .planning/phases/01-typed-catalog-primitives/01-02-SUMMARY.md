@@ -140,12 +140,12 @@ Each task was committed atomically (TDD RED then GREEN):
 
 ### Auto-fixed Issues
 
-**1. [Rule 1 - Bug] Pyright attribute access on tuple vs EagerResult**
-- **Found during:** Task 2 post-GREEN typecheck
-- **Issue:** `result.records` after `isinstance(result, tuple)` branch left pyright believing remaining type was still tuple
-- **Fix:** Use `getattr(result, 'records', None)` instead of `hasattr` + attribute access
-- **Files modified:** `mcp_server/src/services/catalog_store.py`
-- **Committed in:** `6a51724`
+**1. [Rule 1 - Bug] execute_query result must follow EagerResult tuple contract**
+- **Found during:** Task 2 post-GREEN / merge diagnostics
+- **Issue:** `_read_one` treated `execute_query` return as object with `.records`; Neo4jDriver returns EagerResult = `(records, summary, keys)` tuple subclass
+- **Fix:** Parse only via tuple index 0 (`_first_from_execute_query_result`); unit test rejects fake `.records` objects
+- **Files modified:** `mcp_server/src/services/catalog_store.py`, `mcp_server/tests/test_catalog_store_unit.py`
+- **Committed in:** diagnostic fix commit after `6a51724`
 
 **2. [Rule 2 - Missing critical] Atomic failure must attribute error to failing item**
 - **Found during:** Task 2 GREEN (atomic rollback test)
@@ -153,6 +153,13 @@ Each task was committed atomically (TDD RED then GREEN):
 - **Fix:** Track `current_prep` during loop so trigger index matches the item that raised
 - **Files modified:** `mcp_server/src/services/catalog_service.py`
 - **Committed in:** `6a51724`
+
+**3. [Rule 3 - Blocking] Editor pyright unresolved imports in unit tests**
+- **Found during:** Merge diagnostics reopen
+- **Issue:** `from graphiti_core.driver.driver import GraphProvider` in service tests fails editor/path-strict pyright; dead `prepared_ok` param noise
+- **Fix:** Use `SimpleNamespace(value=provider)` in tests (no graphiti_core import); drop unused `prepared_ok`; portable `extraPaths = ["src"]` already present from 01-01
+- **Files modified:** `mcp_server/tests/test_catalog_service.py`, `mcp_server/src/services/catalog_service.py`
+- **Committed in:** diagnostic fix commit after `6a51724`
 
 ## Threat Flags
 
@@ -166,8 +173,9 @@ None. Entity path fully wired under unit mocks. Live Neo4j coverage deferred to 
 
 - RED commits: `2f5b8e9`, `8235a78`
 - GREEN commits after RED: `7b1fe35`, `6a51724`
-- Verification: `uv run pytest tests/test_catalog_store_unit.py tests/test_catalog_service.py -q` → 33 passed
-- Verification: `uv run pyright` on changed paths → 0 errors
+- Diagnostic fix: see latest `fix(01-02)` commit
+- Verification: `uv run --directory mcp_server pytest tests/test_catalog_store_unit.py tests/test_catalog_service.py -q` → 34 passed
+- Verification: `uv run --directory mcp_server pyright src/graphiti_mcp_server.py src/config/schema.py src/models src/services/catalog_identity.py src/services/catalog_store.py src/services/catalog_service.py tests/test_catalog_store_unit.py tests/test_catalog_service.py` → 0 errors
 
 ## Self-Check: PASSED
 

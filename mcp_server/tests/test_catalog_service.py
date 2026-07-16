@@ -73,12 +73,8 @@ def _make_client(
     tx_side_effect=None,
     existing: dict | None = None,
 ):
-    from graphiti_core.driver.driver import GraphProvider
-
-    provider_enum = {
-        'neo4j': GraphProvider.NEO4J,
-        'falkordb': GraphProvider.FALKORDB,
-    }.get(provider, GraphProvider.NEO4J)
+    # Mirror GraphProvider.value without importing graphiti_core (editor pyright path).
+    provider_enum = SimpleNamespace(value=provider)
 
     embedder = embedder or AsyncMock(return_value=[0.1, 0.2, 0.3])
     call_order: list[str] = []

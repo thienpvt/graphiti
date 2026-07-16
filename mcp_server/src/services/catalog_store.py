@@ -273,26 +273,48 @@ class CatalogNeo4jStore:
     ) -> dict[str, Any] | None:
         if tx is not None:
             result = await tx.run(cypher, **params)
-            if hasattr(result, 'data'):
-                rows = await result.data()
-                return rows[0] if rows else None
-            if hasattr(result, 'single'):
-                record = await result.single()
-                return dict(record) if record is not None else None
-            return None
-        # driver.execute_query style
+            return await self._first_from_tx_result(result)
+        # Neo4jDriver.execute_query -> EagerResult, a tuple of (records, summary, keys).
         result = await executor.execute_query(cypher, **params)
+        return self._first_from_execute_query_result(result)
+
+    @staticmethod
+    async def _first_from_tx_result(result: Any) -> dict[str, Any] | None:
         if result is None:
             return None
-        # EagerResult: (records, summary, keys) or object with records
-        if isinstance(result, tuple) and result:
-            records = result[0]
-            if not records:
+        if hasattr(result, 'data'):
+            rows = await result.data()
+            if not rows:
                 return None
-            first = records[0]
-            return dict(first) if not isinstance(first, dict) else first
-        records_attr = getattr(result, 'records', None)
-        if records_attr:
-            first = records_attr[0]
-            return dict(first) if not isinstance(first, dict) else first
+            first = rows[0]
+            return first if isinstance(first, dict) else dict(first)
+        if hasattr(result, 'single'):
+            record = await result.single()
+            if record is None:
+                return None
+            return record if isinstance(record, dict) else dict(record)
         return None
+
+    @staticmethod
+    def _first_from_execute_query_result(result: Any) -> dict[str, Any] | None:
+        """Parse Neo4jDriver.execute_query / EagerResult contract.
+
+        Contract: None, or tuple-like (records, summary, keys) where records is a
+        sequence of mapping rows. EagerResult is a tuple subclass; index 0 is records.
+        Do not use .records attribute access — pyright types the return as tuple.
+        """
+        if result is None:
+            return None
+        # EagerResult and plain (records, summary, keys) are both tuple-like.
+        if not isinstance(result, tuple) or not result:
+            return None
+        records = result[0]
+        if not records:
+            return None
+        first = records[0]
+        if isinstance(first, dict):
+            return first
+        try:
+            return dict(first)
+        except (TypeError, ValueError):
+            return None
