@@ -43,9 +43,9 @@ llm:
       api_url: ${GROQ_API_URL:https://api.groq.com/openai/v1}
 
 embedder:
-  provider: "openai"  # Options: openai, azure_openai, gemini, voyage
+  provider: "openai"  # Options: openai, azure_openai, gemini, voyage, ollama
   model: ${EMBEDDER_MODEL:text-embedding-3-small}
-  dimensions: 1536
+  dimensions: ${EMBEDDER_DIMENSIONS:1536}
   
   providers:
     openai:
@@ -69,6 +69,13 @@ embedder:
       api_key: ${VOYAGE_API_KEY}
       api_url: ${VOYAGE_API_URL:https://api.voyageai.com/v1}
       model: "voyage-3"
+
+    ollama:
+      api_url: ${OLLAMA_EMBEDDER_API_URL:http://localhost:11434}
+      api_key: ${OLLAMA_API_KEY:}
+      truncate: ${OLLAMA_EMBEDDER_TRUNCATE:true}
+      keep_alive: ${OLLAMA_EMBEDDER_KEEP_ALIVE:}
+      timeout: ${OLLAMA_EMBEDDER_TIMEOUT:60}
 
 database:
   provider: "falkordb"  # Default: falkordb. Options: neo4j, falkordb

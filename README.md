@@ -560,7 +560,7 @@ ollama pull nomic-embed-text # embeddings
 from graphiti_core import Graphiti
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
-from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
+from graphiti_core.embedder.ollama import OllamaEmbedder, OllamaEmbedderConfig
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 
 # Configure Ollama LLM client
@@ -579,12 +579,11 @@ graphiti = Graphiti(
     "neo4j",
     "password",
     llm_client=llm_client,
-    embedder=OpenAIEmbedder(
-        config=OpenAIEmbedderConfig(
-            api_key="ollama",  # Placeholder API key
+    embedder=OllamaEmbedder(
+        config=OllamaEmbedderConfig(
             embedding_model="nomic-embed-text",
             embedding_dim=768,
-            base_url="http://localhost:11434/v1",
+            base_url="http://localhost:11434",  # Native /api/embed endpoint
         )
     ),
     cross_encoder=OpenAIRerankerClient(client=llm_client, config=llm_config),
@@ -593,7 +592,9 @@ graphiti = Graphiti(
 # Now you can use Graphiti with local Ollama models
 ```
 
-Ensure Ollama is running (`ollama serve`) and that you have pulled the models you want to use.
+Ensure Ollama is running (`ollama serve`) and that you have pulled the models you want to use. Local Ollama needs no embedding API key. For Ollama Cloud, use `base_url="https://ollama.com"` and set `api_key` to `OLLAMA_API_KEY`. The previous `OpenAIEmbedder` configuration against `/v1` remains supported for Ollama's OpenAI-compatible endpoint.
+
+Embedding model and dimension must match stored graph vectors. Rebuild embeddings and vector indexes before changing either value.
 
 ### Structured output and small models
 

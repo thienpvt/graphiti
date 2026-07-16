@@ -5,11 +5,7 @@
 #
 # Create the namespace and credentials before applying this manifest:
 # kubectl create namespace graphiti --dry-run=client -o yaml | kubectl apply -f -
-# kubectl -n graphiti create secret generic graphiti-secrets \
-#   --from-literal=NEO4J_USER=neo4j \
-#   --from-literal=NEO4J_PASSWORD='<strong-password>' \
-#   --from-literal=OPENAI_API_KEY='<api-key>' \
-#   --dry-run=client -o yaml | kubectl apply -f -
+
 
 apiVersion: v1
 kind: Namespace
@@ -30,13 +26,13 @@ data:
 
     llm:
       provider: "openai"
-      model: ${MODEL_NAME:gpt-5.5}
+      model: ${MODEL_NAME:xai/grok-4.5}
       max_tokens: 200000
 
       providers:
         openai:
           api_key: ${OPENAI_API_KEY}
-          api_url: ${OPENAI_API_URL:https://api.openai.com/v1}
+          api_url: ${OPENAI_API_URL:http://router9.shb-smartcard.svc.cluster.local:20128/v1}
           organization_id: ${OPENAI_ORGANIZATION_ID:}
 
         azure_openai:
@@ -62,13 +58,13 @@ data:
 
     embedder:
       provider: "openai"
-      model: ${EMBEDDER_MODEL:text-embedding-3-small}
-      dimensions: 1536
+      model: ${EMBEDDER_MODEL:openrouter/nvidia/llama-nemotron-embed-vl-1b-v2:free}
+      dimensions: ${EMBEDDER_DIMENSIONS:1536}
 
       providers:
         openai:
           api_key: ${OPENAI_API_KEY}
-          api_url: ${OPENAI_API_URL:https://api.openai.com/v1}
+          api_url: ${OPENAI_EMBEDDER_API_URL:http://router9.shb-smartcard.svc.cluster.local:20128/v1}
           organization_id: ${OPENAI_ORGANIZATION_ID:}
 
         azure_openai:
@@ -88,6 +84,13 @@ data:
           api_url: ${VOYAGE_API_URL:https://api.voyageai.com/v1}
           model: "voyage-3"
 
+        ollama:
+          api_url: ${OLLAMA_EMBEDDER_API_URL:http://ollama:11434}
+          api_key: ${OLLAMA_API_KEY:}
+          truncate: ${OLLAMA_EMBEDDER_TRUNCATE:true}
+          keep_alive: ${OLLAMA_EMBEDDER_KEEP_ALIVE:}
+          timeout: ${OLLAMA_EMBEDDER_TIMEOUT:60}
+
     database:
       provider: "neo4j"
 
@@ -100,28 +103,174 @@ data:
           use_parallel_runtime: ${USE_PARALLEL_RUNTIME:false}
 
     graphiti:
-      group_id: ${GRAPHITI_GROUP_ID:main}
+      group_id: ${GRAPHITI_GROUP_ID:oracle-core}
       episode_id_prefix: ${EPISODE_ID_PREFIX:}
       user_id: ${USER_ID:mcp_user}
       entity_types:
-        - name: "Preference"
-          description: "User preferences, choices, opinions, or selections (PRIORITIZE over most other types except User/Assistant)"
-        - name: "Requirement"
-          description: "Specific needs, features, or functionality that must be fulfilled"
-        - name: "Procedure"
-          description: "Standard operating procedures and sequential instructions"
-        - name: "Location"
-          description: "Physical or virtual places where activities occur"
-        - name: "Event"
-          description: "Time-bound activities, occurrences, or experiences"
-        - name: "Organization"
-          description: "Companies, institutions, groups, or formal entities"
-        - name: "Document"
-          description: "Information content in various forms (books, articles, reports, etc.)"
-        - name: "Topic"
-          description: "Subject of conversation, interest, or knowledge domain (use as last resort)"
-        - name: "Object"
-          description: "Physical items, tools, devices, or possessions (use as last resort)"
+      - name: Database
+        description: >
+          A relational database system or database instance.
+  
+      - name: Schema
+        description: >
+          A database schema or owner. Use the exact schema name.
+  
+      - name: Table
+        description: >
+          A physical relational database table. Use schema-qualified canonical
+          name such as APP.NTF_SCHEME_EVENT.
+  
+      - name: View
+        description: >
+          A database view or materialized view. Preserve its schema-qualified name.
+  
+      - name: Column
+        description: >
+          A table or view column. Canonical name must include schema, table and
+          column, for example APP.NTF_SCHEME_EVENT.SCHEME_ID.
+  
+      - name: Package
+        description: >
+          An Oracle PL/SQL package. Use schema-qualified package name.
+  
+      - name: Procedure
+        description: >
+          A standalone procedure or a procedure declared inside an Oracle package.
+  
+      - name: Function
+        description: >
+          A standalone function or a function declared inside an Oracle package.
+  
+      - name: Trigger
+        description: >
+          An Oracle database trigger attached to a table, view or schema.
+  
+      - name: Constraint
+        description: >
+          A primary key, foreign key, unique, check or not-null constraint.
+  
+      - name: Index
+        description: >
+          A database index including unique and function-based indexes.
+  
+      - name: DictionaryDocument
+        description: >
+          A source data-dictionary document containing descriptions and documented
+          database relationships.
+
+      edge_types:
+        - name: Contains
+          description: >
+            Structural containment such as Schema contains Table, Table contains
+            Column, or Package contains Procedure.
+    
+        - name: PrimaryKeyOf
+          description: >
+            A constraint or column is the declared primary key of a table.
+    
+        - name: ForeignKeyTo
+          description: >
+            A declared database foreign key supported by DDL or constraint metadata.
+    
+        - name: ReferencesByCode
+          description: >
+            A logical reference inferred from SQL or PL/SQL without a declared
+            database foreign key.
+    
+        - name: ReadsFrom
+          description: >
+            A package, procedure, function, trigger or view reads from a table or view.
+    
+        - name: WritesTo
+          description: >
+            A package, procedure, function or trigger inserts, updates, deletes or
+            merges data in a table.
+    
+        - name: JoinsWith
+          description: >
+            Two tables or views are joined in executable SQL using one or more columns.
+    
+        - name: Calls
+          description: >
+            A package, procedure, function or trigger calls another executable object.
+    
+        - name: DependsOn
+          description: >
+            A database object depends on another database object.
+    
+        - name: DerivedFrom
+          description: >
+            A view, materialized view, output column or table value is derived from
+            another database object.
+    
+        - name: DocumentedBy
+          description: >
+            A database entity is described by a source dictionary document.
+    
+      edge_type_map:
+        - source: Schema
+          target: Table
+          edge_types: [Contains]
+    
+        - source: Schema
+          target: View
+          edge_types: [Contains]
+    
+        - source: Schema
+          target: Package
+          edge_types: [Contains]
+    
+        - source: Table
+          target: Column
+          edge_types: [Contains]
+    
+        - source: View
+          target: Column
+          edge_types: [Contains]
+    
+        - source: Package
+          target: Procedure
+          edge_types: [Contains]
+    
+        - source: Package
+          target: Function
+          edge_types: [Contains]
+    
+        - source: Constraint
+          target: Table
+          edge_types: [PrimaryKeyOf]
+    
+        - source: Column
+          target: Column
+          edge_types: [ForeignKeyTo, ReferencesByCode]
+    
+        - source: Procedure
+          target: Table
+          edge_types: [ReadsFrom, WritesTo]
+    
+        - source: Function
+          target: Table
+          edge_types: [ReadsFrom, WritesTo]
+    
+        - source: Trigger
+          target: Table
+          edge_types: [ReadsFrom, WritesTo]
+    
+        - source: Table
+          target: Table
+          edge_types: [JoinsWith, DependsOn]
+    
+        - source: View
+          target: Table
+          edge_types: [ReadsFrom, DerivedFrom, DependsOn]
+    
+        - source: Entity
+          target: DictionaryDocument
+          edge_types: [DocumentedBy]
+    
+        - source: Entity
+          target: Entity
+          edge_types: [DependsOn, Calls]
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -178,6 +327,8 @@ spec:
             - name: bolt
               containerPort: 7687
           env:
+            - name: NEO4J_server_config_strict__validation_enabled
+              value: "false"
             - name: NEO4J_USER
               valueFrom:
                 secretKeyRef:
@@ -269,14 +420,18 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: graphiti-mcp
-          image: ghcr.io/thienpvt/graphiti-mcp:standalone
+          image: ghcr.io/thienpvt/graphiti-mcp:sha-19b8bb14cdac147566daeab94c4bfb370f564d5b
           imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8000
           env:
+            - name: MAX_TOKENS
+              value: '100000'
+            - name: FASTMCP_HTTP_ALLOWED_HOSTS
+              value: '["10.4.97.70:30080","localhost:*","127.0.0.1:*"]'
             - name: NEO4J_URI
-              value: bolt://neo4j:7687
+              value: 'bolt://neo4j:7687'
             - name: NEO4J_USER
               valueFrom:
                 secretKeyRef:
@@ -288,24 +443,27 @@ spec:
                   name: graphiti-secrets
                   key: NEO4J_PASSWORD
             - name: NEO4J_DATABASE
-              value: neo4j
-            - name: GRAPHITI_GROUP_ID
-              value: main
+              value: 'neo4j'
             - name: SEMAPHORE_LIMIT
               value: "10"
             - name: CONFIG_PATH
-              value: /app/mcp/config/config.yaml
+              value: '/app/mcp/config/config.yaml'
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: graphiti-secrets
                   key: OPENAI_API_KEY
+            - name: OPENAI_EMBEDDER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: graphiti-secrets
+                  key: OPENAI_EMBEDDER_API_KEY
           resources:
             requests:
-              cpu: 250m
+              cpu: 500m
               memory: 512Mi
             limits:
-              cpu: "1"
+              cpu: "2"
               memory: 1Gi
           startupProbe:
             httpGet:

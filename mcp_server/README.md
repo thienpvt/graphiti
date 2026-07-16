@@ -24,7 +24,7 @@ The Graphiti MCP server provides comprehensive knowledge graph capabilities:
 - **Multiple LLM Providers**: Support for OpenAI, Anthropic, Gemini, Groq, and Azure OpenAI
 - **Multiple Embedding Providers**: Support for OpenAI, Voyage, Sentence Transformers, and Gemini embeddings
 - **Rich Entity Types**: Built-in entity types including Preferences, Requirements, Procedures, Locations, Events, Organizations, Documents, and more for structured knowledge extraction
-- **HTTP Transport**: Default HTTP transport with MCP endpoint at `/mcp/` for broad client compatibility
+- **HTTP Transport**: Default HTTP transport with MCP endpoint at `/mcp` for broad client compatibility
 - **Queue-based Processing**: Asynchronous episode processing with configurable concurrency limits
 
 ## Quick Start
@@ -72,7 +72,7 @@ This starts both FalkorDB and the MCP server in a single container.
 docker compose -f docker/docker-compose-neo4j.yml up
 ```
 
-4. Point your MCP client to `http://localhost:8000/mcp/`
+4. Point your MCP client to `http://localhost:8000/mcp`
 
 ## Installation
 
@@ -94,7 +94,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Create a virtual environment and install dependencies in one step
 uv sync
 
-# Optional: Install additional LLM providers (anthropic, gemini, groq, voyage, sentence-transformers)
+# Optional: Install additional providers (anthropic, gemini, groq, voyage, sentence-transformers)
 uv sync --extra providers
 ```
 
@@ -105,7 +105,7 @@ The server can be configured using a `config.yaml` file, environment variables, 
 ### Default Configuration
 
 The MCP server comes with sensible defaults:
-- **Transport**: HTTP (accessible at `http://localhost:8000/mcp/`)
+- **Transport**: HTTP (accessible at `http://localhost:8000/mcp`)
 - **Database**: FalkorDB (combined in single container with MCP server)
 - **LLM**: OpenAI with model gpt-5.5
 - **Embedder**: OpenAI text-embedding-3-small
@@ -171,23 +171,33 @@ database:
   provider: "falkordb"  # Default. Options: "falkordb", "neo4j"
 ```
 
-### Using Ollama for Local LLM
+### Using Ollama for Local LLM and Embeddings
 
-To use Ollama with the MCP server, configure it as an OpenAI-compatible endpoint:
+Ollama LLM inference uses its OpenAI-compatible `/v1` endpoint. Embeddings use Ollama's native `/api/embed` endpoint directly:
 
 ```yaml
 llm:
   provider: "openai"
   model: "gpt-oss:120b"  # or your preferred Ollama model
-  api_base: "http://localhost:11434/v1"
-  api_key: "ollama"  # dummy key required
+  providers:
+    openai:
+      api_url: "http://localhost:11434/v1"
+      api_key: "ollama"  # placeholder required by the OpenAI-compatible client
 
 embedder:
-  provider: "sentence_transformers"  # recommended for local setup
-  model: "all-MiniLM-L6-v2"
+  provider: "ollama"
+  model: "nomic-embed-text"
+  dimensions: 768
+  providers:
+    ollama:
+      api_url: "http://localhost:11434"  # host root; client appends /api/embed
+      truncate: true
+      timeout: 60
 ```
 
-Make sure Ollama is running locally with: `ollama serve`
+Local Ollama needs no embedding API key. Ollama Cloud uses `api_url: "https://ollama.com"` and `api_key: ${OLLAMA_API_KEY}`. Keep embedding model and dimensions unchanged for an existing graph; changing either requires rebuilding stored embeddings and vector indexes.
+
+Make sure Ollama is running locally with `ollama serve` and both models are pulled. From Docker, `localhost` means the MCP container; use `http://host.docker.internal:11434` or a reachable Ollama service name. Kubernetes likewise needs a service URL such as `http://ollama:11434`, not pod-local `localhost` unless Ollama runs as a sidecar.
 
 > [!IMPORTANT]
 > Graphiti relies on structured (JSON) output for entity/edge extraction and deduplication, and reliability varies on
@@ -247,6 +257,12 @@ The `config.yaml` file supports environment variable expansion using `${VAR_NAME
 - `AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT`: Optional Azure OpenAI embeddings deployment name
 - `AZURE_OPENAI_API_VERSION`: Optional Azure OpenAI API version
 - `USE_AZURE_AD`: Optional use Azure Managed Identities for authentication
+- `EMBEDDER_DIMENSIONS`: Embedding vector width (must match the selected model)
+- `OLLAMA_EMBEDDER_API_URL`: Ollama host root for native `/api/embed` (default: `http://localhost:11434`)
+- `OLLAMA_API_KEY`: Optional Bearer token for Ollama Cloud
+- `OLLAMA_EMBEDDER_TRUNCATE`: Truncate overlong inputs (default: `true`)
+- `OLLAMA_EMBEDDER_KEEP_ALIVE`: Optional model keep-alive duration, such as `5m`
+- `OLLAMA_EMBEDDER_TIMEOUT`: Request timeout in seconds (default: `60`)
 - `SEMAPHORE_LIMIT`: Episode processing concurrency. See [Concurrency and LLM Provider 429 Rate Limit Errors](#concurrency-and-llm-provider-429-rate-limit-errors)
 
 You can set these variables in a `.env` file in the project directory.
@@ -262,7 +278,7 @@ docker compose up
 ```
 
 This starts a single container with:
-- HTTP transport on `http://localhost:8000/mcp/`
+- HTTP transport on `http://localhost:8000/mcp`
 - FalkorDB graph database on `localhost:6379`
 - FalkorDB web UI on `http://localhost:3000`
 - OpenAI LLM with gpt-5.5 model
@@ -328,7 +344,9 @@ uv run main.py --config config/config-docker-falkordb.yaml
 
 - `--config`: Path to YAML configuration file (default: config.yaml)
 - `--llm-provider`: LLM provider to use (openai, anthropic, gemini, groq, azure_openai)
-- `--embedder-provider`: Embedder provider to use (openai, azure_openai, gemini, voyage)
+- `--embedder-provider`: Embedder provider to use (openai, azure_openai, gemini, voyage, ollama)
+- `--embedder-model`: Model name to use with the embedder
+- `--embedder-dimensions`: Embedding vector width (must match the selected model)
 - `--database-provider`: Database provider to use (falkordb, neo4j) - default: falkordb
 - `--model`: Model name to use with the LLM client
 - `--temperature`: Temperature setting for the LLM (0.0-2.0)
@@ -407,6 +425,8 @@ Before running Docker Compose, configure your API keys using a `.env` file (reco
 
    # Optional - embedder providers
    VOYAGE_API_KEY=your_voyage_key
+   OLLAMA_EMBEDDER_API_URL=http://host.docker.internal:11434
+   EMBEDDER_DIMENSIONS=768
    ```
 
 **Important**: The `.env` file must be in the `mcp_server/` directory (the parent of the `docker/` subdirectory).
@@ -457,7 +477,7 @@ FalkorDB configuration:
 #### Accessing the MCP Server
 
 Once running, the MCP server is available at:
-- **HTTP endpoint**: `http://localhost:8000/mcp/`
+- **HTTP endpoint**: `http://localhost:8000/mcp`
 - **Health check**: `http://localhost:8000/health`
 
 #### Running Docker Compose from a Different Directory
@@ -486,7 +506,7 @@ VS Code with GitHub Copilot Chat extension supports MCP servers. Add to your VS 
 {
   "mcpServers": {
     "graphiti": {
-      "uri": "http://localhost:8000/mcp/",
+      "uri": "http://localhost:8000/mcp",
       "transport": {
         "type": "http"
       }
@@ -540,7 +560,7 @@ For HTTP transport (default), you can use this configuration:
   "mcpServers": {
     "graphiti-memory": {
       "transport": "http",
-      "url": "http://localhost:8000/mcp/"
+      "url": "http://localhost:8000/mcp"
     }
   }
 }
@@ -617,7 +637,7 @@ docker compose up
 {
   "mcpServers": {
     "graphiti-memory": {
-      "url": "http://localhost:8000/mcp/"
+      "url": "http://localhost:8000/mcp"
     }
   }
 }
@@ -632,7 +652,7 @@ capabilities.
 
 ## Integrating with Claude Desktop (Docker MCP Server)
 
-The Graphiti MCP Server uses HTTP transport (at endpoint `/mcp/`). Claude Desktop does not natively support HTTP transport, so you'll need to use a gateway like `mcp-remote`.
+The Graphiti MCP Server uses HTTP transport (at endpoint `/mcp`). Claude Desktop does not natively support HTTP transport, so you'll need to use a gateway like `mcp-remote`.
 
 1.  **Run the Graphiti MCP server**:
 
@@ -660,7 +680,7 @@ The Graphiti MCP Server uses HTTP transport (at endpoint `/mcp/`). Claude Deskto
           "command": "npx", // Or the full path to mcp-remote if npx is not in your PATH
           "args": [
             "mcp-remote",
-            "http://localhost:8000/mcp/" // The Graphiti server's HTTP endpoint
+            "http://localhost:8000/mcp" // The Graphiti server's HTTP endpoint
           ]
         }
       }

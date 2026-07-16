@@ -23,8 +23,8 @@ from graphiti_core.models.nodes.node_db_queries import get_entity_node_save_quer
 from graphiti_core.nodes import EntityNode, EpisodeType, SagaNode
 from graphiti_core.search.search_filters import SearchFilters
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
-from mcp.server.transport_security import TransportSecuritySettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 from typing_extensions import LiteralString
@@ -131,7 +131,7 @@ def configure_uvicorn_logging():
 logger = logging.getLogger(__name__)
 
 # Create global config instance - will be properly initialized later
-config= GraphitiConfig()
+config = GraphitiConfig()
 
 # MCP server instructions
 GRAPHITI_MCP_INSTRUCTIONS = """
@@ -178,16 +178,16 @@ server requires a configured database and valid API keys for language-model oper
 
 # MCP server instance
 allowed_hosts_raw = os.getenv(
-    "FASTMCP_HTTP_ALLOWED_HOSTS",
+    'FASTMCP_HTTP_ALLOWED_HOSTS',
     '["localhost:*", "127.0.0.1:*", "[::1]:*"]',
 )
 
 allowed_hosts = json.loads(allowed_hosts_raw)
 
 mcp = FastMCP(
-    "Graphiti Agent Memory",
+    'Graphiti Agent Memory',
     instructions=GRAPHITI_MCP_INSTRUCTIONS,
-    host=config.server.host or "0.0.0.0",
+    host=config.server.host or '0.0.0.0',
     port=config.server.port,
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
@@ -229,11 +229,9 @@ class GraphitiService:
             except Exception as e:
                 logger.warning(f'Failed to create LLM client: {e}')
 
-            # Create embedder client based on configured provider
-            try:
-                embedder_client = EmbedderFactory.create(self.config.embedder)
-            except Exception as e:
-                logger.warning(f'Failed to create embedder client: {e}')
+            # Create embedder client based on configured provider. Invalid explicit
+            # configuration must not silently fall back to Graphiti's OpenAI default.
+            embedder_client = EmbedderFactory.create(self.config.embedder)
 
             # Get database configuration
             db_config = DatabaseDriverFactory.create_config(self.config.database)
@@ -358,6 +356,12 @@ class GraphitiService:
         if self.client is None:
             raise RuntimeError('Failed to initialize Graphiti client')
         return self.client
+
+    async def close(self) -> None:
+        """Close the initialized Graphiti client."""
+        if self.client is not None:
+            await self.client.close()
+            self.client = None
 
 
 @mcp.tool()
@@ -746,8 +750,7 @@ async def update_entity(
                 remove_labels = ':'.join(previous_labels)
                 replace_labels_query: LiteralString = (  # type: ignore[assignment]
                     'MATCH (n:Entity {uuid: $entity_data.uuid}) '
-                    f'WITH n AS existing REMOVE existing:{remove_labels} '
-                    + save_query
+                    f'WITH n AS existing REMOVE existing:{remove_labels} ' + save_query
                 )
                 await client.driver.execute_query(
                     replace_labels_query,
@@ -1264,7 +1267,7 @@ async def initialize_server() -> ServerConfig:
     )
     parser.add_argument(
         '--embedder-provider',
-        choices=['openai', 'azure_openai', 'gemini', 'voyage'],
+        choices=['openai', 'azure_openai', 'gemini', 'voyage', 'ollama'],
         help='Embedder provider to use',
     )
     parser.add_argument(
@@ -1282,6 +1285,11 @@ async def initialize_server() -> ServerConfig:
 
     # Embedder configuration arguments
     parser.add_argument('--embedder-model', help='Model name to use with the embedder')
+    parser.add_argument(
+        '--embedder-dimensions',
+        type=int,
+        help='Embedding vector dimensions (must match the selected model)',
+    )
 
     # Graphiti-specific arguments
     parser.add_argument(
@@ -1341,10 +1349,13 @@ async def initialize_server() -> ServerConfig:
     if hasattr(config, 'destroy_graph') and config.destroy_graph:
         logger.warning('Destroying all Graphiti graphs as requested...')
         temp_service = GraphitiService(config, SEMAPHORE_LIMIT)
-        await temp_service.initialize()
-        client = await temp_service.get_client()
-        await clear_data(client.driver)
-        logger.info('All graphs destroyed')
+        try:
+            await temp_service.initialize()
+            client = await temp_service.get_client()
+            await clear_data(client.driver)
+            logger.info('All graphs destroyed')
+        finally:
+            await temp_service.close()
 
     # Initialize services
     graphiti_service = GraphitiService(config, SEMAPHORE_LIMIT)
@@ -1370,46 +1381,46 @@ async def initialize_server() -> ServerConfig:
 
 async def run_mcp_server():
     """Run the MCP server in the current event loop."""
-    # Initialize the server
-    mcp_config = await initialize_server()
+    global graphiti_service
 
-    # Run the server with configured transport
-    logger.info(f'Starting MCP server with transport: {mcp_config.transport}')
-    if mcp_config.transport == 'stdio':
-        await mcp.run_stdio_async()
-    elif mcp_config.transport == 'sse':
-        logger.info(
-            f'Running MCP server with SSE transport on {mcp.settings.host}:{mcp.settings.port}'
-        )
-        logger.info(f'Access the server at: http://{mcp.settings.host}:{mcp.settings.port}/sse')
-        await mcp.run_sse_async()
-    elif mcp_config.transport == 'http':
-        # Use localhost for display if binding to 0.0.0.0
-        display_host = 'localhost' if mcp.settings.host == '0.0.0.0' else mcp.settings.host
-        logger.info(
-            f'Running MCP server with streamable HTTP transport on {mcp.settings.host}:{mcp.settings.port}'
-        )
-        logger.info('=' * 60)
-        logger.info('MCP Server Access Information:')
-        logger.info(f'  Base URL: http://{display_host}:{mcp.settings.port}/')
-        logger.info(f'  MCP Endpoint: http://{display_host}:{mcp.settings.port}/mcp/')
-        logger.info('  Transport: HTTP (streamable)')
+    try:
+        mcp_config = await initialize_server()
 
-        # Show FalkorDB Browser UI access if enabled
-        if os.environ.get('BROWSER', '1') == '1':
-            logger.info(f'  FalkorDB Browser UI: http://{display_host}:3000/')
+        logger.info(f'Starting MCP server with transport: {mcp_config.transport}')
+        if mcp_config.transport == 'stdio':
+            await mcp.run_stdio_async()
+        elif mcp_config.transport == 'sse':
+            logger.info(
+                f'Running MCP server with SSE transport on {mcp.settings.host}:{mcp.settings.port}'
+            )
+            logger.info(f'Access the server at: http://{mcp.settings.host}:{mcp.settings.port}/sse')
+            await mcp.run_sse_async()
+        elif mcp_config.transport == 'http':
+            display_host = 'localhost' if mcp.settings.host == '0.0.0.0' else mcp.settings.host
+            logger.info(
+                f'Running MCP server with streamable HTTP transport on {mcp.settings.host}:{mcp.settings.port}'
+            )
+            logger.info('=' * 60)
+            logger.info('MCP Server Access Information:')
+            logger.info(f'  Base URL: http://{display_host}:{mcp.settings.port}/')
+            logger.info(f'  MCP Endpoint: http://{display_host}:{mcp.settings.port}/mcp/')
+            logger.info('  Transport: HTTP (streamable)')
 
-        logger.info('=' * 60)
-        logger.info('For MCP clients, connect to the /mcp/ endpoint above')
+            if os.environ.get('BROWSER', '1') == '1':
+                logger.info(f'  FalkorDB Browser UI: http://{display_host}:3000/')
 
-        # Configure uvicorn logging to match our format
-        configure_uvicorn_logging()
-
-        await mcp.run_streamable_http_async()
-    else:
-        raise ValueError(
-            f'Unsupported transport: {mcp_config.transport}. Use "sse", "stdio", or "http"'
-        )
+            logger.info('=' * 60)
+            logger.info('For MCP clients, connect to the /mcp/ endpoint above')
+            configure_uvicorn_logging()
+            await mcp.run_streamable_http_async()
+        else:
+            raise ValueError(
+                f'Unsupported transport: {mcp_config.transport}. Use "sse", "stdio", or "http"'
+            )
+    finally:
+        if graphiti_service is not None:
+            await graphiti_service.close()
+            graphiti_service = None
 
 
 def main():

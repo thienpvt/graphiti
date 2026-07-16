@@ -158,8 +158,9 @@ def test_cli_override():
         llm_provider = 'anthropic'
         model = 'claude-3-sonnet'
         temperature = 0.5
-        embedder_provider = 'voyage'
-        embedder_model = 'voyage-3'
+        embedder_provider = 'ollama'
+        embedder_model = 'nomic-embed-text'
+        embedder_dimensions = 768
         database_provider = 'falkordb'
         group_id = 'test-group'
         user_id = 'test-user'
@@ -169,6 +170,9 @@ def test_cli_override():
 
     assert config.server.host == '127.0.0.1', f'Expected host 127.0.0.1, got {config.server.host}'
     assert config.server.port == 9999, f'Expected port 9999, got {config.server.port}'
+    assert config.embedder.provider == 'ollama'
+    assert config.embedder.model == 'nomic-embed-text'
+    assert config.embedder.dimensions == 768
 
     print('✓ CLI overrides applied successfully')
     print(f'  - Transport: {config.server.transport}')
@@ -193,6 +197,7 @@ def test_cli_override():
         temperature = None
         embedder_provider = None
         embedder_model = None
+        embedder_dimensions = None
         database_provider = None
         group_id = None
         user_id = None
@@ -203,6 +208,16 @@ def test_cli_override():
     assert default_config.server.host == '0.0.0.0', 'Default host should be preserved'
     assert default_config.server.port == 8000, 'Default port should be preserved'
     print('✓ Defaults preserved when CLI flags are omitted')
+
+    class ProviderOnlyArgs(MinimalArgs):
+        embedder_provider = 'ollama'
+
+    ollama_config = GraphitiConfig()
+    ollama_config.apply_cli_overrides(ProviderOnlyArgs())
+
+    assert ollama_config.embedder.provider == 'ollama'
+    assert ollama_config.embedder.model == 'embeddinggemma'
+    assert ollama_config.embedder.dimensions == 768
 
 
 async def main():
