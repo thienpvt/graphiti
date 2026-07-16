@@ -12,6 +12,7 @@ Gate mode: CATALOG_INT_REQUIRED=1 converts missing Neo4j into FAIL (not skip).
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import os
 import sys
@@ -284,6 +285,29 @@ async def _count_group_edges(driver: Any, group_id: str = GROUP) -> int:
     return int(row['c'] if isinstance(row, dict) else row['c'])
 
 
+async def _snapshot_other_groups(driver: Any) -> tuple[tuple[str, int, int], ...]:
+    result = await driver.execute_query(
+        """
+        CALL {
+          MATCH (n)
+          WHERE n.group_id IS NOT NULL AND n.group_id <> $g
+          RETURN n.group_id AS group_id, count(n) AS node_count, 0 AS edge_count
+          UNION ALL
+          MATCH ()-[e]->()
+          WHERE e.group_id IS NOT NULL AND e.group_id <> $g
+          RETURN e.group_id AS group_id, 0 AS node_count, count(e) AS edge_count
+        }
+        RETURN group_id, sum(node_count) AS node_count, sum(edge_count) AS edge_count
+        ORDER BY group_id
+        """,
+        params={'g': GROUP},
+    )
+    return tuple(
+        (str(row['group_id']), int(row['node_count']), int(row['edge_count']))
+        for row in (result[0] if result else [])
+    )
+
+
 async def _count_entity_uuid(driver: Any, ent_uuid: str) -> int:
     result = await driver.execute_query(
         'MATCH (n:Entity {uuid: $u}) WHERE n.group_id = $g RETURN count(n) AS c',
@@ -398,11 +422,13 @@ async def neo4j_driver():
     await asyncio.sleep(0.5)
 
     await _teardown_group(driver)
+    other_groups_before = await _snapshot_other_groups(driver)
     try:
         yield driver
     finally:
         try:
             await _teardown_group(driver)
+            assert await _snapshot_other_groups(driver) == other_groups_before
         finally:
             await driver.close()
 
@@ -430,31 +456,6 @@ async def catalog_client(neo4j_driver: Any):
     )
 
 
-async def _assert_no_out_of_group(driver: Any) -> None:
-    other = await driver.execute_query(
-        """
-        MATCH (n)
-        WHERE n.group_id IS NOT NULL AND n.group_id <> $g
-        RETURN count(n) AS c
-        """,
-        params={'g': GROUP},
-    )
-    other_rows = other[0] if other else []
-    if other_rows:
-        # Isolated empty Neo4j may still be empty; if any other groups exist, leave them.
-        assert (
-            int(other_rows[0]['c'] if isinstance(other_rows[0], dict) else other_rows[0]['c']) >= 0
-        )
-    # Empty DB expected for this isolated instance; still assert forbidden group untouched.
-    forb = await driver.execute_query(
-        'MATCH (n) WHERE n.group_id = $g RETURN count(n) AS c',
-        params={'g': FORBIDDEN_GROUP},
-    )
-    records = forb[0] if forb else []
-    if records:
-        row = records[0]
-        c = int(row['c'] if isinstance(row, dict) else row['c'])
-        assert c == 0, 'must never write oracle-catalog-v2'
 
 
 async def _upsert_entities(ctx, entities: list[CatalogEntityItem], **kw: Any):
@@ -561,7 +562,6 @@ async def test_happy_path_six_entities_and_six_edges(catalog_client):
         assert row['graph_key'] == item.graph_key
         assert row['name'] == item.graph_key
 
-    await _assert_no_out_of_group(ctx.driver)
 
 
 async def test_resolve_and_verify_found(catalog_client):
@@ -609,6 +609,72 @@ async def test_resolve_and_verify_found(catalog_client):
     assert vresp.edges.missing_embedding == []
     assert vresp.missing == []
     assert vresp.anomalies == []
+
+
+async def test_verify_physical_duplicate_edge_is_preserved_and_reported(catalog_client):
+    ctx = catalog_client
+    await _upsert_entities(ctx, [_six_entities()[1], _six_entities()[2]])
+    edge = _structural_and_fk_edges()[0]
+    edge_resp = await _upsert_edges(ctx, [edge], batch_id='verify-duplicate-live')
+    assert edge_resp.created == 1
+    expected_uuid = edge_resp.results[0].uuid
+    assert expected_uuid
+
+    await ctx.driver.execute_query(
+        """
+        MATCH (s:Entity {group_id: $g, graph_key: $source_key})
+        MATCH (t:Entity {group_id: $g, graph_key: $target_key})
+        CREATE (s)-[:RELATES_TO {
+          uuid: $rogue_uuid,
+          group_id: $g,
+          edge_key: $edge_key,
+          name: '',
+          batch_id: $batch_id
+        }]->(t)
+        """,
+        params={
+            'g': GROUP,
+            'source_key': edge.source_graph_key,
+            'target_key': edge.target_graph_key,
+            'rogue_uuid': str(uuid.uuid4()),
+            'edge_key': edge.edge_key,
+            'batch_id': 'verify-duplicate-live',
+        },
+    )
+    resp = await ctx.service.verify_catalog_batch(
+        client=ctx.client,
+        request=VerifyCatalogBatchRequest(
+            group_id=GROUP,
+            batch_id='verify-duplicate-live',
+            edges=[VerifyEdgeRef(edge_type=edge.edge_type, edge_key=edge.edge_key)],
+        ),
+    )
+    assert resp.edges.found == 1
+    assert resp.edges.duplicate_edge_key == [edge.edge_key]
+    assert resp.edges.uuid_mismatch == [edge.edge_key]
+    assert resp.edges.edge_type_mismatch == [edge.edge_key]
+    assert resp.edges.missing_embedding == [edge.edge_key]
+
+
+async def test_provenance_presence_isolated_by_episode_and_target_group(catalog_client):
+    ctx = catalog_client
+    entity = _six_entities()[2]
+    response = await _upsert_entities(ctx, [entity])
+    target_uuid = response.results[0].uuid
+    assert target_uuid
+
+    await ctx.driver.execute_query(
+        """
+        MATCH (target:Entity {uuid: $u, group_id: $g})
+        CREATE (ep:Episodic {uuid: $ep_uuid, group_id: 'other-test-group'})
+        CREATE (ep)-[:MENTIONS]->(target)
+        """,
+        params={'u': target_uuid, 'g': GROUP, 'ep_uuid': str(uuid.uuid4())},
+    )
+    rows = await ctx.service._store.match_provenance_presence(
+        ctx.driver, group_id=GROUP, target_uuids=[target_uuid]
+    )
+    assert rows == [{'uuid': target_uuid, 'has_provenance': False}]
 
 
 async def test_verify_edge_endpoint_and_type_mismatch_live(catalog_client):
@@ -1169,22 +1235,30 @@ async def test_no_llm_no_queue_calls(catalog_client):
     ctx.queue.enqueue.assert_not_called()
     ctx.queue.add.assert_not_called()
     assert ctx.llm.calls == 0
-    await _assert_no_out_of_group(ctx.driver)
 
 
-async def test_teardown_scoped_never_clear_graph(catalog_client):
-    """Fixture contract: only GROUP deleted; clear_graph never used."""
+async def test_teardown_scoped_and_fixture_never_calls_clear_graph(catalog_client):
+    """Fixture contract: only GROUP deletion; no clear_graph invocation."""
     ctx = catalog_client
     await _upsert_entities(ctx, [_six_entities()[0]])
     assert await _count_group_nodes(ctx.driver) == 1
-    # Simulate fixture teardown query only
     await _teardown_group(ctx.driver)
     assert await _count_group_nodes(ctx.driver) == 0
-    # Source must not reference clear_graph
-    src = Path(__file__).read_text(encoding='utf-8')
-    assert 'clear_graph' not in src or 'Never clear_graph' in src
-    assert GROUP in src
-    assert FORBIDDEN_GROUP in src
+
+    tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
+    clear_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (
+            isinstance(node.func, ast.Name)
+            and node.func.id == 'clear_graph'
+            or isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'clear_graph'
+        )
+    ]
+    assert clear_calls == []
+    assert FORBIDDEN_GROUP == 'oracle-catalog-v2'
 
 
 async def test_two_fk_edges_distinct_keys_same_endpoints(catalog_client):

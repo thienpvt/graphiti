@@ -592,6 +592,39 @@ def test_build_get_edge_by_uuid_cypher_parameterized():
     assert 'SET e = $' not in cypher
 
 
+def test_verify_edge_queries_return_physical_identity_and_provenance_is_group_scoped():
+    store = CatalogNeo4jStore()
+    for cypher in (
+        store.build_match_edges_for_verify_by_batch_cypher(),
+        store.build_match_edges_for_verify_by_keys_cypher(),
+    ):
+        assert 'elementId(e) AS element_id' in cypher
+    provenance = store.build_match_provenance_presence_cypher()
+    assert 'ep.group_id = $group_id' in provenance
+    assert 'n.group_id = $group_id' in provenance
+
+
+@pytest.mark.asyncio
+async def test_verify_edge_overlap_dedup_uses_element_id_and_preserves_twins():
+    store = CatalogNeo4jStore()
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = params, kwargs
+            rows = [
+                {'element_id': 'rel-1', 'uuid': 'same', 'edge_key': 'EDGE::K'},
+                {'element_id': 'rel-2', 'uuid': 'same', 'edge_key': 'EDGE::K'},
+            ]
+            if '$batch_id' in cypher:
+                return (rows, None, [])
+            return ([rows[0]], None, [])
+
+    rows = await store.match_edges_for_verify(
+        _Exec(), group_id=GROUP, batch_id=BATCH, edge_keys=['EDGE::K']
+    )
+    assert [row['element_id'] for row in rows] == ['rel-1', 'rel-2']
+
+
 def test_identity_uniqueness_constraint_statements_are_fixed_create_only():
     stmts = CatalogNeo4jStore.identity_uniqueness_constraint_statements()
     assert len(stmts) == 2
