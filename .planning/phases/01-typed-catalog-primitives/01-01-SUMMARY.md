@@ -142,6 +142,8 @@ Each task was committed atomically (TDD RED then GREEN):
 2. **Task 2: Deterministic identity and canonical hash helpers**
    - `ec2d9d6` test(01-01): add failing tests for catalog identity helpers
    - `fb427db` feat(01-01): implement catalog UUIDv5 and canonical SHA-256 helpers
+3. **Post-merge diagnostic fix**
+   - `361bec2` fix(01-01): clear pyright diagnostics on catalog foundation
 
 ## Files Created/Modified
 
@@ -171,6 +173,14 @@ Each task was committed atomically (TDD RED then GREEN):
 - **Files modified:** `mcp_server/src/config/schema.py`
 - **Committed in:** `c67e69d`
 
+**2. [Rule 1 - Bug] Pyright diagnostics on foundation surface**
+- **Found during:** Post-execution diagnostic gate
+- **Issue:** `CatalogConfig` self-annotation, `enum.StrEnum` (3.11+), `CatalogErrorCode.value` as str, unresolved test imports without `extraPaths`, graphiti_core optional import noise
+- **Fix:** Quoted return annotation; local `str, Enum` StrEnum; `_error_code_text`; `extraPaths=["src"]`; local `_validate_group_id`; typed `model_validate` test helpers
+- **Files modified:** `schema.py`, `catalog_common.py`, `catalog_entities.py`, `catalog_edges.py`, `catalog_identity.py`, `pyproject.toml`, `test_catalog_models.py`
+- **Verification:** 55 unit tests pass; pyright 0 errors on changed paths
+- **Committed in:** `361bec2`
+
 ## Threat Flags
 
 None — no new network endpoints, auth paths, or runtime I/O surfaces. Models and pure helpers only.
@@ -183,7 +193,9 @@ None.
 
 - RED commits present: `bd6290b`, `ec2d9d6`
 - GREEN commits present after RED: `c67e69d`, `fb427db`
+- Diagnostic fix: `361bec2`
 - Verification: `pytest tests/test_catalog_models.py tests/test_catalog_identity.py` → 55 passed
+- Verification: `pyright src/config/schema.py src/models src/services/catalog_identity.py tests/test_catalog_models.py tests/test_catalog_identity.py` → 0 errors
 
 ## Self-Check: PASSED
 
@@ -195,4 +207,4 @@ None.
 - FOUND: `mcp_server/src/services/catalog_identity.py`
 - FOUND: `mcp_server/tests/test_catalog_models.py`
 - FOUND: `mcp_server/tests/test_catalog_identity.py`
-- FOUND commits: `bd6290b`, `c67e69d`, `ec2d9d6`, `fb427db`
+- FOUND commits: `bd6290b`, `c67e69d`, `ec2d9d6`, `fb427db`, `361bec2`, `bc5f83b`
