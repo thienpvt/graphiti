@@ -1071,6 +1071,68 @@ async def test_verify_edge_type_mismatch_never_becomes_endpoint_mismatch():
 
 
 @pytest.mark.asyncio
+async def test_verify_edge_aggregates_anomalies_across_all_duplicate_rows_once():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    expected_uuid = catalog_edge_uuid(FIXED_NS, GROUP, 'Contains', edge_key)
+    service._store.match_edges_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': expected_uuid,
+                'edge_key': edge_key,
+                'edge_type': 'Contains',
+                'source_graph_key': 'SCHEMA::HR',
+                'has_fact_embedding': True,
+            },
+            {
+                'uuid': 'rogue',
+                'edge_key': edge_key,
+                'edge_type': '',
+                'source_graph_key': 'SCHEMA::WRONG',
+                'has_fact_embedding': False,
+            },
+        ]
+    )
+    resp = await service.verify_catalog_batch(
+        client=client,
+        request=_verify_request(
+            batch_id=None,
+            entities=[],
+            edges=[
+                VerifyEdgeRef(
+                    edge_type='Contains',
+                    edge_key=edge_key,
+                    expected_source_graph_key='SCHEMA::HR',
+                )
+            ],
+        ),
+    )
+    assert resp.edges.duplicate_edge_key == [edge_key]
+    assert resp.edges.uuid_mismatch == [edge_key]
+    assert resp.edges.edge_type_mismatch == [edge_key]
+    assert resp.edges.endpoint_mismatch == [edge_key]
+    assert resp.edges.missing_embedding == [edge_key]
+
+
+@pytest.mark.asyncio
+async def test_verify_provenance_read_failure_is_internal_error_not_missing():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    service._store.match_provenance_presence = AsyncMock(side_effect=RuntimeError('db down'))
+    resp = await service.verify_catalog_batch(
+        client=client,
+        request=_verify_request(require_provenance=True, entities=[], edges=[]),
+    )
+    assert resp.error_code == CatalogErrorCode.internal_error
+    assert resp.error_message == 'verify provenance read failed'
+    assert resp.missing_provenance == []
+
+
+@pytest.mark.asyncio
 async def test_verify_require_provenance_report_only_no_write():
     ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
     client = _make_client()

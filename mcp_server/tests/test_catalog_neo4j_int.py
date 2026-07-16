@@ -591,13 +591,24 @@ async def test_resolve_and_verify_found(catalog_client):
             ],
         ),
     )
-    # Verify sections report found for created objects
-    assert vresp.entities.found >= 6 or all(
-        getattr(i, 'found', True) for i in getattr(vresp.entities, 'items', []) or []
-    )
-    # Fallback: batch_id scoped counts present
-    assert vresp.entities is not None
-    assert vresp.edges is not None
+    assert vresp.entities.expected == 6
+    assert vresp.entities.found == 6
+    assert vresp.entities.missing == []
+    assert vresp.entities.wrong_type == []
+    assert vresp.entities.generic_duplicate == []
+    assert vresp.entities.typed_duplicate == []
+    assert vresp.entities.uuid_mismatch == []
+    assert vresp.entities.missing_embedding == []
+    assert vresp.edges.expected == len(seeded['edges'])
+    assert vresp.edges.found == len(seeded['edges'])
+    assert vresp.edges.missing == []
+    assert vresp.edges.duplicate_edge_key == []
+    assert vresp.edges.edge_type_mismatch == []
+    assert vresp.edges.endpoint_mismatch == []
+    assert vresp.edges.uuid_mismatch == []
+    assert vresp.edges.missing_embedding == []
+    assert vresp.missing == []
+    assert vresp.anomalies == []
 
 
 async def test_verify_edge_endpoint_and_type_mismatch_live(catalog_client):

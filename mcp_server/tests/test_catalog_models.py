@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ from models.catalog_common import (  # noqa: E402
     HARD_MAX_EDGES_PER_BATCH,
     HARD_MAX_ENTITIES_PER_BATCH,
     MAX_EVIDENCE_LENGTH,
+    MAX_NESTED_DEPTH,
+    MAX_NESTED_NODES,
     MAX_SHORT_STRING_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     CatalogErrorCode,
@@ -408,6 +411,36 @@ def test_entity_rejects_oversized_nested_source_ref_key_and_value():
         _entity(source_refs=[{'raw': 'x' * (MAX_EVIDENCE_LENGTH + 1)}])
 
 
+@pytest.mark.parametrize(
+    'value',
+    [b'raw', {'set'}, object(), 1 + 2j, uuid.UUID(FIXED_NS)],
+)
+def test_entity_rejects_non_json_nested_values(value: object):
+    with pytest.raises(ValidationError):
+        _entity(attributes={'value': value})
+    with pytest.raises(ValidationError):
+        _entity(source_refs=[{'value': value}])
+
+
+def test_entity_rejects_nested_cycles_depth_and_total_nodes():
+    cycle: list[Any] = []
+    cycle.append(cycle)
+    with pytest.raises(ValidationError):
+        _entity(attributes={'cycle': cycle})
+
+    deep: list[Any] = []
+    cursor = deep
+    for _ in range(MAX_NESTED_DEPTH + 1):
+        child: list[Any] = []
+        cursor.append(child)
+        cursor = child
+    with pytest.raises(ValidationError):
+        _entity(source_refs=deep)
+
+    with pytest.raises(ValidationError):
+        _entity(attributes={'wide': [None] * MAX_NESTED_NODES})
+
+
 def test_resolve_typed_entities_requires_group_id():
     with pytest.raises(ValidationError):
         ResolveTypedEntitiesRequest.model_validate({'entities': []})
@@ -502,6 +535,19 @@ def test_edge_rejects_oversized_nested_attribute_string():
         _edge(attributes={'nested': [{'raw': 'x' * 1_000_000}]})
 
 
+@pytest.mark.parametrize('value', [b'raw', {'set'}, object(), 1 + 2j, uuid.UUID(FIXED_NS)])
+def test_edge_rejects_non_json_nested_values(value: object):
+    with pytest.raises(ValidationError):
+        _edge(attributes={'value': value})
+
+
+def test_edge_rejects_nested_cycle():
+    cycle: dict[str, Any] = {}
+    cycle['self'] = cycle
+    with pytest.raises(ValidationError):
+        _edge(attributes=cycle)
+
+
 def test_edge_rejects_non_finite_attribute_and_bad_confidence():
     with pytest.raises(ValidationError):
         _edge(attributes={'w': math.inf})
@@ -563,6 +609,10 @@ def test_verify_edge_ref_is_backward_compatible_and_accepts_expected_endpoints()
         expected_target_uuid=FIXED_NS,
     )
     assert ref.expected_source_graph_key == 'SCHEMA::HR'
+    uppercase = FIXED_NS.upper()
+    assert VerifyEdgeRef(
+        edge_type='Contains', edge_key='CONTAINS::K', expected_source_uuid=uppercase
+    ).expected_source_uuid == FIXED_NS
 
 
 @pytest.mark.parametrize('field', ['expected_source_uuid', 'expected_target_uuid'])
