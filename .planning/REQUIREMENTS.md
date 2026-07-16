@@ -161,27 +161,104 @@ Deferred beyond this milestone.
 
 ## Traceability
 
-Populated during roadmap creation. Every v1 requirement must map to exactly one phase.
+Every v1 requirement maps to exactly one phase.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONF-01..SAFE-05 | TBD | Pending |
-| IDEN-01..IDEN-08 | TBD | Pending |
-| ENTY-01..ENTY-13 | TBD | Pending |
-| RESO-01..RESO-04 | TBD | Pending |
-| EDGE-01..EDGE-12 | TBD | Pending |
-| VERI-01..VERI-05 | TBD | Pending |
-| GATE-01..GATE-05 | TBD | Pending |
-| PROV-01..PROV-06 | TBD | Pending |
-| STAT-01..STAT-06 | TBD | Pending |
-| BATC-01..BATC-12 | TBD | Pending |
-| DOCS-01..DOCS-05 | TBD | Pending |
+| CONF-01 | Phase 1 | Pending |
+| CONF-02 | Phase 1 | Pending |
+| CONF-03 | Phase 1 | Pending |
+| CONF-04 | Phase 1 | Pending |
+| CONF-05 | Phase 1 | Pending |
+| SAFE-01 | Phase 1 | Pending |
+| SAFE-02 | Phase 1 | Pending |
+| SAFE-03 | Phase 1 | Pending |
+| SAFE-04 | Phase 1 | Pending |
+| SAFE-05 | Phase 1 | Pending |
+| IDEN-01 | Phase 1 | Pending |
+| IDEN-02 | Phase 1 | Pending |
+| IDEN-05 | Phase 1 | Pending |
+| IDEN-06 | Phase 1 | Pending |
+| IDEN-07 | Phase 1 | Pending |
+| IDEN-08 | Phase 1 | Pending |
+| ENTY-01 | Phase 1 | Pending |
+| ENTY-02 | Phase 1 | Pending |
+| ENTY-03 | Phase 1 | Pending |
+| ENTY-04 | Phase 1 | Pending |
+| ENTY-05 | Phase 1 | Pending |
+| ENTY-06 | Phase 1 | Pending |
+| ENTY-07 | Phase 1 | Pending |
+| ENTY-08 | Phase 1 | Pending |
+| ENTY-09 | Phase 1 | Pending |
+| ENTY-10 | Phase 1 | Pending |
+| ENTY-11 | Phase 1 | Pending |
+| ENTY-12 | Phase 1 | Pending |
+| ENTY-13 | Phase 1 | Pending |
+| RESO-01 | Phase 1 | Pending |
+| RESO-02 | Phase 1 | Pending |
+| RESO-03 | Phase 1 | Pending |
+| RESO-04 | Phase 1 | Pending |
+| EDGE-01 | Phase 1 | Pending |
+| EDGE-02 | Phase 1 | Pending |
+| EDGE-03 | Phase 1 | Pending |
+| EDGE-04 | Phase 1 | Pending |
+| EDGE-05 | Phase 1 | Pending |
+| EDGE-06 | Phase 1 | Pending |
+| EDGE-07 | Phase 1 | Pending |
+| EDGE-08 | Phase 1 | Pending |
+| EDGE-09 | Phase 1 | Pending |
+| EDGE-10 | Phase 1 | Pending |
+| EDGE-11 | Phase 1 | Pending |
+| EDGE-12 | Phase 1 | Pending |
+| VERI-01 | Phase 1 | Pending |
+| VERI-02 | Phase 1 | Pending |
+| VERI-03 | Phase 1 | Pending |
+| VERI-04 | Phase 1 | Pending |
+| VERI-05 | Phase 1 | Pending |
+| GATE-01 | Phase 1 | Pending |
+| GATE-02 | Phase 1 | Pending |
+| GATE-03 | Phase 1 | Pending |
+| GATE-04 | Phase 1 | Pending |
+| GATE-05 | Phase 1 | Pending |
+| IDEN-03 | Phase 2 | Pending |
+| IDEN-04 | Phase 2 | Pending |
+| PROV-01 | Phase 2 | Pending |
+| PROV-02 | Phase 2 | Pending |
+| PROV-03 | Phase 2 | Pending |
+| PROV-04 | Phase 2 | Pending |
+| PROV-05 | Phase 2 | Pending |
+| PROV-06 | Phase 2 | Pending |
+| STAT-01 | Phase 2 | Pending |
+| STAT-02 | Phase 2 | Pending |
+| STAT-03 | Phase 2 | Pending |
+| STAT-04 | Phase 2 | Pending |
+| STAT-05 | Phase 2 | Pending |
+| STAT-06 | Phase 2 | Pending |
+| BATC-01 | Phase 2 | Pending |
+| BATC-02 | Phase 2 | Pending |
+| BATC-03 | Phase 2 | Pending |
+| BATC-04 | Phase 2 | Pending |
+| BATC-05 | Phase 2 | Pending |
+| BATC-06 | Phase 2 | Pending |
+| BATC-07 | Phase 2 | Pending |
+| BATC-08 | Phase 2 | Pending |
+| BATC-09 | Phase 2 | Pending |
+| BATC-10 | Phase 2 | Pending |
+| BATC-11 | Phase 2 | Pending |
+| BATC-12 | Phase 2 | Pending |
+| DOCS-01 | Phase 2 | Pending |
+| DOCS-02 | Phase 2 | Pending |
+| DOCS-03 | Phase 2 | Pending |
+| DOCS-04 | Phase 2 | Pending |
+| DOCS-05 | Phase 2 | Pending |
 
 **Coverage:**
-- v1 requirements: 81 total
-- Mapped to phases: 0
-- Unmapped: 81 ⚠️
+- v1 requirements: 86 total (corrected from earlier 81 miscount)
+- Mapped to phases: 86
+- Unmapped: 0
+- Phase 1: 55 (CONF 5, SAFE 5, IDEN 6, ENTY 13, RESO 4, EDGE 12, VERI 5, GATE 5)
+- Phase 2: 31 (IDEN 2, PROV 6, STAT 6, BATC 12, DOCS 5)
 
 ---
 *Requirements defined: 2026-07-16*
-*Last updated: 2026-07-16 after initial definition*
+*Last updated: 2026-07-16 after roadmap creation*
