@@ -1510,7 +1510,7 @@ class CatalogService:
                         wrong.append(row)
                 if generic:
                     section.generic_duplicate.append(ent.graph_key)
-                if wrong and not typed:
+                if wrong:
                     section.wrong_type.append(ent.graph_key)
                 if len(typed) > 1:
                     section.typed_duplicate.append(ent.graph_key)
