@@ -30,6 +30,7 @@ from models.catalog_entities import (  # noqa: E402
     ResolveEntityRef,
     ResolveTypedEntitiesRequest,
     UpsertTypedEntitiesRequest,
+    VerifyEdgeRef,
 )
 from models.catalog_responses import (  # noqa: E402
     CatalogItemResult,
@@ -548,6 +549,28 @@ def test_write_response_preserves_results():
         ],
     )
     assert len(resp.results) == 1
+
+
+def test_verify_edge_ref_is_backward_compatible_and_accepts_expected_endpoints():
+    minimal = VerifyEdgeRef(edge_type='Contains', edge_key='CONTAINS::K')
+    assert minimal.expected_source_graph_key is None
+    ref = VerifyEdgeRef(
+        edge_type='Contains',
+        edge_key='CONTAINS::K',
+        expected_source_graph_key='SCHEMA::HR',
+        expected_target_graph_key='TABLE::HR.EMPLOYEES',
+        expected_source_uuid=FIXED_NS,
+        expected_target_uuid=FIXED_NS,
+    )
+    assert ref.expected_source_graph_key == 'SCHEMA::HR'
+
+
+@pytest.mark.parametrize('field', ['expected_source_uuid', 'expected_target_uuid'])
+def test_verify_edge_ref_rejects_invalid_expected_uuid(field: str):
+    with pytest.raises(ValidationError):
+        VerifyEdgeRef.model_validate(
+            {'edge_type': 'Contains', 'edge_key': 'CONTAINS::K', field: 'not-a-uuid'}
+        )
 
 
 def test_resolve_and_verify_response_models_construct():

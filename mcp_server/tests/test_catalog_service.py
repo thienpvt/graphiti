@@ -1005,6 +1005,72 @@ async def test_verify_edge_counts_and_anomaly_lists():
 
 
 @pytest.mark.asyncio
+async def test_verify_edge_true_endpoint_mismatch_is_distinct_from_type():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    service._store.match_edges_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': catalog_edge_uuid(FIXED_NS, GROUP, 'Contains', edge_key),
+                'edge_key': edge_key,
+                'edge_type': 'Contains',
+                'source_uuid': str(uuid.uuid4()),
+                'target_uuid': str(uuid.uuid4()),
+                'source_graph_key': 'SCHEMA::WRONG',
+                'target_graph_key': 'TABLE::HR.EMPLOYEES',
+                'has_fact_embedding': True,
+            }
+        ]
+    )
+    req = _verify_request(
+        batch_id=None,
+        entities=[],
+        edges=[
+            VerifyEdgeRef(
+                edge_type='Contains',
+                edge_key=edge_key,
+                expected_source_graph_key='SCHEMA::HR',
+            )
+        ],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert resp.edges.endpoint_mismatch == [edge_key]
+    assert resp.edges.edge_type_mismatch == []
+    assert {'kind': 'endpoint_mismatch', 'edge_key': edge_key} in resp.anomalies
+
+
+@pytest.mark.asyncio
+async def test_verify_edge_type_mismatch_never_becomes_endpoint_mismatch():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    service._store.match_edges_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': 'stored-type-uuid',
+                'edge_key': edge_key,
+                'edge_type': 'DependsOn',
+                'source_graph_key': 'SCHEMA::HR',
+                'target_graph_key': 'TABLE::HR.EMPLOYEES',
+                'has_fact_embedding': True,
+            }
+        ]
+    )
+    req = _verify_request(
+        batch_id=None,
+        entities=[],
+        edges=[VerifyEdgeRef(edge_type='Contains', edge_key=edge_key)],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert resp.edges.edge_type_mismatch == [edge_key]
+    assert resp.edges.endpoint_mismatch == []
+    assert {'kind': 'edge_type_mismatch', 'edge_key': edge_key} in resp.anomalies
+
+
+@pytest.mark.asyncio
 async def test_verify_require_provenance_report_only_no_write():
     ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
     client = _make_client()

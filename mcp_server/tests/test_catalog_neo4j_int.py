@@ -600,6 +600,40 @@ async def test_resolve_and_verify_found(catalog_client):
     assert vresp.edges is not None
 
 
+async def test_verify_edge_endpoint_and_type_mismatch_live(catalog_client):
+    ctx = catalog_client
+    await _upsert_entities(ctx, [_six_entities()[1], _six_entities()[2]])
+    edge = _structural_and_fk_edges()[0]
+    edge_resp = await _upsert_edges(ctx, [edge], batch_id='verify-edge-live')
+    assert edge_resp.created == 1
+
+    endpoint_resp = await ctx.service.verify_catalog_batch(
+        client=ctx.client,
+        request=VerifyCatalogBatchRequest(
+            group_id=GROUP,
+            edges=[
+                VerifyEdgeRef(
+                    edge_type=edge.edge_type,
+                    edge_key=edge.edge_key,
+                    expected_source_graph_key='SCHEMA::WRONG',
+                )
+            ],
+        ),
+    )
+    assert endpoint_resp.edges.endpoint_mismatch == [edge.edge_key]
+    assert endpoint_resp.edges.edge_type_mismatch == []
+
+    type_resp = await ctx.service.verify_catalog_batch(
+        client=ctx.client,
+        request=VerifyCatalogBatchRequest(
+            group_id=GROUP,
+            edges=[VerifyEdgeRef(edge_type='DependsOn', edge_key=edge.edge_key)],
+        ),
+    )
+    assert type_resp.edges.edge_type_mismatch == [edge.edge_key]
+    assert type_resp.edges.endpoint_mismatch == []
+
+
 async def test_search_nodes_and_memory_facts_interop(catalog_client):
     """ENTY-13 / EDGE-12 via existing graphiti search APIs (not new search engine)."""
     ctx = catalog_client
