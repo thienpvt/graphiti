@@ -691,3 +691,221 @@ async def test_mcp_tool_resolve_typed_entities_registered():
 
     assert hasattr(server, 'resolve_typed_entities')
     assert callable(server.resolve_typed_entities)
+
+
+# ---------------------------------------------------------------------------
+# verify_catalog_batch (read-only)
+# ---------------------------------------------------------------------------
+
+
+def _verify_request(**kwargs):
+    from models.catalog_entities import (
+        VerifyCatalogBatchRequest,
+        VerifyEdgeRef,
+        VerifyEntityRef,
+    )
+
+    data = {
+        'group_id': GROUP,
+        'batch_id': BATCH,
+        'entities': [
+            VerifyEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
+        ],
+        'edges': [
+            VerifyEdgeRef(edge_type='Contains', edge_key='CONTAINS::HR.SCHEMA->HR.EMPLOYEES'),
+        ],
+        'require_provenance': False,
+    }
+    data.update(kwargs)
+    return VerifyCatalogBatchRequest.model_validate(data)
+
+
+@pytest.mark.asyncio
+async def test_verify_feature_disabled_no_write_no_embed():
+    client = _make_client()
+    service = CatalogService(catalog_config=_disabled_config())
+    service._store.match_entities_for_verify = AsyncMock()
+    service._store.match_edges_for_verify = AsyncMock()
+    resp = await service.verify_catalog_batch(client=client, request=_verify_request())
+    assert resp.error_code == CatalogErrorCode.feature_disabled
+    service._store.match_entities_for_verify.assert_not_awaited()
+    service._store.match_edges_for_verify.assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_verify_non_neo4j_backend_unavailable():
+    client = _make_client(provider='falkordb')
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock()
+    resp = await service.verify_catalog_batch(client=client, request=_verify_request())
+    assert resp.error_code == CatalogErrorCode.backend_unavailable
+    service._store.match_entities_for_verify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_verify_batch_scoped_match_uses_group_and_batch_id():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    await service.verify_catalog_batch(client=client, request=_verify_request())
+    ent_kwargs = service._store.match_entities_for_verify.await_args.kwargs
+    edge_kwargs = service._store.match_edges_for_verify.await_args.kwargs
+    assert ent_kwargs['group_id'] == GROUP
+    assert ent_kwargs['batch_id'] == BATCH
+    assert edge_kwargs['group_id'] == GROUP
+    assert edge_kwargs['batch_id'] == BATCH
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_verify_entity_counts_and_anomaly_lists():
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': ent_uuid,
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'content_sha256': 'a' * 64,
+                'has_name_embedding': False,
+                'batch_id': BATCH,
+            },
+            {
+                'uuid': 'generic-1',
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity'],
+                'neo4j_labels': ['Entity'],
+                'content_sha256': 'b' * 64,
+                'has_name_embedding': False,
+                'batch_id': BATCH,
+            },
+        ]
+    )
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    from models.catalog_entities import VerifyEntityRef
+
+    req = _verify_request(
+        entities=[
+            VerifyEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
+            VerifyEntityRef(entity_type='View', graph_key='VIEW::HR.V1'),
+        ],
+        edges=[],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert resp.entities.expected == 2
+    assert resp.entities.found == 1
+    assert 'VIEW::HR.V1' in resp.entities.missing
+    assert 'TABLE::HR.EMPLOYEES' in resp.entities.generic_duplicate
+    assert 'TABLE::HR.EMPLOYEES' in resp.entities.missing_embedding
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_verify_edge_counts_and_anomaly_lists():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    service._store.match_edges_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': 'edge-1',
+                'edge_key': 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES',
+                'edge_type': 'Contains',
+                'has_fact_embedding': False,
+                'batch_id': BATCH,
+            },
+            {
+                'uuid': 'edge-2',
+                'edge_key': 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES',
+                'edge_type': 'Contains',
+                'has_fact_embedding': True,
+                'batch_id': BATCH,
+            },
+        ]
+    )
+    from models.catalog_entities import VerifyEdgeRef
+
+    req = _verify_request(
+        entities=[],
+        edges=[
+            VerifyEdgeRef(
+                edge_type='Contains', edge_key='CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+            ),
+            VerifyEdgeRef(edge_type='DependsOn', edge_key='DEPENDS::MISSING'),
+        ],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert resp.edges.expected == 2
+    assert resp.edges.found == 1
+    assert 'DEPENDS::MISSING' in resp.edges.missing
+    assert 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES' in resp.edges.duplicate_edge_key
+    assert 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES' in resp.edges.missing_embedding
+    client.embedder.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_verify_require_provenance_report_only_no_write():
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': ent_uuid,
+                'graph_key': 'TABLE::HR.EMPLOYEES',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'content_sha256': 'a' * 64,
+                'has_name_embedding': True,
+                'batch_id': BATCH,
+            }
+        ]
+    )
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    service._store.match_provenance_presence = AsyncMock(
+        return_value=[{'uuid': ent_uuid, 'has_provenance': False}]
+    )
+    service._store.upsert_entity_item = AsyncMock()
+    resp = await service.verify_catalog_batch(
+        client=client, request=_verify_request(require_provenance=True, edges=[])
+    )
+    assert resp.require_provenance is True
+    assert ent_uuid in resp.missing_provenance
+    service._store.match_provenance_presence.assert_awaited()
+    service._store.upsert_entity_item.assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_verify_never_embeds_or_writes():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    service._store.upsert_entity_item = AsyncMock()
+    await service.verify_catalog_batch(client=client, request=_verify_request())
+    client.embedder.create.assert_not_awaited()
+    client.embedder.create_batch.assert_not_awaited()
+    service._store.upsert_entity_item.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_verify_catalog_batch_registered():
+    import graphiti_mcp_server as server
+
+    assert hasattr(server, 'verify_catalog_batch')
+    assert callable(server.verify_catalog_batch)
