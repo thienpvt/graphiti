@@ -609,6 +609,42 @@ async def test_resolve_and_verify_found(catalog_client):
     assert vresp.anomalies == []
 
 
+async def test_verify_typed_entity_twin_anomalies_are_not_hidden(catalog_client):
+    ctx = catalog_client
+    entity = _six_entities()[2]
+    response = await _upsert_entities(ctx, [entity])
+    expected_uuid = response.results[0].uuid
+    assert expected_uuid
+    await ctx.driver.execute_query(
+        """
+        CREATE (n:Entity:Table {
+          uuid: $rogue_uuid,
+          group_id: $g,
+          name: $key,
+          graph_key: $key,
+          batch_id: $batch_id
+        })
+        """,
+        params={
+            'rogue_uuid': str(uuid.uuid4()),
+            'g': GROUP,
+            'key': entity.graph_key,
+            'batch_id': BATCH,
+        },
+    )
+    resp = await ctx.service.verify_catalog_batch(
+        client=ctx.client,
+        request=VerifyCatalogBatchRequest(
+            group_id=GROUP,
+            entities=[VerifyEntityRef(entity_type='Table', graph_key=entity.graph_key)],
+        ),
+    )
+    assert resp.entities.found == 1
+    assert resp.entities.typed_duplicate == [entity.graph_key]
+    assert resp.entities.uuid_mismatch == [entity.graph_key]
+    assert resp.entities.missing_embedding == [entity.graph_key]
+
+
 async def test_verify_physical_duplicate_edge_is_preserved_and_reported(catalog_client):
     ctx = catalog_client
     await _upsert_entities(ctx, [_six_entities()[1], _six_entities()[2]])

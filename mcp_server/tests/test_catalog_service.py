@@ -966,6 +966,45 @@ async def test_verify_entity_counts_and_anomaly_lists():
 
 
 @pytest.mark.asyncio
+async def test_verify_entity_aggregates_anomalies_across_typed_twins():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    key = 'TABLE::HR.EMPLOYEES'
+    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', key)
+    service._store.match_entities_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': expected_uuid,
+                'graph_key': key,
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'has_name_embedding': True,
+            },
+            {
+                'uuid': str(uuid.uuid4()),
+                'graph_key': key,
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'has_name_embedding': False,
+            },
+        ]
+    )
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    resp = await service.verify_catalog_batch(
+        client=client,
+        request=_verify_request(
+            batch_id=None,
+            entities=[VerifyEntityRef(entity_type='Table', graph_key=key)],
+            edges=[],
+        ),
+    )
+    assert resp.entities.found == 1
+    assert resp.entities.typed_duplicate == [key]
+    assert resp.entities.uuid_mismatch == [key]
+    assert resp.entities.missing_embedding == [key]
+
+
+@pytest.mark.asyncio
 async def test_verify_edge_counts_and_anomaly_lists():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
