@@ -37,7 +37,7 @@ from services.catalog_identity import (
     catalog_edge_uuid,
     catalog_entity_uuid,
 )
-from services.catalog_store import CatalogNeo4jStore
+from services.catalog_store import CatalogNeo4jStore, CatalogStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +186,66 @@ class CatalogService:
             )
         return None
 
+    async def _ensure_schema(self, client: Any) -> None:
+        """Await product catalog schema readiness immediately before real write tx."""
+        await self._store.ensure_uuid_uniqueness_constraints(client.driver)
+
+    def _schema_fail_entity_response(
+        self,
+        request: UpsertTypedEntitiesRequest,
+        *,
+        reason: str,
+    ) -> CatalogWriteResponse:
+        n = len(request.entities)
+        logger.error('catalog schema_init_failed kind=entity reason=%s', reason)
+        return CatalogWriteResponse(
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            dry_run=request.dry_run,
+            atomic=request.atomic,
+            results=[
+                CatalogItemResult(
+                    index=i,
+                    status='error',
+                    graph_key=request.entities[i].graph_key,
+                    entity_type=request.entities[i].entity_type,
+                    error_code=CatalogErrorCode.neo4j_transaction_failed,
+                    error_message='catalog schema initialization failed',
+                    details={'reason': reason},
+                )
+                for i in range(n)
+            ],
+            failed=n,
+        )
+
+    def _schema_fail_edge_response(
+        self,
+        request: UpsertTypedEdgesRequest,
+        *,
+        reason: str,
+    ) -> CatalogWriteResponse:
+        n = len(request.edges)
+        logger.error('catalog schema_init_failed kind=edge reason=%s', reason)
+        return CatalogWriteResponse(
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            dry_run=request.dry_run,
+            atomic=request.atomic,
+            results=[
+                CatalogItemResult(
+                    index=i,
+                    status='error',
+                    edge_key=request.edges[i].edge_key,
+                    edge_type=request.edges[i].edge_type,
+                    error_code=CatalogErrorCode.neo4j_transaction_failed,
+                    error_message='catalog schema initialization failed',
+                    details={'reason': reason},
+                )
+                for i in range(n)
+            ],
+            failed=n,
+        )
+
     async def upsert_typed_entities(
         self,
         *,
@@ -327,6 +387,22 @@ class CatalogService:
                     error_message=prep.error_message,
                 )
                 continue
+            id_err = self._entity_identity_property_conflict(existing, prep.item)
+            if id_err is not None:
+                prep.projected_status = 'error'
+                prep.error_code = CatalogErrorCode.deterministic_uuid_conflict
+                prep.error_message = id_err
+                early_errors[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.entity_uuid,
+                    content_sha256=prep.content_sha256,
+                    graph_key=prep.item.graph_key,
+                    entity_type=prep.item.entity_type,
+                    error_code=prep.error_code,
+                    error_message=prep.error_message,
+                )
+                continue
             if existing.get('content_sha256') == prep.content_sha256:
                 prep.projected_status = 'unchanged'
             else:
@@ -418,7 +494,15 @@ class CatalogService:
             )
             return resp
 
-        # 5) write
+        # 5) schema ensure only for real writes (never dry-run / embed failure path)
+        try:
+            await self._ensure_schema(client)
+        except CatalogStoreError as exc:
+            return self._schema_fail_entity_response(request, reason=type(exc).__name__)
+        except Exception as exc:
+            return self._schema_fail_entity_response(request, reason=type(exc).__name__)
+
+        # 6) write
         if request.atomic:
             return await self._write_atomic(client, request, write_set, early_errors, request_ts)
         return await self._write_per_item(client, request, write_set, early_errors, request_ts)
@@ -672,13 +756,37 @@ class CatalogService:
             return f'existing custom labels {custom} conflict with exact type {expected_type}'
         return None
 
+    def _entity_identity_property_conflict(
+        self,
+        existing: dict[str, Any],
+        item: CatalogEntityItem,
+    ) -> str | None:
+        """Fail closed when stored identity props disagree with request (IDEN-08).
+
+        name, graph_key, name_raw, name_canonical are create-once; never rewrite.
+        """
+        stored_name = existing.get('name')
+        stored_key = existing.get('graph_key')
+        stored_raw = existing.get('name_raw')
+        stored_canon = existing.get('name_canonical')
+        # name property is graph_key for catalog entities
+        if stored_name is not None and stored_name != item.graph_key:
+            return 'existing name conflicts with request graph_key'
+        if stored_key is not None and stored_key != item.graph_key:
+            return 'existing graph_key conflicts with request graph_key'
+        if stored_raw is not None and stored_raw != item.name_raw:
+            return 'existing name_raw conflicts with request name_raw'
+        if stored_canon is not None and stored_canon != item.name_canonical:
+            return 'existing name_canonical conflicts with request name_canonical'
+        return None
+
     async def _recheck_entity_in_tx(
         self,
         tx: Any,
         prep: _PreparedEntity,
         request: UpsertTypedEntitiesRequest,
     ) -> CatalogErrorCode | None:
-        """Transaction-local label/group invariant before entity mutation."""
+        """Transaction-local label/identity invariant before entity mutation."""
         try:
             existing = await self._store.get_entity_by_uuid(
                 None,
@@ -697,6 +805,8 @@ class CatalogService:
             return None
         if self._entity_label_conflict(existing, prep.item.entity_type) is not None:
             return CatalogErrorCode.entity_type_conflict
+        if self._entity_identity_property_conflict(existing, prep.item) is not None:
+            return CatalogErrorCode.deterministic_uuid_conflict
         return None
 
     class _EntityInvariantRace(Exception):
@@ -962,6 +1072,7 @@ class CatalogService:
             )
             return ResolveTypedEntitiesResponse(group_id=request.group_id, results=results)
 
+        # Resolve is read-only: never schema-init or write.
         namespace = self._namespace()
         assert namespace is not None
 
@@ -1201,6 +1312,7 @@ class CatalogService:
                 error_message=f'edges exceed max_edges_per_batch ({max_edges})',
             )
 
+        # Verify is read-only: never schema-init or write.
         namespace = self._namespace()
         assert namespace is not None
 
@@ -1609,15 +1721,29 @@ class CatalogService:
 
         # 2) resolve both endpoints BEFORE embedding (EDGE-03/05)
         # missing_endpoint is only a successful empty MATCH; DB exceptions are internal_error.
+        # Prefer exact expected UUIDv5; never arbitrary-bind first typed row.
         driver = client.driver
         for prep in prepared:
             item = prep.item
+            expected_src = catalog_entity_uuid(
+                namespace,
+                request.group_id,
+                item.source_entity_type,
+                item.source_graph_key,
+            )
+            expected_tgt = catalog_entity_uuid(
+                namespace,
+                request.group_id,
+                item.target_entity_type,
+                item.target_graph_key,
+            )
             try:
                 src_code, src_row = await self._store.resolve_endpoint_typed(
                     driver,
                     group_id=request.group_id,
                     graph_key=item.source_graph_key,
                     entity_type=item.source_entity_type,
+                    expected_uuid=expected_src,
                 )
             except Exception as exc:
                 logger.error(
@@ -1663,6 +1789,7 @@ class CatalogService:
                     group_id=request.group_id,
                     graph_key=item.target_graph_key,
                     entity_type=item.target_entity_type,
+                    expected_uuid=expected_tgt,
                 )
             except Exception as exc:
                 logger.error(
@@ -1703,8 +1830,40 @@ class CatalogService:
                 continue
 
             assert src_row is not None and tgt_row is not None
-            prep.source_uuid = str(src_row['uuid'])
-            prep.target_uuid = str(tgt_row['uuid'])
+            src_uuid = str(src_row['uuid'])
+            tgt_uuid = str(tgt_row['uuid'])
+            if src_uuid != expected_src:
+                prep.projected_status = 'error'
+                prep.error_code = CatalogErrorCode.deterministic_uuid_conflict
+                prep.error_message = 'source endpoint uuid does not match deterministic identity'
+                early_errors[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.edge_uuid,
+                    content_sha256=prep.content_sha256,
+                    edge_key=item.edge_key,
+                    edge_type=item.edge_type,
+                    error_code=prep.error_code,
+                    error_message=prep.error_message,
+                )
+                continue
+            if tgt_uuid != expected_tgt:
+                prep.projected_status = 'error'
+                prep.error_code = CatalogErrorCode.deterministic_uuid_conflict
+                prep.error_message = 'target endpoint uuid does not match deterministic identity'
+                early_errors[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.edge_uuid,
+                    content_sha256=prep.content_sha256,
+                    edge_key=item.edge_key,
+                    edge_type=item.edge_type,
+                    error_code=prep.error_code,
+                    error_message=prep.error_message,
+                )
+                continue
+            prep.source_uuid = src_uuid
+            prep.target_uuid = tgt_uuid
 
         # 3) load existing for conflict / unchanged
         for prep in prepared:
@@ -1829,7 +1988,7 @@ class CatalogService:
                 failed=len(err_results),
             )
 
-        # 5) dry-run: no transaction, no batch_id persistence
+        # 5) dry-run: no transaction, no batch_id persistence, no schema init
         if request.dry_run:
             results = self._build_edge_results(request, write_set, early_errors, written={})
             resp = self._count_edge_response(request, results)
@@ -1844,7 +2003,15 @@ class CatalogService:
             )
             return resp
 
-        # 6) write
+        # 6) schema ensure only for real writes (never dry-run / embed failure path)
+        try:
+            await self._ensure_schema(client)
+        except CatalogStoreError as exc:
+            return self._schema_fail_edge_response(request, reason=type(exc).__name__)
+        except Exception as exc:
+            return self._schema_fail_edge_response(request, reason=type(exc).__name__)
+
+        # 7) write
         if request.atomic:
             return await self._write_edges_atomic(
                 client, request, write_set, early_errors, request_ts
@@ -1859,6 +2026,8 @@ class CatalogService:
             'missing_endpoint': CatalogErrorCode.missing_endpoint,
             'endpoint_type_mismatch': CatalogErrorCode.endpoint_type_mismatch,
             'generic_endpoint_conflict': CatalogErrorCode.generic_endpoint_conflict,
+            'typed_endpoint_duplicate': CatalogErrorCode.deterministic_uuid_conflict,
+            'deterministic_uuid_conflict': CatalogErrorCode.deterministic_uuid_conflict,
             'internal_error': CatalogErrorCode.internal_error,
         }
         # Unknown classify codes are internal defects, not absent endpoints.
@@ -2015,12 +2184,34 @@ class CatalogService:
         Returns structured endpoint/identity error code on race, else None.
         """
         item = prep.item
+        namespace = self._namespace()
+        expected_src = (
+            catalog_entity_uuid(
+                namespace,
+                request.group_id,
+                item.source_entity_type,
+                item.source_graph_key,
+            )
+            if namespace is not None
+            else prep.source_uuid
+        )
+        expected_tgt = (
+            catalog_entity_uuid(
+                namespace,
+                request.group_id,
+                item.target_entity_type,
+                item.target_graph_key,
+            )
+            if namespace is not None
+            else prep.target_uuid
+        )
         src_code, src_row = await self._store.resolve_endpoint_typed(
             None,
             group_id=request.group_id,
             graph_key=item.source_graph_key,
             entity_type=item.source_entity_type,
             tx=tx,
+            expected_uuid=expected_src,
         )
         if src_code is not None:
             return self._endpoint_error_code(src_code)
@@ -2030,6 +2221,7 @@ class CatalogService:
             graph_key=item.target_graph_key,
             entity_type=item.target_entity_type,
             tx=tx,
+            expected_uuid=expected_tgt,
         )
         if tgt_code is not None:
             return self._endpoint_error_code(tgt_code)
@@ -2040,6 +2232,10 @@ class CatalogService:
             return CatalogErrorCode.missing_endpoint
         if prep.target_uuid and tgt_uuid != prep.target_uuid:
             return CatalogErrorCode.missing_endpoint
+        if expected_src and src_uuid != expected_src:
+            return CatalogErrorCode.deterministic_uuid_conflict
+        if expected_tgt and tgt_uuid != expected_tgt:
+            return CatalogErrorCode.deterministic_uuid_conflict
         prep.source_uuid = src_uuid
         prep.target_uuid = tgt_uuid
         # Transaction-local identity invariant for existing edge uuid.

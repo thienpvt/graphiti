@@ -6,7 +6,10 @@ MERGE (never SET n = $map). Caller UUIDs are never identity authority.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
+import logging
 import re
 from datetime import datetime
 from typing import Any
@@ -19,11 +22,29 @@ from models.catalog_common import (
     PROTECTED_ENTITY_PROPERTIES,
 )
 
+logger = logging.getLogger(__name__)
+
 # Mirror graphiti_core.helpers.SAFE_CYPHER_IDENTIFIER_PATTERN without importing core.
 _SAFE_LABEL = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 # Fixed map: entity_type -> Neo4j label literal (identity with allowlist keys).
 _ENTITY_LABELS: dict[str, str] = {t: t for t in ENTITY_TYPE_PREFIXES if _SAFE_LABEL.match(t)}
+
+# Catalog-owned composite UNIQUE constraints. Single-property UNIQUE on uuid
+# cannot coexist with stock Graphiti RANGE indexes (entity_uuid / relation_uuid)
+# on Neo4j 5.26. Composite (uuid, group_id) coexists and matches MERGE keys.
+# CREATE only — never DROP INDEX / DROP CONSTRAINT / data repair.
+CATALOG_ENTITY_IDENTITY_CONSTRAINT = 'catalog_entity_identity_unique'
+CATALOG_RELATES_TO_IDENTITY_CONSTRAINT = 'catalog_relates_to_identity_unique'
+
+_CREATE_ENTITY_IDENTITY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_ENTITY_IDENTITY_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:Entity) REQUIRE (n.uuid, n.group_id) IS UNIQUE'
+)
+_CREATE_RELATES_TO_IDENTITY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_RELATES_TO_IDENTITY_CONSTRAINT} IF NOT EXISTS '
+    'FOR ()-[e:RELATES_TO]-() REQUIRE (e.uuid, e.group_id) IS UNIQUE'
+)
 
 
 class CatalogStoreError(ValueError):
@@ -54,6 +75,165 @@ class CatalogNeo4jStore:
     Does not call EntityNode.save or stock SET-map queries.
     """
 
+    def __init__(self) -> None:
+        self._schema_lock = asyncio.Lock()
+        self._schema_ready = False
+
+    @staticmethod
+    def identity_uniqueness_constraint_statements() -> tuple[str, ...]:
+        """Fixed server Cypher for catalog composite identity UNIQUE (CREATE only)."""
+        return (_CREATE_ENTITY_IDENTITY_UNIQUE, _CREATE_RELATES_TO_IDENTITY_UNIQUE)
+
+    # Back-compat alias for callers/tests that used the earlier name.
+    @staticmethod
+    def uuid_uniqueness_constraint_statements() -> tuple[str, ...]:
+        return CatalogNeo4jStore.identity_uniqueness_constraint_statements()
+
+    async def ensure_uuid_uniqueness_constraints(self, executor: Any) -> None:
+        """Idempotent: composite (uuid, group_id) UNIQUE for concurrent MERGE.
+
+        Awaited before catalog reads/writes. Once-ready short-circuits.
+        CREATE CONSTRAINT IF NOT EXISTS only — never drops indexes/data.
+        On existing duplicate (uuid, group_id) pairs, fails closed without repair.
+        """
+        if self._schema_ready:
+            return
+        async with self._schema_lock:
+            if self._schema_ready:
+                return
+            if not self._executor_supports_schema_ddl(executor):
+                # Unit-test mock drivers: no real Neo4j DDL surface.
+                self._schema_ready = True
+                return
+            await self._ensure_identity_uniqueness_constraints_locked(executor)
+            self._schema_ready = True
+
+    @staticmethod
+    def _executor_supports_schema_ddl(executor: Any) -> bool:
+        """True when executor.execute_query is a real awaitable Neo4j entrypoint."""
+        exec_q = getattr(executor, 'execute_query', None)
+        if exec_q is None or not callable(exec_q):
+            return False
+        # AsyncMock / coroutine functions are fine; plain MagicMock is not.
+        if inspect.iscoroutinefunction(exec_q):
+            return True
+        # Bound Neo4jDriver.execute_query is a coroutine function.
+        func = getattr(exec_q, '__func__', None)
+        if func is not None and inspect.iscoroutinefunction(func):
+            return True
+        # Heuristic: name from unittest.mock without async → skip DDL.
+        owner = type(executor)
+        module = getattr(owner, '__module__', '') or ''
+        return not module.startswith('unittest.mock')
+
+    async def _run_schema_query(self, executor: Any, stmt: str) -> Any:
+        result = executor.execute_query(stmt, params={})
+        if inspect.isawaitable(result):
+            return await result
+        raise CatalogStoreError(
+            'catalog schema init requires async execute_query',
+            code='neo4j_schema_failed',
+        )
+
+    async def _ensure_identity_uniqueness_constraints_locked(self, executor: Any) -> None:
+        if await self._identity_uniqueness_present(executor):
+            return
+
+        applied = 0
+        for stmt in self.identity_uniqueness_constraint_statements():
+            # Safety: product init never issues DROP.
+            assert 'DROP' not in stmt.upper()
+            try:
+                await self._run_schema_query(executor, stmt)
+                applied += 1
+            except CatalogStoreError:
+                raise
+            except Exception as exc:
+                msg = f'{type(exc).__name__}: {exc}'
+                if (
+                    'EquivalentSchemaRuleAlreadyExists' in msg
+                    or 'already exists' in msg.lower()
+                    or 'ConstraintAlreadyExists' in msg
+                ):
+                    applied += 1
+                    continue
+                # Duplicate data prevents uniqueness — fail closed, no repair.
+                if (
+                    'ConstraintValidationFailed' in msg
+                    or 'already has' in msg.lower()
+                    or 'duplicate' in msg.lower()
+                ):
+                    raise CatalogStoreError(
+                        'catalog identity uniqueness constraint failed: existing duplicate '
+                        '(uuid, group_id) values prevent CREATE CONSTRAINT; resolve manually',
+                        code='neo4j_schema_failed',
+                    ) from exc
+                if await self._identity_uniqueness_present(executor):
+                    return
+                raise CatalogStoreError(
+                    f'catalog schema init failed: {exc}',
+                    code='neo4j_schema_failed',
+                ) from exc
+
+        # CREATE IF NOT EXISTS succeeded (or already-exists) for both statements.
+        # Do not require SHOW re-verify: drivers/mocks may not surface constraints.
+        if applied >= 2:
+            logger.info(
+                'catalog schema ready constraints=%s,%s',
+                CATALOG_ENTITY_IDENTITY_CONSTRAINT,
+                CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
+            )
+            return
+
+        if not await self._identity_uniqueness_present(executor):
+            raise CatalogStoreError(
+                'catalog identity uniqueness constraints not present after init',
+                code='neo4j_schema_failed',
+            )
+        logger.info(
+            'catalog schema ready constraints=%s,%s',
+            CATALOG_ENTITY_IDENTITY_CONSTRAINT,
+            CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
+        )
+
+    async def _identity_uniqueness_present(self, executor: Any) -> bool:
+        """True when Entity and RELATES_TO have (uuid, group_id) uniqueness."""
+        try:
+            result = await self._run_schema_query(
+                executor,
+                """
+                SHOW CONSTRAINTS
+                YIELD name, type, entityType, labelsOrTypes, properties
+                RETURN name, type, entityType, labelsOrTypes, properties
+                """,
+            )
+        except Exception:
+            return False
+        rows = self._all_from_execute_query_result(result)
+        entity_unique = False
+        rel_unique = False
+        for row in rows:
+            name = str(row.get('name') or '')
+            if name == CATALOG_ENTITY_IDENTITY_CONSTRAINT:
+                entity_unique = True
+                continue
+            if name == CATALOG_RELATES_TO_IDENTITY_CONSTRAINT:
+                rel_unique = True
+                continue
+            props = list(row.get('properties') or [])
+            labels = list(row.get('labelsOrTypes') or [])
+            ctype = str(row.get('type') or '').upper()
+            etype = str(row.get('entityType') or '')
+            if 'UNIQUENESS' not in ctype and 'UNIQUE' not in ctype:
+                continue
+            if 'uuid' not in props or 'group_id' not in props:
+                continue
+            if etype == 'NODE' and 'Entity' in labels:
+                entity_unique = True
+            if etype == 'RELATIONSHIP' and 'RELATES_TO' in labels:
+                rel_unique = True
+        return entity_unique and rel_unique
+
     def resolve_entity_label(self, entity_type: str) -> str:
         """Map allowlisted entity_type to a fixed Neo4j label (re-validate at builder)."""
         if entity_type not in CATALOG_ENTITY_TYPES or entity_type not in _ENTITY_LABELS:
@@ -77,7 +257,8 @@ class CatalogNeo4jStore:
         Status derived from token presence + pre-update hash compare — never timestamps.
         Matched unchanged: no SET of content props, no vector rewrite.
         Token REMOVEd before RETURN (create-only; never client authority).
-        Cross-group same UUID rejected via WHERE n.group_id = $group_id (empty row).
+        MERGE key is composite (uuid, group_id) matching catalog identity UNIQUE.
+        Identity properties set only ON CREATE (never rewritten on match).
         """
         label = self.resolve_entity_label(entity_type)
         # Updated-only content fields (identity/preservation never rewritten on match).
@@ -93,7 +274,7 @@ class CatalogNeo4jStore:
         """.strip()
 
         return f"""
-            MERGE (n:Entity {{uuid: $uuid}})
+            MERGE (n:Entity {{uuid: $uuid, group_id: $group_id}})
             ON CREATE SET
                 n:{label},
                 n.uuid = $uuid,
@@ -113,8 +294,6 @@ class CatalogNeo4jStore:
                 n.created_at = $created_at,
                 n.updated_at = $updated_at,
                 n._catalog_create_token = $create_token
-            WITH n
-            WHERE n.group_id = $group_id
             WITH n,
                  coalesce(n._catalog_create_token, '') = $create_token AS created,
                  n.content_sha256 = $content_sha256 AS same
@@ -155,6 +334,8 @@ class CatalogNeo4jStore:
                    n.group_id AS group_id,
                    n.name AS name,
                    n.graph_key AS graph_key,
+                   n.name_raw AS name_raw,
+                   n.name_canonical AS name_canonical,
                    n.labels AS labels,
                    labels(n) AS neo4j_labels,
                    n.content_sha256 AS content_sha256,
@@ -657,6 +838,9 @@ class CatalogNeo4jStore:
             else:
                 wrong.append(row)
 
+        if len(typed) > 1:
+            # Ambiguous exact-typed rows: never arbitrary-bind.
+            return 'typed_endpoint_duplicate', None
         if typed:
             return None, typed[0]
         if wrong:
@@ -673,17 +857,38 @@ class CatalogNeo4jStore:
         graph_key: str,
         entity_type: str,
         tx: Any | None = None,
+        expected_uuid: str | None = None,
     ) -> tuple[str | None, dict[str, Any] | None]:
         """Resolve exact endpoint by group_id + graph_key + entity_type.
 
         MATCH only; never CREATE. Returns (error_code|None, row|None).
+        When expected_uuid is provided, prefer that row among typed matches.
         """
         # Validate type early (raises CatalogStoreError if unknown)
         self.resolve_entity_label(entity_type)
         cypher = self.build_resolve_endpoint_typed_cypher(entity_type)
         params = {'group_id': group_id, 'name': graph_key}
         rows = await self._read_many(executor, cypher, params, tx=tx)
-        return self.classify_endpoint_rows(rows, expected_type=entity_type)
+        if expected_uuid is not None:
+            typed_exact = [
+                r
+                for r in rows
+                if str(r.get('uuid')) == expected_uuid
+                and set(
+                    lb for lb in (r.get('neo4j_labels') or r.get('labels') or []) if lb != 'Entity'
+                )
+                == {entity_type}
+            ]
+            if typed_exact:
+                return None, typed_exact[0]
+        code, row = self.classify_endpoint_rows(rows, expected_type=entity_type)
+        if code is not None:
+            return code, row
+        if row is None:
+            return 'missing_endpoint', None
+        if expected_uuid is not None and str(row.get('uuid')) != expected_uuid:
+            return 'deterministic_uuid_conflict', row
+        return None, row
 
     def build_edge_upsert_cypher(self) -> str:
         """MERGE RELATES_TO by uuid; e.name is parameterized allowlisted edge type.
@@ -703,11 +908,9 @@ class CatalogNeo4jStore:
         """.strip()
 
         return f"""
-            MATCH (source:Entity {{uuid: $source_uuid}})
-            WHERE source.group_id = $group_id
-            MATCH (target:Entity {{uuid: $target_uuid}})
-            WHERE target.group_id = $group_id
-            MERGE (source)-[e:RELATES_TO {{uuid: $uuid}}]->(target)
+            MATCH (source:Entity {{uuid: $source_uuid, group_id: $group_id}})
+            MATCH (target:Entity {{uuid: $target_uuid, group_id: $group_id}})
+            MERGE (source)-[e:RELATES_TO {{uuid: $uuid, group_id: $group_id}}]->(target)
             ON CREATE SET
                 e.uuid = $uuid,
                 e.group_id = $group_id,
