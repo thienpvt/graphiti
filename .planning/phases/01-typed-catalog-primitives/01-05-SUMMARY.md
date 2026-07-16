@@ -136,7 +136,7 @@ Production composite identity uniqueness + live GATE-02 suite under `oracle-cata
 - `catalog_entity_identity_unique` FOR (n:Entity) REQUIRE (n.uuid, n.group_id) IS UNIQUE
 - `catalog_relates_to_identity_unique` FOR ()-[e:RELATES_TO]-() REQUIRE (e.uuid, e.group_id) IS UNIQUE
 - CREATE IF NOT EXISTS only; never DROP INDEX / DROP CONSTRAINT / data repair
-- Async once-ready lock; skip DDL for unittest.mock drivers
+- Async once-ready lock; product path never branches on unittest.mock — test doubles supply real async execute_query
 - Entity/edge MERGE keys: `{uuid, group_id}` (match constraint)
 
 ### Schema ensure timing
