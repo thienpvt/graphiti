@@ -84,12 +84,39 @@ def _disabled_config() -> CatalogConfig:
     return CatalogConfig(enabled=False, uuid_namespace=None)
 
 
+def _schema_execute_query(cypher: str, params=None, **kwargs):
+    """Async-compatible schema DDL double: SHOW reports constraints present."""
+    _ = params, kwargs
+    text = (cypher or '').strip().upper()
+    if 'SHOW CONSTRAINTS' in text:
+        return (
+            [
+                {
+                    'name': 'catalog_entity_identity_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['Entity'],
+                    'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_relates_to_identity_unique',
+                    'type': 'RELATIONSHIP_PROPERTY_UNIQUENESS',
+                    'entityType': 'RELATIONSHIP',
+                    'labelsOrTypes': ['RELATES_TO'],
+                    'properties': ['uuid', 'group_id'],
+                },
+            ],
+            None,
+            None,
+        )
+    return ([], None, None)
+
+
 def _make_client(
     *,
     provider: str = 'neo4j',
     embedder: AsyncMock | None = None,
     tx_side_effect=None,
-    existing: dict | None = None,
 ):
     # Mirror GraphProvider.value without importing graphiti_core (editor pyright path).
     provider_enum = SimpleNamespace(value=provider)
@@ -98,6 +125,7 @@ def _make_client(
     call_order: list[str] = []
 
     async def _embed(*args, **kwargs):
+        _ = args, kwargs
         call_order.append('embed')
         return [0.1, 0.2, 0.3]
 
@@ -127,10 +155,14 @@ def _make_client(
             raise tx_side_effect
         yield tx
 
+    async def _execute_query(cypher: str, params=None, **kwargs):
+        return _schema_execute_query(cypher, params=params, **kwargs)
+
     driver = SimpleNamespace(
         provider=provider_enum,
         transaction=_transaction,
-        execute_query=AsyncMock(return_value=([], None, None)),
+        # Real async callable — product path never special-cases unittest.mock.
+        execute_query=_execute_query,
     )
 
     client = SimpleNamespace(
@@ -204,10 +236,12 @@ async def test_entity_dry_run_embeds_but_never_writes_or_persists_batch_id():
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
     service._store.upsert_entity_item = AsyncMock()
+    service._ensure_schema = AsyncMock()
     resp = await service.upsert_typed_entities(client=client, request=_request(dry_run=True))
     assert 'embed' in client.call_order
     assert 'transaction' not in client.call_order
     service._store.upsert_entity_item.assert_not_awaited()
+    service._ensure_schema.assert_not_awaited()
     assert resp.dry_run is True
     # dry-run success states still report projected status
     assert resp.results[0].status in ('created', 'updated', 'unchanged')
@@ -219,6 +253,7 @@ async def test_entity_create_persists_request_batch_id():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
+    service._ensure_schema = AsyncMock()
     captured: dict = {}
 
     async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
@@ -237,6 +272,33 @@ async def test_entity_create_persists_request_batch_id():
     assert captured.get('batch_id') == BATCH
     assert resp.results[0].status == 'created'
     assert resp.created == 1
+    service._ensure_schema.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_entity_identity_name_raw_conflict_no_write():
+    entity = _entity(name_raw='CHANGED')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, entity.entity_type, entity.graph_key)
+    existing = {
+        'uuid': ent_uuid,
+        'content_sha256': 'b' * 64,
+        'batch_id': 'old-batch',
+        'labels': ['Entity', 'Table'],
+        'name': entity.graph_key,
+        'graph_key': entity.graph_key,
+        'name_raw': 'EMPLOYEES',
+        'name_canonical': 'employees',
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(return_value=existing)
+    service._store.upsert_entity_item = AsyncMock()
+    service._ensure_schema = AsyncMock()
+    resp = await service.upsert_typed_entities(client=client, request=_request([entity]))
+    assert any(r.error_code == CatalogErrorCode.deterministic_uuid_conflict for r in resp.results)
+    service._store.upsert_entity_item.assert_not_awaited()
+    service._ensure_schema.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -748,8 +810,10 @@ async def test_resolve_never_opens_write_transaction():
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_resolve = AsyncMock(return_value=[])
     service._store.upsert_entity_item = AsyncMock()
+    service._ensure_schema = AsyncMock()
     await service.resolve_typed_entities(client=client, request=_resolve_request())
     service._store.upsert_entity_item.assert_not_awaited()
+    service._ensure_schema.assert_not_awaited()
     assert 'transaction' not in client.call_order
     assert 'embed' not in client.call_order
 
@@ -966,10 +1030,12 @@ async def test_verify_never_embeds_or_writes():
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
     service._store.upsert_entity_item = AsyncMock()
+    service._ensure_schema = AsyncMock()
     await service.verify_catalog_batch(client=client, request=_verify_request())
     client.embedder.create.assert_not_awaited()
     client.embedder.create_batch.assert_not_awaited()
     service._store.upsert_entity_item.assert_not_awaited()
+    service._ensure_schema.assert_not_awaited()
     assert 'transaction' not in client.call_order
     assert 'embed' not in client.call_order
 
@@ -1034,9 +1100,29 @@ def _typed_endpoint(uuid: str, graph_key: str, entity_type: str = 'Table') -> di
     }
 
 
-def _wire_ok_endpoints(service: CatalogService, src_uuid: str = 'src-u', tgt_uuid: str = 'tgt-u'):
-    async def _resolve(executor, *, group_id, graph_key, entity_type, tx=None, **kwargs):
-        _ = (executor, group_id, entity_type, tx, kwargs)
+def _expected_entity_uuid(entity_type: str, graph_key: str) -> str:
+    return catalog_entity_uuid(FIXED_NS, GROUP, entity_type, graph_key)
+
+
+def _wire_ok_endpoints(
+    service: CatalogService,
+    src_uuid: str | None = None,
+    tgt_uuid: str | None = None,
+):
+    src_uuid = src_uuid or _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES')
+    tgt_uuid = tgt_uuid or _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS')
+
+    async def _resolve(
+        executor,
+        *,
+        group_id,
+        graph_key,
+        entity_type,
+        tx=None,
+        expected_uuid=None,
+        **kwargs,
+    ):
+        _ = (executor, group_id, entity_type, tx, expected_uuid, kwargs)
         if graph_key == 'TABLE::HR.EMPLOYEES':
             return None, _typed_endpoint(src_uuid, graph_key)
         if graph_key == 'TABLE::HR.DEPARTMENTS':
@@ -1097,12 +1183,19 @@ async def test_edge_target_endpoint_read_failure_is_internal_error_not_missing()
     service = CatalogService(catalog_config=_enabled_config())
 
     async def _resolve(
-        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+        executor,
+        *,
+        group_id=None,
+        graph_key=None,
+        entity_type=None,
+        tx=None,
+        expected_uuid=None,
+        **kwargs,
     ):
-        _ = (executor, group_id, entity_type, tx, kwargs)
+        _ = (executor, group_id, entity_type, tx, expected_uuid, kwargs)
         assert graph_key is not None
         if graph_key == 'TABLE::HR.EMPLOYEES':
-            return None, _typed_endpoint('src-u', graph_key)
+            return None, _typed_endpoint(_expected_entity_uuid('Table', graph_key), graph_key)
         raise RuntimeError('db down')
 
     service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
@@ -1236,7 +1329,10 @@ async def test_edge_identical_hash_unchanged_leaves_batch_id():
     edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
     payload = CatalogService.edge_canonical_payload(edge)
     digest = canonical_sha256(payload)
-    src, tgt = 'src-u', 'tgt-u'
+    src, tgt = (
+        _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
+        _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+    )
     existing = {
         'uuid': edge_uuid,
         'content_sha256': digest,
@@ -1264,7 +1360,10 @@ async def test_edge_identical_hash_unchanged_leaves_batch_id():
 async def test_edge_changed_update_passes_request_batch_id():
     edge = _edge(fact='changed fact text about fk')
     edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
-    src, tgt = 'src-u', 'tgt-u'
+    src, tgt = (
+        _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
+        _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+    )
     existing = {
         'uuid': edge_uuid,
         'content_sha256': 'b' * 64,
@@ -1308,8 +1407,8 @@ async def test_edge_identity_conflict_no_mutation():
         'batch_id': 'old',
         'name': 'Contains',  # wrong type for same uuid
         'edge_key': edge.edge_key,
-        'source_uuid': 'src-u',
-        'target_uuid': 'tgt-u',
+        'source_uuid': _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
+        'target_uuid': _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
         'group_id': GROUP,
     }
     client = _make_client()
@@ -1359,11 +1458,19 @@ async def test_edge_atomic_rollback_on_store_failure():
     service = CatalogService(catalog_config=_enabled_config())
 
     async def _resolve(
-        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+        executor,
+        *,
+        group_id=None,
+        graph_key=None,
+        entity_type=None,
+        tx=None,
+        expected_uuid=None,
+        **kwargs,
     ):
-        _ = (executor, group_id, entity_type, tx, kwargs)
+        _ = (executor, group_id, entity_type, tx, expected_uuid, kwargs)
         assert graph_key is not None
-        return None, _typed_endpoint(f'u-{graph_key}', graph_key)
+        et = entity_type or 'Table'
+        return None, _typed_endpoint(_expected_entity_uuid(et, graph_key), graph_key, et)
 
     service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
     service._store.get_edge_by_uuid = AsyncMock(return_value=None)
@@ -1427,11 +1534,19 @@ async def test_edge_preserves_input_order_and_deterministic_uuid():
     service = CatalogService(catalog_config=_enabled_config())
 
     async def _resolve(
-        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+        executor,
+        *,
+        group_id=None,
+        graph_key=None,
+        entity_type=None,
+        tx=None,
+        expected_uuid=None,
+        **kwargs,
     ):
-        _ = (executor, group_id, entity_type, tx, kwargs)
+        _ = (executor, group_id, entity_type, tx, expected_uuid, kwargs)
         assert graph_key is not None
-        return None, _typed_endpoint(f'u-{graph_key}', graph_key)
+        et = entity_type or 'Table'
+        return None, _typed_endpoint(_expected_entity_uuid(et, graph_key), graph_key, et)
 
     service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
     service._store.get_edge_by_uuid = AsyncMock(return_value=None)
@@ -1475,7 +1590,10 @@ async def test_edge_prefers_db_status_when_present():
     """DB create-token status is authoritative when present."""
     edge = _edge(fact='changed fact text about fk')
     edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
-    src, tgt = 'src-u', 'tgt-u'
+    src, tgt = (
+        _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
+        _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+    )
     existing = {
         'uuid': edge_uuid,
         'content_sha256': 'b' * 64,
@@ -1514,15 +1632,23 @@ async def test_edge_in_tx_endpoint_race_rolls_back():
     call_n = {'n': 0}
 
     async def _resolve(
-        executor, *, group_id=None, graph_key=None, entity_type=None, tx=None, **kwargs
+        executor,
+        *,
+        group_id=None,
+        graph_key=None,
+        entity_type=None,
+        tx=None,
+        expected_uuid=None,
+        **kwargs,
     ):
-        _ = (executor, group_id, entity_type, kwargs)
+        _ = (executor, group_id, entity_type, expected_uuid, kwargs)
         assert graph_key is not None
         call_n['n'] += 1
         # Pre-tx resolves OK; in-tx (tx is not None) races to missing
         if tx is not None:
             return 'missing_endpoint', None
-        return None, _typed_endpoint(f'u-{graph_key}', graph_key)
+        et = entity_type or 'Table'
+        return None, _typed_endpoint(_expected_entity_uuid(et, graph_key), graph_key, et)
 
     service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
     service._store.get_edge_by_uuid = AsyncMock(return_value=None)
