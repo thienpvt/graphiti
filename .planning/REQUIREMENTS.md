@@ -82,8 +82,8 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 - [ ] **GATE-01**: Focused unit tests cover configuration, strict validation, allowlists, canonical hashes, deterministic UUIDs, errors, and embedding-before-transaction ordering
 - [ ] **GATE-02**: Neo4j integration tests create and verify only `oracle-catalog-tool-test` fixtures, including six typed entities, four structural edges, two distinct foreign keys, conflicts, retries, concurrency, search, and rollback
 - [ ] **GATE-03**: Phase 1 tests verify no LLM call, no queue call, no generic endpoint creation, and no mutation outside the dedicated test group
-- [ ] **GATE-04**: Formatter, linter, changed-code type checking, MCP tool-schema listing, and relevant existing MCP tests pass
-- [ ] **GATE-05**: A short Phase 1 report records exact commands/results and explicitly gates Phase 2
+- [x] **GATE-04**: Formatter, linter, changed-code type checking, MCP tool-schema listing, and relevant existing MCP tests pass
+- [x] **GATE-05**: A short Phase 1 report records exact commands/results and explicitly gates Phase 2
 
 ### Provenance
 
@@ -218,8 +218,8 @@ Every v1 requirement maps to exactly one phase.
 | GATE-01 | Phase 1 | Pending |
 | GATE-02 | Phase 1 | Pending |
 | GATE-03 | Phase 1 | Pending |
-| GATE-04 | Phase 1 | Pending |
-| GATE-05 | Phase 1 | Pending |
+| GATE-04 | Phase 1 | Complete |
+| GATE-05 | Phase 1 | Complete |
 | IDEN-03 | Phase 2 | Pending |
 | IDEN-04 | Phase 2 | Pending |
 | PROV-01 | Phase 2 | Pending |
@@ -253,6 +253,7 @@ Every v1 requirement maps to exactly one phase.
 | DOCS-05 | Phase 2 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 86 total (corrected from earlier 81 miscount)
 - Mapped to phases: 86
 - Unmapped: 0

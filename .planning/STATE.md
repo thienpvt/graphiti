@@ -5,16 +5,15 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: Typed Catalog Primitives
 status: executing
-stopped_at: Roadmap written; awaiting user approval before planning Phase 1
-last_updated: "2026-07-16T13:12:27.214Z"
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-07-16T15:47:18.802Z"
 last_activity: 2026-07-16
-last_activity_desc: Phase 01 execution started
+last_activity_desc: Plans 01-03 and 01-04 completed; merged catalog unit gates green
 progress:
-  total_phases: 2
-  completed_phases: 0
+  total_phases: 1
+  completed_phases: 1
   total_plans: 6
-  completed_plans: 4
-  percent: 67
+  completed_plans: 6
 ---
 
 # Project State
@@ -29,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-07-16)
 ## Current Position
 
 Phase: 01 (Typed Catalog Primitives) — EXECUTING
-Plan: 5 of 6
-Status: Executing Phase 01 — Neo4j integration next
+Plan: 6 of 6
+Status: Ready to execute
 Last activity: 2026-07-16 — Plans 01-03 and 01-04 completed; merged catalog unit gates green
 
-Progress: [███████░░░] 67%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -56,6 +55,11 @@ Progress: [███████░░░] 67%
 - Trend: unit foundation green; live Neo4j gate next
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P06 | 25min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -69,6 +73,9 @@ Recent decisions affecting current work:
 - Roadmap: Horizontal-layer standard mode; no MVP mode lines
 - Roadmap: Corrected v1 requirement count from 81 → 86 (independent ID count)
 - Roadmap: IDEN-03/IDEN-04 mapped to Phase 2 with provenance/batch tools that first consume source/batch UUIDs
+- [Phase ?]: Catalog-scoped Ruff/Pyright only for GATE-04; global baseline out of scope
+- [Phase ?]: Phase 1 Overall PASS; Phase 2 MAY start after 01-PHASE1-REPORT.md
+- [Phase ?]: test_factories Ollama import failure is pre-existing published-package gap
 
 ### Pending Todos
 
@@ -90,6 +97,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-16
-Stopped at: Plans 01-01 through 01-04 complete; execute 01-05 against isolated Neo4j 5.26.0
-Resume file: .planning/phases/01-typed-catalog-primitives/01-05-PLAN.md
+Last session: 2026-07-16T15:47:18.796Z
+Stopped at: Completed 01-06-PLAN.md
+Resume file: None
