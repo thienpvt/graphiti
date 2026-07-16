@@ -14,6 +14,7 @@ from typing import Any
 
 from config.schema import CatalogConfig
 from models.catalog_common import CatalogErrorCode
+from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest
 from models.catalog_entities import (
     CatalogEntityItem,
     ResolveEntityRef,
@@ -56,6 +57,22 @@ class _PreparedEntity:
     error_message: str | None = None
 
 
+@dataclass
+class _PreparedEdge:
+    index: int
+    item: CatalogEdgeItem
+    edge_uuid: str
+    content_sha256: str
+    source_uuid: str | None = None
+    target_uuid: str | None = None
+    fact_embedding: list[float] | None = None
+    coalesced_indices: list[int] = field(default_factory=list)
+    existing: dict[str, Any] | None = None
+    projected_status: str = 'created'
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
 class CatalogService:
     """Orchestrates catalog writes against CatalogNeo4jStore + configured embedder."""
 
@@ -82,6 +99,22 @@ class CatalogService:
             'summary': item.summary,
             'attributes': item.attributes,
             'source_refs': item.source_refs,
+            'confidence': item.confidence,
+        }
+
+    @staticmethod
+    def edge_canonical_payload(item: CatalogEdgeItem) -> dict[str, Any]:
+        """Mutable canonical fields used for edge content_sha256 (identity excluded)."""
+        return {
+            'edge_type': item.edge_type,
+            'edge_key': item.edge_key,
+            'source_graph_key': item.source_graph_key,
+            'source_entity_type': item.source_entity_type,
+            'target_graph_key': item.target_graph_key,
+            'target_entity_type': item.target_entity_type,
+            'fact': item.fact,
+            'evidence': item.evidence,
+            'attributes': item.attributes,
             'confidence': item.confidence,
         }
 
@@ -1300,3 +1333,671 @@ class CatalogService:
                 if count > 1 and key:
                     section.duplicate_edge_key.append(key)
         return section
+
+    # ------------------------------------------------------------------
+    # Typed edge upsert
+    # ------------------------------------------------------------------
+
+    def _edge_gate_errors(
+        self,
+        client: Any,
+        request: UpsertTypedEdgesRequest,
+    ) -> CatalogWriteResponse | None:
+        n = len(request.edges)
+
+        def _all_error(code: CatalogErrorCode, message: str) -> CatalogWriteResponse:
+            results = [
+                CatalogItemResult(
+                    index=i,
+                    status='error',
+                    edge_key=request.edges[i].edge_key,
+                    edge_type=request.edges[i].edge_type,
+                    error_code=code,
+                    error_message=message,
+                )
+                for i in range(n)
+            ]
+            return CatalogWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                dry_run=request.dry_run,
+                atomic=request.atomic,
+                results=results,
+                failed=n,
+            )
+
+        if not self.catalog_config.enabled:
+            return _all_error(
+                CatalogErrorCode.feature_disabled,
+                'catalog_upsert.enabled is false',
+            )
+        ns = self._namespace()
+        if ns is None:
+            return _all_error(
+                CatalogErrorCode.invalid_uuid_namespace,
+                'uuid_namespace missing or invalid',
+            )
+        provider = getattr(getattr(client, 'driver', None), 'provider', None)
+        provider_val = getattr(provider, 'value', provider)
+        if provider_val != 'neo4j':
+            return _all_error(
+                CatalogErrorCode.backend_unavailable,
+                'catalog writes require Neo4j backend',
+            )
+        max_n = self.catalog_config.max_edges_per_batch
+        if n > max_n:
+            return _all_error(
+                CatalogErrorCode.batch_limit_exceeded,
+                f'edges exceed max_edges_per_batch ({max_n})',
+            )
+        return None
+
+    async def upsert_typed_edges(
+        self,
+        *,
+        client: Any,
+        request: UpsertTypedEdgesRequest,
+    ) -> CatalogWriteResponse:
+        """Deterministic typed edge upsert (EDGE-01..11).
+
+        Order: gate → identity/hash → resolve both endpoints → embed fact →
+        open write tx (if not dry_run). Never creates/relabels endpoints.
+        """
+        gate = self._edge_gate_errors(client, request)
+        if gate is not None:
+            logger.info(
+                'catalog upsert_typed_edges gated batch_id=%s count=%s failed=%s',
+                request.batch_id,
+                len(request.edges),
+                gate.failed,
+            )
+            return gate
+
+        namespace = self._namespace()
+        assert namespace is not None
+
+        request_ts = datetime.now(timezone.utc)
+        prepared: list[_PreparedEdge] = []
+        identity_to_prep: dict[str, _PreparedEdge] = {}
+        early_errors: dict[int, CatalogItemResult] = {}
+
+        # 1) identity + hash + coalesce
+        for idx, item in enumerate(request.edges):
+            try:
+                payload = self.edge_canonical_payload(item)
+                digest = canonical_sha256(payload)
+                assert_optional_client_hash(item.content_sha256, digest)
+            except ValueError as exc:
+                msg = str(exc)
+                code = (
+                    CatalogErrorCode.content_hash_mismatch
+                    if 'content_hash_mismatch' in msg
+                    else CatalogErrorCode.validation_error
+                )
+                early_errors[idx] = CatalogItemResult(
+                    index=idx,
+                    status='error',
+                    edge_key=item.edge_key,
+                    edge_type=item.edge_type,
+                    error_code=code,
+                    error_message=msg,
+                )
+                continue
+
+            edge_uuid = catalog_edge_uuid(
+                namespace, request.group_id, item.edge_type, item.edge_key
+            )
+            if edge_uuid in identity_to_prep:
+                prior = identity_to_prep[edge_uuid]
+                if prior.content_sha256 != digest:
+                    for i in [prior.index, *prior.coalesced_indices, idx]:
+                        it = request.edges[i]
+                        early_errors[i] = CatalogItemResult(
+                            index=i,
+                            status='error',
+                            uuid=edge_uuid,
+                            edge_key=it.edge_key,
+                            edge_type=it.edge_type,
+                            error_code=CatalogErrorCode.deterministic_uuid_conflict,
+                            error_message='same identity different canonical payload in request',
+                        )
+                    if prior in prepared:
+                        prepared.remove(prior)
+                    identity_to_prep.pop(edge_uuid, None)
+                    continue
+                prior.coalesced_indices.append(idx)
+                continue
+
+            prep = _PreparedEdge(
+                index=idx,
+                item=item,
+                edge_uuid=edge_uuid,
+                content_sha256=digest,
+            )
+            prepared.append(prep)
+            identity_to_prep[edge_uuid] = prep
+
+        if early_errors and request.atomic:
+            return self._edge_atomic_fail_response(
+                request, early_errors, trigger_indices=set(early_errors.keys())
+            )
+
+        # 2) resolve both endpoints BEFORE embedding (EDGE-03/05)
+        driver = client.driver
+        for prep in prepared:
+            item = prep.item
+            try:
+                src_code, src_row = await self._store.resolve_endpoint_typed(
+                    driver,
+                    group_id=request.group_id,
+                    graph_key=item.source_graph_key,
+                    entity_type=item.source_entity_type,
+                )
+            except Exception as exc:
+                src_code, src_row = 'missing_endpoint', None
+                logger.error(
+                    'catalog endpoint_resolve_failed batch_id=%s side=source reason=%s',
+                    request.batch_id,
+                    type(exc).__name__,
+                )
+            if src_code is not None:
+                code = self._endpoint_error_code(src_code)
+                prep.projected_status = 'error'
+                prep.error_code = code
+                prep.error_message = f'source endpoint: {src_code}'
+                early_errors[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.edge_uuid,
+                    content_sha256=prep.content_sha256,
+                    edge_key=item.edge_key,
+                    edge_type=item.edge_type,
+                    error_code=code,
+                    error_message=prep.error_message,
+                )
+                continue
+
+            try:
+                tgt_code, tgt_row = await self._store.resolve_endpoint_typed(
+                    driver,
+                    group_id=request.group_id,
+                    graph_key=item.target_graph_key,
+                    entity_type=item.target_entity_type,
+                )
+            except Exception as exc:
+                tgt_code, tgt_row = 'missing_endpoint', None
+                logger.error(
+                    'catalog endpoint_resolve_failed batch_id=%s side=target reason=%s',
+                    request.batch_id,
+                    type(exc).__name__,
+                )
+            if tgt_code is not None:
+                code = self._endpoint_error_code(tgt_code)
+                prep.projected_status = 'error'
+                prep.error_code = code
+                prep.error_message = f'target endpoint: {tgt_code}'
+                early_errors[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.edge_uuid,
+                    content_sha256=prep.content_sha256,
+                    edge_key=item.edge_key,
+                    edge_type=item.edge_type,
+                    error_code=code,
+                    error_message=prep.error_message,
+                )
+                continue
+
+            assert src_row is not None and tgt_row is not None
+            prep.source_uuid = str(src_row['uuid'])
+            prep.target_uuid = str(tgt_row['uuid'])
+
+        # 3) load existing for conflict / unchanged
+        for prep in prepared:
+            if prep.projected_status == 'error':
+                continue
+            try:
+                existing = await self._store.get_edge_by_uuid(
+                    driver,
+                    uuid=prep.edge_uuid,
+                    group_id=request.group_id,
+                )
+            except Exception:
+                existing = None
+            prep.existing = existing
+            if existing is None:
+                prep.projected_status = 'created'
+                continue
+            conflict = self._store.detect_edge_identity_conflict(
+                existing,
+                edge_type=prep.item.edge_type,
+                edge_key=prep.item.edge_key,
+                source_uuid=prep.source_uuid or '',
+                target_uuid=prep.target_uuid or '',
+            )
+            if conflict:
+                prep.projected_status = 'error'
+                prep.error_code = CatalogErrorCode.edge_identity_conflict
+                prep.error_message = 'edge uuid exists with conflicting type/key/source/target'
+                early_errors[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.edge_uuid,
+                    content_sha256=prep.content_sha256,
+                    edge_key=prep.item.edge_key,
+                    edge_type=prep.item.edge_type,
+                    error_code=prep.error_code,
+                    error_message=prep.error_message,
+                )
+                continue
+            if existing.get('content_sha256') == prep.content_sha256:
+                prep.projected_status = 'unchanged'
+            else:
+                prep.projected_status = 'updated'
+
+        write_set = [p for p in prepared if p.projected_status != 'error']
+        conflicted = [p for p in prepared if p.projected_status == 'error']
+
+        if conflicted and request.atomic:
+            for p in conflicted:
+                if p.index not in early_errors:
+                    early_errors[p.index] = CatalogItemResult(
+                        index=p.index,
+                        status='error',
+                        uuid=p.edge_uuid,
+                        content_sha256=p.content_sha256,
+                        edge_key=p.item.edge_key,
+                        edge_type=p.item.edge_type,
+                        error_code=p.error_code,
+                        error_message=p.error_message,
+                    )
+            return self._edge_atomic_fail_response(
+                request,
+                early_errors,
+                trigger_indices={p.index for p in conflicted} | set(early_errors.keys()),
+            )
+
+        # 4) embed fact for non-unchanged (including dry-run readiness) AFTER endpoints
+        embed_targets = [p for p in write_set if p.projected_status != 'unchanged']
+        embedder = client.embedder
+        try:
+            for prep in embed_targets:
+                text = prep.item.fact.replace('\n', ' ')
+                prep.fact_embedding = await embedder.create(input_data=[text])
+        except Exception as exc:
+            logger.error(
+                'catalog embedding_failed batch_id=%s count=%s',
+                request.batch_id,
+                len(embed_targets),
+            )
+            err_results = []
+            for i, item in enumerate(request.edges):
+                if i in early_errors:
+                    err_results.append(early_errors[i])
+                else:
+                    err_results.append(
+                        CatalogItemResult(
+                            index=i,
+                            status='error',
+                            edge_key=item.edge_key,
+                            edge_type=item.edge_type,
+                            error_code=CatalogErrorCode.embedding_failed,
+                            error_message='embedding generation failed',
+                            details={'reason': type(exc).__name__},
+                        )
+                    )
+            return CatalogWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                dry_run=request.dry_run,
+                atomic=request.atomic,
+                results=sorted(err_results, key=lambda r: r.index),
+                failed=len(err_results),
+            )
+
+        # 5) dry-run: no transaction, no batch_id persistence
+        if request.dry_run:
+            results = self._build_edge_results(request, write_set, early_errors, written={})
+            resp = self._count_edge_response(request, results)
+            logger.info(
+                'catalog upsert_typed_edges dry_run batch_id=%s count=%s created=%s updated=%s unchanged=%s failed=%s',
+                request.batch_id,
+                len(request.edges),
+                resp.created,
+                resp.updated,
+                resp.unchanged,
+                resp.failed,
+            )
+            return resp
+
+        # 6) write
+        if request.atomic:
+            return await self._write_edges_atomic(
+                client, request, write_set, early_errors, request_ts
+            )
+        return await self._write_edges_per_item(
+            client, request, write_set, early_errors, request_ts
+        )
+
+    @staticmethod
+    def _endpoint_error_code(code: str) -> CatalogErrorCode:
+        mapping = {
+            'missing_endpoint': CatalogErrorCode.missing_endpoint,
+            'endpoint_type_mismatch': CatalogErrorCode.endpoint_type_mismatch,
+            'generic_endpoint_conflict': CatalogErrorCode.generic_endpoint_conflict,
+        }
+        return mapping.get(code, CatalogErrorCode.missing_endpoint)
+
+    def _edge_params_for(
+        self,
+        prep: _PreparedEdge,
+        request: UpsertTypedEdgesRequest,
+        request_ts: datetime,
+    ) -> dict[str, Any]:
+        item = prep.item
+        embedding = prep.fact_embedding or []
+        return self._store.prepare_edge_params(
+            edge_type=item.edge_type,
+            uuid=prep.edge_uuid,
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            edge_key=item.edge_key,
+            source_uuid=prep.source_uuid or '',
+            target_uuid=prep.target_uuid or '',
+            fact=item.fact,
+            evidence=item.evidence,
+            content_sha256=prep.content_sha256,
+            created_at=request_ts,
+            updated_at=request_ts,
+            fact_embedding=embedding,
+            attributes=item.attributes,
+            confidence=item.confidence,
+        )
+
+    def _edge_success_result(
+        self,
+        prep: _PreparedEdge,
+        status: str,
+        *,
+        index: int | None = None,
+    ) -> CatalogItemResult:
+        return CatalogItemResult(
+            index=prep.index if index is None else index,
+            status=status,  # type: ignore[arg-type]
+            uuid=prep.edge_uuid,
+            content_sha256=prep.content_sha256,
+            edge_key=prep.item.edge_key,
+            edge_type=prep.item.edge_type,
+        )
+
+    def _build_edge_results(
+        self,
+        request: UpsertTypedEdgesRequest,
+        write_set: list[_PreparedEdge],
+        early_errors: dict[int, CatalogItemResult],
+        written: dict[int, CatalogItemResult],
+    ) -> list[CatalogItemResult]:
+        by_index: dict[int, CatalogItemResult] = dict(early_errors)
+        by_index.update(written)
+        for prep in write_set:
+            if prep.index not in by_index:
+                by_index[prep.index] = self._edge_success_result(prep, prep.projected_status)
+            for ci in prep.coalesced_indices:
+                if ci not in by_index:
+                    by_index[ci] = self._edge_success_result(
+                        prep, prep.projected_status, index=ci
+                    )
+        results: list[CatalogItemResult] = []
+        for i, item in enumerate(request.edges):
+            if i in by_index:
+                results.append(by_index[i])
+            else:
+                results.append(
+                    CatalogItemResult(
+                        index=i,
+                        status='error',
+                        edge_key=item.edge_key,
+                        edge_type=item.edge_type,
+                        error_code=CatalogErrorCode.internal_error,
+                        error_message='missing result',
+                    )
+                )
+        return sorted(results, key=lambda r: r.index)
+
+    def _count_edge_response(
+        self,
+        request: UpsertTypedEdgesRequest,
+        results: list[CatalogItemResult],
+    ) -> CatalogWriteResponse:
+        created = sum(1 for r in results if r.status == 'created')
+        updated = sum(1 for r in results if r.status == 'updated')
+        unchanged = sum(1 for r in results if r.status == 'unchanged')
+        failed = sum(1 for r in results if r.status == 'error')
+        rolled_back = sum(1 for r in results if r.status == 'rolled_back')
+        return CatalogWriteResponse(
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            dry_run=request.dry_run,
+            atomic=request.atomic,
+            results=results,
+            created=created,
+            updated=updated,
+            unchanged=unchanged,
+            failed=failed,
+            rolled_back=rolled_back,
+        )
+
+    def _edge_atomic_fail_response(
+        self,
+        request: UpsertTypedEdgesRequest,
+        early_errors: dict[int, CatalogItemResult],
+        trigger_indices: set[int],
+    ) -> CatalogWriteResponse:
+        results: list[CatalogItemResult] = []
+        for i, item in enumerate(request.edges):
+            if i in early_errors:
+                results.append(early_errors[i])
+            elif i in trigger_indices:
+                results.append(
+                    CatalogItemResult(
+                        index=i,
+                        status='error',
+                        edge_key=item.edge_key,
+                        edge_type=item.edge_type,
+                        error_code=CatalogErrorCode.neo4j_transaction_failed,
+                        error_message='neo4j transaction failed',
+                    )
+                )
+            else:
+                results.append(
+                    CatalogItemResult(
+                        index=i,
+                        status='rolled_back',
+                        edge_key=item.edge_key,
+                        edge_type=item.edge_type,
+                        error_code=CatalogErrorCode.batch_conflict,
+                        error_message='rolled back due to sibling failure',
+                    )
+                )
+        results = sorted(results, key=lambda r: r.index)
+        resp = self._count_edge_response(request, results)
+        logger.info(
+            'catalog upsert_typed_edges atomic_fail batch_id=%s count=%s failed=%s rolled_back=%s',
+            request.batch_id,
+            len(request.edges),
+            resp.failed,
+            resp.rolled_back,
+        )
+        return resp
+
+    async def _write_edges_atomic(
+        self,
+        client: Any,
+        request: UpsertTypedEdgesRequest,
+        write_set: list[_PreparedEdge],
+        early_errors: dict[int, CatalogItemResult],
+        request_ts: datetime,
+    ) -> CatalogWriteResponse:
+        written: dict[int, CatalogItemResult] = {}
+        to_write = [p for p in write_set if p.projected_status != 'unchanged']
+        unchanged = [p for p in write_set if p.projected_status == 'unchanged']
+        for p in unchanged:
+            written[p.index] = self._edge_success_result(p, 'unchanged')
+            for ci in p.coalesced_indices:
+                written[ci] = self._edge_success_result(p, 'unchanged', index=ci)
+
+        if not to_write:
+            results = self._build_edge_results(request, write_set, early_errors, written)
+            resp = self._count_edge_response(request, results)
+            logger.info(
+                'catalog upsert_typed_edges batch_id=%s count=%s created=%s updated=%s unchanged=%s failed=%s',
+                request.batch_id,
+                len(request.edges),
+                resp.created,
+                resp.updated,
+                resp.unchanged,
+                resp.failed,
+            )
+            return resp
+
+        current_prep: _PreparedEdge | None = None
+        try:
+            async with client.driver.transaction() as tx:
+                for prep in to_write:
+                    current_prep = prep
+                    params = self._edge_params_for(prep, request, request_ts)
+                    row = await self._store.upsert_edge_item(tx, params=params)
+                    status = row.get('status') or prep.projected_status
+                    if status not in ('created', 'updated', 'unchanged'):
+                        status = prep.projected_status
+                    result = CatalogItemResult(
+                        index=prep.index,
+                        status=status,  # type: ignore[arg-type]
+                        uuid=prep.edge_uuid,
+                        content_sha256=prep.content_sha256,
+                        edge_key=prep.item.edge_key,
+                        edge_type=prep.item.edge_type,
+                    )
+                    written[prep.index] = result
+                    for ci in prep.coalesced_indices:
+                        written[ci] = CatalogItemResult(
+                            index=ci,
+                            status=status,  # type: ignore[arg-type]
+                            uuid=prep.edge_uuid,
+                            content_sha256=prep.content_sha256,
+                            edge_key=request.edges[ci].edge_key,
+                            edge_type=request.edges[ci].edge_type,
+                        )
+        except Exception as exc:
+            logger.error(
+                'catalog neo4j_transaction_failed batch_id=%s count=%s',
+                request.batch_id,
+                len(to_write),
+            )
+            trigger = current_prep or (to_write[0] if to_write else None)
+            trigger_idx = trigger.index if trigger is not None else 0
+            early_errors[trigger_idx] = CatalogItemResult(
+                index=trigger_idx,
+                status='error',
+                uuid=trigger.edge_uuid if trigger is not None else None,
+                edge_key=trigger.item.edge_key if trigger is not None else None,
+                edge_type=trigger.item.edge_type if trigger is not None else None,
+                error_code=CatalogErrorCode.neo4j_transaction_failed,
+                error_message='neo4j transaction failed',
+                details={'reason': type(exc).__name__},
+            )
+            return self._edge_atomic_fail_response(
+                request, early_errors, trigger_indices={trigger_idx}
+            )
+
+        results = self._build_edge_results(request, write_set, early_errors, written)
+        resp = self._count_edge_response(request, results)
+        logger.info(
+            'catalog upsert_typed_edges batch_id=%s count=%s created=%s updated=%s unchanged=%s failed=%s',
+            request.batch_id,
+            len(request.edges),
+            resp.created,
+            resp.updated,
+            resp.unchanged,
+            resp.failed,
+        )
+        return resp
+
+    async def _write_edges_per_item(
+        self,
+        client: Any,
+        request: UpsertTypedEdgesRequest,
+        write_set: list[_PreparedEdge],
+        early_errors: dict[int, CatalogItemResult],
+        request_ts: datetime,
+    ) -> CatalogWriteResponse:
+        written: dict[int, CatalogItemResult] = {}
+        for prep in write_set:
+            if prep.projected_status == 'unchanged':
+                written[prep.index] = self._edge_success_result(prep, 'unchanged')
+                for ci in prep.coalesced_indices:
+                    written[ci] = self._edge_success_result(prep, 'unchanged', index=ci)
+                continue
+            try:
+                async with client.driver.transaction() as tx:
+                    params = self._edge_params_for(prep, request, request_ts)
+                    row = await self._store.upsert_edge_item(tx, params=params)
+                    status = row.get('status') or prep.projected_status
+                    if status not in ('created', 'updated', 'unchanged'):
+                        status = prep.projected_status
+                    written[prep.index] = CatalogItemResult(
+                        index=prep.index,
+                        status=status,  # type: ignore[arg-type]
+                        uuid=prep.edge_uuid,
+                        content_sha256=prep.content_sha256,
+                        edge_key=prep.item.edge_key,
+                        edge_type=prep.item.edge_type,
+                    )
+                    for ci in prep.coalesced_indices:
+                        written[ci] = CatalogItemResult(
+                            index=ci,
+                            status=status,  # type: ignore[arg-type]
+                            uuid=prep.edge_uuid,
+                            content_sha256=prep.content_sha256,
+                            edge_key=request.edges[ci].edge_key,
+                            edge_type=request.edges[ci].edge_type,
+                        )
+            except Exception as exc:
+                logger.error(
+                    'catalog neo4j_transaction_failed batch_id=%s index=%s',
+                    request.batch_id,
+                    prep.index,
+                )
+                written[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.edge_uuid,
+                    edge_key=prep.item.edge_key,
+                    edge_type=prep.item.edge_type,
+                    error_code=CatalogErrorCode.neo4j_transaction_failed,
+                    error_message='neo4j transaction failed',
+                    details={'reason': type(exc).__name__},
+                )
+                for ci in prep.coalesced_indices:
+                    written[ci] = CatalogItemResult(
+                        index=ci,
+                        status='error',
+                        uuid=prep.edge_uuid,
+                        edge_key=request.edges[ci].edge_key,
+                        edge_type=request.edges[ci].edge_type,
+                        error_code=CatalogErrorCode.neo4j_transaction_failed,
+                        error_message='neo4j transaction failed',
+                    )
+
+        results = self._build_edge_results(request, write_set, early_errors, written)
+        resp = self._count_edge_response(request, results)
+        logger.info(
+            'catalog upsert_typed_edges batch_id=%s count=%s created=%s updated=%s unchanged=%s failed=%s',
+            request.batch_id,
+            len(request.edges),
+            resp.created,
+            resp.updated,
+            resp.unchanged,
+            resp.failed,
+        )
+        return resp

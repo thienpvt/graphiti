@@ -19,7 +19,6 @@ from services.catalog_store import (  # noqa: E402
     serialize_nested_json,
 )
 
-
 FIXED_TS = datetime(2026, 7, 16, 12, 0, 0, tzinfo=timezone.utc)
 GROUP = 'oracle-catalog-tool-test'
 BATCH = 'batch-001'
