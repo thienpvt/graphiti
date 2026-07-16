@@ -1,11 +1,14 @@
 """Configuration schemas with pydantic-settings and YAML support."""
 
+from __future__ import annotations
+
 import os
+import uuid
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -273,6 +276,56 @@ class GraphitiAppConfig(BaseModel):
             self.episode_id_prefix = ''
 
 
+class CatalogConfig(BaseModel):
+    """Deterministic catalog upsert configuration.
+
+    Catalog write tools operate against Neo4j only. Other graph backends keep
+    stable tool schemas but return structured backend-unavailable errors.
+    GRAPHITI_CATALOG_UUID_NAMESPACE is immutable deployment configuration and
+    is never auto-generated.
+    """
+
+    enabled: bool = Field(default=False, description='Enable catalog write tools')
+    uuid_namespace: str | None = Field(
+        default=None,
+        description=(
+            'Fixed UUIDv5 namespace for deterministic catalog identities. '
+            'Mapped from GRAPHITI_CATALOG_UUID_NAMESPACE. Never auto-generated.'
+        ),
+    )
+    max_entities_per_batch: int = Field(default=500, ge=1)
+    max_edges_per_batch: int = Field(default=2000, ge=1)
+    max_provenance_links_per_batch: int = Field(default=5000, ge=1)
+
+    @model_validator(mode='before')
+    @classmethod
+    def _bind_namespace_env(cls, data: Any) -> Any:
+        """Map GRAPHITI_CATALOG_UUID_NAMESPACE when uuid_namespace is unset."""
+        if not isinstance(data, dict):
+            return data
+        if data.get('uuid_namespace') in (None, ''):
+            env_ns = os.environ.get('GRAPHITI_CATALOG_UUID_NAMESPACE')
+            if env_ns:
+                data = {**data, 'uuid_namespace': env_ns}
+        return data
+
+    @model_validator(mode='after')
+    def _require_valid_namespace_when_enabled(self) -> CatalogConfig:
+        if not self.enabled:
+            return self
+        if not self.uuid_namespace:
+            raise ValueError(
+                'uuid_namespace is required when catalog_upsert.enabled is true'
+            )
+        try:
+            uuid.UUID(self.uuid_namespace)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError(
+                f'uuid_namespace must be a valid UUID when enabled: {self.uuid_namespace}'
+            ) from exc
+        return self
+
+
 class GraphitiConfig(BaseSettings):
     """Graphiti configuration with YAML and environment support."""
 
@@ -281,6 +334,7 @@ class GraphitiConfig(BaseSettings):
     embedder: EmbedderConfig = Field(default_factory=EmbedderConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     graphiti: GraphitiAppConfig = Field(default_factory=GraphitiAppConfig)
+    catalog_upsert: CatalogConfig = Field(default_factory=CatalogConfig)
 
     # Additional server options
     destroy_graph: bool = Field(default=False, description='Clear graph on startup')
