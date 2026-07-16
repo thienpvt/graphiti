@@ -645,6 +645,54 @@ async def test_verify_typed_entity_twin_anomalies_are_not_hidden(catalog_client)
     assert resp.entities.missing_embedding == [entity.graph_key]
 
 
+async def test_resolve_mixed_twin_anomalies_are_not_hidden(catalog_client):
+    ctx = catalog_client
+    entity = _six_entities()[2]
+    response = await _upsert_entities(ctx, [entity])
+    expected_uuid = response.results[0].uuid
+    assert expected_uuid
+    await ctx.driver.execute_query(
+        """
+        CREATE (n:Entity:Table {
+          uuid: $rogue_uuid,
+          group_id: $g,
+          name: $key,
+          graph_key: $key,
+          batch_id: $batch_id
+        })
+        CREATE (w:Entity:View {
+          uuid: $wrong_uuid,
+          group_id: $g,
+          name: $key,
+          graph_key: $key,
+          batch_id: $batch_id
+        })
+        """,
+        params={
+            'rogue_uuid': str(uuid.uuid4()),
+            'wrong_uuid': str(uuid.uuid4()),
+            'g': GROUP,
+            'key': entity.graph_key,
+            'batch_id': BATCH,
+        },
+    )
+    resp = await ctx.service.resolve_typed_entities(
+        client=ctx.client,
+        request=ResolveTypedEntitiesRequest(
+            group_id=GROUP,
+            entities=[ResolveEntityRef(entity_type='Table', graph_key=entity.graph_key)],
+        ),
+    )
+    r0 = resp.results[0]
+    assert r0.found is True
+    assert r0.status == 'found'
+    assert r0.uuid == expected_uuid
+    assert 'typed_duplicate' in r0.anomalies
+    assert 'uuid_mismatch' in r0.anomalies
+    assert 'missing_embedding' in r0.anomalies
+    assert 'wrong_type' in r0.anomalies
+
+
 async def test_verify_physical_duplicate_edge_is_preserved_and_reported(catalog_client):
     ctx = catalog_client
     await _upsert_entities(ctx, [_six_entities()[1], _six_entities()[2]])
