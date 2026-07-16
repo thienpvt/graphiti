@@ -1213,7 +1213,11 @@ class CatalogService:
                 matches[0],
             )
             anomalies.append('missing')  # no typed node
-            if any(not row.get('has_name_embedding') for row in matches if not self._custom_labels(self._node_labels(row))):
+            if any(
+                not row.get('has_name_embedding')
+                for row in matches
+                if not self._custom_labels(self._node_labels(row))
+            ):
                 anomalies.append('missing_embedding')
 
         if primary is None:
