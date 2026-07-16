@@ -92,7 +92,7 @@ class CatalogNeo4jStore:
     async def ensure_uuid_uniqueness_constraints(self, executor: Any) -> None:
         """Idempotent: composite (uuid, group_id) UNIQUE for concurrent MERGE.
 
-        Awaited before catalog reads/writes. Once-ready short-circuits.
+        Awaited before real catalog writes. Once-ready short-circuits.
         CREATE CONSTRAINT IF NOT EXISTS only — never drops indexes/data.
         On existing duplicate (uuid, group_id) pairs, fails closed without repair.
         """
@@ -101,39 +101,21 @@ class CatalogNeo4jStore:
         async with self._schema_lock:
             if self._schema_ready:
                 return
-            if not self._executor_supports_schema_ddl(executor):
-                # Unit-test mock drivers: no real Neo4j DDL surface.
-                self._schema_ready = True
-                return
             await self._ensure_identity_uniqueness_constraints_locked(executor)
             self._schema_ready = True
 
-    @staticmethod
-    def _executor_supports_schema_ddl(executor: Any) -> bool:
-        """True when executor.execute_query is a real awaitable Neo4j entrypoint."""
+    async def _run_schema_query(self, executor: Any, stmt: str) -> Any:
         exec_q = getattr(executor, 'execute_query', None)
         if exec_q is None or not callable(exec_q):
-            return False
-        # AsyncMock / coroutine functions are fine; plain MagicMock is not.
-        if inspect.iscoroutinefunction(exec_q):
-            return True
-        # Bound Neo4jDriver.execute_query is a coroutine function.
-        func = getattr(exec_q, '__func__', None)
-        if func is not None and inspect.iscoroutinefunction(func):
-            return True
-        # Heuristic: name from unittest.mock without async → skip DDL.
-        owner = type(executor)
-        module = getattr(owner, '__module__', '') or ''
-        return not module.startswith('unittest.mock')
-
-    async def _run_schema_query(self, executor: Any, stmt: str) -> Any:
-        result = executor.execute_query(stmt, params={})
+            raise CatalogStoreError(
+                'catalog schema init requires executor.execute_query',
+                code='neo4j_schema_failed',
+            )
+        result = exec_q(stmt, params={})
         if inspect.isawaitable(result):
             return await result
-        raise CatalogStoreError(
-            'catalog schema init requires async execute_query',
-            code='neo4j_schema_failed',
-        )
+        # Sync callables (rare) accepted when they return a ready result.
+        return result
 
     async def _ensure_identity_uniqueness_constraints_locked(self, executor: Any) -> None:
         if await self._identity_uniqueness_present(executor):

@@ -84,12 +84,39 @@ def _disabled_config() -> CatalogConfig:
     return CatalogConfig(enabled=False, uuid_namespace=None)
 
 
+def _schema_execute_query(cypher: str, params=None, **kwargs):
+    """Async-compatible schema DDL double: SHOW reports constraints present."""
+    _ = params, kwargs
+    text = (cypher or '').strip().upper()
+    if 'SHOW CONSTRAINTS' in text:
+        return (
+            [
+                {
+                    'name': 'catalog_entity_identity_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['Entity'],
+                    'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_relates_to_identity_unique',
+                    'type': 'RELATIONSHIP_PROPERTY_UNIQUENESS',
+                    'entityType': 'RELATIONSHIP',
+                    'labelsOrTypes': ['RELATES_TO'],
+                    'properties': ['uuid', 'group_id'],
+                },
+            ],
+            None,
+            None,
+        )
+    return ([], None, None)
+
+
 def _make_client(
     *,
     provider: str = 'neo4j',
     embedder: AsyncMock | None = None,
     tx_side_effect=None,
-    existing: dict | None = None,
 ):
     # Mirror GraphProvider.value without importing graphiti_core (editor pyright path).
     provider_enum = SimpleNamespace(value=provider)
@@ -98,6 +125,7 @@ def _make_client(
     call_order: list[str] = []
 
     async def _embed(*args, **kwargs):
+        _ = args, kwargs
         call_order.append('embed')
         return [0.1, 0.2, 0.3]
 
@@ -127,10 +155,14 @@ def _make_client(
             raise tx_side_effect
         yield tx
 
+    async def _execute_query(cypher: str, params=None, **kwargs):
+        return _schema_execute_query(cypher, params=params, **kwargs)
+
     driver = SimpleNamespace(
         provider=provider_enum,
         transaction=_transaction,
-        execute_query=AsyncMock(return_value=([], None, None)),
+        # Real async callable — product path never special-cases unittest.mock.
+        execute_query=_execute_query,
     )
 
     client = SimpleNamespace(
