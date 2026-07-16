@@ -22,7 +22,12 @@ Deliver configurable, synchronous Neo4j-only MCP primitives for deterministic ty
 - Edge upsert never creates generic or implicit endpoints; both typed endpoints must already resolve in the request scope.
 - Existing node types are immutable. A deterministic identity or graph key with conflicting labels fails without mutation.
 - Entity upsert generates `name_embedding` before opening the write transaction, including dry-run readiness validation.
-- An identical canonical payload returns `unchanged` and performs no timestamp or property mutation.
+- An identical canonical entity payload returns `unchanged` and performs no timestamp or property mutation.
+- Edge upsert requires two existing endpoints and resolves each by exact `group_id`, `graph_key`, and expected `entity_type`.
+- A missing endpoint returns `missing_endpoint`; an endpoint with the wrong custom label returns `endpoint_type_mismatch`.
+- Edge upsert never creates or relabels endpoints.
+- Edge UUIDs are server-derived UUIDv5 identities, and `fact_embedding` is generated before opening the write transaction.
+- An identical canonical edge payload returns `unchanged` and performs no timestamp or property mutation.
 
 ### Result Contract
 - Item success states are `created`, `updated`, and `unchanged`.
@@ -79,7 +84,7 @@ Deliver configurable, synchronous Neo4j-only MCP primitives for deterministic ty
 <specifics>
 ## Specific Ideas
 
-The mandatory rules are hard constraints, not defaults: synchronous post-commit responses, no queue, no LLM, no `excluded_entity_types`, UUIDv5 identity, required custom labels, immutable node types, generated `name_embedding`, no generic endpoints, and no mutation for identical payloads.
+The mandatory rules are hard constraints, not defaults: synchronous post-commit responses, no queue, no LLM, no `excluded_entity_types`, UUIDv5 identity, required custom labels, immutable node types, generated `name_embedding` and `fact_embedding`, exact endpoint resolution by group/key/type, `missing_endpoint` and `endpoint_type_mismatch` errors, no endpoint creation, and no mutation for identical entity or edge payloads.
 
 </specifics>
 
