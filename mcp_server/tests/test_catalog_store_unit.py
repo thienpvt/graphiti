@@ -438,7 +438,9 @@ def test_edge_on_create_and_changed_match_include_batch_id():
     assert 'CASE' in cypher.upper()
     assert 'content_sha256' in cypher
     assert 'ON MATCH SET' not in cypher
-    assert 'e.episodes = $episodes' in cypher
+    # create + updated paths both set episodes (unchanged FOREACH is empty → zero mutation)
+    assert cypher.count('e.episodes = $episodes') == 2
+    assert "status = 'updated'" in cypher
 
 
 def test_edge_identical_hash_noop_preserves_batch_id():

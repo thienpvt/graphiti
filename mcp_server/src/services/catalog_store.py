@@ -897,7 +897,9 @@ class CatalogNeo4jStore:
                 e.confidence = $confidence,
                 e.batch_id = $batch_id,
                 e.content_sha256 = $content_sha256,
-                e.updated_at = $updated_at
+                e.updated_at = $updated_at,
+                // Heal null/missing episodes on content update so EntityEdge search hydrates.
+                e.episodes = $episodes
         """.strip()
 
         return f"""

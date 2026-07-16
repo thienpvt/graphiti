@@ -1154,3 +1154,134 @@ async def test_two_fk_edges_distinct_keys_same_endpoints(catalog_client):
     assert u1 != u2
     assert await _count_edge_uuid(ctx.driver, u1) == 1
     assert await _count_edge_uuid(ctx.driver, u2) == 1
+
+
+async def test_edge_update_heals_null_episodes_for_search(catalog_client):
+    """Updated path sets e.episodes=[] so pre-fix null episodes become searchable."""
+    ctx = catalog_client
+    await _upsert_entities(ctx, [_six_entities()[2], _extra_table()])
+    edge = _edge(
+        'ForeignKeyTo',
+        'FK::null-episodes-heal',
+        'TABLE::HR.EMPLOYEES',
+        'Table',
+        'TABLE::HR.DEPARTMENTS',
+        'Table',
+        'employees.dept_id references departments.dept_id original',
+    )
+    r1 = await _upsert_edges(ctx, [edge], batch_id='ep-create')
+    assert r1.results[0].status == 'created'
+    eu = r1.results[0].uuid
+    assert eu
+
+    # Plant legacy null episodes on matching deterministic RELATES_TO.
+    await ctx.driver.execute_query(
+        """
+        MATCH ()-[e:RELATES_TO {uuid: $u}]->()
+        WHERE e.group_id = $g
+        SET e.episodes = null
+        """,
+        params={'u': eu, 'g': GROUP},
+    )
+    planted = await ctx.driver.execute_query(
+        """
+        MATCH ()-[e:RELATES_TO {uuid: $u}]->()
+        WHERE e.group_id = $g
+        RETURN e.episodes AS episodes
+        """,
+        params={'u': eu, 'g': GROUP},
+    )
+    assert planted[0][0]['episodes'] is None
+
+    # Content change forces status=updated (not unchanged zero-mutation).
+    updated = _edge(
+        'ForeignKeyTo',
+        'FK::null-episodes-heal',
+        'TABLE::HR.EMPLOYEES',
+        'Table',
+        'TABLE::HR.DEPARTMENTS',
+        'Table',
+        'employees.dept_id references departments.dept_id healed',
+    )
+    r2 = await _upsert_edges(ctx, [updated], batch_id='ep-update')
+    assert r2.results[0].status == 'updated'
+    assert r2.results[0].uuid == eu
+
+    stored = await ctx.driver.execute_query(
+        """
+        MATCH ()-[e:RELATES_TO {uuid: $u}]->()
+        WHERE e.group_id = $g
+        RETURN e.episodes AS episodes, e.fact AS fact
+        """,
+        params={'u': eu, 'g': GROUP},
+    )
+    row = stored[0][0]
+    assert row['episodes'] == []
+    assert 'healed' in row['fact']
+
+    # Production search path must hydrate without EntityEdge ValidationError.
+    from graphiti_core.cross_encoder.client import CrossEncoderClient
+    from graphiti_core.embedder.client import EmbedderClient
+    from graphiti_core.graphiti_types import GraphitiClients
+    from graphiti_core.llm_client.client import LLMClient
+    from graphiti_core.search.search import search
+    from graphiti_core.search.search_config_recipes import EDGE_HYBRID_SEARCH_RRF
+    from graphiti_core.search.search_filters import SearchFilters
+    from graphiti_core.tracer import NoOpTracer
+
+    class _Emb(EmbedderClient):
+        async def create(self, input_data: Any = None, **kwargs: Any) -> list[float]:
+            assert input_data is None or input_data is not None
+            assert isinstance(kwargs, dict)
+            return [0.01] * EMBED_DIM
+
+        async def create_batch(self, input_data_list: list[Any] | None = None) -> list[list[float]]:
+            items = input_data_list or []
+            return [[0.01] * EMBED_DIM for _ in items]
+
+    class _LLM(LLMClient):
+        def __init__(self) -> None:
+            pass
+
+        async def _generate_response(self, *args: Any, **kwargs: Any) -> Any:
+            raise AssertionError('no LLM')
+
+        async def generate_response(self, *args: Any, **kwargs: Any) -> Any:
+            raise AssertionError('no LLM')
+
+    class _CE(CrossEncoderClient):
+        async def rank(self, query: str, passages: list[str]) -> list[tuple[str, float]]:
+            return [(p, 0.0) for p in passages]
+
+    try:
+        clients = GraphitiClients(
+            driver=ctx.driver,
+            llm_client=_LLM(),  # type: ignore[arg-type]
+            embedder=_Emb(),  # type: ignore[arg-type]
+            cross_encoder=_CE(),  # type: ignore[arg-type]
+            tracer=NoOpTracer(),
+        )
+    except Exception:
+        clients = GraphitiClients.model_construct(
+            driver=ctx.driver,
+            llm_client=ctx.llm,
+            embedder=ctx.embedder,
+            cross_encoder=_CE(),
+            tracer=NoOpTracer(),
+        )
+
+    edge_results = await search(
+        clients,
+        'employees.dept_id references departments.dept_id healed',
+        [GROUP],
+        EDGE_HYBRID_SEARCH_RRF,
+        SearchFilters(edge_types=None),
+    )
+    facts = [getattr(e, 'fact', None) for e in (edge_results.edges or [])]
+    assert any(f and 'healed' in f for f in facts), (
+        f'search failed to hydrate healed edge: {facts!r}'
+    )
+    for e in edge_results.edges or []:
+        if getattr(e, 'uuid', None) == eu:
+            assert list(getattr(e, 'episodes', None) or []) == []
+            break
