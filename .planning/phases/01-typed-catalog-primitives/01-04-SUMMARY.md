@@ -176,9 +176,11 @@ None - plan executed exactly as written.
    - `execute_query(..., params=params)` contract (no kwargs splat).
    - `_verify_edges` reports `uuid_mismatch` via `catalog_edge_uuid`.
 6. **Commands / results**
-   - `uv run ruff check` catalog files → All checks passed
+   - `uv run ruff format` on `catalog_service.py`, `catalog_store.py`, `test_catalog_service.py`, `test_catalog_store_unit.py` → **4 files reformatted**
+   - `uv run ruff format --check` on those four → clean after format commit
+   - `uv run ruff check` those four → **All checks passed**
    - `uv run pyright` catalog source/tests → **0 errors, 0 warnings**
-   - catalog unit tests → **146 passed**
+   - catalog unit tests (`test_catalog_store_unit`, `test_catalog_service`, `test_catalog_models`, `test_catalog_identity`) → **146 passed**
 
 ## Self-Check: PASSED
 
@@ -187,4 +189,4 @@ None - plan executed exactly as written.
 - FOUND: mcp_server/src/graphiti_mcp_server.py
 - FOUND: mcp_server/tests/test_catalog_store_unit.py
 - FOUND: mcp_server/tests/test_catalog_service.py
-- FOUND: commits b62fd32, 04074bb, e9138c0, e58a266
+- FOUND: commits b62fd32, 04074bb, e9138c0, e58a266, 4ac7f66
