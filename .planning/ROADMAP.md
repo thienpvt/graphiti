@@ -25,7 +25,15 @@ Add synchronous, typed, deterministic Neo4j catalog-upsert tools to the existing
   3. MCP client can call read-only `resolve_typed_entities` and `verify_catalog_batch` and observe missing, generic, duplicate, mistyped, UUID-mismatch, missing-embedding, and endpoint issues without graph writes
   4. Existing `search_nodes` and `search_memory_facts` retrieve catalog entities and facts created only under `oracle-catalog-tool-test` with expected type filters
   5. Phase 1 quality gate is green: focused unit tests, Neo4j integration on `oracle-catalog-tool-test` only, format/lint/changed-code typecheck, MCP tool-schema listing, relevant existing MCP regressions, and a short Phase 1 report that explicitly gates Phase 2
-**Plans**: TBD
+**Plans:** 6 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — CatalogConfig, allowlisted models, UUIDv5/SHA-256 identity (TDD)
+- [ ] 01-02-PLAN.md — CatalogNeo4jStore + upsert_typed_entities service/tool (TDD)
+- [ ] 01-03-PLAN.md — resolve_typed_entities + verify_catalog_batch read-only (TDD)
+- [ ] 01-04-PLAN.md — upsert_typed_edges with exact endpoints (TDD)
+- [ ] 01-05-PLAN.md — Neo4j integration GATE-02/03 under oracle-catalog-tool-test (TDD)
+- [ ] 01-06-PLAN.md — format/lint/typecheck/schema/regressions + Phase 1 report (GATE-04/05)
 
 ### Phase 2: Provenance and Atomic Batch
 **Goal**: Operators can attach installed-schema provenance, observe restart-safe non-Entity batch status, and commit complete catalog batches atomically with documented operator guidance
@@ -46,7 +54,7 @@ Phases execute in numeric order: 1 → 2. Phase 2 must not start until Phase 1 g
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Typed Catalog Primitives | 0/TBD | Not started | - |
+| 1. Typed Catalog Primitives | 0/6 | Planned | - |
 | 2. Provenance and Atomic Batch | 0/TBD | Not started | - |
 
 ## Coverage
