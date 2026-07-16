@@ -577,7 +577,9 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
     client.embedder.create_batch.assert_not_awaited()
     assert 'transaction' not in client.call_order
     # MATCH scoped to group_id + requested keys only
-    call_kwargs = service._store.match_entities_for_resolve.await_args.kwargs
+    await_args = service._store.match_entities_for_resolve.await_args
+    assert await_args is not None
+    call_kwargs = await_args.kwargs
     assert call_kwargs['group_id'] == GROUP
     assert 'TABLE::HR.EMPLOYEES' in call_kwargs['graph_keys']
 
@@ -751,8 +753,12 @@ async def test_verify_batch_scoped_match_uses_group_and_batch_id():
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
     await service.verify_catalog_batch(client=client, request=_verify_request())
-    ent_kwargs = service._store.match_entities_for_verify.await_args.kwargs
-    edge_kwargs = service._store.match_edges_for_verify.await_args.kwargs
+    ent_await = service._store.match_entities_for_verify.await_args
+    edge_await = service._store.match_edges_for_verify.await_args
+    assert ent_await is not None
+    assert edge_await is not None
+    ent_kwargs = ent_await.kwargs
+    edge_kwargs = edge_await.kwargs
     assert ent_kwargs['group_id'] == GROUP
     assert ent_kwargs['batch_id'] == BATCH
     assert edge_kwargs['group_id'] == GROUP

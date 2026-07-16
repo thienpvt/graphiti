@@ -66,7 +66,7 @@ class ResolveTypedEntitiesResponse(BaseModel):
     """Response for resolve_typed_entities."""
 
     group_id: str
-    results: list[ResolveEntityResult | CatalogItemResult] = Field(default_factory=list)
+    results: list[ResolveEntityResult] = Field(default_factory=list)
 
 
 class VerifyEntitySection(BaseModel):
