@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import sys
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -17,13 +17,26 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from config.schema import CatalogConfig  # noqa: E402
 from models.catalog_common import CatalogErrorCode  # noqa: E402
-from models.catalog_entities import CatalogEntityItem, UpsertTypedEntitiesRequest  # noqa: E402
+from models.catalog_entities import (  # noqa: E402
+    CatalogEntityItem,
+    ResolveEntityRef,
+    ResolveTypedEntitiesRequest,
+    UpsertTypedEntitiesRequest,
+    VerifyCatalogBatchRequest,
+    VerifyEdgeRef,
+    VerifyEntityRef,
+)
 from services.catalog_identity import canonical_sha256, catalog_entity_uuid  # noqa: E402
 from services.catalog_service import CatalogService  # noqa: E402
 
 FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 GROUP = 'oracle-catalog-tool-test'
 BATCH = 'batch-entity-001'
+
+
+def _mcp_server():
+    """Lazy import MCP server module (avoids static missing-import diagnostics)."""
+    return importlib.import_module('graphiti_mcp_server')
 
 
 def _entity(**overrides) -> CatalogEntityItem:
@@ -476,8 +489,7 @@ async def test_entity_same_identity_different_hash_is_conflict():
 
 @pytest.mark.asyncio
 async def test_mcp_tool_upsert_typed_entities_registered():
-    import graphiti_mcp_server as server
-
+    server = _mcp_server()
     assert hasattr(server, 'upsert_typed_entities')
     assert callable(server.upsert_typed_entities)
 
@@ -488,8 +500,6 @@ async def test_mcp_tool_upsert_typed_entities_registered():
 
 
 def _resolve_request(entities=None, **kwargs):
-    from models.catalog_entities import ResolveEntityRef, ResolveTypedEntitiesRequest
-
     if entities is None:
         entities = [
             ResolveEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
@@ -692,8 +702,7 @@ async def test_resolve_never_opens_write_transaction():
 
 @pytest.mark.asyncio
 async def test_mcp_tool_resolve_typed_entities_registered():
-    import graphiti_mcp_server as server
-
+    server = _mcp_server()
     assert hasattr(server, 'resolve_typed_entities')
     assert callable(server.resolve_typed_entities)
 
@@ -704,12 +713,6 @@ async def test_mcp_tool_resolve_typed_entities_registered():
 
 
 def _verify_request(**kwargs):
-    from models.catalog_entities import (
-        VerifyCatalogBatchRequest,
-        VerifyEdgeRef,
-        VerifyEntityRef,
-    )
-
     data = {
         'group_id': GROUP,
         'batch_id': BATCH,
@@ -809,8 +812,6 @@ async def test_verify_entity_counts_and_anomaly_lists():
         ]
     )
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
-    from models.catalog_entities import VerifyEntityRef
-
     req = _verify_request(
         entities=[
             VerifyEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
@@ -851,8 +852,6 @@ async def test_verify_edge_counts_and_anomaly_lists():
             },
         ]
     )
-    from models.catalog_entities import VerifyEdgeRef
-
     req = _verify_request(
         entities=[],
         edges=[
@@ -923,7 +922,6 @@ async def test_verify_never_embeds_or_writes():
 
 @pytest.mark.asyncio
 async def test_mcp_tool_verify_catalog_batch_registered():
-    import graphiti_mcp_server as server
-
+    server = _mcp_server()
     assert hasattr(server, 'verify_catalog_batch')
     assert callable(server.verify_catalog_batch)

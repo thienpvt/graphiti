@@ -164,7 +164,14 @@ Each task was committed atomically (TDD RED then GREEN):
 - **Issue:** `await_args` is typed optional; accessing `.kwargs` after `assert is not None` still trips reportOptionalMemberAccess in some analyzers
 - **Fix:** Capture kwargs via AsyncMock `side_effect` dicts; assert_awaited without reading optional await_args
 - **Files modified:** `test_catalog_service.py`
-- **Committed in:** pre-merge diagnostic fix
+- **Committed in:** `5979d04`
+
+**4. [Rule 1 - Bug] Function-local model/server imports flagged by editor pyright**
+- **Found during:** Final diagnostic cleanup
+- **Issue:** Repeated `from models.catalog_entities import ...` and `import graphiti_mcp_server` inside tests/helpers
+- **Fix:** Top-level model imports; `_mcp_server()` via `importlib.import_module`; drop unused `datetime`/`timezone`/`call`
+- **Files modified:** `test_catalog_service.py`
+- **Committed in:** final diagnostic cleanup
 
 ## Threat Flags
 
@@ -181,11 +188,11 @@ None for resolve/verify behavior. Live Neo4j integration deferred to later phase
 - Verify tests: `ee08e13` (implementation already present from Task 1 GREEN; tests authored RED-style against public API)
 - Diagnostic fix: `401dd89`
 - Pre-merge optional-mock fix: capture kwargs via side_effect (no await_args.kwargs)
-- Verification: `cd mcp_server && uv run pytest tests/test_catalog_service.py -k "resolve or verify" -q` → 16 passed
+- Final import cleanup: top-level model symbols; `importlib` for MCP server; no local `from models...` / `import graphiti_mcp_server`
 - Verification: `cd mcp_server && uv run pytest tests/test_catalog_service.py -q` → 33 passed
 - Verification (root portable): `uv run --project mcp_server pyright --project mcp_server/pyproject.toml mcp_server/src/graphiti_mcp_server.py mcp_server/src/models/catalog_entities.py mcp_server/src/models/catalog_responses.py mcp_server/src/services/catalog_store.py mcp_server/src/services/catalog_service.py mcp_server/tests/test_catalog_service.py` → 0 errors
 - Verification (package): `cd mcp_server && uv run pyright src/graphiti_mcp_server.py src/models/catalog_entities.py src/models/catalog_responses.py src/services/catalog_store.py src/services/catalog_service.py tests/test_catalog_service.py` → 0 errors
-- Unused imports: `ruff check src/services/catalog_service.py --select F401` → All checks passed
+- Ruff: `uv run ruff check tests/test_catalog_service.py --select F401,F821` → All checks passed
 
 ## Self-Check: PASSED
 
@@ -193,6 +200,6 @@ None for resolve/verify behavior. Live Neo4j integration deferred to later phase
 - FOUND: `mcp_server/src/services/catalog_service.py` (`resolve_typed_entities`, `verify_catalog_batch`)
 - FOUND: `mcp_server/src/graphiti_mcp_server.py` (`resolve_typed_entities`, `verify_catalog_batch`)
 - FOUND: `mcp_server/tests/test_catalog_service.py` (resolve + verify cases)
-- FOUND commits: `fd33ca7`, `e70e8f9`, `ee08e13`, `401dd89` (+ pre-merge fix)
+- FOUND commits: `fd33ca7`, `e70e8f9`, `ee08e13`, `401dd89`, `5979d04` (+ final import cleanup)
 - STATE.md / ROADMAP.md: not modified (per executor instructions)
-- No `await_args.kwargs` remaining in `test_catalog_service.py`
+- No function-local `from models...` or `import graphiti_mcp_server` remaining
