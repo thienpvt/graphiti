@@ -291,10 +291,8 @@ class CatalogNeo4jStore:
                 return None
             first = records[0]
             return dict(first) if not isinstance(first, dict) else first
-        if hasattr(result, 'records'):
-            records = result.records
-            if not records:
-                return None
-            first = records[0]
+        records_attr = getattr(result, 'records', None)
+        if records_attr:
+            first = records_attr[0]
             return dict(first) if not isinstance(first, dict) else first
         return None
