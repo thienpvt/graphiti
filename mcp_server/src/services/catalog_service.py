@@ -14,11 +14,26 @@ from typing import Any
 
 from config.schema import CatalogConfig
 from models.catalog_common import CatalogErrorCode
-from models.catalog_entities import CatalogEntityItem, UpsertTypedEntitiesRequest
-from models.catalog_responses import CatalogItemResult, CatalogWriteResponse
+from models.catalog_entities import (
+    CatalogEntityItem,
+    ResolveEntityRef,
+    ResolveTypedEntitiesRequest,
+    UpsertTypedEntitiesRequest,
+    VerifyCatalogBatchRequest,
+)
+from models.catalog_responses import (
+    CatalogItemResult,
+    CatalogWriteResponse,
+    ResolveEntityResult,
+    ResolveTypedEntitiesResponse,
+    VerifyCatalogBatchResponse,
+    VerifyEdgeSection,
+    VerifyEntitySection,
+)
 from services.catalog_identity import (
     assert_optional_client_hash,
     canonical_sha256,
+    catalog_edge_uuid,
     catalog_entity_uuid,
 )
 from services.catalog_store import CatalogNeo4jStore
@@ -690,3 +705,598 @@ class CatalogService:
             resp.rolled_back,
         )
         return resp
+
+    # ------------------------------------------------------------------
+    # Read-only resolve / verify
+    # ------------------------------------------------------------------
+
+    def _read_gate(
+        self,
+        client: Any,
+        *,
+        group_id: str,
+        item_count: int,
+    ) -> tuple[CatalogErrorCode, str] | None:
+        """Shared feature/namespace/backend gates for read-only tools."""
+        if not self.catalog_config.enabled:
+            return (
+                CatalogErrorCode.feature_disabled,
+                'catalog_upsert.enabled is false',
+            )
+        if self._namespace() is None:
+            return (
+                CatalogErrorCode.invalid_uuid_namespace,
+                'uuid_namespace missing or invalid',
+            )
+        provider = getattr(getattr(client, 'driver', None), 'provider', None)
+        provider_val = getattr(provider, 'value', provider)
+        if provider_val != 'neo4j':
+            return (
+                CatalogErrorCode.backend_unavailable,
+                'catalog operations require Neo4j backend',
+            )
+        max_n = self.catalog_config.max_entities_per_batch
+        if item_count > max_n:
+            return (
+                CatalogErrorCode.batch_limit_exceeded,
+                f'items exceed max_entities_per_batch ({max_n})',
+            )
+        return None
+
+    @staticmethod
+    def _node_labels(row: dict[str, Any]) -> list[str]:
+        labels = row.get('neo4j_labels') or row.get('labels') or []
+        if isinstance(labels, str):
+            return [labels]
+        return list(labels)
+
+    @staticmethod
+    def _custom_labels(labels: list[str]) -> list[str]:
+        return [lb for lb in labels if lb != 'Entity']
+
+    @staticmethod
+    def _row_key(row: dict[str, Any]) -> str | None:
+        return row.get('graph_key') or row.get('name')
+
+    async def resolve_typed_entities(
+        self,
+        *,
+        client: Any,
+        request: ResolveTypedEntitiesRequest,
+    ) -> ResolveTypedEntitiesResponse:
+        """Read-only resolve of typed catalog entities (RESO-01..04).
+
+        Never opens a write transaction or calls the embedder.
+        """
+        refs = list(request.entities)
+        # Allow graph_keys-only convenience when entities empty (optional).
+        if not refs and request.graph_keys:
+            # Without entity_type we cannot fully resolve; treat as validation.
+            return ResolveTypedEntitiesResponse(
+                group_id=request.group_id,
+                results=[
+                    ResolveEntityResult(
+                        index=0,
+                        entity_type='',
+                        graph_key='',
+                        status='error',
+                        found=False,
+                        error_code=CatalogErrorCode.validation_error,
+                        error_message='entities with entity_type required for resolve',
+                        anomalies=['validation_error'],
+                    )
+                ],
+            )
+
+        gate = self._read_gate(client, group_id=request.group_id, item_count=len(refs))
+        if gate is not None:
+            code, message = gate
+            results = [
+                ResolveEntityResult(
+                    index=i,
+                    entity_type=ref.entity_type,
+                    graph_key=ref.graph_key,
+                    status='error',
+                    found=False,
+                    error_code=code,
+                    error_message=message,
+                    anomalies=[code.value if hasattr(code, 'value') else str(code)],
+                )
+                for i, ref in enumerate(refs)
+            ]
+            logger.info(
+                'catalog resolve_typed_entities gated group_id=%s count=%s code=%s',
+                request.group_id,
+                len(refs),
+                code,
+            )
+            return ResolveTypedEntitiesResponse(group_id=request.group_id, results=results)
+
+        namespace = self._namespace()
+        assert namespace is not None
+
+        graph_keys = [ref.graph_key for ref in refs]
+        try:
+            rows = await self._store.match_entities_for_resolve(
+                client.driver,
+                group_id=request.group_id,
+                graph_keys=graph_keys,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog resolve_typed_entities read_failed group_id=%s count=%s reason=%s',
+                request.group_id,
+                len(refs),
+                type(exc).__name__,
+            )
+            return ResolveTypedEntitiesResponse(
+                group_id=request.group_id,
+                results=[
+                    ResolveEntityResult(
+                        index=i,
+                        entity_type=ref.entity_type,
+                        graph_key=ref.graph_key,
+                        status='error',
+                        found=False,
+                        error_code=CatalogErrorCode.internal_error,
+                        error_message='resolve read failed',
+                        anomalies=['internal_error'],
+                    )
+                    for i, ref in enumerate(refs)
+                ],
+            )
+
+        by_key: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            key = self._row_key(row)
+            if not key:
+                continue
+            by_key.setdefault(str(key), []).append(row)
+
+        results: list[ResolveEntityResult] = []
+        for i, ref in enumerate(refs):
+            expected_uuid = catalog_entity_uuid(
+                namespace, request.group_id, ref.entity_type, ref.graph_key
+            )
+            matches = by_key.get(ref.graph_key, [])
+            result = self._analyze_resolve_item(
+                index=i,
+                ref=ref,
+                expected_uuid=expected_uuid,
+                matches=matches,
+            )
+            results.append(result)
+
+        logger.info(
+            'catalog resolve_typed_entities group_id=%s count=%s found=%s',
+            request.group_id,
+            len(refs),
+            sum(1 for r in results if r.found),
+        )
+        return ResolveTypedEntitiesResponse(group_id=request.group_id, results=results)
+
+    def _analyze_resolve_item(
+        self,
+        *,
+        index: int,
+        ref: ResolveEntityRef,
+        expected_uuid: str,
+        matches: list[dict[str, Any]],
+    ) -> ResolveEntityResult:
+        if not matches:
+            return ResolveEntityResult(
+                index=index,
+                entity_type=ref.entity_type,
+                graph_key=ref.graph_key,
+                status='missing',
+                found=False,
+                uuid=None,
+                anomalies=['missing'],
+            )
+
+        generic_dups: list[str] = []
+        typed_nodes: list[dict[str, Any]] = []
+        wrong_type_nodes: list[dict[str, Any]] = []
+
+        for row in matches:
+            labels = self._node_labels(row)
+            custom = self._custom_labels(labels)
+            uuid_val = str(row.get('uuid') or '')
+            if not custom:
+                # bare generic Entity with name/graph_key match
+                if uuid_val:
+                    generic_dups.append(uuid_val)
+                continue
+            if ref.entity_type in custom:
+                typed_nodes.append(row)
+            else:
+                wrong_type_nodes.append(row)
+
+        anomalies: list[str] = []
+        if generic_dups:
+            anomalies.append('generic_duplicate')
+
+        primary: dict[str, Any] | None = None
+        typed_dups: list[str] = []
+
+        if typed_nodes:
+            # Prefer exact expected UUID, else first typed
+            for row in typed_nodes:
+                if str(row.get('uuid')) == expected_uuid:
+                    primary = row
+                    break
+            if primary is None:
+                primary = typed_nodes[0]
+            for row in typed_nodes:
+                u = str(row.get('uuid') or '')
+                if primary is not None and u and u != str(primary.get('uuid')):
+                    typed_dups.append(u)
+            if len(typed_nodes) > 1:
+                anomalies.append('typed_duplicate')
+        elif wrong_type_nodes:
+            primary = wrong_type_nodes[0]
+            anomalies.append('wrong_type')
+        elif generic_dups:
+            # only bare generics — found as anomaly state, not verified typed
+            primary = next(
+                (m for m in matches if str(m.get('uuid')) == generic_dups[0]),
+                matches[0],
+            )
+            anomalies.append('missing')  # no typed node
+
+        if primary is None:
+            return ResolveEntityResult(
+                index=index,
+                entity_type=ref.entity_type,
+                graph_key=ref.graph_key,
+                status='missing',
+                found=False,
+                generic_duplicates=generic_dups,
+                anomalies=anomalies or ['missing'],
+            )
+
+        labels = self._node_labels(primary)
+        custom = self._custom_labels(labels)
+        verified = ref.entity_type if ref.entity_type in custom else (custom[0] if custom else None)
+        has_emb = bool(primary.get('has_name_embedding'))
+        uuid_val = str(primary.get('uuid') or '') or None
+
+        if uuid_val and uuid_val != expected_uuid:
+            anomalies.append('uuid_mismatch')
+        if not has_emb:
+            anomalies.append('missing_embedding')
+        if custom and ref.entity_type not in custom and 'wrong_type' not in anomalies:
+            anomalies.append('wrong_type')
+
+        # Deduplicate anomaly tags while preserving order
+        seen_a: set[str] = set()
+        ordered_anomalies: list[str] = []
+        for a in anomalies:
+            if a not in seen_a:
+                seen_a.add(a)
+                ordered_anomalies.append(a)
+
+        if ref.entity_type in custom:
+            status = 'found'
+        elif custom:
+            status = 'wrong_type'
+        else:
+            # bare generic Entity: found for diagnostics, not verified typed
+            status = 'generic_only'
+            ordered_anomalies = [a for a in ordered_anomalies if a != 'missing']
+            if 'generic_duplicate' not in ordered_anomalies:
+                ordered_anomalies.insert(0, 'generic_duplicate')
+        found = True
+
+        return ResolveEntityResult(
+            index=index,
+            entity_type=ref.entity_type,
+            graph_key=ref.graph_key,
+            status=status,
+            found=found,
+            uuid=uuid_val,
+            labels=labels,
+            verified_type=verified,
+            has_name_embedding=has_emb,
+            content_sha256=primary.get('content_sha256'),
+            generic_duplicates=generic_dups,
+            typed_duplicates=typed_dups,
+            anomalies=ordered_anomalies,
+        )
+
+    async def verify_catalog_batch(
+        self,
+        *,
+        client: Any,
+        request: VerifyCatalogBatchRequest,
+    ) -> VerifyCatalogBatchResponse:
+        """Read-only batch verification (VERI-01..05). No writes, no embeddings."""
+        entity_count = len(request.entities)
+        edge_count = len(request.edges)
+        gate = self._read_gate(
+            client,
+            group_id=request.group_id,
+            item_count=max(entity_count, 1),
+        )
+        if gate is not None:
+            code, message = gate
+            logger.info(
+                'catalog verify_catalog_batch gated group_id=%s batch_id=%s code=%s',
+                request.group_id,
+                request.batch_id,
+                code,
+            )
+            return VerifyCatalogBatchResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                require_provenance=request.require_provenance,
+                error_code=code,
+                error_message=message,
+            )
+
+        max_edges = self.catalog_config.max_edges_per_batch
+        if edge_count > max_edges:
+            return VerifyCatalogBatchResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                require_provenance=request.require_provenance,
+                error_code=CatalogErrorCode.batch_limit_exceeded,
+                error_message=f'edges exceed max_edges_per_batch ({max_edges})',
+            )
+
+        namespace = self._namespace()
+        assert namespace is not None
+
+        graph_keys = [e.graph_key for e in request.entities]
+        edge_keys = [e.edge_key for e in request.edges]
+
+        try:
+            entity_rows = await self._store.match_entities_for_verify(
+                client.driver,
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                graph_keys=graph_keys or None,
+            )
+            edge_rows = await self._store.match_edges_for_verify(
+                client.driver,
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                edge_keys=edge_keys or None,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog verify_catalog_batch read_failed group_id=%s batch_id=%s reason=%s',
+                request.group_id,
+                request.batch_id,
+                type(exc).__name__,
+            )
+            return VerifyCatalogBatchResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                require_provenance=request.require_provenance,
+                error_code=CatalogErrorCode.internal_error,
+                error_message='verify read failed',
+            )
+
+        entity_section = self._verify_entities(
+            namespace=namespace,
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            expected=request.entities,
+            rows=entity_rows,
+        )
+        edge_section = self._verify_edges(
+            namespace=namespace,
+            group_id=request.group_id,
+            expected=request.edges,
+            rows=edge_rows,
+            batch_id=request.batch_id,
+        )
+
+        missing = list(entity_section.missing) + list(edge_section.missing)
+        anomalies: list[dict[str, Any]] = []
+        for key in entity_section.wrong_type:
+            anomalies.append({'kind': 'wrong_type', 'graph_key': key})
+        for key in entity_section.generic_duplicate:
+            anomalies.append({'kind': 'generic_duplicate', 'graph_key': key})
+        for key in entity_section.typed_duplicate:
+            anomalies.append({'kind': 'typed_duplicate', 'graph_key': key})
+        for key in entity_section.uuid_mismatch:
+            anomalies.append({'kind': 'uuid_mismatch', 'graph_key': key})
+        for key in entity_section.missing_embedding:
+            anomalies.append({'kind': 'missing_embedding', 'graph_key': key})
+        for key in edge_section.duplicate_edge_key:
+            anomalies.append({'kind': 'duplicate_edge_key', 'edge_key': key})
+        for key in edge_section.endpoint_mismatch:
+            anomalies.append({'kind': 'endpoint_mismatch', 'edge_key': key})
+        for key in edge_section.missing_embedding:
+            anomalies.append({'kind': 'missing_embedding', 'edge_key': key})
+
+        missing_provenance: list[str] = []
+        if request.require_provenance:
+            target_uuids: list[str] = []
+            for row in entity_rows:
+                u = row.get('uuid')
+                if u:
+                    target_uuids.append(str(u))
+            for row in edge_rows:
+                u = row.get('uuid')
+                if u:
+                    target_uuids.append(str(u))
+            # Also include expected deterministic UUIDs for missing targets
+            for ent in request.entities:
+                target_uuids.append(
+                    catalog_entity_uuid(
+                        namespace, request.group_id, ent.entity_type, ent.graph_key
+                    )
+                )
+            for edge in request.edges:
+                target_uuids.append(
+                    catalog_edge_uuid(
+                        namespace, request.group_id, edge.edge_type, edge.edge_key
+                    )
+                )
+            # de-dupe preserve order
+            seen_u: set[str] = set()
+            uniq_targets: list[str] = []
+            for u in target_uuids:
+                if u not in seen_u:
+                    seen_u.add(u)
+                    uniq_targets.append(u)
+            try:
+                prov_rows = await self._store.match_provenance_presence(
+                    client.driver,
+                    group_id=request.group_id,
+                    target_uuids=uniq_targets,
+                )
+            except Exception:
+                prov_rows = []
+            present = {
+                str(r.get('uuid'))
+                for r in prov_rows
+                if r.get('has_provenance')
+            }
+            for u in uniq_targets:
+                if u not in present:
+                    missing_provenance.append(u)
+
+        logger.info(
+            'catalog verify_catalog_batch group_id=%s batch_id=%s entities=%s edges=%s',
+            request.group_id,
+            request.batch_id,
+            entity_section.found,
+            edge_section.found,
+        )
+        return VerifyCatalogBatchResponse(
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            entities=entity_section,
+            edges=edge_section,
+            missing=missing,
+            anomalies=anomalies,
+            require_provenance=request.require_provenance,
+            missing_provenance=missing_provenance,
+        )
+
+    def _verify_entities(
+        self,
+        *,
+        namespace: uuid.UUID,
+        group_id: str,
+        batch_id: str | None,
+        expected: list[Any],
+        rows: list[dict[str, Any]],
+    ) -> VerifyEntitySection:
+        section = VerifyEntitySection(expected=len(expected))
+
+        by_key: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            key = self._row_key(row)
+            if key:
+                by_key.setdefault(str(key), []).append(row)
+
+        if expected:
+            found_count = 0
+            for ent in expected:
+                matches = by_key.get(ent.graph_key, [])
+                expected_uuid = catalog_entity_uuid(
+                    namespace, group_id, ent.entity_type, ent.graph_key
+                )
+                if not matches:
+                    section.missing.append(ent.graph_key)
+                    continue
+                typed = []
+                generic = []
+                wrong = []
+                for row in matches:
+                    labels = self._node_labels(row)
+                    custom = self._custom_labels(labels)
+                    if not custom:
+                        generic.append(row)
+                    elif ent.entity_type in custom:
+                        typed.append(row)
+                    else:
+                        wrong.append(row)
+                if generic:
+                    section.generic_duplicate.append(ent.graph_key)
+                if wrong and not typed:
+                    section.wrong_type.append(ent.graph_key)
+                if len(typed) > 1:
+                    section.typed_duplicate.append(ent.graph_key)
+                if typed:
+                    found_count += 1
+                    primary = next(
+                        (r for r in typed if str(r.get('uuid')) == expected_uuid),
+                        typed[0],
+                    )
+                    if str(primary.get('uuid')) != expected_uuid:
+                        section.uuid_mismatch.append(ent.graph_key)
+                    if not primary.get('has_name_embedding'):
+                        section.missing_embedding.append(ent.graph_key)
+                elif wrong:
+                    found_count += 1
+                    if not wrong[0].get('has_name_embedding'):
+                        section.missing_embedding.append(ent.graph_key)
+                elif generic:
+                    found_count += 1
+            section.found = found_count
+        else:
+            # batch-scoped only: report rows under batch without per-key expected list
+            section.expected = len(rows)
+            section.found = len(rows)
+            for row in rows:
+                key = self._row_key(row) or str(row.get('uuid') or '')
+                labels = self._node_labels(row)
+                custom = self._custom_labels(labels)
+                if not custom and key:
+                    section.generic_duplicate.append(str(key))
+                if not row.get('has_name_embedding') and key:
+                    section.missing_embedding.append(str(key))
+        return section
+
+    def _verify_edges(
+        self,
+        *,
+        namespace: uuid.UUID,
+        group_id: str,
+        expected: list[Any],
+        rows: list[dict[str, Any]],
+        batch_id: str | None,
+    ) -> VerifyEdgeSection:
+        section = VerifyEdgeSection(expected=len(expected))
+        by_key: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            key = row.get('edge_key')
+            if key:
+                by_key.setdefault(str(key), []).append(row)
+
+        if expected:
+            found_count = 0
+            for edge in expected:
+                matches = by_key.get(edge.edge_key, [])
+                if not matches:
+                    section.missing.append(edge.edge_key)
+                    continue
+                found_count += 1
+                if len(matches) > 1:
+                    section.duplicate_edge_key.append(edge.edge_key)
+                primary = matches[0]
+                # endpoint mismatch if type differs when present
+                if primary.get('edge_type') and primary.get('edge_type') != edge.edge_type:
+                    section.endpoint_mismatch.append(edge.edge_key)
+                if not primary.get('has_fact_embedding'):
+                    section.missing_embedding.append(edge.edge_key)
+            section.found = found_count
+        else:
+            section.expected = len(rows)
+            section.found = len(rows)
+            seen_keys: dict[str, int] = {}
+            for row in rows:
+                key = str(row.get('edge_key') or row.get('uuid') or '')
+                seen_keys[key] = seen_keys.get(key, 0) + 1
+                if not row.get('has_fact_embedding') and key:
+                    section.missing_embedding.append(key)
+            for key, count in seen_keys.items():
+                if count > 1 and key:
+                    section.duplicate_edge_key.append(key)
+        return section

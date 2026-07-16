@@ -184,3 +184,68 @@ class ResolveTypedEntitiesRequest(BaseModel):
             raise ValueError('group_id is required and must be non-empty')
         _validate_group_id(v)
         return v
+
+
+class VerifyEntityRef(BaseModel):
+    """Optional explicit entity key for verify_catalog_batch."""
+
+    entity_type: str
+    graph_key: str = Field(..., max_length=MAX_GRAPH_KEY_LENGTH)
+
+    @field_validator('entity_type')
+    @classmethod
+    def _entity_type_allowlisted(cls, v: str) -> str:
+        if v not in ENTITY_TYPE_PREFIXES:
+            raise ValueError(f'entity_type not allowlisted: {v}')
+        return v
+
+    @model_validator(mode='after')
+    def _graph_key_prefix(self) -> VerifyEntityRef:
+        prefix = ENTITY_TYPE_PREFIXES[self.entity_type]
+        if not self.graph_key.startswith(prefix):
+            raise ValueError(
+                f'graph_key_prefix_mismatch: {self.entity_type} requires prefix {prefix}'
+            )
+        return self
+
+
+class VerifyEdgeRef(BaseModel):
+    """Optional explicit edge key for verify_catalog_batch."""
+
+    edge_type: str
+    edge_key: str = Field(..., min_length=1, max_length=MAX_GRAPH_KEY_LENGTH)
+
+    @field_validator('edge_type')
+    @classmethod
+    def _edge_type_allowlisted(cls, v: str) -> str:
+        from models.catalog_common import CATALOG_EDGE_TYPES
+
+        if v not in CATALOG_EDGE_TYPES:
+            raise ValueError(f'edge_type not allowlisted: {v}')
+        return v
+
+
+class VerifyCatalogBatchRequest(BaseModel):
+    """Request for verify_catalog_batch (read-only)."""
+
+    group_id: str = Field(..., min_length=1)
+    batch_id: str | None = Field(default=None, max_length=MAX_SHORT_STRING_LENGTH)
+    entities: list[VerifyEntityRef] = Field(
+        default_factory=list, max_length=DEFAULT_MAX_ENTITIES_PER_BATCH
+    )
+    edges: list[VerifyEdgeRef] = Field(default_factory=list, max_length=2000)
+    require_provenance: bool = False
+
+    @field_validator('group_id')
+    @classmethod
+    def _validate_group_id_field(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('group_id is required and must be non-empty')
+        _validate_group_id(v)
+        return v
+
+    @model_validator(mode='after')
+    def _require_scope(self) -> VerifyCatalogBatchRequest:
+        if not self.batch_id and not self.entities and not self.edges:
+            raise ValueError('verify requires batch_id and/or explicit entity/edge keys')
+        return self
