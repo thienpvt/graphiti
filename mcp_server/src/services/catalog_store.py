@@ -651,7 +651,8 @@ class CatalogNeo4jStore:
             custom = [lb for lb in labels if lb != 'Entity']
             if not custom:
                 generic.append(row)
-            elif expected_type in custom:
+            elif set(custom) == {expected_type}:
+                # Exactly Entity + one expected custom label; extra labels are wrong_type.
                 typed.append(row)
             else:
                 wrong.append(row)

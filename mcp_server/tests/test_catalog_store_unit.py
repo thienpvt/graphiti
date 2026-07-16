@@ -337,6 +337,44 @@ def test_edge_classify_endpoint_missing_wrong_label_generic():
     )
     assert code is None
     assert row is not None and row['uuid'] == 'u3'
+    # expected type + extra custom label is wrong_type (exact label contract)
+    code, row = store.classify_endpoint_rows(
+        [
+            {
+                'uuid': 'u4',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity', 'Table', 'View'],
+                'labels': ['Entity', 'Table', 'View'],
+            }
+        ],
+        expected_type='Table',
+    )
+    assert code == 'endpoint_type_mismatch'
+    assert row is not None and row['uuid'] == 'u4'
+
+
+def test_classify_endpoint_extra_label_not_typed_when_exact_also_present():
+    """Duplicates: exact typed preferred; multi-label siblings stay wrong_type."""
+    store = CatalogNeo4jStore()
+    code, row = store.classify_endpoint_rows(
+        [
+            {
+                'uuid': 'extra',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity', 'Table', 'View'],
+                'labels': ['Entity', 'Table', 'View'],
+            },
+            {
+                'uuid': 'exact',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity', 'Table'],
+                'labels': ['Entity', 'Table'],
+            },
+        ],
+        expected_type='Table',
+    )
+    assert code is None
+    assert row is not None and row['uuid'] == 'exact'
 
 
 def test_build_edge_upsert_cypher_uses_relates_to_and_param_name():

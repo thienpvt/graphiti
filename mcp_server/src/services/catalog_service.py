@@ -1057,7 +1057,7 @@ class CatalogService:
                 if uuid_val:
                     generic_dups.append(uuid_val)
                 continue
-            if ref.entity_type in custom:
+            if set(custom) == {ref.entity_type}:
                 typed_nodes.append(row)
             else:
                 wrong_type_nodes.append(row)
@@ -1107,7 +1107,14 @@ class CatalogService:
 
         labels = self._node_labels(primary)
         custom = self._custom_labels(labels)
-        verified = ref.entity_type if ref.entity_type in custom else (custom[0] if custom else None)
+        exact_typed = set(custom) == {ref.entity_type}
+        if exact_typed:
+            verified = ref.entity_type
+        elif custom:
+            # Multi-label / wrong-type: prefer a label that is not the expected type.
+            verified = next((c for c in custom if c != ref.entity_type), custom[0])
+        else:
+            verified = None
         has_emb = bool(primary.get('has_name_embedding'))
         uuid_val = str(primary.get('uuid') or '') or None
 
@@ -1115,7 +1122,7 @@ class CatalogService:
             anomalies.append('uuid_mismatch')
         if not has_emb:
             anomalies.append('missing_embedding')
-        if custom and ref.entity_type not in custom and 'wrong_type' not in anomalies:
+        if custom and not exact_typed and 'wrong_type' not in anomalies:
             anomalies.append('wrong_type')
 
         # Deduplicate anomaly tags while preserving order
@@ -1126,7 +1133,7 @@ class CatalogService:
                 seen_a.add(a)
                 ordered_anomalies.append(a)
 
-        if ref.entity_type in custom:
+        if exact_typed:
             status = 'found'
         elif custom:
             status = 'wrong_type'
@@ -1355,7 +1362,7 @@ class CatalogService:
                     custom = self._custom_labels(labels)
                     if not custom:
                         generic.append(row)
-                    elif ent.entity_type in custom:
+                    elif set(custom) == {ent.entity_type}:
                         typed.append(row)
                     else:
                         wrong.append(row)
@@ -1601,6 +1608,7 @@ class CatalogService:
             )
 
         # 2) resolve both endpoints BEFORE embedding (EDGE-03/05)
+        # missing_endpoint is only a successful empty MATCH; DB exceptions are internal_error.
         driver = client.driver
         for prep in prepared:
             item = prep.item
@@ -1612,12 +1620,26 @@ class CatalogService:
                     entity_type=item.source_entity_type,
                 )
             except Exception as exc:
-                src_code, src_row = 'missing_endpoint', None
                 logger.error(
                     'catalog endpoint_resolve_failed batch_id=%s side=source reason=%s',
                     request.batch_id,
                     type(exc).__name__,
                 )
+                prep.projected_status = 'error'
+                prep.error_code = CatalogErrorCode.internal_error
+                prep.error_message = 'source endpoint pre-resolve failed'
+                early_errors[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.edge_uuid,
+                    content_sha256=prep.content_sha256,
+                    edge_key=item.edge_key,
+                    edge_type=item.edge_type,
+                    error_code=CatalogErrorCode.internal_error,
+                    error_message=prep.error_message,
+                    details={'reason': type(exc).__name__, 'side': 'source'},
+                )
+                continue
             if src_code is not None:
                 code = self._endpoint_error_code(src_code)
                 prep.projected_status = 'error'
@@ -1643,12 +1665,26 @@ class CatalogService:
                     entity_type=item.target_entity_type,
                 )
             except Exception as exc:
-                tgt_code, tgt_row = 'missing_endpoint', None
                 logger.error(
                     'catalog endpoint_resolve_failed batch_id=%s side=target reason=%s',
                     request.batch_id,
                     type(exc).__name__,
                 )
+                prep.projected_status = 'error'
+                prep.error_code = CatalogErrorCode.internal_error
+                prep.error_message = 'target endpoint pre-resolve failed'
+                early_errors[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.edge_uuid,
+                    content_sha256=prep.content_sha256,
+                    edge_key=item.edge_key,
+                    edge_type=item.edge_type,
+                    error_code=CatalogErrorCode.internal_error,
+                    error_message=prep.error_message,
+                    details={'reason': type(exc).__name__, 'side': 'target'},
+                )
+                continue
             if tgt_code is not None:
                 code = self._endpoint_error_code(tgt_code)
                 prep.projected_status = 'error'
@@ -1823,8 +1859,10 @@ class CatalogService:
             'missing_endpoint': CatalogErrorCode.missing_endpoint,
             'endpoint_type_mismatch': CatalogErrorCode.endpoint_type_mismatch,
             'generic_endpoint_conflict': CatalogErrorCode.generic_endpoint_conflict,
+            'internal_error': CatalogErrorCode.internal_error,
         }
-        return mapping.get(code, CatalogErrorCode.missing_endpoint)
+        # Unknown classify codes are internal defects, not absent endpoints.
+        return mapping.get(code, CatalogErrorCode.internal_error)
 
     def _edge_params_for(
         self,

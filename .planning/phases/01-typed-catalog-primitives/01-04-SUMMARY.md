@@ -175,12 +175,13 @@ None - plan executed exactly as written.
    - In-tx recheck: entity labels; edge endpoints + identity before mutation.
    - `execute_query(..., params=params)` contract (no kwargs splat).
    - `_verify_edges` reports `uuid_mismatch` via `catalog_edge_uuid`.
-6. **Commands / results**
-   - `uv run ruff format` on `catalog_service.py`, `catalog_store.py`, `test_catalog_service.py`, `test_catalog_store_unit.py` → **4 files reformatted**
-   - `uv run ruff format --check` on those four → clean after format commit
-   - `uv run ruff check` those four → **All checks passed**
+6. **Exact custom label contract** — `classify_endpoint_rows`, `_analyze_resolve_item`, `_verify_entities` require `set(custom) == {expected_type}`; Entity+Table+View is wrong_type / endpoint_type_mismatch (not typed). Duplicate exact-typed behavior preserved.
+7. **Endpoint pre-resolve exceptions** — DB read failure maps to `internal_error`, never `missing_endpoint` (empty MATCH only).
+8. **Commands / results**
+   - `uv run ruff format` catalog service/store + tests → clean
+   - `uv run ruff check` → **All checks passed**
    - `uv run pyright` catalog source/tests → **0 errors, 0 warnings**
-   - catalog unit tests (`test_catalog_store_unit`, `test_catalog_service`, `test_catalog_models`, `test_catalog_identity`) → **146 passed**
+   - catalog unit tests → **152 passed**
 
 ## Self-Check: PASSED
 
