@@ -391,37 +391,11 @@ async def neo4j_driver():
             pytest.fail(f'Neo4j unavailable under CATALOG_INT_REQUIRED=1: {exc}')
         pytest.skip(f'Neo4j unavailable: {exc}')
 
-    # Allow background index bootstrap if scheduled.
+    # Allow background Graphiti stock index bootstrap if scheduled.
+    # Product catalog schema (composite identity UNIQUE) is created by
+    # CatalogNeo4jStore.ensure_uuid_uniqueness_constraints on first real write.
+    # Fixture issues ZERO DROP statements — safe on shared authorized DBs.
     await asyncio.sleep(0.5)
-    # Uniqueness required for concurrent MERGE identity (ENTY-12 / EDGE-11).
-    # Graphiti bootstrap creates non-unique RANGE indexes named entity_uuid /
-    # relates_to_uuid; UNIQUE constraints cannot coexist with those indexes.
-    # Drop constraints first (owned indexes cannot be DROP INDEX'd), then any
-    # leftover RANGE indexes, then recreate UNIQUE constraints. Isolated test DB only.
-    for stmt in (
-        'DROP CONSTRAINT entity_uuid IF EXISTS',
-        'DROP CONSTRAINT relates_to_uuid IF EXISTS',
-        'DROP INDEX entity_uuid IF EXISTS',
-        'DROP INDEX relates_to_uuid IF EXISTS',
-        'CREATE CONSTRAINT entity_uuid IF NOT EXISTS FOR (n:Entity) REQUIRE n.uuid IS UNIQUE',
-        'CREATE CONSTRAINT relates_to_uuid IF NOT EXISTS '
-        'FOR ()-[e:RELATES_TO]-() REQUIRE e.uuid IS UNIQUE',
-    ):
-        try:
-            await driver.execute_query(stmt, params={})
-        except Exception as exc:
-            # Constraint/index may already exist after prior run; continue only then.
-            msg = f'{type(exc).__name__}: {exc}'
-            if (
-                'EquivalentSchemaRuleAlreadyExists' in msg
-                or 'already' in msg.lower()
-                or 'IndexDropFailed' in msg
-                or 'belongs to constraint' in msg.lower()
-            ):
-                continue
-            if _catalog_int_required():
-                raise
-            continue
 
     await _teardown_group(driver)
     try:
@@ -779,20 +753,26 @@ async def test_update_changes_summary_preserves_identity_names(catalog_client):
 
 
 async def test_name_raw_canonical_in_hash_identity_stable(catalog_client):
-    """Changed name_raw/name_canonical same graph_key → update (hash), identity UUID stable."""
+    """Changed name_raw/name_canonical same graph_key → deterministic_uuid_conflict; originals preserved."""
     ctx = catalog_client
     e1 = _entity('Table', 'TABLE::HR.T', 'T', 't', 'HR.T', 'table t')
     r1 = await _upsert_entities(ctx, [e1])
     u = r1.results[0].uuid
+    assert u
+    before = await _fetch_entity(ctx.driver, u)
+    assert before is not None
+    before_hash = before['content_sha256']
+    before_batch = before['batch_id']
     e2 = _entity('Table', 'TABLE::HR.T', 'T_RAW', 't_raw', 'HR.T', 'table t')
     r2 = await _upsert_entities(ctx, [e2], batch_id='b-name')
-    assert r2.results[0].status == 'updated'
-    assert r2.results[0].uuid == u
+    assert any(r.error_code == CatalogErrorCode.deterministic_uuid_conflict for r in r2.results)
     after = await _fetch_entity(ctx.driver, u)
     assert after is not None
-    # ON MATCH does not rewrite name_raw/name_canonical (preserve originals)
+    # Identity props and content hash/batch never rewritten on conflict
     assert after['name_raw'] == 'T'
     assert after['name_canonical'] == 't'
+    assert after['content_sha256'] == before_hash
+    assert after['batch_id'] == before_batch
 
 
 async def test_wrong_graph_key_is_different_identity(catalog_client):
@@ -893,45 +873,84 @@ async def test_missing_endpoint_and_type_and_generic(catalog_client):
 
 
 async def test_typed_duplicate_endpoint_does_not_bind_wrong_uuid(catalog_client):
-    """Two Entity rows same name: only typed expected label binds; arbitrary UUID ignored."""
+    """Typed endpoint bind prefers expected UUIDv5; wrong-only / multi-typed never arbitrary-bind."""
     ctx = catalog_client
-    table = _six_entities()[2]
-    await _upsert_entities(ctx, [table, _extra_table()])
-    # Plant decoy wrong-type row with same name as departments
-    await _seed_wrong_type_entity(ctx.driver, 'TABLE::HR.DEPARTMENTS', 'View')
+    # Source only — target is not product-created.
+    await _upsert_entities(ctx, [_six_entities()[2]])
+    target_key = 'TABLE::HR.DEPARTMENTS'
+    expected_tgt = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', target_key)
+
+    # Case 1: single exact-typed row with non-deterministic uuid → conflict, no edge.
+    decoy_uuid = str(uuid.uuid4())
+    await ctx.driver.execute_query(
+        """
+        CREATE (n:Entity:Table {
+            uuid: $u,
+            group_id: $g,
+            name: $name,
+            graph_key: $name,
+            name_raw: 'DEPARTMENTS',
+            name_canonical: 'departments',
+            content_sha256: $h
+        })
+        """,
+        params={'u': decoy_uuid, 'g': GROUP, 'name': target_key, 'h': 'c' * 64},
+    )
     edge = _edge(
         'ForeignKeyTo',
-        'FK::decoy',
+        'FK::decoy-wrong-only',
         'TABLE::HR.EMPLOYEES',
         'Table',
-        'TABLE::HR.DEPARTMENTS',
+        target_key,
         'Table',
-        'must bind typed Table not View decoy',
+        'must not bind non-deterministic typed uuid',
     )
-    resp = await _upsert_edges(ctx, [edge])
-    # Either succeeds on typed Table or type mismatch if classify prefers wrong — must not
-    # silently bind View UUID.
-    if resp.results[0].status in ('created', 'updated', 'unchanged'):
-        eu = resp.results[0].uuid
-        assert eu
-        row = await ctx.driver.execute_query(
-            """
-            MATCH (s:Entity)-[e:RELATES_TO {uuid: $u}]->(t:Entity)
-            WHERE e.group_id = $g
-            RETURN labels(t) AS tl, t.uuid AS tu
-            """,
-            params={'u': eu, 'g': GROUP},
-        )
-        rec = row[0][0]
-        labels = set(rec['tl'] if isinstance(rec, dict) else rec['tl'])
-        assert 'Table' in labels
-        assert 'View' not in labels or labels == {'Entity', 'Table'}
-    else:
-        assert resp.results[0].error_code in (
-            CatalogErrorCode.endpoint_type_mismatch,
-            CatalogErrorCode.generic_endpoint_conflict,
-            CatalogErrorCode.missing_endpoint,
-        )
+    r1 = await _upsert_edges(ctx, [edge], batch_id='e-decoy1')
+    assert r1.results[0].status == 'error'
+    assert r1.results[0].error_code == CatalogErrorCode.deterministic_uuid_conflict
+    assert await _count_group_edges(ctx.driver) == 0
+
+    # Case 2: expected UUIDv5 typed row + corrupt typed twin → bind only expected uuid.
+    await _upsert_entities(ctx, [_extra_table()])
+    decoy2 = str(uuid.uuid4())
+    await ctx.driver.execute_query(
+        """
+        CREATE (n:Entity:Table {
+            uuid: $u,
+            group_id: $g,
+            name: $name,
+            graph_key: $name,
+            name_raw: 'DEPARTMENTS',
+            name_canonical: 'departments',
+            content_sha256: $h
+        })
+        """,
+        params={'u': decoy2, 'g': GROUP, 'name': target_key, 'h': 'd' * 64},
+    )
+    edge2 = _edge(
+        'ForeignKeyTo',
+        'FK::decoy-with-expected',
+        'TABLE::HR.EMPLOYEES',
+        'Table',
+        target_key,
+        'Table',
+        'must bind expected deterministic uuid not twin',
+    )
+    r2 = await _upsert_edges(ctx, [edge2], batch_id='e-decoy2')
+    assert r2.results[0].status == 'created'
+    eu = r2.results[0].uuid
+    assert eu
+    row = await ctx.driver.execute_query(
+        """
+        MATCH (s:Entity)-[e:RELATES_TO {uuid: $u}]->(t:Entity)
+        WHERE e.group_id = $g
+        RETURN t.uuid AS tu, labels(t) AS tl
+        """,
+        params={'u': eu, 'g': GROUP},
+    )
+    rec = row[0][0]
+    assert rec['tu'] == expected_tgt
+    assert set(rec['tl']) == {'Entity', 'Table'}
 
 
 async def test_edge_identity_conflict(catalog_client):

@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from models.catalog_common import ENTITY_TYPE_PREFIXES  # noqa: E402
 from services.catalog_store import (  # noqa: E402
+    CATALOG_ENTITY_IDENTITY_CONSTRAINT,
+    CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
     CatalogNeo4jStore,
     CatalogStoreError,
     serialize_nested_json,
@@ -69,7 +71,7 @@ def test_build_entity_upsert_cypher_uses_allowlisted_label_literal():
     assert ':Table' in cypher
     assert ':Entity' in cypher
     # Client-controlled raw type must not appear as free-form f-string of unknown value
-    assert 'MERGE (n:Entity {uuid: $uuid})' in cypher
+    assert 'MERGE (n:Entity {uuid: $uuid, group_id: $group_id})' in cypher
 
 
 def test_build_entity_upsert_cypher_rejects_unknown_before_query_text():
@@ -200,6 +202,8 @@ def test_build_get_entity_by_uuid_cypher_parameterized():
     assert 'MATCH' in cypher
     assert '$uuid' in cypher
     assert '$group_id' in cypher
+    assert 'n.name_raw AS name_raw' in cypher
+    assert 'n.name_canonical AS name_canonical' in cypher
     assert 'SET n = $' not in cypher
 
 
@@ -232,7 +236,8 @@ def test_identical_hash_noop_clause_preserves_batch_id():
 def test_entity_upsert_cypher_scopes_group_and_preserves_identity():
     store = CatalogNeo4jStore()
     cypher = store.build_entity_upsert_cypher('Table')
-    assert 'WHERE n.group_id = $group_id' in cypher
+    # Composite MERGE key matches catalog identity UNIQUE (uuid, group_id).
+    assert 'MERGE (n:Entity {uuid: $uuid, group_id: $group_id})' in cypher
     assert '_catalog_create_token' in cypher
     assert 'REMOVE n._catalog_create_token' in cypher
     assert 'n._catalog_create_token AS' not in cypher
@@ -377,6 +382,29 @@ def test_classify_endpoint_extra_label_not_typed_when_exact_also_present():
     assert row is not None and row['uuid'] == 'exact'
 
 
+def test_classify_endpoint_two_exact_typed_is_duplicate():
+    store = CatalogNeo4jStore()
+    code, row = store.classify_endpoint_rows(
+        [
+            {
+                'uuid': 'u-a',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity', 'Table'],
+                'labels': ['Entity', 'Table'],
+            },
+            {
+                'uuid': 'u-b',
+                'name': 'TABLE::HR.EMPLOYEES',
+                'neo4j_labels': ['Entity', 'Table'],
+                'labels': ['Entity', 'Table'],
+            },
+        ],
+        expected_type='Table',
+    )
+    assert code == 'typed_endpoint_duplicate'
+    assert row is None
+
+
 def test_build_edge_upsert_cypher_uses_relates_to_and_param_name():
     store = CatalogNeo4jStore()
     cypher = store.build_edge_upsert_cypher()
@@ -391,9 +419,10 @@ def test_build_edge_upsert_cypher_uses_relates_to_and_param_name():
     assert '$source_uuid' in cypher
     assert '$target_uuid' in cypher
     assert '$uuid' in cypher
-    # both endpoints group-scoped
-    assert 'source.group_id = $group_id' in cypher
-    assert 'target.group_id = $group_id' in cypher
+    # endpoints + edge identity use composite (uuid, group_id) MERGE/MATCH keys
+    assert 'MATCH (source:Entity {uuid: $source_uuid, group_id: $group_id})' in cypher
+    assert 'MATCH (target:Entity {uuid: $target_uuid, group_id: $group_id})' in cypher
+    assert 'MERGE (source)-[e:RELATES_TO {uuid: $uuid, group_id: $group_id}]->(target)' in cypher
     # edge type never interpolated as relationship type
     assert ':[ForeignKeyTo]' not in cypher
     assert '_catalog_create_token' in cypher
@@ -429,10 +458,9 @@ def test_edge_identical_hash_noop_preserves_batch_id():
 def test_edge_upsert_cypher_scopes_endpoint_group_id():
     store = CatalogNeo4jStore()
     cypher = store.build_edge_upsert_cypher()
-    assert 'source.group_id = $group_id' in cypher
-    assert 'target.group_id = $group_id' in cypher
-    assert 'MATCH (source:Entity {uuid: $source_uuid})' in cypher
-    assert 'MATCH (target:Entity {uuid: $target_uuid})' in cypher
+    assert 'MATCH (source:Entity {uuid: $source_uuid, group_id: $group_id})' in cypher
+    assert 'MATCH (target:Entity {uuid: $target_uuid, group_id: $group_id})' in cypher
+    assert 'MERGE (source)-[e:RELATES_TO {uuid: $uuid, group_id: $group_id}]->(target)' in cypher
 
 
 @pytest.mark.asyncio
@@ -560,3 +588,87 @@ def test_build_get_edge_by_uuid_cypher_parameterized():
     assert '$uuid' in cypher
     assert '$group_id' in cypher
     assert 'SET e = $' not in cypher
+
+
+def test_identity_uniqueness_constraint_statements_are_fixed_create_only():
+    stmts = CatalogNeo4jStore.identity_uniqueness_constraint_statements()
+    assert len(stmts) == 2
+    entity_stmt, rel_stmt = stmts
+    assert CATALOG_ENTITY_IDENTITY_CONSTRAINT in entity_stmt
+    assert CATALOG_RELATES_TO_IDENTITY_CONSTRAINT in rel_stmt
+    assert 'CREATE CONSTRAINT' in entity_stmt
+    assert 'CREATE CONSTRAINT' in rel_stmt
+    assert 'IF NOT EXISTS' in entity_stmt
+    assert 'IF NOT EXISTS' in rel_stmt
+    assert '(n.uuid, n.group_id)' in entity_stmt
+    assert '(e.uuid, e.group_id)' in rel_stmt
+    for stmt in stmts:
+        assert 'DROP' not in stmt.upper()
+        assert 'DELETE' not in stmt.upper()
+
+
+@pytest.mark.asyncio
+async def test_ensure_uuid_uniqueness_constraints_idempotent_and_no_drop():
+    """Product init issues CREATE IF NOT EXISTS only; second call is no-op."""
+    store = CatalogNeo4jStore()
+    calls: list[str] = []
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = (0 if params is None else 1) + len(kwargs)
+            calls.append(cypher.strip())
+            # SHOW CONSTRAINTS empty first; CREATE succeeds
+            if 'SHOW CONSTRAINTS' in cypher:
+                return ([], None, [])
+            return ([], None, [])
+
+    exec1 = _Exec()
+    await store.ensure_uuid_uniqueness_constraints(exec1)
+    assert store._schema_ready is True
+    assert any('CREATE CONSTRAINT' in c for c in calls)
+    assert all('DROP' not in c.upper() for c in calls)
+    create_count = sum(1 for c in calls if 'CREATE CONSTRAINT' in c)
+    assert create_count == 2
+
+    # Second call short-circuits (no more executor traffic)
+    n_before = len(calls)
+    await store.ensure_uuid_uniqueness_constraints(exec1)
+    assert len(calls) == n_before
+
+
+@pytest.mark.asyncio
+async def test_ensure_schema_skips_create_when_constraints_present():
+    store = CatalogNeo4jStore()
+    calls: list[str] = []
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = params, kwargs
+            calls.append(cypher.strip())
+            if 'SHOW CONSTRAINTS' in cypher:
+                return (
+                    [
+                        {
+                            'name': CATALOG_ENTITY_IDENTITY_CONSTRAINT,
+                            'type': 'NODE_PROPERTY_UNIQUENESS',
+                            'entityType': 'NODE',
+                            'labelsOrTypes': ['Entity'],
+                            'properties': ['uuid', 'group_id'],
+                        },
+                        {
+                            'name': CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
+                            'type': 'RELATIONSHIP_PROPERTY_UNIQUENESS',
+                            'entityType': 'RELATIONSHIP',
+                            'labelsOrTypes': ['RELATES_TO'],
+                            'properties': ['uuid', 'group_id'],
+                        },
+                    ],
+                    None,
+                    [],
+                )
+            raise AssertionError(f'unexpected query: {cypher[:80]}')
+
+    await store.ensure_uuid_uniqueness_constraints(_Exec())
+    assert store._schema_ready is True
+    assert all('CREATE CONSTRAINT' not in c for c in calls)
+    assert all('DROP' not in c.upper() for c in calls)
