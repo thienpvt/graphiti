@@ -121,23 +121,21 @@ class CatalogNeo4jStore:
         if await self._identity_uniqueness_present(executor):
             return
 
-        applied = 0
         for stmt in self.identity_uniqueness_constraint_statements():
             # Safety: product init never issues DROP.
             assert 'DROP' not in stmt.upper()
             try:
                 await self._run_schema_query(executor, stmt)
-                applied += 1
             except CatalogStoreError:
                 raise
             except Exception as exc:
                 msg = f'{type(exc).__name__}: {exc}'
+                # Already-exists races are OK only if final SHOW verifies shape.
                 if (
                     'EquivalentSchemaRuleAlreadyExists' in msg
                     or 'already exists' in msg.lower()
                     or 'ConstraintAlreadyExists' in msg
                 ):
-                    applied += 1
                     continue
                 # Duplicate data prevents uniqueness — fail closed, no repair.
                 if (
@@ -150,23 +148,12 @@ class CatalogNeo4jStore:
                         '(uuid, group_id) values prevent CREATE CONSTRAINT; resolve manually',
                         code='neo4j_schema_failed',
                     ) from exc
-                if await self._identity_uniqueness_present(executor):
-                    return
                 raise CatalogStoreError(
-                    f'catalog schema init failed: {exc}',
+                    f'catalog schema init failed: {type(exc).__name__}',
                     code='neo4j_schema_failed',
                 ) from exc
 
-        # CREATE IF NOT EXISTS succeeded (or already-exists) for both statements.
-        # Do not require SHOW re-verify: drivers/mocks may not surface constraints.
-        if applied >= 2:
-            logger.info(
-                'catalog schema ready constraints=%s,%s',
-                CATALOG_ENTITY_IDENTITY_CONSTRAINT,
-                CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
-            )
-            return
-
+        # Fail closed: CREATE success / already-exists never skip SHOW verification.
         if not await self._identity_uniqueness_present(executor):
             raise CatalogStoreError(
                 'catalog identity uniqueness constraints not present after init',
@@ -178,8 +165,36 @@ class CatalogNeo4jStore:
             CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
         )
 
+    @staticmethod
+    def _constraint_row_matches(
+        row: dict[str, Any],
+        *,
+        expected_name: str,
+        expected_entity_type: str,
+        expected_label: str,
+    ) -> bool:
+        """True only when named constraint has UNIQUENESS shape on exact props."""
+        name = str(row.get('name') or '')
+        if name != expected_name:
+            return False
+        ctype = str(row.get('type') or '').upper()
+        if 'UNIQUENESS' not in ctype and 'UNIQUE' not in ctype:
+            return False
+        etype = str(row.get('entityType') or '').upper()
+        if etype != expected_entity_type.upper():
+            return False
+        labels = list(row.get('labelsOrTypes') or [])
+        if expected_label not in labels:
+            return False
+        props = list(row.get('properties') or [])
+        # Exact composite identity properties (order-insensitive).
+        return set(props) == {'uuid', 'group_id'}
+
     async def _identity_uniqueness_present(self, executor: Any) -> bool:
-        """True when Entity and RELATES_TO have (uuid, group_id) uniqueness."""
+        """True when both catalog-named constraints have exact identity shape.
+
+        Name match alone is insufficient: wrong type/entity/labels/properties fail closed.
+        """
         try:
             result = await self._run_schema_query(
                 executor,
@@ -192,29 +207,25 @@ class CatalogNeo4jStore:
         except Exception:
             return False
         rows = self._all_from_execute_query_result(result)
-        entity_unique = False
-        rel_unique = False
-        for row in rows:
-            name = str(row.get('name') or '')
-            if name == CATALOG_ENTITY_IDENTITY_CONSTRAINT:
-                entity_unique = True
-                continue
-            if name == CATALOG_RELATES_TO_IDENTITY_CONSTRAINT:
-                rel_unique = True
-                continue
-            props = list(row.get('properties') or [])
-            labels = list(row.get('labelsOrTypes') or [])
-            ctype = str(row.get('type') or '').upper()
-            etype = str(row.get('entityType') or '')
-            if 'UNIQUENESS' not in ctype and 'UNIQUE' not in ctype:
-                continue
-            if 'uuid' not in props or 'group_id' not in props:
-                continue
-            if etype == 'NODE' and 'Entity' in labels:
-                entity_unique = True
-            if etype == 'RELATIONSHIP' and 'RELATES_TO' in labels:
-                rel_unique = True
-        return entity_unique and rel_unique
+        entity_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_ENTITY_IDENTITY_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='Entity',
+            )
+            for row in rows
+        )
+        rel_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
+                expected_entity_type='RELATIONSHIP',
+                expected_label='RELATES_TO',
+            )
+            for row in rows
+        )
+        return entity_ok and rel_ok
 
     def resolve_entity_label(self, entity_type: str) -> str:
         """Map allowlisted entity_type to a fixed Neo4j label (re-validate at builder)."""

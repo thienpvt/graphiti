@@ -503,10 +503,13 @@ async def _seed_happy_graph(ctx) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-async def test_gate_required_mode_documented():
-    """CATALOG_INT_REQUIRED=1 is the gate-mode switch (module contract)."""
+async def test_gate_required_mode_documents_live_driver(neo4j_driver):
+    """CATALOG_INT_REQUIRED=1 requires a live Neo4jDriver fixture (fail-not-skip)."""
     assert callable(_catalog_int_required)
-    # When required and neo4j fixture ran, we are green path; just document truth.
+    assert _catalog_int_required() is True or _catalog_int_required() is False
+    # Fixture yields a real driver; required mode never green without it.
+    assert neo4j_driver is not None
+    assert hasattr(neo4j_driver, 'execute_query')
     if _catalog_int_required():
         assert os.environ.get('CATALOG_INT_REQUIRED') in ('1', 'true', 'TRUE', 'yes')
 
@@ -516,6 +519,30 @@ async def test_happy_path_six_entities_and_six_edges(catalog_client):
     seeded = await _seed_happy_graph(ctx)
     assert await _count_group_nodes(ctx.driver) >= 8  # 6 + doc + departments
     assert await _count_group_edges(ctx.driver) == 6
+
+    # Product schema after first real write: exact composite identity shapes.
+    show = await ctx.driver.execute_query(
+        """
+        SHOW CONSTRAINTS
+        YIELD name, type, entityType, labelsOrTypes, properties
+        RETURN name, type, entityType, labelsOrTypes, properties
+        """,
+        params={},
+    )
+    rows = list(show[0] or [])
+    by_name = {str(r['name']): r for r in rows}
+    ent = by_name.get('catalog_entity_identity_unique')
+    rel = by_name.get('catalog_relates_to_identity_unique')
+    assert ent is not None, 'product entity composite UNIQUE missing after first write'
+    assert rel is not None, 'product RELATES_TO composite UNIQUE missing after first write'
+    assert 'UNIQUENESS' in str(ent['type']).upper() or 'UNIQUE' in str(ent['type']).upper()
+    assert 'UNIQUENESS' in str(rel['type']).upper() or 'UNIQUE' in str(rel['type']).upper()
+    assert str(ent['entityType']).upper() == 'NODE'
+    assert str(rel['entityType']).upper() == 'RELATIONSHIP'
+    assert 'Entity' in list(ent['labelsOrTypes'] or [])
+    assert 'RELATES_TO' in list(rel['labelsOrTypes'] or [])
+    assert set(ent['properties'] or []) == {'uuid', 'group_id'}
+    assert set(rel['properties'] or []) == {'uuid', 'group_id'}
 
     # Exact labels Entity + custom type for each of six core types
     for item, result in zip(
@@ -651,21 +678,10 @@ async def test_search_nodes_and_memory_facts_interop(catalog_client):
     node_names = {
         getattr(n, 'name', None) or getattr(n, 'uuid', None) for n in (node_results.nodes or [])
     }
-    # BM25/fulltext may need indexes; also accept direct property match fallback.
-    if not any(n and 'EMPLOYEES' in str(n) for n in node_names):
-        # Fallback: confirm data is searchable via Cypher matching search contract fields
-        direct = await ctx.driver.execute_query(
-            """
-            MATCH (n:Entity:Table)
-            WHERE n.group_id = $g AND (n.name CONTAINS $q OR n.summary CONTAINS $q)
-            RETURN n.name AS name
-            """,
-            params={'g': GROUP, 'q': 'EMPLOYEES'},
-        )
-        drows = list(direct[0] or [])
-        assert drows, 'ENTY-13: Table entities must be readable for search_nodes path'
-    else:
-        assert any('EMPLOYEES' in str(n) for n in node_names)
+    # No raw-Cypher fallback: graphiti search APIs must surface catalog entities.
+    assert any(n and 'EMPLOYEES' in str(n) for n in node_names), (
+        f'ENTY-13: search_nodes path returned no EMPLOYEES; got {node_names!r}'
+    )
 
     edge_filter = SearchFilters(edge_types=None)
     edge_results = await search(
@@ -676,23 +692,10 @@ async def test_search_nodes_and_memory_facts_interop(catalog_client):
         edge_filter,
     )
     facts = [getattr(e, 'fact', None) for e in (edge_results.edges or [])]
-    if not any(f and 'dept_id' in f for f in facts):
-        direct_e = await ctx.driver.execute_query(
-            """
-            MATCH ()-[e:RELATES_TO]->()
-            WHERE e.group_id = $g AND e.fact CONTAINS $q
-            RETURN e.fact AS fact, e.name AS name
-            """,
-            params={'g': GROUP, 'q': 'dept_id'},
-        )
-        erows = list(direct_e[0] or [])
-        assert erows, 'EDGE-12: edge facts must be readable for search_memory_facts path'
-        assert any(
-            r['name'] == 'ForeignKeyTo' or (isinstance(r, dict) and r.get('name') == 'ForeignKeyTo')
-            for r in erows
-        )
-    else:
-        assert any('dept_id' in (f or '') for f in facts)
+    # No raw-Cypher fallback: graphiti search APIs must surface catalog edges.
+    assert any(f and 'dept_id' in f for f in facts), (
+        f'EDGE-12: search_memory_facts path returned no dept_id fact; got {facts!r}'
+    )
 
 
 # ---------------------------------------------------------------------------

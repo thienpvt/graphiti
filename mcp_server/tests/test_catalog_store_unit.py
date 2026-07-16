@@ -607,19 +607,43 @@ def test_identity_uniqueness_constraint_statements_are_fixed_create_only():
         assert 'DELETE' not in stmt.upper()
 
 
+def _valid_catalog_constraint_rows() -> list[dict]:
+    return [
+        {
+            'name': CATALOG_ENTITY_IDENTITY_CONSTRAINT,
+            'type': 'NODE_PROPERTY_UNIQUENESS',
+            'entityType': 'NODE',
+            'labelsOrTypes': ['Entity'],
+            'properties': ['uuid', 'group_id'],
+        },
+        {
+            'name': CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
+            'type': 'RELATIONSHIP_PROPERTY_UNIQUENESS',
+            'entityType': 'RELATIONSHIP',
+            'labelsOrTypes': ['RELATES_TO'],
+            'properties': ['uuid', 'group_id'],
+        },
+    ]
+
+
 @pytest.mark.asyncio
 async def test_ensure_uuid_uniqueness_constraints_idempotent_and_no_drop():
     """Product init issues CREATE IF NOT EXISTS only; second call is no-op."""
     store = CatalogNeo4jStore()
     calls: list[str] = []
+    created = {'n': 0}
 
     class _Exec:
         async def execute_query(self, cypher: str, params=None, **kwargs):
             _ = (0 if params is None else 1) + len(kwargs)
             calls.append(cypher.strip())
-            # SHOW CONSTRAINTS empty first; CREATE succeeds
             if 'SHOW CONSTRAINTS' in cypher:
-                return ([], None, [])
+                # Empty until both CREATE attempts complete; final SHOW verifies shape.
+                if created['n'] < 2:
+                    return ([], None, [])
+                return (_valid_catalog_constraint_rows(), None, [])
+            if 'CREATE CONSTRAINT' in cypher:
+                created['n'] += 1
             return ([], None, [])
 
     exec1 = _Exec()
@@ -629,6 +653,8 @@ async def test_ensure_uuid_uniqueness_constraints_idempotent_and_no_drop():
     assert all('DROP' not in c.upper() for c in calls)
     create_count = sum(1 for c in calls if 'CREATE CONSTRAINT' in c)
     assert create_count == 2
+    # Final SHOW after CREATE must run (fail-closed verification).
+    assert sum(1 for c in calls if 'SHOW CONSTRAINTS' in c) >= 2
 
     # Second call short-circuits (no more executor traffic)
     n_before = len(calls)
@@ -646,14 +672,32 @@ async def test_ensure_schema_skips_create_when_constraints_present():
             _ = params, kwargs
             calls.append(cypher.strip())
             if 'SHOW CONSTRAINTS' in cypher:
+                return (_valid_catalog_constraint_rows(), None, [])
+            raise AssertionError(f'unexpected query: {cypher[:80]}')
+
+    await store.ensure_uuid_uniqueness_constraints(_Exec())
+    assert store._schema_ready is True
+    assert all('CREATE CONSTRAINT' not in c for c in calls)
+    assert all('DROP' not in c.upper() for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_ensure_schema_rejects_same_name_wrong_shape():
+    """Name-only match is not enough — wrong type/props fail closed."""
+    store = CatalogNeo4jStore()
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = params, kwargs
+            if 'SHOW CONSTRAINTS' in cypher:
                 return (
                     [
                         {
                             'name': CATALOG_ENTITY_IDENTITY_CONSTRAINT,
-                            'type': 'NODE_PROPERTY_UNIQUENESS',
+                            'type': 'RANGE',  # wrong
                             'entityType': 'NODE',
                             'labelsOrTypes': ['Entity'],
-                            'properties': ['uuid', 'group_id'],
+                            'properties': ['uuid'],  # missing group_id
                         },
                         {
                             'name': CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
@@ -666,9 +710,49 @@ async def test_ensure_schema_skips_create_when_constraints_present():
                     None,
                     [],
                 )
-            raise AssertionError(f'unexpected query: {cypher[:80]}')
+            # CREATE succeeds but final SHOW still returns wrong shape
+            return ([], None, [])
 
-    await store.ensure_uuid_uniqueness_constraints(_Exec())
-    assert store._schema_ready is True
-    assert all('CREATE CONSTRAINT' not in c for c in calls)
-    assert all('DROP' not in c.upper() for c in calls)
+    with pytest.raises(CatalogStoreError) as ei:
+        await store.ensure_uuid_uniqueness_constraints(_Exec())
+    assert ei.value.code == 'neo4j_schema_failed'
+    assert store._schema_ready is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_schema_rejects_already_exists_without_verified_shape():
+    """already-exists exceptions must not skip SHOW verification."""
+    store = CatalogNeo4jStore()
+    creates = {'n': 0}
+
+    class _Boom(Exception):
+        pass
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = params, kwargs
+            if 'SHOW CONSTRAINTS' in cypher:
+                # Never present with correct shape
+                return (
+                    [
+                        {
+                            'name': CATALOG_ENTITY_IDENTITY_CONSTRAINT,
+                            'type': 'UNIQUENESS',
+                            'entityType': 'NODE',
+                            'labelsOrTypes': ['Entity'],
+                            'properties': ['uuid'],  # wrong props
+                        }
+                    ],
+                    None,
+                    [],
+                )
+            if 'CREATE CONSTRAINT' in cypher:
+                creates['n'] += 1
+                raise _Boom('ConstraintAlreadyExists: already exists')
+            return ([], None, [])
+
+    with pytest.raises(CatalogStoreError) as ei:
+        await store.ensure_uuid_uniqueness_constraints(_Exec())
+    assert ei.value.code == 'neo4j_schema_failed'
+    assert creates['n'] == 2
+    assert store._schema_ready is False
