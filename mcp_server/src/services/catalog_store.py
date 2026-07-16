@@ -723,6 +723,8 @@ class CatalogNeo4jStore:
                 e.target_node_uuid = $target_node_uuid,
                 e.created_at = $created_at,
                 e.updated_at = $updated_at,
+                // Empty list so stock EntityEdge/search hydration never sees episodes=None.
+                e.episodes = $episodes,
                 e._catalog_create_token = $create_token
             WITH e,
                  coalesce(e._catalog_create_token, '') = $create_token AS created,
@@ -823,6 +825,9 @@ class CatalogNeo4jStore:
             'fact_embedding': fact_embedding,
             'attributes': serialize_nested_json(cleaned_attrs),
             'confidence': confidence,
+            # Catalog edges have no episode provenance in Phase 1; keep list (not null)
+            # so graphiti_core EntityEdge/search paths do not ValidationError.
+            'episodes': [],
             # Per-write create marker only; never client authority, never persisted.
             'create_token': uuid4().hex,
         }
