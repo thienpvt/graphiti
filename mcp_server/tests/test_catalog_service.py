@@ -925,3 +925,412 @@ async def test_mcp_tool_verify_catalog_batch_registered():
     server = _mcp_server()
     assert hasattr(server, 'verify_catalog_batch')
     assert callable(server.verify_catalog_batch)
+
+
+# ---------------------------------------------------------------------------
+# upsert_typed_edges
+# ---------------------------------------------------------------------------
+
+from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
+from services.catalog_identity import catalog_edge_uuid  # noqa: E402
+
+EDGE_BATCH = 'batch-edge-001'
+
+
+def _edge(**overrides) -> CatalogEdgeItem:
+    data = {
+        'edge_type': 'ForeignKeyTo',
+        'edge_key': 'FK::HR.EMPLOYEES->HR.DEPARTMENTS',
+        'source_graph_key': 'TABLE::HR.EMPLOYEES',
+        'source_entity_type': 'Table',
+        'target_graph_key': 'TABLE::HR.DEPARTMENTS',
+        'target_entity_type': 'Table',
+        'fact': 'employees.dept_id references departments.dept_id',
+        'evidence': None,
+        'attributes': {'on_delete': 'CASCADE'},
+        'confidence': 0.9,
+    }
+    data.update(overrides)
+    return CatalogEdgeItem.model_validate(data)
+
+
+def _edge_request(
+    edges: list[CatalogEdgeItem] | None = None,
+    *,
+    dry_run: bool = False,
+    atomic: bool = True,
+    batch_id: str = EDGE_BATCH,
+    strict_endpoints: bool = True,
+) -> UpsertTypedEdgesRequest:
+    return UpsertTypedEdgesRequest(
+        group_id=GROUP,
+        batch_id=batch_id,
+        edges=edges or [_edge()],
+        dry_run=dry_run,
+        atomic=atomic,
+        strict_endpoints=strict_endpoints,
+    )
+
+
+def _typed_endpoint(uuid: str, graph_key: str, entity_type: str = 'Table') -> dict:
+    return {
+        'uuid': uuid,
+        'name': graph_key,
+        'graph_key': graph_key,
+        'labels': ['Entity', entity_type],
+        'neo4j_labels': ['Entity', entity_type],
+        'group_id': GROUP,
+    }
+
+
+def _wire_ok_endpoints(service: CatalogService, src_uuid: str = 'src-u', tgt_uuid: str = 'tgt-u'):
+    async def _resolve(executor, *, group_id, graph_key, entity_type, tx=None):
+        if graph_key == 'TABLE::HR.EMPLOYEES':
+            return None, _typed_endpoint(src_uuid, graph_key)
+        if graph_key == 'TABLE::HR.DEPARTMENTS':
+            return None, _typed_endpoint(tgt_uuid, graph_key)
+        return 'missing_endpoint', None
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    return src_uuid, tgt_uuid
+
+
+@pytest.mark.asyncio
+async def test_edge_feature_disabled_returns_structured_error_without_write():
+    client = _make_client()
+    service = CatalogService(catalog_config=_disabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock()
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert any(r.error_code == CatalogErrorCode.feature_disabled for r in resp.results)
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+    service._store.resolve_endpoint_typed.assert_not_awaited()
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_missing_endpoint_before_embed_no_write():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock(return_value=('missing_endpoint', None))
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert any(r.error_code == CatalogErrorCode.missing_endpoint for r in resp.results)
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_endpoint_type_mismatch_and_generic_conflict_no_create():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+
+    async def _resolve(executor, *, group_id, graph_key, entity_type, tx=None):
+        if graph_key == 'TABLE::HR.EMPLOYEES':
+            return 'endpoint_type_mismatch', {
+                'uuid': 'wrong',
+                'neo4j_labels': ['Entity', 'View'],
+            }
+        return 'generic_endpoint_conflict', {
+            'uuid': 'gen',
+            'neo4j_labels': ['Entity'],
+        }
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    codes = {r.error_code for r in resp.results}
+    assert CatalogErrorCode.endpoint_type_mismatch in codes or (
+        CatalogErrorCode.generic_endpoint_conflict in codes
+    )
+    assert 'embed' not in client.call_order
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_embed_before_transaction_order():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_edge_item = AsyncMock(
+        return_value={
+            'uuid': 'e1',
+            'content_sha256': 'a' * 64,
+            'batch_id': EDGE_BATCH,
+            'status': 'created',
+        }
+    )
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert client.call_order.index('embed') < client.call_order.index('transaction')
+    assert resp.results[0].status in ('created', 'updated', 'unchanged')
+
+
+@pytest.mark.asyncio
+async def test_edge_dry_run_embeds_but_never_writes_or_persists_batch_id():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(
+        client=client, request=_edge_request(dry_run=True)
+    )
+    assert 'embed' in client.call_order
+    assert 'transaction' not in client.call_order
+    service._store.upsert_edge_item.assert_not_awaited()
+    assert resp.dry_run is True
+    assert resp.results[0].status in ('created', 'updated', 'unchanged')
+    assert resp.results[0].uuid is not None
+
+
+@pytest.mark.asyncio
+async def test_edge_create_persists_request_batch_id():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    src, tgt = _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    captured: dict = {}
+
+    async def _upsert(tx, *, params):
+        captured.update(params)
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'created',
+        }
+
+    service._store.upsert_edge_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert captured.get('batch_id') == EDGE_BATCH
+    assert captured.get('source_uuid') == src
+    assert captured.get('target_uuid') == tgt
+    assert captured.get('name') == 'ForeignKeyTo'
+    assert resp.results[0].status == 'created'
+    assert resp.created == 1
+
+
+@pytest.mark.asyncio
+async def test_edge_identical_hash_unchanged_leaves_batch_id():
+    edge = _edge()
+    edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
+    payload = CatalogService.edge_canonical_payload(edge)
+    digest = canonical_sha256(payload)
+    src, tgt = 'src-u', 'tgt-u'
+    existing = {
+        'uuid': edge_uuid,
+        'content_sha256': digest,
+        'batch_id': 'prior-edge-batch',
+        'name': edge.edge_type,
+        'edge_key': edge.edge_key,
+        'source_uuid': src,
+        'target_uuid': tgt,
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service, src, tgt)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=existing)
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([edge]))
+    assert resp.results[0].status == 'unchanged'
+    assert resp.unchanged == 1
+    service._store.upsert_edge_item.assert_not_awaited()
+    assert resp.results[0].uuid == edge_uuid
+    assert resp.results[0].content_sha256 == digest
+
+
+@pytest.mark.asyncio
+async def test_edge_changed_update_passes_request_batch_id():
+    edge = _edge(fact='changed fact text about fk')
+    edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
+    src, tgt = 'src-u', 'tgt-u'
+    existing = {
+        'uuid': edge_uuid,
+        'content_sha256': 'b' * 64,
+        'batch_id': 'old-edge-batch',
+        'name': edge.edge_type,
+        'edge_key': edge.edge_key,
+        'source_uuid': src,
+        'target_uuid': tgt,
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service, src, tgt)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=existing)
+    captured: dict = {}
+
+    async def _upsert(tx, *, params):
+        captured.update(params)
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'updated',
+        }
+
+    service._store.upsert_edge_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([edge]))
+    assert resp.results[0].status == 'updated'
+    assert captured.get('batch_id') == EDGE_BATCH
+
+
+@pytest.mark.asyncio
+async def test_edge_identity_conflict_no_mutation():
+    edge = _edge()
+    edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
+    existing = {
+        'uuid': edge_uuid,
+        'content_sha256': 'c' * 64,
+        'batch_id': 'old',
+        'name': 'Contains',  # wrong type for same uuid
+        'edge_key': edge.edge_key,
+        'source_uuid': 'src-u',
+        'target_uuid': 'tgt-u',
+        'group_id': GROUP,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=existing)
+    # use real store method for conflict detection
+    service._store.upsert_edge_item = AsyncMock()
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request([edge]))
+    assert any(r.error_code == CatalogErrorCode.edge_identity_conflict for r in resp.results)
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_two_foreign_key_same_endpoints_different_keys():
+    e1 = _edge(edge_key='FK::HR.EMPLOYEES.DEPT->HR.DEPARTMENTS')
+    e2 = _edge(edge_key='FK::HR.EMPLOYEES.MGR_DEPT->HR.DEPARTMENTS', fact='mgr dept fk')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    upsert = AsyncMock(
+        side_effect=lambda tx, *, params: {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'created',
+        }
+    )
+    service._store.upsert_edge_item = upsert
+    resp = await service.upsert_typed_edges(
+        client=client, request=_edge_request([e1, e2])
+    )
+    assert upsert.await_count == 2
+    assert resp.created == 2
+    assert resp.results[0].uuid != resp.results[1].uuid
+    assert resp.results[0].edge_key == e1.edge_key
+    assert resp.results[1].edge_key == e2.edge_key
+
+
+@pytest.mark.asyncio
+async def test_edge_atomic_rollback_on_store_failure():
+    e1 = _edge(edge_key='FK::A.T1->A.T2', fact='fk one')
+    e2 = _edge(edge_key='FK::A.T3->A.T4', fact='fk two')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+
+    async def _resolve(executor, *, group_id, graph_key, entity_type, tx=None):
+        return None, _typed_endpoint(f'u-{graph_key}', graph_key)
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+
+    async def _upsert(tx, *, params):
+        if params['edge_key'] == 'FK::A.T3->A.T4':
+            raise RuntimeError('neo4j boom')
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'created',
+        }
+
+    service._store.upsert_edge_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_edges(
+        client=client, request=_edge_request([e1, e2], atomic=True)
+    )
+    statuses = [r.status for r in resp.results]
+    assert 'error' in statuses
+    assert 'rolled_back' in statuses
+    assert resp.rolled_back >= 1
+    err = next(r for r in resp.results if r.status == 'error')
+    assert err.error_code in (
+        CatalogErrorCode.neo4j_transaction_failed,
+        CatalogErrorCode.internal_error,
+    )
+
+
+@pytest.mark.asyncio
+async def test_edge_no_queue_or_llm_calls():
+    client = _make_client()
+    queue = MagicMock()
+    queue.add_episode = AsyncMock()
+    llm = MagicMock()
+    llm.generate_response = AsyncMock()
+    client.llm_client = llm
+    service = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_edge_item = AsyncMock(
+        return_value={
+            'uuid': 'x',
+            'content_sha256': 'a' * 64,
+            'batch_id': EDGE_BATCH,
+            'status': 'created',
+        }
+    )
+    await service.upsert_typed_edges(client=client, request=_edge_request())
+    queue.add_episode.assert_not_awaited()
+    llm.generate_response.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_edge_preserves_input_order_and_deterministic_uuid():
+    e1 = _edge(edge_key='FK::A.T1->A.T2', fact='one')
+    e2 = _edge(edge_key='FK::A.T3->A.T4', fact='two')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+
+    async def _resolve(executor, *, group_id, graph_key, entity_type, tx=None):
+        return None, _typed_endpoint(f'u-{graph_key}', graph_key)
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+
+    async def _upsert(tx, *, params):
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'created',
+        }
+
+    service._store.upsert_edge_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_edges(
+        client=client, request=_edge_request([e1, e2])
+    )
+    assert [r.index for r in resp.results] == [0, 1]
+    assert resp.results[0].edge_key == e1.edge_key
+    assert resp.results[1].edge_key == e2.edge_key
+    assert resp.results[0].uuid == catalog_edge_uuid(
+        FIXED_NS, GROUP, e1.edge_type, e1.edge_key
+    )
+    assert resp.results[0].content_sha256 is not None
+    assert len(resp.results[0].content_sha256) == 64
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_upsert_typed_edges_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'upsert_typed_edges')
+    assert callable(server.upsert_typed_edges)
