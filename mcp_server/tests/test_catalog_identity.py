@@ -26,9 +26,7 @@ GROUP = 'oracle-catalog-tool-test'
 
 def test_catalog_entity_uuid_matches_uuid5():
     got = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
-    expected = str(
-        uuid.uuid5(FIXED_NS, f'{GROUP}|Table|TABLE::HR.EMPLOYEES')
-    )
+    expected = str(uuid.uuid5(FIXED_NS, f'{GROUP}|Table|TABLE::HR.EMPLOYEES'))
     assert got == expected
 
 

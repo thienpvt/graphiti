@@ -111,9 +111,8 @@ class CatalogEdgeItem(BaseModel):
 
     @model_validator(mode='after')
     def _enforced_by_requires_evidence(self) -> CatalogEdgeItem:
-        if self.edge_type == 'EnforcedBy':
-            if not self.evidence or not self.evidence.strip():
-                raise ValueError('EnforcedBy requires non-empty evidence')
+        if self.edge_type == 'EnforcedBy' and (not self.evidence or not self.evidence.strip()):
+            raise ValueError('EnforcedBy requires non-empty evidence')
         src_prefix = ENTITY_TYPE_PREFIXES[self.source_entity_type]
         if not self.source_graph_key.startswith(src_prefix):
             raise ValueError(
@@ -134,9 +133,7 @@ class UpsertTypedEdgesRequest(BaseModel):
 
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
-    edges: list[CatalogEdgeItem] = Field(
-        ..., min_length=1, max_length=DEFAULT_MAX_EDGES_PER_BATCH
-    )
+    edges: list[CatalogEdgeItem] = Field(..., min_length=1, max_length=DEFAULT_MAX_EDGES_PER_BATCH)
     dry_run: bool = False
     atomic: bool = True
     strict_endpoints: bool = True
