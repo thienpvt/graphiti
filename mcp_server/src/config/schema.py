@@ -310,7 +310,7 @@ class CatalogConfig(BaseModel):
         return data
 
     @model_validator(mode='after')
-    def _require_valid_namespace_when_enabled(self) -> CatalogConfig:
+    def _require_valid_namespace_when_enabled(self) -> 'CatalogConfig':
         if not self.enabled:
             return self
         if not self.uuid_namespace:

@@ -50,6 +50,11 @@ def canonical_sha256(payload: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
+def _error_code_text(code: CatalogErrorCode | str) -> str:
+    """Normalize CatalogErrorCode or plain string to error-code text."""
+    return code if isinstance(code, str) else str(code)
+
+
 def assert_optional_client_hash(client_hash: str | None, server_hash: str) -> None:
     """Compare optional client content hash to server canonical hash.
 
@@ -58,4 +63,5 @@ def assert_optional_client_hash(client_hash: str | None, server_hash: str) -> No
     if client_hash is None:
         return
     if client_hash.lower() != server_hash.lower():
-        raise ValueError(f'{CatalogErrorCode.content_hash_mismatch.value}: client hash mismatch')
+        code = _error_code_text(CatalogErrorCode.content_hash_mismatch)
+        raise ValueError(f'{code}: client hash mismatch')

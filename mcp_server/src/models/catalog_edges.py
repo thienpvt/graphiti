@@ -21,16 +21,14 @@ from models.catalog_common import (
     SHA256_HEX_RE,
 )
 
-try:
-    from graphiti_core.helpers import validate_group_id
-except ImportError:  # pragma: no cover
 
-    def validate_group_id(group_id: str | None) -> bool:
-        if not group_id:
-            return True
-        if not re.match(r'^[a-zA-Z0-9_-]+$', group_id):
-            raise ValueError(f'group_id contains invalid characters: {group_id}')
+def _validate_group_id(group_id: str | None) -> bool:
+    """Mirror graphiti_core.helpers.validate_group_id (ASCII alnum/dash/underscore)."""
+    if not group_id:
         return True
+    if not re.match(r'^[a-zA-Z0-9_-]+$', group_id):
+        raise ValueError(f'group_id contains invalid characters: {group_id}')
+    return True
 
 
 def _reject_non_finite(obj: Any, path: str = 'value') -> None:
@@ -145,8 +143,8 @@ class UpsertTypedEdgesRequest(BaseModel):
 
     @field_validator('group_id')
     @classmethod
-    def _validate_group_id(cls, v: str) -> str:
+    def _validate_group_id_field(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('group_id is required and must be non-empty')
-        validate_group_id(v)
+        _validate_group_id(v)
         return v

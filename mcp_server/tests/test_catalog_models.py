@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import math
-import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -23,6 +23,7 @@ from models.catalog_common import (  # noqa: E402
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
 from models.catalog_entities import (  # noqa: E402
     CatalogEntityItem,
+    ResolveEntityRef,
     ResolveTypedEntitiesRequest,
     UpsertTypedEntitiesRequest,
 )
@@ -37,8 +38,8 @@ from models.catalog_responses import (  # noqa: E402
 FIXED_NS = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'
 
 
-def _entity_kwargs(**overrides):
-    base = {
+def _entity_kwargs(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
         'entity_type': 'Table',
         'graph_key': 'TABLE::HR.EMPLOYEES',
         'name_raw': 'EMPLOYEES',
@@ -50,8 +51,8 @@ def _entity_kwargs(**overrides):
     return base
 
 
-def _edge_kwargs(**overrides):
-    base = {
+def _edge_kwargs(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
         'edge_type': 'Contains',
         'edge_key': 'CONTAINS::SCHEMA::HR->TABLE::HR.EMPLOYEES',
         'source_graph_key': 'SCHEMA::HR',
@@ -62,6 +63,14 @@ def _edge_kwargs(**overrides):
     }
     base.update(overrides)
     return base
+
+
+def _entity(**overrides: Any) -> CatalogEntityItem:
+    return CatalogEntityItem.model_validate(_entity_kwargs(**overrides))
+
+
+def _edge(**overrides: Any) -> CatalogEdgeItem:
+    return CatalogEdgeItem.model_validate(_edge_kwargs(**overrides))
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +92,6 @@ def test_catalog_config_no_uuid_factory_in_defaults():
     """CONF-03: namespace must not be auto-generated."""
     cfg = CatalogConfig()
     assert cfg.uuid_namespace is None
-    # Constructing many times must stay None (no uuid4 factory)
     for _ in range(3):
         assert CatalogConfig().uuid_namespace is None
 
@@ -131,10 +139,8 @@ def test_graphiti_config_exposes_catalog_upsert():
 
 def test_graphiti_catalog_uuid_namespace_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv('GRAPHITI_CATALOG_UUID_NAMESPACE', FIXED_NS)
-    # Direct CatalogConfig should pick up env when namespace omitted
     cfg = CatalogConfig()
     assert cfg.uuid_namespace == FIXED_NS
-    # Nested GraphitiConfig path
     g = GraphitiConfig()
     assert g.catalog_upsert.uuid_namespace == FIXED_NS
 
@@ -142,7 +148,6 @@ def test_graphiti_catalog_uuid_namespace_env(monkeypatch: pytest.MonkeyPatch):
 def test_schema_source_has_no_uuid4_namespace_factory():
     schema_path = Path(__file__).parent.parent / 'src' / 'config' / 'schema.py'
     text = schema_path.read_text(encoding='utf-8')
-    # No default UUID generation for catalog namespace
     assert not re.search(
         r'uuid_namespace\s*[:=].*uuid\.(uuid4|uuid5|uuid1)\(',
         text,
@@ -245,32 +250,40 @@ def test_catalog_error_code_includes_required_codes():
 
 def test_upsert_entities_requires_group_id():
     with pytest.raises(ValidationError):
-        UpsertTypedEntitiesRequest(entities=[CatalogEntityItem(**_entity_kwargs())])
+        UpsertTypedEntitiesRequest.model_validate(
+            {'entities': [_entity_kwargs()]}
+        )
 
 
 def test_upsert_entities_rejects_empty_group_id():
     with pytest.raises(ValidationError):
-        UpsertTypedEntitiesRequest(
-            group_id='',
-            batch_id='batch-1',
-            entities=[CatalogEntityItem(**_entity_kwargs())],
+        UpsertTypedEntitiesRequest.model_validate(
+            {
+                'group_id': '',
+                'batch_id': 'batch-1',
+                'entities': [_entity_kwargs()],
+            }
         )
 
 
 def test_upsert_entities_rejects_invalid_group_id():
     with pytest.raises(ValidationError):
-        UpsertTypedEntitiesRequest(
-            group_id='bad group!',
-            batch_id='batch-1',
-            entities=[CatalogEntityItem(**_entity_kwargs())],
+        UpsertTypedEntitiesRequest.model_validate(
+            {
+                'group_id': 'bad group!',
+                'batch_id': 'batch-1',
+                'entities': [_entity_kwargs()],
+            }
         )
 
 
 def test_upsert_entities_accepts_valid_request():
-    req = UpsertTypedEntitiesRequest(
-        group_id='oracle-catalog-tool-test',
-        batch_id='batch-1',
-        entities=[CatalogEntityItem(**_entity_kwargs())],
+    req = UpsertTypedEntitiesRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'batch_id': 'batch-1',
+            'entities': [_entity_kwargs()],
+        }
     )
     assert req.group_id == 'oracle-catalog-tool-test'
     assert req.dry_run is False
@@ -280,85 +293,90 @@ def test_upsert_entities_accepts_valid_request():
 
 def test_entity_item_rejects_unknown_type():
     with pytest.raises(ValidationError):
-        CatalogEntityItem(**_entity_kwargs(entity_type='Widget'))
+        _entity(entity_type='Widget')
 
 
 def test_entity_item_rejects_wrong_prefix():
     with pytest.raises(ValidationError) as exc:
-        CatalogEntityItem(**_entity_kwargs(graph_key='SCHEMA::HR.EMPLOYEES'))
+        _entity(graph_key='SCHEMA::HR.EMPLOYEES')
     msg = str(exc.value).lower()
     assert 'prefix' in msg or 'graph_key' in msg
 
 
 def test_entity_item_rejects_protected_attribute_key():
     with pytest.raises(ValidationError):
-        CatalogEntityItem(**_entity_kwargs(attributes={'uuid': 'caller-owned'}))
+        _entity(attributes={'uuid': 'caller-owned'})
 
 
 def test_entity_item_rejects_non_finite_attribute():
     with pytest.raises(ValidationError):
-        CatalogEntityItem(**_entity_kwargs(attributes={'score': math.nan}))
+        _entity(attributes={'score': math.nan})
     with pytest.raises(ValidationError):
-        CatalogEntityItem(**_entity_kwargs(attributes={'score': math.inf}))
+        _entity(attributes={'score': math.inf})
 
 
 def test_entity_item_rejects_bad_confidence():
     with pytest.raises(ValidationError):
-        CatalogEntityItem(**_entity_kwargs(confidence=1.5))
+        _entity(confidence=1.5)
     with pytest.raises(ValidationError):
-        CatalogEntityItem(**_entity_kwargs(confidence=-0.1))
+        _entity(confidence=-0.1)
 
 
 def test_entity_item_accepts_boundary_confidence():
-    item = CatalogEntityItem(**_entity_kwargs(confidence=0.0))
+    item = _entity(confidence=0.0)
     assert item.confidence == 0.0
-    item = CatalogEntityItem(**_entity_kwargs(confidence=1.0))
+    item = _entity(confidence=1.0)
     assert item.confidence == 1.0
 
 
 def test_entity_item_rejects_empty_strings():
     with pytest.raises(ValidationError):
-        CatalogEntityItem(**_entity_kwargs(name_raw=''))
+        _entity(name_raw='')
     with pytest.raises(ValidationError):
-        CatalogEntityItem(**_entity_kwargs(summary=''))
+        _entity(summary='')
 
 
 def test_entity_item_rejects_invalid_content_sha256():
     with pytest.raises(ValidationError):
-        CatalogEntityItem(**_entity_kwargs(content_sha256='deadbeef'))
+        _entity(content_sha256='deadbeef')
     with pytest.raises(ValidationError):
-        CatalogEntityItem(**_entity_kwargs(content_sha256='G' * 64))
+        _entity(content_sha256='G' * 64)
 
 
 def test_entity_item_accepts_valid_content_sha256():
     digest = 'a' * 64
-    item = CatalogEntityItem(**_entity_kwargs(content_sha256=digest))
+    item = _entity(content_sha256=digest)
     assert item.content_sha256 == digest
 
 
 def test_entity_collection_over_limit_rejected():
-    entities = [CatalogEntityItem(**_entity_kwargs(graph_key=f'TABLE::T{i}')) for i in range(501)]
+    entities = [_entity_kwargs(graph_key=f'TABLE::T{i}') for i in range(501)]
     with pytest.raises(ValidationError):
-        UpsertTypedEntitiesRequest(
-            group_id='oracle-catalog-tool-test',
-            batch_id='batch-1',
-            entities=entities,
+        UpsertTypedEntitiesRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'batch-1',
+                'entities': entities,
+            }
         )
 
 
 def test_resolve_typed_entities_requires_group_id():
     with pytest.raises(ValidationError):
-        ResolveTypedEntitiesRequest(entities=[])
+        ResolveTypedEntitiesRequest.model_validate({'entities': []})
 
 
 def test_resolve_accepts_valid():
-    req = ResolveTypedEntitiesRequest(
-        group_id='oracle-catalog-tool-test',
-        entities=[
-            {'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'},
-        ],
+    req = ResolveTypedEntitiesRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'entities': [
+                {'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'},
+            ],
+        }
     )
     assert req.group_id == 'oracle-catalog-tool-test'
+    assert isinstance(req.entities[0], ResolveEntityRef)
 
 
 # ---------------------------------------------------------------------------
@@ -368,39 +386,40 @@ def test_resolve_accepts_valid():
 
 def test_edge_item_rejects_unknown_type():
     with pytest.raises(ValidationError):
-        CatalogEdgeItem(**_edge_kwargs(edge_type='Owns'))
+        _edge(edge_type='Owns')
 
 
 def test_edge_enforced_by_requires_evidence():
     with pytest.raises(ValidationError):
-        CatalogEdgeItem(**_edge_kwargs(edge_type='EnforcedBy', evidence=None))
+        _edge(edge_type='EnforcedBy', evidence=None)
     with pytest.raises(ValidationError):
-        CatalogEdgeItem(**_edge_kwargs(edge_type='EnforcedBy', evidence=''))
-    item = CatalogEdgeItem(
-        **_edge_kwargs(
-            edge_type='EnforcedBy',
-            edge_key='ENFORCEDBY::CONSTRAINT::C1',
-            evidence='ALTER TABLE ... CONSTRAINT C1',
-        )
+        _edge(edge_type='EnforcedBy', evidence='')
+    item = _edge(
+        edge_type='EnforcedBy',
+        edge_key='ENFORCEDBY::CONSTRAINT::C1',
+        evidence='ALTER TABLE ... CONSTRAINT C1',
     )
+    assert item.evidence is not None
     assert item.evidence.startswith('ALTER')
 
 
 def test_edge_rejects_invalid_endpoint_type():
     with pytest.raises(ValidationError):
-        CatalogEdgeItem(**_edge_kwargs(source_entity_type='Widget'))
+        _edge(source_entity_type='Widget')
 
 
 def test_edge_rejects_empty_fact():
     with pytest.raises(ValidationError):
-        CatalogEdgeItem(**_edge_kwargs(fact=''))
+        _edge(fact='')
 
 
 def test_upsert_edges_accepts_valid_request():
-    req = UpsertTypedEdgesRequest(
-        group_id='oracle-catalog-tool-test',
-        batch_id='batch-1',
-        edges=[CatalogEdgeItem(**_edge_kwargs())],
+    req = UpsertTypedEdgesRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'batch_id': 'batch-1',
+            'edges': [_edge_kwargs()],
+        }
     )
     assert req.strict_endpoints is True
     assert req.atomic is True
@@ -408,22 +427,22 @@ def test_upsert_edges_accepts_valid_request():
 
 
 def test_edge_collection_over_limit_rejected():
-    edges = [
-        CatalogEdgeItem(**_edge_kwargs(edge_key=f'CONTAINS::E{i}')) for i in range(2001)
-    ]
+    edges = [_edge_kwargs(edge_key=f'CONTAINS::E{i}') for i in range(2001)]
     with pytest.raises(ValidationError):
-        UpsertTypedEdgesRequest(
-            group_id='oracle-catalog-tool-test',
-            batch_id='batch-1',
-            edges=edges,
+        UpsertTypedEdgesRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'batch-1',
+                'edges': edges,
+            }
         )
 
 
 def test_edge_rejects_non_finite_attribute_and_bad_confidence():
     with pytest.raises(ValidationError):
-        CatalogEdgeItem(**_edge_kwargs(attributes={'w': math.inf}))
+        _edge(attributes={'w': math.inf})
     with pytest.raises(ValidationError):
-        CatalogEdgeItem(**_edge_kwargs(confidence=2.0))
+        _edge(confidence=2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -435,7 +454,7 @@ def test_catalog_item_result_states():
     for status in ('created', 'updated', 'unchanged', 'rolled_back'):
         r = CatalogItemResult(
             index=0,
-            status=status,
+            status=status,  # type: ignore[arg-type]
             uuid=FIXED_NS,
             content_sha256='b' * 64,
         )
@@ -457,7 +476,12 @@ def test_write_response_preserves_results():
         group_id='oracle-catalog-tool-test',
         batch_id='batch-1',
         results=[
-            CatalogItemResult(index=0, status='created', uuid=FIXED_NS, content_sha256='c' * 64),
+            CatalogItemResult(
+                index=0,
+                status='created',
+                uuid=FIXED_NS,
+                content_sha256='c' * 64,
+            ),
         ],
     )
     assert len(resp.results) == 1
