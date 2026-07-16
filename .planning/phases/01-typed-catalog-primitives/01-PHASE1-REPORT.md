@@ -17,17 +17,17 @@
 | Requirement | Result | Evidence |
 |---|---|---|
 | CONF-04 | **PASS** | Config values above defaults construct through transport up to hard maxima; service still rejects above active configured limits |
-| SAFE-03 | **PASS** | Recursive nested string key/value bounds execute in entity attributes, entity source refs, and edge attributes before service work |
-| VERI-03 | **PASS** | Optional expected endpoint refs compare against Neo4j rows; `edge_type_mismatch` is separate from true `endpoint_mismatch` |
-| GATE-01 | **PASS** | 175 catalog units passed; focused gap regressions included |
+| SAFE-03 | **PASS** | One iterative validator enforces JSON types, finite floats, string limits, depth/node ceilings, and cycle rejection before service work |
+| VERI-03 | **PASS** | Optional expected endpoint refs compare across every matching Neo4j row; type/endpoint/UUID/embedding anomalies aggregate separately |
+| GATE-01 | **PASS** | 189 catalog units passed; focused gap and review regressions included |
 | GATE-05 | **PASS** | Report corrected from independently identified false-positive evidence; Phase 2 remains independently gated |
 
 ## Gate Results
 
 | Gate | Result | Evidence |
 |---|---|---|
-| GATE-01 catalog units | **PASS** | `175 passed in 1.51s` |
-| GATE-02 live Neo4j | **PASS** | `22 passed in 15.13s`; zero skipped under required mode |
+| GATE-01 catalog units | **PASS** | `189 passed in 1.49s` |
+| GATE-02 live Neo4j | **PASS** | `22 passed in 14.89s`; zero skipped under required mode |
 | GATE-03 no LLM/queue | **PASS** | Existing live spy coverage remained green |
 | GATE-04 quality/compatibility | **PASS** | Ruff format/check, Pyright, 86 MCP regressions, 18-tool listing |
 | GATE-05 report | **PASS** | This corrected evidence report |
@@ -47,7 +47,7 @@ export CATALOG_INT_REQUIRED=1
 uv run pytest tests/test_catalog_models.py tests/test_catalog_identity.py tests/test_catalog_store_unit.py tests/test_catalog_service.py -q --tb=short
 ```
 
-Result: exit 0 — `175 passed in 1.51s`.
+Result: exit 0 — `189 passed in 1.49s`.
 
 ### Live Neo4j integration
 
@@ -55,7 +55,7 @@ Result: exit 0 — `175 passed in 1.51s`.
 CATALOG_INT_REQUIRED=1 uv run pytest tests/test_catalog_neo4j_int.py -q --tb=short
 ```
 
-Result: exit 0 — `22 passed in 15.13s`; no skips. Writes and scoped teardown used only `group_id=oracle-catalog-tool-test`.
+Result: exit 0 — `22 passed in 14.89s`; no skips. Writes and scoped teardown used only `group_id=oracle-catalog-tool-test`.
 
 ### Combined catalog suite
 
@@ -63,7 +63,7 @@ Result: exit 0 — `22 passed in 15.13s`; no skips. Writes and scoped teardown u
 CATALOG_INT_REQUIRED=1 uv run pytest tests/test_catalog_*.py -q --tb=short
 ```
 
-Result: exit 0 — `197 passed in 16.02s`.
+Result: exit 0 — `211 passed in 15.81s`.
 
 ### Catalog-scoped formatting, lint, type checking
 
@@ -77,8 +77,23 @@ uv run ruff format --check \
   tests/test_catalog_models.py tests/test_catalog_service.py \
   tests/test_catalog_store_unit.py tests/test_catalog_neo4j_int.py
 
-uv run ruff check <same 14 paths>
-uv run pyright <same 14 paths>
+uv run ruff check \
+  src/services/catalog_identity.py src/services/catalog_service.py \
+  src/services/catalog_store.py src/config/schema.py \
+  src/models/catalog_common.py src/models/catalog_edges.py \
+  src/models/catalog_entities.py src/models/catalog_responses.py \
+  src/graphiti_mcp_server.py tests/test_catalog_identity.py \
+  tests/test_catalog_models.py tests/test_catalog_service.py \
+  tests/test_catalog_store_unit.py tests/test_catalog_neo4j_int.py
+
+uv run pyright \
+  src/services/catalog_identity.py src/services/catalog_service.py \
+  src/services/catalog_store.py src/config/schema.py \
+  src/models/catalog_common.py src/models/catalog_edges.py \
+  src/models/catalog_entities.py src/models/catalog_responses.py \
+  src/graphiti_mcp_server.py tests/test_catalog_identity.py \
+  tests/test_catalog_models.py tests/test_catalog_service.py \
+  tests/test_catalog_store_unit.py tests/test_catalog_neo4j_int.py
 ```
 
 Results:
@@ -92,12 +107,12 @@ Results:
 uv run pytest tests/test_update_entity.py tests/test_factories.py tests/test_configuration.py tests/test_core_parity.py -q --tb=short
 ```
 
-Result: exit 0 — `86 passed in 1.40s`.
+Result: exit 0 — `86 passed in 1.23s`.
 
 ### MCP tool listing
 
 ```bash
-uv run python -c "# import graphiti_mcp_server.mcp; await list_tools; assert existing and catalog sets"
+uv run python -c "import asyncio; from graphiti_mcp_server import mcp; existing={'add_memory','search_nodes','search_memory_facts','add_triplet','get_entity_edge','get_episodes','get_episode_entities','update_entity','build_communities','summarize_saga','delete_episode','delete_entity_edge','clear_graph','get_status'}; catalog={'upsert_typed_entities','upsert_typed_edges','resolve_typed_entities','verify_catalog_batch'}; names={tool.name for tool in asyncio.run(mcp.list_tools())}; print('TOOL_COUNT',len(names)); print('CATALOG_COUNT',len(names & catalog)); print('EXISTING_COUNT',len(names & existing)); print('MISSING',sorted((existing|catalog)-names)); assert len(names)==18 and existing|catalog<=names"
 ```
 
 Result: exit 0.
@@ -129,11 +144,11 @@ Existing tools retained: `add_memory`, `search_nodes`, `search_memory_facts`, `a
 | Check | Result |
 |---|---|
 | CONF-04 configurable limits within hard bounds | PASS |
-| SAFE-03 recursive nested raw-string bounds | PASS |
-| VERI-03 true endpoint and separate type mismatch | PASS |
-| Catalog units | PASS — 175 |
+| SAFE-03 bounded iterative JSON validation | PASS |
+| VERI-03 all-row endpoint/type/UUID/embedding aggregation | PASS |
+| Catalog units | PASS — 189 |
 | Live Neo4j | PASS — 22 unskipped |
-| Combined catalog | PASS — 197 |
+| Combined catalog | PASS — 211 |
 | Ruff/Pyright | PASS |
 | MCP regressions | PASS — 86 |
 | Tool compatibility | PASS — 18 total, 14 existing, 4 catalog |

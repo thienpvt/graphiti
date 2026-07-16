@@ -8,7 +8,7 @@ requires:
     provides: deterministic typed catalog entity, edge, resolve, and verify primitives
 provides:
   - configurable catalog batch limits bounded by transport hard maxima
-  - recursive nested string validation before hash/embed/write
+  - bounded iterative JSON validation before hash/embed/write
   - exact edge endpoint verification separated from edge-type mismatch
   - corrected Phase 1 gate evidence
   - independent verifier handoff with Phase 2 still blocked
@@ -33,7 +33,7 @@ provides:
 affects: [phase-1-verification, phase-2-gate]
 tech-stack:
   added: []
-  patterns: [transport hard ceiling plus operator runtime limit, recursive trust-boundary validation, optional expected identity comparison]
+  patterns: [transport hard ceiling plus operator runtime limit, iterative bounded JSON validation, all-row expected identity comparison]
 key-files:
   created: [.planning/phases/01-typed-catalog-primitives/01-07-SUMMARY.md]
   modified:
@@ -62,7 +62,7 @@ coverage:
     requirement: CONF-04
     verification:
       - kind: unit
-        ref: mcp_server/tests/test_catalog_models.py and test_catalog_service.py; 175-unit gate
+        ref: mcp_server/tests/test_catalog_models.py and test_catalog_service.py; 189-unit gate
         status: pass
     human_judgment: false
   - id: D2
@@ -89,7 +89,7 @@ coverage:
     requirement: GATE-05
     verification:
       - kind: other
-        ref: 175 units; 22 live; 197 combined; Ruff/Pyright; 86 MCP regressions; 18-tool listing
+        ref: 189 units; 22 live; 211 combined; Ruff/Pyright; 86 MCP regressions; 18-tool listing
         status: pass
     human_judgment: true
     rationale: Independent verifier must accept executor evidence before phase completion.
@@ -100,7 +100,7 @@ status: complete
 
 # Phase 1 Plan 7: Independent Gap Closure Summary
 
-**Hard-bounded configurable batches, recursive nested raw-text validation, and exact edge endpoint verification with 197 catalog tests green**
+**Hard-bounded configurable batches, recursive nested raw-text validation, and exact edge endpoint verification with 211 catalog tests green**
 
 ## Performance
 
@@ -113,8 +113,9 @@ status: complete
 ## Accomplishments
 
 - Closed CONF-04: transport accepts configured limits above defaults through fixed hard maxima; service retains active configured-limit authority.
-- Closed SAFE-03: nested dict/list keys and string values are bounded during Pydantic validation before identity hashing, embedding, or writes.
-- Closed VERI-03: optional expected endpoint UUID/graph-key fields compare with returned Neo4j identities; type mismatches have their own anomaly.
+- Closed SAFE-03: one iterative validator rejects non-JSON values, non-finite floats, oversized strings, cycles, excess depth, and excess nodes during Pydantic validation.
+- Closed VERI-03: optional endpoint expectations compare across every matching Neo4j row; duplicate rogue rows cannot hide UUID/type/endpoint/embedding anomalies.
+- Fail closed on provenance read errors with structured `internal_error`; no DB failure becomes absence.
 - Re-ran complete catalog, live Neo4j, Ruff, Pyright, 86 MCP regression, and 18-tool compatibility gates.
 - Corrected Phase 1 report and validation evidence without updating phase completion tracking.
 
@@ -132,20 +133,20 @@ status: complete
 |---|---|
 | Focused Task 1 | 13 passed |
 | Focused Task 2 | 25 passed |
-| Catalog units | 175 passed in 1.51s |
-| Live Neo4j required | 22 passed in 15.13s; 0 skipped |
-| Combined catalog | 197 passed in 16.02s |
+| Catalog units | 189 passed in 1.49s |
+| Live Neo4j required | 22 passed in 14.89s; 0 skipped |
+| Combined catalog | 211 passed in 15.81s |
 | Ruff format | 14 files already formatted |
 | Ruff check | All checks passed |
 | Pyright | 0 errors, 0 warnings, 0 informations |
-| MCP regressions | 86 passed in 1.40s |
+| MCP regressions | 86 passed in 1.23s |
 | Tool listing | 18 total; 14 existing; 4 catalog; missing none |
 
 Live writes and scoped teardown used only `oracle-catalog-tool-test`. Credentials stayed in the existing environment/session.
 
 ## Files Created/Modified
 
-- `mcp_server/src/models/catalog_common.py` — hard maxima and recursive string walker.
+- `mcp_server/src/models/catalog_common.py` — hard maxima and iterative bounded JSON validator.
 - `mcp_server/src/config/schema.py` — hard upper bounds on CatalogConfig values.
 - `mcp_server/src/models/catalog_entities.py` — hard request ceilings, nested validation, optional expected edge endpoints.
 - `mcp_server/src/models/catalog_edges.py` — hard request ceiling and nested validation.
@@ -165,7 +166,25 @@ Live writes and scoped teardown used only `oracle-catalog-tool-test`. Credential
 
 ## Deviations from Plan
 
-None - plan executed exactly as written.
+### Auto-fixed Issues
+
+**1. [Rule 2 - Missing Critical] Hardened nested JSON resource and type validation**
+- **Found during:** Independent review after Task 3
+- **Issue:** Recursive string-only walking allowed non-JSON values, cycles, and resource exhaustion.
+- **Fix:** Added one iterative validator with JSON type, finite-float, string, depth, node, and active-cycle checks.
+- **Files modified:** `catalog_common.py`, entity/edge models, model tests
+- **Verification:** 189 catalog units; 211 combined catalog tests
+- **Committed in:** `4feebfc`
+
+**2. [Rule 1 - Bug] Aggregated every duplicate edge row and failed provenance reads closed**
+- **Found during:** Independent review after Task 3
+- **Issue:** A selected primary row could hide rogue duplicate anomalies; provenance DB exceptions became missing data.
+- **Fix:** Scan all matching rows once per anomaly; return structured `internal_error` on provenance read failure.
+- **Files modified:** `catalog_service.py`, service/live tests
+- **Verification:** 189 catalog units; 22 live Neo4j tests
+- **Committed in:** `4feebfc`
+
+**Total deviations:** 2 auto-fixed (1 missing critical, 1 bug). No scope creep.
 
 ## Issues Encountered
 
@@ -189,7 +208,7 @@ None - existing Neo4j environment/session was sufficient.
 ## Self-Check: PASSED
 
 - Source/test/report files exist.
-- Task commits `a89fd15`, `2d1ed11`, `0fad8ce`, and `928263b` exist.
+- Task/review commits `a89fd15`, `2d1ed11`, `0fad8ce`, `928263b`, `65cf7a4`, `4feebfc`, and `f38a3ef` exist.
 - No tracked files deleted.
 - No ROADMAP, REQUIREMENTS, or STATE completion update made.
 
