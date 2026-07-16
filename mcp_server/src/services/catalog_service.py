@@ -1374,6 +1374,8 @@ class CatalogService:
             anomalies.append({'kind': 'missing_embedding', 'graph_key': key})
         for key in edge_section.duplicate_edge_key:
             anomalies.append({'kind': 'duplicate_edge_key', 'edge_key': key})
+        for key in edge_section.edge_type_mismatch:
+            anomalies.append({'kind': 'edge_type_mismatch', 'edge_key': key})
         for key in edge_section.endpoint_mismatch:
             anomalies.append({'kind': 'endpoint_mismatch', 'edge_key': key})
         for key in edge_section.uuid_mismatch:
@@ -1414,8 +1416,25 @@ class CatalogService:
                     group_id=request.group_id,
                     target_uuids=uniq_targets,
                 )
-            except Exception:
-                prov_rows = []
+            except Exception as exc:
+                logger.error(
+                    'catalog verify_catalog_batch provenance_read_failed group_id=%s '
+                    'batch_id=%s reason=%s',
+                    request.group_id,
+                    request.batch_id,
+                    type(exc).__name__,
+                )
+                return VerifyCatalogBatchResponse(
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    entities=entity_section,
+                    edges=edge_section,
+                    missing=missing,
+                    anomalies=anomalies,
+                    require_provenance=True,
+                    error_code=CatalogErrorCode.internal_error,
+                    error_message='verify provenance read failed',
+                )
             present = {str(r.get('uuid')) for r in prov_rows if r.get('has_provenance')}
             for u in uniq_targets:
                 if u not in present:
@@ -1486,20 +1505,18 @@ class CatalogService:
                     section.typed_duplicate.append(ent.graph_key)
                 if typed:
                     found_count += 1
-                    primary = next(
-                        (r for r in typed if str(r.get('uuid')) == expected_uuid),
-                        typed[0],
-                    )
-                    if str(primary.get('uuid')) != expected_uuid:
+                    if any(str(row.get('uuid')) != expected_uuid for row in typed):
                         section.uuid_mismatch.append(ent.graph_key)
-                    if not primary.get('has_name_embedding'):
+                    if any(not row.get('has_name_embedding') for row in typed):
                         section.missing_embedding.append(ent.graph_key)
                 elif wrong:
                     found_count += 1
-                    if not wrong[0].get('has_name_embedding'):
+                    if any(not row.get('has_name_embedding') for row in wrong):
                         section.missing_embedding.append(ent.graph_key)
                 elif generic:
                     found_count += 1
+                    if any(not row.get('has_name_embedding') for row in generic):
+                        section.missing_embedding.append(ent.graph_key)
             section.found = found_count
         else:
             # batch-scoped only: report rows under batch without per-key expected list
@@ -1544,17 +1561,28 @@ class CatalogService:
                 found_count += 1
                 if len(matches) > 1:
                     section.duplicate_edge_key.append(edge.edge_key)
-                primary = next(
-                    (r for r in matches if str(r.get('uuid')) == expected_uuid),
-                    matches[0],
-                )
-                if str(primary.get('uuid')) != expected_uuid:
+                if any(str(row.get('uuid')) != expected_uuid for row in matches):
                     section.uuid_mismatch.append(edge.edge_key)
-                # type mismatch when present on row
-                row_type = primary.get('edge_type') or primary.get('name')
-                if row_type and row_type != edge.edge_type:
+                if any(
+                    not (row.get('edge_type') or row.get('name'))
+                    or (row.get('edge_type') or row.get('name')) != edge.edge_type
+                    for row in matches
+                ):
+                    section.edge_type_mismatch.append(edge.edge_key)
+                if any(
+                    any(
+                        expected is not None and str(row.get(actual_field)) != expected
+                        for expected, actual_field in (
+                            (edge.expected_source_uuid, 'source_uuid'),
+                            (edge.expected_target_uuid, 'target_uuid'),
+                            (edge.expected_source_graph_key, 'source_graph_key'),
+                            (edge.expected_target_graph_key, 'target_graph_key'),
+                        )
+                    )
+                    for row in matches
+                ):
                     section.endpoint_mismatch.append(edge.edge_key)
-                if not primary.get('has_fact_embedding'):
+                if any(not row.get('has_fact_embedding') for row in matches):
                     section.missing_embedding.append(edge.edge_key)
             section.found = found_count
         else:

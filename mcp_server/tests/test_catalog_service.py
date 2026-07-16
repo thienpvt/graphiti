@@ -220,6 +220,22 @@ async def test_entity_non_neo4j_backend_unavailable():
 
 
 @pytest.mark.asyncio
+async def test_entity_service_enforces_configured_limit_below_hard_max():
+    client = _make_client()
+    cfg = CatalogConfig(
+        enabled=True,
+        uuid_namespace=str(FIXED_NS),
+        max_entities_per_batch=1,
+    )
+    service = CatalogService(catalog_config=cfg)
+    request = _request([_entity(), _entity(graph_key='TABLE::HR.DEPARTMENTS')])
+    resp = await service.upsert_typed_entities(client=client, request=request)
+    assert all(r.error_code == CatalogErrorCode.batch_limit_exceeded for r in resp.results)
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
 async def test_entity_embed_before_transaction_order():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -950,6 +966,45 @@ async def test_verify_entity_counts_and_anomaly_lists():
 
 
 @pytest.mark.asyncio
+async def test_verify_entity_aggregates_anomalies_across_typed_twins():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    key = 'TABLE::HR.EMPLOYEES'
+    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', key)
+    service._store.match_entities_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': expected_uuid,
+                'graph_key': key,
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'has_name_embedding': True,
+            },
+            {
+                'uuid': str(uuid.uuid4()),
+                'graph_key': key,
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'has_name_embedding': False,
+            },
+        ]
+    )
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    resp = await service.verify_catalog_batch(
+        client=client,
+        request=_verify_request(
+            batch_id=None,
+            entities=[VerifyEntityRef(entity_type='Table', graph_key=key)],
+            edges=[],
+        ),
+    )
+    assert resp.entities.found == 1
+    assert resp.entities.typed_duplicate == [key]
+    assert resp.entities.uuid_mismatch == [key]
+    assert resp.entities.missing_embedding == [key]
+
+
+@pytest.mark.asyncio
 async def test_verify_edge_counts_and_anomaly_lists():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -986,6 +1041,134 @@ async def test_verify_edge_counts_and_anomaly_lists():
     assert 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES' in resp.edges.duplicate_edge_key
     assert 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES' in resp.edges.missing_embedding
     client.embedder.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_verify_edge_true_endpoint_mismatch_is_distinct_from_type():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    service._store.match_edges_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': catalog_edge_uuid(FIXED_NS, GROUP, 'Contains', edge_key),
+                'edge_key': edge_key,
+                'edge_type': 'Contains',
+                'source_uuid': str(uuid.uuid4()),
+                'target_uuid': str(uuid.uuid4()),
+                'source_graph_key': 'SCHEMA::WRONG',
+                'target_graph_key': 'TABLE::HR.EMPLOYEES',
+                'has_fact_embedding': True,
+            }
+        ]
+    )
+    req = _verify_request(
+        batch_id=None,
+        entities=[],
+        edges=[
+            VerifyEdgeRef(
+                edge_type='Contains',
+                edge_key=edge_key,
+                expected_source_graph_key='SCHEMA::HR',
+            )
+        ],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert resp.edges.endpoint_mismatch == [edge_key]
+    assert resp.edges.edge_type_mismatch == []
+    assert {'kind': 'endpoint_mismatch', 'edge_key': edge_key} in resp.anomalies
+
+
+@pytest.mark.asyncio
+async def test_verify_edge_type_mismatch_never_becomes_endpoint_mismatch():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    service._store.match_edges_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': 'stored-type-uuid',
+                'edge_key': edge_key,
+                'edge_type': 'DependsOn',
+                'source_graph_key': 'SCHEMA::HR',
+                'target_graph_key': 'TABLE::HR.EMPLOYEES',
+                'has_fact_embedding': True,
+            }
+        ]
+    )
+    req = _verify_request(
+        batch_id=None,
+        entities=[],
+        edges=[VerifyEdgeRef(edge_type='Contains', edge_key=edge_key)],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert resp.edges.edge_type_mismatch == [edge_key]
+    assert resp.edges.endpoint_mismatch == []
+    assert {'kind': 'edge_type_mismatch', 'edge_key': edge_key} in resp.anomalies
+
+
+@pytest.mark.asyncio
+async def test_verify_edge_aggregates_anomalies_across_all_duplicate_rows_once():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    expected_uuid = catalog_edge_uuid(FIXED_NS, GROUP, 'Contains', edge_key)
+    service._store.match_edges_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': expected_uuid,
+                'edge_key': edge_key,
+                'edge_type': 'Contains',
+                'source_graph_key': 'SCHEMA::HR',
+                'has_fact_embedding': True,
+            },
+            {
+                'uuid': 'rogue',
+                'edge_key': edge_key,
+                'edge_type': '',
+                'source_graph_key': 'SCHEMA::WRONG',
+                'has_fact_embedding': False,
+            },
+        ]
+    )
+    resp = await service.verify_catalog_batch(
+        client=client,
+        request=_verify_request(
+            batch_id=None,
+            entities=[],
+            edges=[
+                VerifyEdgeRef(
+                    edge_type='Contains',
+                    edge_key=edge_key,
+                    expected_source_graph_key='SCHEMA::HR',
+                )
+            ],
+        ),
+    )
+    assert resp.edges.duplicate_edge_key == [edge_key]
+    assert resp.edges.uuid_mismatch == [edge_key]
+    assert resp.edges.edge_type_mismatch == [edge_key]
+    assert resp.edges.endpoint_mismatch == [edge_key]
+    assert resp.edges.missing_embedding == [edge_key]
+
+
+@pytest.mark.asyncio
+async def test_verify_provenance_read_failure_is_internal_error_not_missing():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    service._store.match_provenance_presence = AsyncMock(side_effect=RuntimeError('db down'))
+    resp = await service.verify_catalog_batch(
+        client=client,
+        request=_verify_request(require_provenance=True, entities=[], edges=[]),
+    )
+    assert resp.error_code == CatalogErrorCode.internal_error
+    assert resp.error_message == 'verify provenance read failed'
+    assert resp.missing_provenance == []
 
 
 @pytest.mark.asyncio
@@ -1145,6 +1328,22 @@ async def test_edge_feature_disabled_returns_structured_error_without_write():
     assert 'embed' not in client.call_order
     service._store.resolve_endpoint_typed.assert_not_awaited()
     service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_service_enforces_configured_limit_below_hard_max():
+    client = _make_client()
+    cfg = CatalogConfig(
+        enabled=True,
+        uuid_namespace=str(FIXED_NS),
+        max_edges_per_batch=1,
+    )
+    service = CatalogService(catalog_config=cfg)
+    request = _edge_request([_edge(), _edge(edge_key='FK::SECOND')])
+    resp = await service.upsert_typed_edges(client=client, request=request)
+    assert all(r.error_code == CatalogErrorCode.batch_limit_exceeded for r in resp.results)
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
 
 
 @pytest.mark.asyncio

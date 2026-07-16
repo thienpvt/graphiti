@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from models.catalog_common import (
     CATALOG_EDGE_TYPES,
-    DEFAULT_MAX_EDGES_PER_BATCH,
     ENTITY_TYPE_PREFIXES,
+    HARD_MAX_EDGES_PER_BATCH,
     MAX_ATTRIBUTE_KEYS,
     MAX_EVIDENCE_LENGTH,
     MAX_FACT_LENGTH,
@@ -19,6 +19,7 @@ from models.catalog_common import (
     MAX_SHORT_STRING_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
+    validate_nested_json,
 )
 
 
@@ -29,17 +30,6 @@ def _validate_group_id(group_id: str | None) -> bool:
     if not re.match(r'^[a-zA-Z0-9_-]+$', group_id):
         raise ValueError(f'group_id contains invalid characters: {group_id}')
     return True
-
-
-def _reject_non_finite(obj: Any, path: str = 'value') -> None:
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-        raise ValueError(f'non-finite number at {path}')
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            _reject_non_finite(v, f'{path}.{k}')
-    elif isinstance(obj, list):
-        for i, v in enumerate(obj):
-            _reject_non_finite(v, f'{path}[{i}]')
 
 
 class CatalogEdgeItem(BaseModel):
@@ -97,7 +87,7 @@ class CatalogEdgeItem(BaseModel):
         protected = set(v.keys()) & PROTECTED_ENTITY_PROPERTIES
         if protected:
             raise ValueError(f'attributes contain protected keys: {sorted(protected)}')
-        _reject_non_finite(v, 'attributes')
+        validate_nested_json(v, 'attributes')
         return v
 
     @field_validator('confidence')
@@ -133,7 +123,7 @@ class UpsertTypedEdgesRequest(BaseModel):
 
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
-    edges: list[CatalogEdgeItem] = Field(..., min_length=1, max_length=DEFAULT_MAX_EDGES_PER_BATCH)
+    edges: list[CatalogEdgeItem] = Field(..., min_length=1, max_length=HARD_MAX_EDGES_PER_BATCH)
     dry_run: bool = False
     atomic: bool = True
     strict_endpoints: bool = True

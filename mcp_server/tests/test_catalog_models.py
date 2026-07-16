@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,12 @@ from config.schema import CatalogConfig, GraphitiConfig  # noqa: E402
 from models.catalog_common import (  # noqa: E402
     CATALOG_EDGE_TYPES,
     ENTITY_TYPE_PREFIXES,
+    HARD_MAX_EDGES_PER_BATCH,
+    HARD_MAX_ENTITIES_PER_BATCH,
+    MAX_EVIDENCE_LENGTH,
+    MAX_NESTED_DEPTH,
+    MAX_NESTED_NODES,
+    MAX_SHORT_STRING_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     CatalogErrorCode,
 )
@@ -26,6 +33,7 @@ from models.catalog_entities import (  # noqa: E402
     ResolveEntityRef,
     ResolveTypedEntitiesRequest,
     UpsertTypedEntitiesRequest,
+    VerifyEdgeRef,
 )
 from models.catalog_responses import (  # noqa: E402
     CatalogItemResult,
@@ -100,6 +108,25 @@ def test_catalog_config_limits_defaults():
     assert cfg.max_entities_per_batch == 500
     assert cfg.max_edges_per_batch == 2000
     assert cfg.max_provenance_links_per_batch == 5000
+
+
+def test_catalog_config_accepts_limits_above_defaults_within_hard_max():
+    cfg = CatalogConfig(max_entities_per_batch=501, max_edges_per_batch=2001)
+    assert cfg.max_entities_per_batch == 501
+    assert cfg.max_edges_per_batch == 2001
+
+
+@pytest.mark.parametrize(
+    ('field', 'value'),
+    [
+        ('max_entities_per_batch', HARD_MAX_ENTITIES_PER_BATCH + 1),
+        ('max_edges_per_batch', HARD_MAX_EDGES_PER_BATCH + 1),
+        ('max_provenance_links_per_batch', 20_001),
+    ],
+)
+def test_catalog_config_rejects_limits_above_hard_max(field: str, value: int):
+    with pytest.raises(ValidationError):
+        CatalogConfig.model_validate({field: value})
 
 
 def test_catalog_config_enabled_requires_valid_namespace():
@@ -346,8 +373,22 @@ def test_entity_item_accepts_valid_content_sha256():
     assert item.content_sha256 == digest
 
 
-def test_entity_collection_over_limit_rejected():
+def test_entity_collection_above_default_constructs_within_hard_max():
     entities = [_entity_kwargs(graph_key=f'TABLE::T{i}') for i in range(501)]
+    request = UpsertTypedEntitiesRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'batch_id': 'batch-1',
+            'entities': entities,
+        }
+    )
+    assert len(request.entities) == 501
+
+
+def test_entity_collection_above_hard_max_rejected():
+    entities = [
+        _entity_kwargs(graph_key=f'TABLE::T{i}') for i in range(HARD_MAX_ENTITIES_PER_BATCH + 1)
+    ]
     with pytest.raises(ValidationError):
         UpsertTypedEntitiesRequest.model_validate(
             {
@@ -356,6 +397,48 @@ def test_entity_collection_over_limit_rejected():
                 'entities': entities,
             }
         )
+
+
+def test_entity_rejects_oversized_nested_attribute_string():
+    with pytest.raises(ValidationError):
+        _entity(attributes={'nested': [{'raw': 'x' * 1_000_000}]})
+
+
+def test_entity_rejects_oversized_nested_source_ref_key_and_value():
+    with pytest.raises(ValidationError):
+        _entity(source_refs=[{'x' * (MAX_SHORT_STRING_LENGTH + 1): 'value'}])
+    with pytest.raises(ValidationError):
+        _entity(source_refs=[{'raw': 'x' * (MAX_EVIDENCE_LENGTH + 1)}])
+
+
+@pytest.mark.parametrize(
+    'value',
+    [b'raw', {'set'}, object(), 1 + 2j, uuid.UUID(FIXED_NS)],
+)
+def test_entity_rejects_non_json_nested_values(value: object):
+    with pytest.raises(ValidationError):
+        _entity(attributes={'value': value})
+    with pytest.raises(ValidationError):
+        _entity(source_refs=[{'value': value}])
+
+
+def test_entity_rejects_nested_cycles_depth_and_total_nodes():
+    cycle: list[Any] = []
+    cycle.append(cycle)
+    with pytest.raises(ValidationError):
+        _entity(attributes={'cycle': cycle})
+
+    deep: list[Any] = []
+    cursor = deep
+    for _ in range(MAX_NESTED_DEPTH + 1):
+        child: list[Any] = []
+        cursor.append(child)
+        cursor = child
+    with pytest.raises(ValidationError):
+        _entity(source_refs=deep)
+
+    with pytest.raises(ValidationError):
+        _entity(attributes={'wide': [None] * MAX_NESTED_NODES})
 
 
 def test_resolve_typed_entities_requires_group_id():
@@ -423,8 +506,20 @@ def test_upsert_edges_accepts_valid_request():
     assert 'excluded_entity_types' not in UpsertTypedEdgesRequest.model_fields
 
 
-def test_edge_collection_over_limit_rejected():
+def test_edge_collection_above_default_constructs_within_hard_max():
     edges = [_edge_kwargs(edge_key=f'CONTAINS::E{i}') for i in range(2001)]
+    request = UpsertTypedEdgesRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'batch_id': 'batch-1',
+            'edges': edges,
+        }
+    )
+    assert len(request.edges) == 2001
+
+
+def test_edge_collection_above_hard_max_rejected():
+    edges = [_edge_kwargs(edge_key=f'CONTAINS::E{i}') for i in range(HARD_MAX_EDGES_PER_BATCH + 1)]
     with pytest.raises(ValidationError):
         UpsertTypedEdgesRequest.model_validate(
             {
@@ -433,6 +528,24 @@ def test_edge_collection_over_limit_rejected():
                 'edges': edges,
             }
         )
+
+
+def test_edge_rejects_oversized_nested_attribute_string():
+    with pytest.raises(ValidationError):
+        _edge(attributes={'nested': [{'raw': 'x' * 1_000_000}]})
+
+
+@pytest.mark.parametrize('value', [b'raw', {'set'}, object(), 1 + 2j, uuid.UUID(FIXED_NS)])
+def test_edge_rejects_non_json_nested_values(value: object):
+    with pytest.raises(ValidationError):
+        _edge(attributes={'value': value})
+
+
+def test_edge_rejects_nested_cycle():
+    cycle: dict[str, Any] = {}
+    cycle['self'] = cycle
+    with pytest.raises(ValidationError):
+        _edge(attributes=cycle)
 
 
 def test_edge_rejects_non_finite_attribute_and_bad_confidence():
@@ -482,6 +595,35 @@ def test_write_response_preserves_results():
         ],
     )
     assert len(resp.results) == 1
+
+
+def test_verify_edge_ref_is_backward_compatible_and_accepts_expected_endpoints():
+    minimal = VerifyEdgeRef(edge_type='Contains', edge_key='CONTAINS::K')
+    assert minimal.expected_source_graph_key is None
+    ref = VerifyEdgeRef(
+        edge_type='Contains',
+        edge_key='CONTAINS::K',
+        expected_source_graph_key='SCHEMA::HR',
+        expected_target_graph_key='TABLE::HR.EMPLOYEES',
+        expected_source_uuid=FIXED_NS,
+        expected_target_uuid=FIXED_NS,
+    )
+    assert ref.expected_source_graph_key == 'SCHEMA::HR'
+    uppercase = FIXED_NS.upper()
+    assert (
+        VerifyEdgeRef(
+            edge_type='Contains', edge_key='CONTAINS::K', expected_source_uuid=uppercase
+        ).expected_source_uuid
+        == FIXED_NS
+    )
+
+
+@pytest.mark.parametrize('field', ['expected_source_uuid', 'expected_target_uuid'])
+def test_verify_edge_ref_rejects_invalid_expected_uuid(field: str):
+    with pytest.raises(ValidationError):
+        VerifyEdgeRef.model_validate(
+            {'edge_type': 'Contains', 'edge_key': 'CONTAINS::K', field: 'not-a-uuid'}
+        )
 
 
 def test_resolve_and_verify_response_models_construct():

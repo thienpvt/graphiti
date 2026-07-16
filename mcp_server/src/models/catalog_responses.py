@@ -89,6 +89,7 @@ class VerifyEdgeSection(BaseModel):
     found: int = 0
     missing: list[str] = Field(default_factory=list)
     duplicate_edge_key: list[str] = Field(default_factory=list)
+    edge_type_mismatch: list[str] = Field(default_factory=list)
     endpoint_mismatch: list[str] = Field(default_factory=list)
     uuid_mismatch: list[str] = Field(default_factory=list)
     missing_embedding: list[str] = Field(default_factory=list)
