@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: Provenance and Atomic Batch
 status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-07-17T00:41:56.873Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-07-17T01:14:17.653Z"
 last_activity: 2026-07-17
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 14
-  completed_plans: 11
+  completed_plans: 12
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-07-16)
 ## Current Position
 
 Phase: 02 (Provenance and Atomic Batch) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-07-17 — Phase 02 execution started
 
-Progress: [████████░░] 79%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [████████░░] 79%
 | Phase 01 P08 | 20min | 3 tasks | 7 files |
 | Phase 02 P02 | 8min | 2 tasks | 5 files |
 | Phase 02 P03 | 5min | 2 tasks | 5 files |
+| Phase 02 P04 | 20min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,9 @@ Recent decisions affecting current work:
 - [Phase ?]: upsert_provenance: target preflight fail-closed; sources skip embedder
 - [Phase ?]: Status writers accept only terminal committed/failed; intermediate lifecycle literals not persisted
 - [Phase ?]: Missing status uses error_summary (no error_message field on CatalogIngestStatusResponse)
+- [Phase ?]: Caller request_sha256 is the external batch-idempotency token when supplied; otherwise use the server canonical hash
+- [Phase ?]: Batch writes edges before append-only provenance attachment inside one domain transaction
+- [Phase ?]: Failed batch status stores only exception type, never exception text or payload
 
 ### Pending Todos
 
@@ -104,6 +108,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-07-17T00:41:56.867Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-07-17T01:14:17.647Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None
