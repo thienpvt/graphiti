@@ -15,11 +15,16 @@ from pydantic import ValidationError
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from config.schema import CatalogConfig, GraphitiConfig  # noqa: E402
+from models.catalog_batch import (  # noqa: E402
+    GetCatalogIngestStatusRequest,
+    UpsertCatalogBatchRequest,
+)
 from models.catalog_common import (  # noqa: E402
     CATALOG_EDGE_TYPES,
     ENTITY_TYPE_PREFIXES,
     HARD_MAX_EDGES_PER_BATCH,
     HARD_MAX_ENTITIES_PER_BATCH,
+    HARD_MAX_PROVENANCE_LINKS_PER_BATCH,
     MAX_EVIDENCE_LENGTH,
     MAX_NESTED_DEPTH,
     MAX_NESTED_NODES,
@@ -35,7 +40,14 @@ from models.catalog_entities import (  # noqa: E402
     UpsertTypedEntitiesRequest,
     VerifyEdgeRef,
 )
+from models.catalog_provenance import (  # noqa: E402
+    CatalogProvenanceEdgeTarget,
+    CatalogProvenanceEntityTarget,
+    CatalogSourceItem,
+    UpsertProvenanceRequest,
+)
 from models.catalog_responses import (  # noqa: E402
+    CatalogIngestStatusResponse,
     CatalogItemResult,
     CatalogWriteResponse,
     ResolveTypedEntitiesResponse,
@@ -629,3 +641,364 @@ def test_verify_edge_ref_rejects_invalid_expected_uuid(field: str):
 def test_resolve_and_verify_response_models_construct():
     ResolveTypedEntitiesResponse(group_id='g', results=[])
     VerifyCatalogBatchResponse(group_id='g', batch_id='b', results=[])
+
+
+# ---------------------------------------------------------------------------
+# Provenance models (PROV-02)
+# ---------------------------------------------------------------------------
+
+
+def _source_kwargs(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        'source_key': 'DOC::HR.PDF#p12',
+        'reference_time': '2024-01-15T10:30:00+00:00',
+        'attributes': {'page': 12, 'title': 'HR schema'},
+    }
+    base.update(overrides)
+    return base
+
+
+def _entity_target(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        'entity_type': 'Table',
+        'graph_key': 'TABLE::HR.EMPLOYEES',
+    }
+    base.update(overrides)
+    return base
+
+
+def _edge_target(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        'edge_type': 'Contains',
+        'edge_key': 'CONTAINS::SCHEMA::HR->TABLE::HR.EMPLOYEES',
+    }
+    base.update(overrides)
+    return base
+
+
+def test_catalog_source_item_requires_source_key_and_reference_time():
+    with pytest.raises(ValidationError):
+        CatalogSourceItem.model_validate({'reference_time': '2024-01-15T10:30:00+00:00'})
+    with pytest.raises(ValidationError):
+        CatalogSourceItem.model_validate({'source_key': 'DOC::A'})
+
+
+def test_catalog_source_item_preserves_exact_reference_time():
+    raw = '2024-01-15T10:30:00.123456+00:00'
+    item = CatalogSourceItem.model_validate(_source_kwargs(reference_time=raw))
+    assert item.reference_time == raw
+
+
+def test_catalog_source_item_rejects_protected_keys_and_bad_hash():
+    with pytest.raises(ValidationError):
+        CatalogSourceItem.model_validate(_source_kwargs(attributes={'uuid': 'x'}))
+    with pytest.raises(ValidationError):
+        CatalogSourceItem.model_validate(_source_kwargs(content_sha256='deadbeef'))
+    digest = 'a' * 64
+    item = CatalogSourceItem.model_validate(_source_kwargs(content_sha256=digest))
+    assert item.content_sha256 == digest
+
+
+def test_catalog_source_item_rejects_non_finite_nested():
+    with pytest.raises(ValidationError):
+        CatalogSourceItem.model_validate(_source_kwargs(attributes={'score': math.nan}))
+    with pytest.raises(ValidationError):
+        CatalogSourceItem.model_validate(_source_kwargs(attributes={'score': math.inf}))
+
+
+def test_provenance_entity_target_allowlist_and_prefix():
+    CatalogProvenanceEntityTarget.model_validate(_entity_target())
+    with pytest.raises(ValidationError):
+        CatalogProvenanceEntityTarget.model_validate(_entity_target(entity_type='Widget'))
+    with pytest.raises(ValidationError):
+        CatalogProvenanceEntityTarget.model_validate(
+            _entity_target(graph_key='SCHEMA::HR.EMPLOYEES')
+        )
+
+
+def test_provenance_edge_target_allowlist():
+    CatalogProvenanceEdgeTarget.model_validate(_edge_target())
+    with pytest.raises(ValidationError):
+        CatalogProvenanceEdgeTarget.model_validate(_edge_target(edge_type='Owns'))
+
+
+def test_upsert_provenance_request_accepts_valid():
+    req = UpsertProvenanceRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'batch_id': 'batch-1',
+            'sources': [_source_kwargs()],
+            'entity_targets': [_entity_target()],
+            'edge_targets': [_edge_target()],
+        }
+    )
+    assert req.dry_run is False
+    assert req.atomic is True
+    assert len(req.sources) == 1
+
+
+def test_upsert_provenance_requires_group_batch_and_sources():
+    with pytest.raises(ValidationError):
+        UpsertProvenanceRequest.model_validate(
+            {
+                'batch_id': 'batch-1',
+                'sources': [_source_kwargs()],
+            }
+        )
+    with pytest.raises(ValidationError):
+        UpsertProvenanceRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'sources': [_source_kwargs()],
+            }
+        )
+    with pytest.raises(ValidationError):
+        UpsertProvenanceRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'batch-1',
+                'sources': [],
+            }
+        )
+
+
+def test_upsert_provenance_rejects_invalid_group_id():
+    with pytest.raises(ValidationError):
+        UpsertProvenanceRequest.model_validate(
+            {
+                'group_id': 'bad group!',
+                'batch_id': 'batch-1',
+                'sources': [_source_kwargs()],
+            }
+        )
+
+
+def test_upsert_provenance_rejects_oversize_links():
+    targets = [
+        _entity_target(graph_key=f'TABLE::T{i}')
+        for i in range(HARD_MAX_PROVENANCE_LINKS_PER_BATCH + 1)
+    ]
+    with pytest.raises(ValidationError):
+        UpsertProvenanceRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'batch-1',
+                'sources': [_source_kwargs()],
+                'entity_targets': targets,
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# Nested atomic batch (BATC-01 / BATC-02)
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_catalog_batch_accepts_nested_entities():
+    req = UpsertCatalogBatchRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'batch_id': 'batch-1',
+            'entities': [_entity_kwargs()],
+            'edges': [],
+            'provenance': None,
+        }
+    )
+    assert req.atomic is True
+    assert req.dry_run is False
+    assert len(req.entities) == 1
+    # Nested list order preserved
+    req2 = UpsertCatalogBatchRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'batch_id': 'batch-1',
+            'entities': [
+                _entity_kwargs(graph_key='TABLE::A', name_raw='A', name_canonical='a'),
+                _entity_kwargs(graph_key='TABLE::B', name_raw='B', name_canonical='b'),
+            ],
+        }
+    )
+    assert [e.graph_key for e in req2.entities] == ['TABLE::A', 'TABLE::B']
+
+
+def test_upsert_catalog_batch_rejects_atomic_false():
+    with pytest.raises(ValidationError) as exc:
+        UpsertCatalogBatchRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'batch-1',
+                'entities': [_entity_kwargs()],
+                'atomic': False,
+            }
+        )
+    msg = str(exc.value).lower()
+    assert 'atomic' in msg or 'validation' in msg
+
+
+def test_upsert_catalog_batch_rejects_empty_all_collections():
+    with pytest.raises(ValidationError):
+        UpsertCatalogBatchRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'batch-1',
+                'entities': [],
+                'edges': [],
+                'provenance': None,
+            }
+        )
+
+
+def test_upsert_catalog_batch_accepts_provenance_only():
+    req = UpsertCatalogBatchRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'batch_id': 'batch-1',
+            'entities': [],
+            'edges': [],
+            'provenance': {
+                'sources': [_source_kwargs()],
+                'entity_targets': [_entity_target()],
+            },
+        }
+    )
+    assert req.provenance is not None
+    assert len(req.provenance.sources) == 1
+
+
+def test_upsert_catalog_batch_optional_hashes():
+    digest = 'b' * 64
+    req = UpsertCatalogBatchRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'batch_id': 'batch-1',
+            'entities': [_entity_kwargs()],
+            'request_sha256': digest,
+            'catalog_sha256': digest,
+        }
+    )
+    assert req.request_sha256 == digest
+    with pytest.raises(ValidationError):
+        UpsertCatalogBatchRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'batch-1',
+                'entities': [_entity_kwargs()],
+                'request_sha256': 'not-hex',
+            }
+        )
+
+
+def test_upsert_catalog_batch_requires_group_and_batch():
+    with pytest.raises(ValidationError):
+        UpsertCatalogBatchRequest.model_validate(
+            {
+                'batch_id': 'batch-1',
+                'entities': [_entity_kwargs()],
+            }
+        )
+    with pytest.raises(ValidationError):
+        UpsertCatalogBatchRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'entities': [_entity_kwargs()],
+            }
+        )
+
+
+def test_get_catalog_ingest_status_request_group_and_batch_only():
+    req = GetCatalogIngestStatusRequest.model_validate(
+        {
+            'group_id': 'oracle-catalog-tool-test',
+            'batch_id': 'batch-1',
+        }
+    )
+    assert req.group_id == 'oracle-catalog-tool-test'
+    assert req.batch_id == 'batch-1'
+    assert set(GetCatalogIngestStatusRequest.model_fields.keys()) == {
+        'group_id',
+        'batch_id',
+    }
+    with pytest.raises(ValidationError):
+        GetCatalogIngestStatusRequest.model_validate({'group_id': 'g'})
+
+
+# ---------------------------------------------------------------------------
+# Ingest status response (STAT-02 / STAT-03)
+# ---------------------------------------------------------------------------
+
+
+def test_catalog_ingest_status_response_six_literals():
+    allowed = {
+        'planned',
+        'validating',
+        'embedding',
+        'writing',
+        'committed',
+        'failed',
+    }
+    for status in allowed:
+        r = CatalogIngestStatusResponse(
+            group_id='oracle-catalog-tool-test',
+            batch_id='batch-1',
+            batch_uuid=FIXED_NS,
+            status=status,  # type: ignore[arg-type]
+        )
+        assert r.status == status
+    with pytest.raises(ValidationError):
+        CatalogIngestStatusResponse(
+            group_id='g',
+            batch_id='b',
+            batch_uuid=FIXED_NS,
+            status='running',  # type: ignore[arg-type]
+        )
+
+
+def test_catalog_ingest_status_response_no_payload_or_secret_fields():
+    fields = set(CatalogIngestStatusResponse.model_fields.keys())
+    forbidden = {
+        'payload',
+        'request',
+        'entities',
+        'edges',
+        'provenance',
+        'sources',
+        'password',
+        'secret',
+        'api_key',
+        'credentials',
+        'raw_document',
+        'content',
+    }
+    assert fields.isdisjoint(forbidden)
+    r = CatalogIngestStatusResponse(
+        group_id='oracle-catalog-tool-test',
+        batch_id='batch-1',
+        batch_uuid=FIXED_NS,
+        status='committed',
+        request_sha256='c' * 64,
+        catalog_sha256=None,
+        entity_count=1,
+        edge_count=0,
+        provenance_count=0,
+        error_summary='',
+    )
+    assert r.error_summary == ''
+    assert r.entity_count == 1
+
+
+def test_catalog_ingest_status_response_rejects_oversize_error_summary():
+    with pytest.raises(ValidationError):
+        CatalogIngestStatusResponse(
+            group_id='g',
+            batch_id='b',
+            batch_uuid=FIXED_NS,
+            status='failed',
+            error_summary='x' * (MAX_SHORT_STRING_LENGTH + 1),
+        )
+
+
+def test_catalog_ingest_status_missing_required_fields():
+    with pytest.raises(ValidationError):
+        CatalogIngestStatusResponse.model_validate(
+            {'group_id': 'g', 'batch_id': 'b', 'status': 'committed'}
+        )

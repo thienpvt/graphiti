@@ -109,3 +109,57 @@ class VerifyCatalogBatchResponse(BaseModel):
     missing_provenance: list[str] = Field(default_factory=list)
     error_code: CatalogErrorCode | None = None
     error_message: str | None = None
+
+
+CatalogIngestStatus = Literal[
+    'planned',
+    'validating',
+    'embedding',
+    'writing',
+    'committed',
+    'failed',
+]
+
+
+class CatalogIngestStatusResponse(BaseModel):
+    """Ingest status for a batch — no full payloads or secrets (STAT-02/03)."""
+
+    group_id: str
+    batch_id: str
+    batch_uuid: str
+    status: CatalogIngestStatus
+    request_sha256: str | None = None
+    catalog_sha256: str | None = None
+    entity_count: int = 0
+    edge_count: int = 0
+    provenance_count: int = 0
+    created_at: str | None = None
+    updated_at: str | None = None
+    committed_at: str | None = None
+    error_summary: str = Field(default='', max_length=512)
+    error_code: CatalogErrorCode | None = None
+
+
+class CatalogBatchWriteResponse(BaseModel):
+    """Response for upsert_catalog_batch (counts + item results)."""
+
+    group_id: str
+    batch_id: str
+    batch_uuid: str | None = None
+    dry_run: bool = False
+    atomic: bool = True
+    status: CatalogIngestStatus | None = None
+    results: list[CatalogItemResult] = Field(default_factory=list)
+    entity_created: int = 0
+    entity_updated: int = 0
+    entity_unchanged: int = 0
+    edge_created: int = 0
+    edge_updated: int = 0
+    edge_unchanged: int = 0
+    provenance_created: int = 0
+    provenance_updated: int = 0
+    provenance_unchanged: int = 0
+    failed: int = 0
+    rolled_back: int = 0
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None

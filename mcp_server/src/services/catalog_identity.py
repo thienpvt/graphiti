@@ -26,6 +26,23 @@ def catalog_edge_uuid(namespace: uuid.UUID, group_id: str, edge_type: str, edge_
     return str(uuid.uuid5(namespace, f'{group_id}|{edge_type}|{edge_key}'))
 
 
+def catalog_source_uuid(namespace: uuid.UUID, group_id: str, source_key: str) -> str:
+    """Server-derived source identity: UUIDv5(ns, group_id|Source|source_key)."""
+    return str(uuid.uuid5(namespace, f'{group_id}|Source|{source_key}'))
+
+
+def catalog_batch_uuid(namespace: uuid.UUID, group_id: str, batch_id: str) -> str:
+    """Server-derived batch identity: UUIDv5(ns, group_id|Batch|batch_id)."""
+    return str(uuid.uuid5(namespace, f'{group_id}|Batch|{batch_id}'))
+
+
+def catalog_mentions_uuid(
+    namespace: uuid.UUID, group_id: str, source_uuid: str, entity_uuid: str
+) -> str:
+    """Server-derived MENTIONS link identity: UUIDv5(ns, group_id|Mentions|source|entity)."""
+    return str(uuid.uuid5(namespace, f'{group_id}|Mentions|{source_uuid}|{entity_uuid}'))
+
+
 def _reject_non_finite(obj: Any) -> None:
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
         raise ValueError('non-finite number')
