@@ -58,7 +58,11 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
   4. New tests and development writes use only `oracle-catalog-tool-test`; `oracle-catalog-v2` is never queried or mutated; no canary runs
   5. Dirty-worktree unrelated files and remote state remain untouched (no push/merge/deploy/tag)
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 00-01-PLAN.md — Live inventory, offline ACCEPT_TAB evidence, truthful pass/fail/skip check ledger
+- [ ] 00-02-PLAN.md — Compatibility freeze, isolation/remote safety policy, Phase 0 gate report
 
 ### Phase 1: Strict Contracts and Catalog-v2 Identity
 
@@ -168,7 +172,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 |-------|----------------|--------|-----------|
 | v1.0 Phase 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
 | v1.0 Phase 2. Provenance and Atomic Batch | 6/6 | Complete | 2026-07-17 |
-| Phase 0. Baseline, Inventory, and Compatibility Policy | 0/TBD | Not started | - |
+| Phase 0. Baseline, Inventory, and Compatibility Policy | 0/2 | Planned | - |
 | Phase 1. Strict Contracts and Catalog-v2 Identity | 0/TBD | Not started | - |
 | Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 0/TBD | Not started | - |
 | Phase 3A. Immutable Prepare/Commit Control Plane | 0/TBD | Not started | - |
