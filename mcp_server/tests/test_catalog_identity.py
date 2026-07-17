@@ -130,7 +130,7 @@ def test_identity_module_has_no_io_imports():
     import services.catalog_identity as mod
 
     forbidden_substrings = ('neo4j', 'embedder', 'llm', 'openai', 'queue', 'graphiti_core')
-    for name, value in vars(mod).items():
+    for _name, value in vars(mod).items():
         if inspect.ismodule(value):
             mod_name = getattr(value, '__name__', '')
             lower = mod_name.lower()
