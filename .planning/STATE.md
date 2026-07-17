@@ -4,11 +4,11 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 1
 current_phase_name: Strict Contracts and Catalog-v2 Identity
-status: Phase 1 gap closure; ready_for_phase_2=false
-stopped_at: Completed 01-06-PLAN.md
-last_updated: "2026-07-17T22:30:22.433Z"
+status: Phase 1 final audit-gap closure; ready_for_phase_2=false
+stopped_at: Executing 01-08-PLAN.md final gate
+last_updated: "2026-07-17T22:49:10Z"
 last_activity: 2026-07-18
-last_activity_desc: Completed 01-06-PLAN.md; readiness remains false pending 01-07/01-08
+last_activity_desc: Plan 01-07 complete; Plan 01-08 remapped IDEN-08 to Phase 4 and IDEN-13 to Phase 5; readiness remains false pending final gate
 progress:
   total_phases: 2
   completed_phases: 1
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 1 of 7 (Strict Contracts and Catalog-v2 Identity) — IN PROGRESS
-Plan: 07 of 08; 01-06 complete
-Status: Phase 1 gap closure; ready_for_phase_2=false
-Last activity: 2026-07-18 — Completed 01-06-PLAN.md; readiness remains false pending 01-07/01-08
+Plan: 08 of 08; 01-07 complete
+Status: Phase 1 final audit-gap closure; ready_for_phase_2=false
+Last activity: 2026-07-18 — IDEN-08 ownership superseded to Phase 4; IDEN-13 ownership superseded to Phase 5; Phase 1 evidence remains partial until final gate
 
 Progress: [████████░░] 80%
 
@@ -108,10 +108,12 @@ Recent decisions affecting current work:
 - [Phase 1]: Missing system_key remains Pydantic missing/validation_error; only explicit invalid_system_key errors receive that structured code
 - [Phase 1]: CatalogSourceRef models are dumped to plain JSON dictionaries before canonical hashing and store serialization
 - [Phase 1]: Strict scalar aliases reject coercion before Literal handling; nested graph-key scope errors retain exact request-relative locations
+- [Phase 1]: IDEN-08 unique completion belongs to Phase 4; Phase 1 graph-key echo tests are partial foundation evidence only
+- [Phase 1]: IDEN-13 unique completion belongs to Phase 5; Phase 1 v1-material inequality and historical-golden guards are partial foundation evidence only
 
 ### Pending Todos
 
-Next: execute 01-07 only when separately dispatched. Phase 1 is 6/8; ready_for_phase_2=false pending 01-07/01-08.
+Next: complete 01-08 final evidence matrix only. Phase 1 is 7/8; ready_for_phase_2=false until every hard gate passes. Do not transition to Phase 2; independent re-audit follows.
 
 ### Blockers/Concerns
 
@@ -138,7 +140,7 @@ Next: execute 01-07 only when separately dispatched. Phase 1 is 6/8; ready_for_p
 
 ## Session Continuity
 
-Last session: 2026-07-17T22:30:04.233Z
-Stopped at: Completed 01-06-PLAN.md
+Last session: 2026-07-17T22:49:10Z
+Stopped at: Executing 01-08-PLAN.md final gate
 Resume file: None
-Next: Plan 01-07 — catalog logging and executable edge-probe gap closure
+Next: Finish Plan 01-08; stop before Phase 2 for independent re-audit

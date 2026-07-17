@@ -48,12 +48,12 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **IDEN-05**: The graph-key registry defines complete catalog-v2 grammar for all allowed types, including System, Database, DictionaryDocument, Schema, Table, View, MaterializedView, Column, Constraint, Index, Package, Procedure, Function, Trigger, Sequence, Synonym, DatabaseLink, and SourceArtifact.
 - [x] **IDEN-06**: Procedure and Function identities include a deterministic overload discriminator so package and standalone overloads cannot collapse.
 - [x] **IDEN-07**: FE and BO objects with identical Oracle database, schema, object, and leaf names have different graph keys and server-derived UUIDs while remaining in one `group_id` graph.
-- [x] **IDEN-08**: Catalog entities expose their complete system-scoped graph keys through resolve, manifest, evidence, and verification responses used by agents.
+- [ ] **IDEN-08**: Catalog entities expose their complete system-scoped graph keys through resolve, manifest, evidence, and verification responses used by agents. Phase 1 model/service echo tests are partial foundation evidence only; Phase 4 uniquely owns completion across all response surfaces.
 - [x] **IDEN-09**: `System`, `DatabaseLink`, and `SourceArtifact` are added to the fixed entity allowlist with fixed server-owned prefixes and grammars; no business-level entity types are added.
 - [x] **IDEN-10**: Entity UUIDs derive from an explicitly versioned canonical name equivalent to `group_id|catalog-v2|entity_type|graph_key` under the configured immutable namespace.
 - [x] **IDEN-11**: Edge, provenance source, evidence-link, batch, manifest, and prepared-plan identities use equivalent explicit catalog-v2 versioning and deterministic server derivation.
 - [x] **IDEN-12**: Catalog-v1 graph keys, UUID material, or payloads are never silently accepted, normalized, re-keyed, or rewritten as catalog-v2 objects.
-- [x] **IDEN-13**: The pre-hardening ACCEPT_TAB hash, 10-entity/16-edge/1-source commit receipt, and prior 38/85 plan remain historical evidence but are explicitly invalid for hardened catalog-v2; builders regenerate new artifacts without executing them or rewriting existing graph data.
+- [ ] **IDEN-13**: The pre-hardening ACCEPT_TAB hash, 10-entity/16-edge/1-source commit receipt, and prior 38/85 plan remain historical evidence but are explicitly invalid for hardened catalog-v2; builders regenerate new artifacts without executing them or rewriting existing graph data. Phase 1 v1-material inequality and historical-golden guards are partial foundation evidence only; Phase 5 uniquely owns hardened offline regeneration and migration guidance.
 
 ### Server-Owned Edge Endpoint Map
 
@@ -247,12 +247,12 @@ Deferred until the deterministic substrate is implemented and verified.
 | IDEN-05 | Phase 1 | Complete |
 | IDEN-06 | Phase 1 | Complete |
 | IDEN-07 | Phase 1 | Complete |
-| IDEN-08 | Phase 1 | Complete |
+| IDEN-08 | Phase 4 | Pending |
 | IDEN-09 | Phase 1 | Complete |
 | IDEN-10 | Phase 1 | Complete |
 | IDEN-11 | Phase 1 | Complete |
 | IDEN-12 | Phase 1 | Complete |
-| IDEN-13 | Phase 1 | Complete |
+| IDEN-13 | Phase 5 | Pending |
 | EDGE-01 | Phase 2 | Pending |
 | EDGE-02 | Phase 2 | Pending |
 | EDGE-03 | Phase 2 | Pending |
@@ -357,19 +357,19 @@ Deferred until the deterministic substrate is implemented and verified.
 **Coverage:**
 
 - v1.1 requirements: 138 total
-- Mapped to phases: 138
-- Unmapped: 0
+- Mapped: 138/138
+- Orphans: 0
 - Duplicates: 0
 
 | Phase | Count |
 |-------|------:|
 | Phase 0 | 8 |
-| Phase 1 | 25 |
+| Phase 1 | 23 |
 | Phase 2 | 34 |
 | Phase 3A | 18 |
 | Phase 3B | 17 |
-| Phase 4 | 20 |
-| Phase 5 | 16 |
+| Phase 4 | 21 |
+| Phase 5 | 17 |
 | **Total** | **138** |
 
 ---

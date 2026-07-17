@@ -73,7 +73,7 @@ Plans:
 
 **Goal**: Agents observe fail-closed catalog-v2 request contracts and collision-free FE/BO/COMMON identities before any new store or control-plane write path ships
 **Depends on**: Phase 0 baseline complete
-**Requirements**: CONT-01, CONT-02, CONT-03, CONT-04, CONT-05, CONT-06, CONT-07, CONT-08, IDEN-01, IDEN-02, IDEN-03, IDEN-04, IDEN-05, IDEN-06, IDEN-07, IDEN-08, IDEN-09, IDEN-10, IDEN-11, IDEN-12, IDEN-13, SAFE-05, SAFE-08, TEST-01, TEST-03
+**Requirements**: CONT-01, CONT-02, CONT-03, CONT-04, CONT-05, CONT-06, CONT-07, CONT-08, IDEN-01, IDEN-02, IDEN-03, IDEN-04, IDEN-05, IDEN-06, IDEN-07, IDEN-09, IDEN-10, IDEN-11, IDEN-12, SAFE-05, SAFE-08, TEST-01, TEST-03
 **Success Criteria** (what must be TRUE):
 
   1. Every deterministic catalog request rejects unknown or misspelled nested fields, forbids `strict_endpoints=false` and `atomic=false`, preserves hash-bearing source bytes, and validates completely before any side effect
@@ -168,7 +168,7 @@ Plans:
 
 **Goal**: Operators can inspect committed membership, evidence, and edges and verify batches from durable manifests while catalog mutation is disabled
 **Depends on**: Phase 3B atomic commit + manifest + concurrency gates green
-**Requirements**: MANI-05, VERI-01, VERI-02, VERI-03, VERI-04, VERI-05, VERI-06, RESE-01, RESE-02, RESE-03, GATE-01, GATE-02, GATE-03, GATE-04, GATE-05, GATE-06, EVID-12, EVID-13, TEST-08, TEST-09
+**Requirements**: IDEN-08, MANI-05, VERI-01, VERI-02, VERI-03, VERI-04, VERI-05, VERI-06, RESE-01, RESE-02, RESE-03, GATE-01, GATE-02, GATE-03, GATE-04, GATE-05, GATE-06, EVID-12, EVID-13, TEST-08, TEST-09
 **Success Criteria** (what must be TRUE):
 
   1. `get_catalog_batch_manifest` returns group, batch, hashes, identity schema version, exact counts, and paginated compact item identities for committed membership including unchanged shared entities
@@ -184,7 +184,7 @@ Plans:
 
 **Goal**: Maintainers can prove catalog-v2 pre-canary readiness with truthful checks, isolation, security, compatibility, and migration guidance without executing a canary
 **Depends on**: Phase 4 complete
-**Requirements**: SAFE-03, SAFE-04, SAFE-06, SAFE-07, SAFE-09, SAFE-10, TEST-10, TEST-11, TEST-12, DOCS-01, DOCS-02, DOCS-03, DOCS-04, DOCS-05, DOCS-06, REPT-01
+**Requirements**: IDEN-13, SAFE-03, SAFE-04, SAFE-06, SAFE-07, SAFE-09, SAFE-10, TEST-10, TEST-11, TEST-12, DOCS-01, DOCS-02, DOCS-03, DOCS-04, DOCS-05, DOCS-06, REPT-01
 **Success Criteria** (what must be TRUE):
 
   1. Deterministic catalog paths never invoke prohibited Graphiti tools, LLM extraction, async queue ingestion, implicit endpoints, or communities; conflicts fail closed; logs stay free of payloads, source text, credentials, auth headers, raw tokens, and unsafe exceptions
@@ -217,12 +217,12 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase | Requirement count | Categories |
 |-------|------------------:|------------|
 | Phase 0 | 8 | BASE, SAFE (isolation/worktree/remote/canary-ban) |
-| Phase 1 | 25 | CONT, IDEN, SAFE-05/08, TEST-01/03 |
+| Phase 1 | 23 | CONT, IDEN foundation, SAFE-05/08, TEST-01/03 |
 | Phase 2 | 34 | EDGE, HASH, CAPA, EVID contract (01–06, 14), TEST-02/04 |
 | Phase 3A | 18 | PLAN control plane (01–12, 17–20), SAFE-11, TEST-05 |
 | Phase 3B | 17 | PLAN domain-tx (13–16), EVID persist (07–11), MANI write, TEST-06/07 |
-| Phase 4 | 20 | MANI-05, VERI, RESE, GATE, EVID-12/13, TEST-08/09 |
-| Phase 5 | 16 | SAFE (security/compat), TEST-10/11/12, DOCS, REPT |
+| Phase 4 | 21 | IDEN-08, MANI-05, VERI, RESE, GATE, EVID-12/13, TEST-08/09 |
+| Phase 5 | 17 | IDEN-13, SAFE (security/compat), TEST-10/11/12, DOCS, REPT |
 | **v1.1 total** | **138** | All v1.1 |
 
 - v1.1 requirements: 138
