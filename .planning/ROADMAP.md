@@ -2,7 +2,7 @@
 
 ## Overview
 
-v1.1 hardens the shipped deterministic catalog MCP surface before any regenerated canary. Work continues from v1.0 (Phases 1–2 complete) as Phases 3–7: baseline and compatibility policy; fail-closed catalog-v2 contracts and identity; server endpoint maps, exact evidence schema, authoritative hashes, and capabilities; immutable prepare/commit with prepare-time embeddings and co-committed manifests; durable diagnostics and verification; then exhaustive security, compatibility, canary-workflow migration, and documentation. A cherry-picked pre-hardening canary workflow records an ACCEPT_TAB dry-run and commit in `oracle-catalog-v2`; v1.1 treats those repository artifacts as historical evidence only and never queries, mutates, retries, or reuses that live group/hash. No canary execution, automatic v1→v2 migration, deployment, or multi-backend claims.
+v1.1 hardens the shipped deterministic catalog MCP surface before any regenerated canary. v1.0 shipped typed catalog primitives and provenance/atomic batch (Phases 1–2). Active pre-canary work uses the canonical spine Phase 0 / 1 / 2 / 3A / 3B / 4 / 5 from `graphiti_mcp_pre_canary_roadmap_en.md`: baseline and compatibility policy; fail-closed catalog-v2 contracts and identity; topology authority, evidence contract, hashes, and capabilities; immutable prepare/commit control plane; atomic catalog + exact evidence + durable manifest co-commit; manifest-backed verification and read-only diagnostics; then final security, compatibility, observability, migration docs, and readiness report. Phase 6 canary is a separate out-of-scope task. A cherry-picked pre-hardening canary workflow records an ACCEPT_TAB dry-run and commit in `oracle-catalog-v2`; v1.1 treats those repository artifacts as historical evidence only and never queries, mutates, retries, or reuses that live group/hash. No canary execution, automatic v1→v2 migration, deployment, or multi-backend claims.
 
 ## Shipped Milestones
 
@@ -10,8 +10,8 @@ v1.1 hardens the shipped deterministic catalog MCP surface before any regenerate
 
 | Phase | Plans | Result |
 |---|---:|---|
-| 1. Typed Catalog Primitives | 8/8 | Verified: 5/5 truths, 55/55 requirements |
-| 2. Provenance and Atomic Batch | 6/6 | Verified: 5/5 truths, 31/31 requirements |
+| v1.0 Phase 1. Typed Catalog Primitives | 8/8 | Verified: 5/5 truths, 55/55 requirements |
+| v1.0 Phase 2. Provenance and Atomic Batch | 6/6 | Verified: 5/5 truths, 31/31 requirements |
 | **v1.0 total** | **14/14** | **86/86 requirements; 6/6 integration flows** |
 
 Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](milestones/v1.0-REQUIREMENTS.md) · [v1.0 audit](milestones/v1.0-MILESTONE-AUDIT.md) · [phase artifacts](milestones/v1.0-phases/)
@@ -20,105 +20,141 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 
 **Phase Numbering:**
 
-- Integer phases (1, 2, …): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
-- v1.0 used Phases 1–2; v1.1 continues at Phase 3
+- Active v1.1 spine: Phase 0, 1, 2, 3A, 3B, 4, 5 (seven work units)
+- Phase 6 canary is separate / out of scope and carries no requirement IDs
+- Shipped history is labeled `v1.0 Phase 1` / `v1.0 Phase 2` to avoid collision with active Phase 1
 
-- [x] **Phase 1: Typed Catalog Primitives** - Config, identity, entity/edge upsert, resolve, verify (v1.0)
-- [x] **Phase 2: Provenance and Atomic Batch** - Provenance, batch status, atomic batch, docs (v1.0)
-- [ ] **Phase 3: Strict Contracts and Catalog-v2 Identity** - Baseline, recursive forbid contracts, FE/BO/COMMON grammar, fail-closed identity
-- [ ] **Phase 4: Endpoint Maps, Hashes, and Capabilities** - Server endpoint map, full-domain hashes, capabilities discovery
-- [ ] **Phase 5: Immutable Prepare/Commit and Exact Evidence** - Prepare/commit/discard, explicit evidence, one-tx domain+evidence+manifest
-- [ ] **Phase 6: Durable Manifests and Read-Only Diagnostics** - Manifest reads, manifest-backed verify, edge resolve, split gates
-- [ ] **Phase 7: Verification, Security, Compatibility, and Migration Docs** - Exhaustive tests, isolation, docs, final report without canary
+- [x] **v1.0 Phase 1: Typed Catalog Primitives** - Config, identity, entity/edge upsert, resolve, verify (shipped)
+- [x] **v1.0 Phase 2: Provenance and Atomic Batch** - Provenance, batch status, atomic batch, docs (shipped)
+- [ ] **Phase 0: Baseline, Inventory, and Compatibility Policy** - Live baseline, isolation policy, worktree/remote safety
+- [ ] **Phase 1: Strict Contracts and Catalog-v2 Identity** - Recursive forbid contracts, FE/BO/COMMON grammar, fail-closed identity
+- [ ] **Phase 2: Topology Authority, Evidence Contract, Hashes, Capabilities** - Endpoint map, exact evidence schema, authoritative hashes, capabilities
+- [ ] **Phase 3A: Immutable Prepare/Commit Control Plane** - Prepare/discard/token, immutable payload, zero domain write on prepare
+- [ ] **Phase 3B: Atomic Catalog, Exact Evidence, Durable Manifest Writes** - Domain+evidence+manifest co-commit, rollback, search interop
+- [ ] **Phase 4: Manifest-Backed Verification and Read-Only Diagnostics** - Manifest reads, verify, edge resolve, split gates
+- [ ] **Phase 5: Verification, Security, Compatibility, and Migration Docs** - Exhaustive tests, isolation, docs, final report without canary
+- Phase 6 canary: separate approval only — not in this milestone requirement set
 
 ## Hard Gates
 
-1. **No store/control-plane write implementation** until Phase 3–4 unit gates pass for strict models, identity grammar, endpoint map, and hash coverage.
-2. **No commit implementation** until prepare/discard prove zero domain/Entity/Episodic/evidence/status mutation on prepare and discard.
-3. **No manifest-backed verification** until atomic commit co-writes domain + evidence + manifest + terminal batch/plan state and concurrency tests pass.
-4. **Final readiness** only after available unit/service/store/MCP/concurrency/live Neo4j/Ruff/Pyright checks report truthfully and isolation proves no v1.1 `oracle-catalog-v2` query/mutation or canary execution; pre-hardening repository evidence is historical only.
-5. **Stop and report** (do not weaken the contract) if Neo4j cannot safely store immutable prepared payloads or co-commit domain + manifest + terminal states in one transaction.
+1. **No store/control-plane write implementation** until Phase 1–2 unit gates pass for strict models, identity grammar, endpoint map, evidence contract, and hash coverage.
+2. **No commit implementation** until Phase 3A prepare/discard prove zero domain/Entity/Episodic/evidence/status mutation and token/control-plane proofs pass.
+3. **No manifest-backed verification** until Phase 3B atomic commit co-writes domain + evidence + manifest + terminal batch/plan state and concurrency tests pass.
+4. **Final readiness (Phase 5)** only after available unit/service/store/MCP/concurrency/live Neo4j/Ruff/Pyright checks report truthfully and isolation proves no v1.1 `oracle-catalog-v2` query/mutation or canary execution; pre-hardening repository evidence is historical only.
+5. **Stop and report** (do not weaken the contract) if Neo4j cannot safely store immutable prepared payloads (3A) or co-commit domain + evidence + manifest + terminal states in one transaction (3B).
 
 ## Phase Details
 
-### Phase 3: Strict Contracts and Catalog-v2 Identity
+### Phase 0: Baseline, Inventory, and Compatibility Policy
 
-**Goal**: Maintainers and agents observe fail-closed catalog-v2 request contracts and collision-free FE/BO/COMMON identities before any new store or control-plane write path ships
-**Depends on**: v1.0 complete (Phases 1–2)
-**Requirements**: BASE-01, BASE-02, BASE-03, BASE-04, SAFE-01, SAFE-02, SAFE-05, SAFE-08, SAFE-12, SAFE-13, CONT-01, CONT-02, CONT-03, CONT-04, CONT-05, CONT-06, CONT-07, CONT-08, IDEN-01, IDEN-02, IDEN-03, IDEN-04, IDEN-05, IDEN-06, IDEN-07, IDEN-08, IDEN-09, IDEN-10, IDEN-11, IDEN-12, IDEN-13, TEST-01, TEST-03
+**Goal**: Maintainers observe a recorded live-grounded baseline and explicit isolation/compatibility policy before contract or identity code changes
+**Depends on**: v1.0 complete
+**Requirements**: BASE-01, BASE-02, BASE-03, BASE-04, SAFE-01, SAFE-02, SAFE-12, SAFE-13
 **Success Criteria** (what must be TRUE):
 
-  1. Maintainer can review a recorded live-grounded baseline of all 14 legacy MCP tools, all 7 catalog tools, and the cherry-picked canary builder/runner/fixtures/receipts/checkpoint/tests; historical ACCEPT_TAB commit evidence is inventoried offline, while pre-existing catalog/canary/Ruff/Pyright failures remain distinguishable from v1.1 regressions
-  2. Every deterministic catalog request rejects unknown or misspelled nested fields, forbids `strict_endpoints=false` and `atomic=false`, preserves hash-bearing source bytes, and validates completely before any side effect
-  3. Catalog-v2 domain requests require `identity_schema_version='catalog-v2'` and a bounded canonical `system_key`; invalid keys fail with `invalid_system_key` / `unsupported_identity_schema` before DB reads, embeddings, schema init, transactions, or status writes
-  4. FE and BO objects with identical Oracle names receive different graph keys and server-derived UUIDs in one `group_id`; Procedure/Function overloads do not collapse; catalog-v1 keys/hashes are never silently accepted or rewritten
-  5. New tests and development writes use only `oracle-catalog-tool-test`; the pre-existing `oracle-catalog-v2` state is never queried or mutated; no canary runs; caller UUIDs never control identity; structured errors expose safe diagnostics; dirty-worktree and remote state remain untouched
+  1. Maintainer can review a recorded live-grounded baseline of all 14 legacy MCP tools, all 7 catalog tools, and the cherry-picked canary builder/runner/fixtures/receipts/checkpoint/tests; historical ACCEPT_TAB commit evidence is inventoried offline
+  2. Pre-existing catalog/canary/Ruff/Pyright failures remain distinguishable from v1.1 regressions; unavailable checks report as skipped
+  3. Compatibility policy and catalog-v1 deprecation boundary are recorded before contract changes
+  4. New tests and development writes use only `oracle-catalog-tool-test`; `oracle-catalog-v2` is never queried or mutated; no canary runs
+  5. Dirty-worktree unrelated files and remote state remain untouched (no push/merge/deploy/tag)
 
 **Plans**: TBD
-**Gate**: Unit coverage for recursive forbid, immutable flags, full entity grammar, FE/BO/overload separation, and UUID material versioning must pass before Phase 4 store/control-plane write work
 
-### Phase 4: Endpoint Maps, Hashes, and Capabilities
+### Phase 1: Strict Contracts and Catalog-v2 Identity
 
-**Goal**: Agents and operators can rely on one server-owned edge topology, complete authoritative batch hashes, and safe capabilities discovery without enabling mutation
-**Depends on**: Phase 3 unit gates green
-**Requirements**: EDGE-01, EDGE-02, EDGE-03, EDGE-04, EDGE-05, EDGE-06, EDGE-07, EDGE-08, EDGE-09, HASH-01, HASH-02, HASH-03, HASH-04, HASH-05, HASH-06, HASH-07, CAPA-01, CAPA-02, CAPA-03, CAPA-04, CAPA-05, CAPA-06, CAPA-07, CAPA-08, CAPA-09, TEST-02, TEST-04
+**Goal**: Agents observe fail-closed catalog-v2 request contracts and collision-free FE/BO/COMMON identities before any new store or control-plane write path ships
+**Depends on**: Phase 0 baseline complete
+**Requirements**: CONT-01, CONT-02, CONT-03, CONT-04, CONT-05, CONT-06, CONT-07, CONT-08, IDEN-01, IDEN-02, IDEN-03, IDEN-04, IDEN-05, IDEN-06, IDEN-07, IDEN-08, IDEN-09, IDEN-10, IDEN-11, IDEN-12, IDEN-13, SAFE-05, SAFE-08, TEST-01, TEST-03
 **Success Criteria** (what must be TRUE):
 
-  1. Every approved catalog edge type enforces a finite server-owned `(source_entity_type, target_entity_type)` map; disallowed pairs fail before side effects, all paths share one authority, and unapproved `LikelyReferencesTo`, `MapsTo`, and `SynchronizesTo` remain deferred rather than substituted
-  2. Combined batches require lowercase 64-hex `catalog_sha256`; server-computed `request_sha256` covers identity schema, group, batch, catalog hash, and all canonical entity/edge/source/evidence content under one versioned canonicalization recipe; caller `request_sha256` is audit-only or `content_hash_mismatch`
-  3. `upsert_catalog_batch` results (including dry-run) return `identity_schema_version`, server `request_sha256`, `catalog_sha256`, and `batch_uuid` with zero dry-run writes
-  4. `get_catalog_capabilities` works after server init even when writes are disabled, returns versions, gates, non-reversible namespace fingerprint (never raw namespace), registries, endpoint map, limits, and feature support flags without secrets
-  5. `get_status` retains existing `status` and `message` fields; exhaustive table-driven endpoint and hash unit tests pass
+  1. Every deterministic catalog request rejects unknown or misspelled nested fields, forbids `strict_endpoints=false` and `atomic=false`, preserves hash-bearing source bytes, and validates completely before any side effect
+  2. Catalog-v2 domain requests require `identity_schema_version='catalog-v2'` and a bounded canonical `system_key`; invalid keys fail with `invalid_system_key` / `unsupported_identity_schema` before DB reads, embeddings, schema init, transactions, or status writes
+  3. FE and BO objects with identical Oracle names receive different graph keys and server-derived UUIDs in one `group_id`; Procedure/Function overloads do not collapse; catalog-v1 keys/hashes are never silently accepted or rewritten
+  4. Caller UUIDs never control identity; structured errors expose safe diagnostics only
+  5. Unit coverage for recursive forbid, immutable flags, full entity grammar, FE/BO/overload separation, and UUID material versioning passes before Phase 2 write-adjacent work
 
 **Plans**: TBD
-**Gate**: Endpoint-map and hash unit gates must pass before Phase 5 prepare/control-plane write implementation
+**Gate**: Strict-model and identity unit gates must pass before Phase 2 store/control-plane write work
 
-### Phase 5: Immutable Prepare/Commit and Exact Evidence
+### Phase 2: Topology Authority, Evidence Contract, Hashes, and Capabilities
 
-**Goal**: Agents can prepare, commit, replay, and discard restart-safe immutable catalog plans that apply exact evidence and co-committed manifests without partial domain success
-**Depends on**: Phase 4 map/hash unit gates green
-**Requirements**: PLAN-01, PLAN-02, PLAN-03, PLAN-04, PLAN-05, PLAN-06, PLAN-07, PLAN-08, PLAN-09, PLAN-10, PLAN-11, PLAN-12, PLAN-13, PLAN-14, PLAN-15, PLAN-16, PLAN-17, PLAN-18, PLAN-19, PLAN-20, EVID-01, EVID-02, EVID-03, EVID-04, EVID-05, EVID-06, EVID-07, EVID-08, EVID-09, EVID-10, EVID-11, EVID-14, MANI-01, MANI-02, MANI-03, MANI-04, MANI-06, MANI-07, SAFE-11, TEST-05, TEST-06, TEST-07
+**Goal**: Server owns edge topology and freezes the evidence contract before prepare hashing; operators discover capabilities without mutation
+**Depends on**: Phase 1 unit gates green
+**Requirements**: EDGE-01, EDGE-02, EDGE-03, EDGE-04, EDGE-05, EDGE-06, EDGE-07, EDGE-08, EDGE-09, HASH-01, HASH-02, HASH-03, HASH-04, HASH-05, HASH-06, HASH-07, CAPA-01, CAPA-02, CAPA-03, CAPA-04, CAPA-05, CAPA-06, CAPA-07, CAPA-08, CAPA-09, EVID-01, EVID-02, EVID-03, EVID-04, EVID-05, EVID-06, EVID-14, TEST-02, TEST-04
 **Success Criteria** (what must be TRUE):
 
-  1. `prepare_catalog_batch` validates the full catalog-v2 batch, projects outcomes, computes required embeddings, and persists bounded non-Entity immutable payload/identity/membership/embedding state (hashes/counts alone insufficient) with zero domain/evidence/manifest/status mutation
+  1. Every approved catalog edge type enforces a finite server-owned `(source_entity_type, target_entity_type)` map; disallowed pairs fail before side effects; unapproved `LikelyReferencesTo`, `MapsTo`, and `SynchronizesTo` remain deferred
+  2. Explicit `CatalogEvidenceLink` schema is stable before persistence: one source, one typed target, allowlisted kind, bounds, deterministic identity/hash; no Cartesian multi-source shape
+  3. Combined batches require lowercase 64-hex `catalog_sha256`; server-computed `request_sha256` covers identity schema, group, batch, catalog hash, and all canonical entity/edge/source/evidence content under one versioned recipe
+  4. `upsert_catalog_batch` results (including dry-run) return `identity_schema_version`, server `request_sha256`, `catalog_sha256`, and `batch_uuid` with zero dry-run writes
+  5. `get_catalog_capabilities` works after server init even when writes are disabled and returns versions, gates, non-reversible namespace fingerprint, registries, endpoint map, limits, and feature flags without secrets
+
+**Plans**: TBD
+**Gate**: Endpoint-map, evidence-contract, and hash unit gates must pass before Phase 3A prepare/control-plane write implementation
+
+### Phase 3A: Immutable Prepare/Commit Control Plane
+
+**Goal**: Eliminate payload mutation between validation and commit; prepare stores restart-safe immutable control-plane state with zero domain graph write
+**Depends on**: Phase 2 map/hash/evidence-contract unit gates green
+**Requirements**: PLAN-01, PLAN-02, PLAN-03, PLAN-04, PLAN-05, PLAN-06, PLAN-07, PLAN-08, PLAN-09, PLAN-10, PLAN-11, PLAN-12, PLAN-17, PLAN-18, PLAN-19, PLAN-20, SAFE-11, TEST-05
+**Success Criteria** (what must be TRUE):
+
+  1. `prepare_catalog_batch` validates the full catalog-v2 batch, projects outcomes, computes required embeddings, and persists bounded non-Entity immutable payload/identity/membership/embedding state with zero domain/evidence/manifest/status mutation
   2. Prepare returns a one-time-visible opaque `plan_token` plus plan UUID, hashes, counts, projections, and `expires_at`; only a secure token digest is stored and compared timing-safe; TTL, payload-byte, and active-plan ceilings are enforced
-  3. `commit_prepared_catalog_batch` accepts only `plan_token` (and optional expected hash), revalidates the frozen artifact, performs no external embedding/LLM/queue/network call, and writes domain + exact evidence + durable manifest + terminal batch/plan state in one Neo4j transaction where supported; failure rolls back completely and stranded `COMMITTING` state has deterministic recovery
-  4. Explicit `CatalogEvidenceLink` provenance replaces Cartesian multi-source target arrays; missing/mismatched targets fail atomically; identical links coalesce; immutable link conflicts return `provenance_link_conflict`; control records never carry Entity labels
-  5. Identical replay and concurrent same-token commits yield one logical committed batch without duplicate domain/evidence/manifest/status; discard terminates only unconsumed plans without deleting domain data; existing `upsert_catalog_batch` remains available with zero-write dry-run
+  3. `commit_prepared_catalog_batch` accepts only `plan_token` (and optional expected hash), revalidates the frozen artifact, and performs no external embedding/LLM/queue/network call
+  4. Token is bound to one immutable group/batch/schema/hash/payload; expired/discarded/consumed plans cannot revive; discard terminates only unconsumed plans without deleting domain data
+  5. Dry-run remains zero-write; existing `upsert_catalog_batch` remains available
 
 **Plans**: TBD
-**Research**: required during planning (payload chunking, property limits, single-tx size, token CAS)
-**Stop condition**: If Neo4j cannot store immutable prepared payloads or co-commit domain+manifest+terminal states in one transaction, stop and report — do not weaken the contract
-**Gate**: Prepare/discard zero-domain-write, commit atomicity, and concurrency tests must pass before Phase 6 manifest-backed verification
+**Research**: required during planning (payload chunking, property limits, token CAS)
+**Stop condition**: If Neo4j cannot store immutable prepared payloads, stop and report — do not weaken the contract
+**Gate**: Prepare/discard zero-domain-write and token/control-plane tests must pass before Phase 3B domain co-commit
 
-### Phase 6: Durable Manifests and Read-Only Diagnostics
+### Phase 3B: Atomic Catalog, Exact Evidence, and Durable Manifest Writes
+
+**Goal**: Commit or roll back catalog data, exact evidence, and batch membership together with no partial domain success
+**Depends on**: Phase 3A prepare/discard and token gates green
+**Requirements**: PLAN-13, PLAN-14, PLAN-15, PLAN-16, EVID-07, EVID-08, EVID-09, EVID-10, EVID-11, MANI-01, MANI-02, MANI-03, MANI-04, MANI-06, MANI-07, TEST-06, TEST-07
+**Success Criteria** (what must be TRUE):
+
+  1. Successful commit writes all domain data, exact evidence, durable manifest, terminal batch status, and terminal prepared-plan state in one Neo4j transaction where supported
+  2. Any failure rolls back completely; stranded `COMMITTING` has deterministic recovery; identical replay and concurrent same-token commits yield one logical committed batch without duplicate domain/evidence/manifest/status
+  3. Explicit `CatalogEvidenceLink` records replace Cartesian multi-source target arrays; missing/mismatched targets fail atomically; identical links coalesce; immutable link conflicts return `provenance_link_conflict`; control records never carry Entity labels
+  4. Manifest membership is exact for created, updated, and unchanged objects and is never inferred from `entity.batch_id` / `edge.batch_id`
+  5. Search interoperability for catalog entities/edges remains; fault injection between persistence steps leaves neither a partial graph nor a partial manifest
+
+**Plans**: TBD
+**Research**: required during planning (single-tx size, manifest property limits)
+**Stop condition**: If Neo4j cannot co-commit domain+evidence+manifest+terminal states in one transaction, stop and report — do not weaken the contract
+**Gate**: Commit atomicity, evidence persist, and concurrency tests must pass before Phase 4 manifest-backed verification
+
+### Phase 4: Manifest-Backed Verification and Read-Only Diagnostics
 
 **Goal**: Operators can inspect committed membership, evidence, and edges and verify batches from durable manifests while catalog mutation is disabled
-**Depends on**: Phase 5 atomic commit + manifest + concurrency gates green
+**Depends on**: Phase 3B atomic commit + manifest + concurrency gates green
 **Requirements**: MANI-05, VERI-01, VERI-02, VERI-03, VERI-04, VERI-05, VERI-06, RESE-01, RESE-02, RESE-03, GATE-01, GATE-02, GATE-03, GATE-04, GATE-05, GATE-06, EVID-12, EVID-13, TEST-08, TEST-09
 **Success Criteria** (what must be TRUE):
 
   1. `get_catalog_batch_manifest` returns group, batch, hashes, identity schema version, exact counts, and paginated compact item identities for committed membership including unchanged shared entities
   2. Batch-only `verify_catalog_batch` uses the committed manifest as membership authority, reports missing members and extra duplicates, checks exact types/UUIDs/endpoints/embeddings/evidence/manifest consistency, and fails with `manifest_mismatch` when no valid manifest exists
-  3. `resolve_typed_edges` and `get_catalog_evidence` return group-isolated read-only diagnostics (edge twins, endpoint mismatches, exact evidence links) without embedding or writes
-  4. Separate read/write feature gates keep capabilities and catalog diagnostics usable when writes are disabled; read paths never initialize/repair schema or open write transactions; missing batch status is distinguishable as not-found
-  5. Explicit-key verification remains available beside manifest-backed verification; gate/registration tests prove read tools work while writes are off and expected tool sets remain registered
+  3. `resolve_typed_edges` and `get_catalog_evidence` return group-isolated read-only diagnostics without embedding or writes
+  4. Separate read/write feature gates keep capabilities and catalog diagnostics usable when writes are disabled; read paths never initialize/repair schema or open write transactions
+  5. Explicit-key verification remains available; gate/registration tests prove read tools work while writes are off
 
 **Plans**: TBD
 **Research**: required during planning (manifest property size vs chunk children, verify pagination)
 
-### Phase 7: Verification, Security, Compatibility, and Migration Docs
+### Phase 5: Verification, Security, Compatibility, and Migration Docs
 
 **Goal**: Maintainers can prove catalog-v2 pre-canary readiness with truthful checks, isolation, security, compatibility, and migration guidance without executing a canary
-**Depends on**: Phase 6 complete
+**Depends on**: Phase 4 complete
 **Requirements**: SAFE-03, SAFE-04, SAFE-06, SAFE-07, SAFE-09, SAFE-10, TEST-10, TEST-11, TEST-12, DOCS-01, DOCS-02, DOCS-03, DOCS-04, DOCS-05, DOCS-06, REPT-01
 **Success Criteria** (what must be TRUE):
 
-  1. Deterministic catalog paths never invoke prohibited Graphiti tools, LLM extraction, async queue ingestion, implicit endpoints, or communities; conflicts fail closed without silent repair; logs stay free of payloads, source text, credentials, auth headers, raw tokens, and unsafe exceptions
+  1. Deterministic catalog paths never invoke prohibited Graphiti tools, LLM extraction, async queue ingestion, implicit endpoints, or communities; conflicts fail closed; logs stay free of payloads, source text, credentials, auth headers, raw tokens, and unsafe exceptions
   2. All 14 legacy MCP tools retain names and public contracts; seven catalog tool names remain registered; every read/write stays `group_id`-isolated on Neo4j 5.26+ only
   3. Live Neo4j tests on `oracle-catalog-tool-test` prove atomic rollback, search interop, exact evidence/manifest behavior, control labels excluded from entity search, and zero writes outside the test group
-  4. Operator and migration docs cover tool inventory, catalog-v2 grammar/map/hash/capabilities/prepare/evidence/manifest/gates/errors/config, obsolete pre-hardening identities/hashes, no automatic migration, and migrated builder/token-runner/fixtures/receipts/checkpoint tests that regenerate artifacts offline without running the canary
+  4. Operator and migration docs cover tool inventory, catalog-v2 grammar/map/hash/capabilities/prepare/evidence/manifest/gates/errors/config, obsolete pre-hardening identities/hashes, no automatic migration, and offline canary-artifact regeneration without running the canary
   5. Final structured report sets `canary_executed=false` and sets `ready_to_regenerate_canary=true` only after every stated available gate reports pass/fail/skip truthfully
 
 **Plans**: TBD
@@ -126,27 +162,31 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 ## Progress
 
 **Execution Order:**
-1 → 2 (shipped) → 3 → 4 → 5 → 6 → 7. Decimal insertions execute in numeric order between integers.
+v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B → 4 → 5. Phase 6 canary is separate.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
-| 2. Provenance and Atomic Batch | 6/6 | Complete | 2026-07-17 |
-| 3. Strict Contracts and Catalog-v2 Identity | 0/TBD | Not started | - |
-| 4. Endpoint Maps, Hashes, and Capabilities | 0/TBD | Not started | - |
-| 5. Immutable Prepare/Commit and Exact Evidence | 0/TBD | Not started | - |
-| 6. Durable Manifests and Read-Only Diagnostics | 0/TBD | Not started | - |
-| 7. Verification, Security, Compatibility, and Migration Docs | 0/TBD | Not started | - |
+| v1.0 Phase 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
+| v1.0 Phase 2. Provenance and Atomic Batch | 6/6 | Complete | 2026-07-17 |
+| Phase 0. Baseline, Inventory, and Compatibility Policy | 0/TBD | Not started | - |
+| Phase 1. Strict Contracts and Catalog-v2 Identity | 0/TBD | Not started | - |
+| Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 0/TBD | Not started | - |
+| Phase 3A. Immutable Prepare/Commit Control Plane | 0/TBD | Not started | - |
+| Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 0/TBD | Not started | - |
+| Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 0/TBD | Not started | - |
+| Phase 5. Verification, Security, Compatibility, and Migration Docs | 0/TBD | Not started | - |
 
 ## Coverage
 
 | Phase | Requirement count | Categories |
 |-------|------------------:|------------|
-| 3 | 33 | BASE, SAFE (baseline/isolation/identity/errors/worktree), CONT, IDEN, TEST-01/03 |
-| 4 | 27 | EDGE, HASH, CAPA, TEST-02/04 |
-| 5 | 42 | PLAN, EVID (write-side), MANI (co-commit write), SAFE-11, TEST-05/06/07 |
-| 6 | 20 | MANI-05, VERI, RESE, GATE, EVID-12/13, TEST-08/09 |
-| 7 | 16 | SAFE (security/compat/isolation), TEST-10/11/12, DOCS, REPT |
+| Phase 0 | 8 | BASE, SAFE (isolation/worktree/remote/canary-ban) |
+| Phase 1 | 25 | CONT, IDEN, SAFE-05/08, TEST-01/03 |
+| Phase 2 | 34 | EDGE, HASH, CAPA, EVID contract (01–06, 14), TEST-02/04 |
+| Phase 3A | 18 | PLAN control plane (01–12, 17–20), SAFE-11, TEST-05 |
+| Phase 3B | 17 | PLAN domain-tx (13–16), EVID persist (07–11), MANI write, TEST-06/07 |
+| Phase 4 | 20 | MANI-05, VERI, RESE, GATE, EVID-12/13, TEST-08/09 |
+| Phase 5 | 16 | SAFE (security/compat), TEST-10/11/12, DOCS, REPT |
 | **v1.1 total** | **138** | All v1.1 |
 
 - v1.1 requirements: 138
@@ -156,12 +196,14 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 
 ## Explicit Non-Goals (v1.1)
 
-- Real canary execution or production/`oracle-catalog-v2` writes
+- Real canary execution or production/`oracle-catalog-v2` writes (Phase 6 separate)
 - Automatic catalog-v1 → catalog-v2 identity migration
 - Oracle/SQL/PL/SQL parsing, relationship inference, object-context/path/impact tools
 - Catalog delta/retirement, business-transaction entities
 - FalkorDB/Kuzu/Neptune catalog portability claims
 - Deployment, push/merge/tag, graph clear/delete, full 14k ingest
+- Multi-backend catalog claims beyond Neo4j 5.26+
 
 ---
 *Roadmap created: 2026-07-17 for milestone v1.1*
+*Reconciled: 2026-07-17 to graphiti_mcp_pre_canary_roadmap_en.md (Phase 0/1/2/3A/3B/4/5)*
