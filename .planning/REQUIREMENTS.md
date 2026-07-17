@@ -105,7 +105,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Atomic Catalog Batch
 
-- [ ] **BATC-01**: MCP client can call `upsert_catalog_batch` with group, batch and catalog hashes, entities, edges, provenance, dry-run, and atomic controls
+- [x] **BATC-01**: MCP client can call `upsert_catalog_batch` with group, batch and catalog hashes, entities, edges, provenance, dry-run, and atomic controls
 - [ ] **BATC-02**: Server validates the complete nested request and all configured limits before any persistent side effect
 - [x] **BATC-03**: Server computes canonical request SHA-256 and returns `batch_conflict` for a committed batch ID reused with different content
 - [x] **BATC-04**: Batch endpoint resolution includes both entities already in Neo4j and entities included in the same request
@@ -120,11 +120,11 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Documentation and Final Verification
 
-- [ ] **DOCS-01**: MCP documentation explains each deterministic catalog tool and warns that it is an administrative structured-ingestion surface
-- [ ] **DOCS-02**: Documentation lists required configuration, immutable namespace warning, supported entity/edge types, batch limits, idempotency, atomicity, and structured errors
-- [ ] **DOCS-03**: Documentation distinguishes `add_memory` semantic ingestion from deterministic PDF catalog, DDL, Oracle dictionary, and SQL parser ingestion
-- [ ] **DOCS-04**: Documentation includes sanitized ACCEPT_TAB requests, Kubernetes ConfigMap/environment examples, and rollout/rollback notes without deploying or exposing credentials
-- [ ] **DOCS-05**: Final verification lists all seven MCP tool schemas, exact test/format/lint/type-check results, Graphiti/Neo4j limitations, unchanged live-group confirmation, image build command, and fresh canary recommendation
+- [x] **DOCS-01**: MCP documentation explains each deterministic catalog tool and warns that it is an administrative structured-ingestion surface
+- [x] **DOCS-02**: Documentation lists required configuration, immutable namespace warning, supported entity/edge types, batch limits, idempotency, atomicity, and structured errors
+- [x] **DOCS-03**: Documentation distinguishes `add_memory` semantic ingestion from deterministic PDF catalog, DDL, Oracle dictionary, and SQL parser ingestion
+- [x] **DOCS-04**: Documentation includes sanitized ACCEPT_TAB requests, Kubernetes ConfigMap/environment examples, and rollout/rollback notes without deploying or exposing credentials
+- [x] **DOCS-05**: Final verification lists all seven MCP tool schemas, exact test/format/lint/type-check results, Graphiti/Neo4j limitations, unchanged live-group confirmation, image build command, and fresh canary recommendation
 
 ## v2 Requirements
 
@@ -234,7 +234,7 @@ Every v1 requirement maps to exactly one phase.
 | STAT-04 | Phase 2 | Complete |
 | STAT-05 | Phase 2 | Complete |
 | STAT-06 | Phase 2 | Complete |
-| BATC-01 | Phase 2 | Pending |
+| BATC-01 | Phase 2 | Complete |
 | BATC-02 | Phase 2 | Pending |
 | BATC-03 | Phase 2 | Complete |
 | BATC-04 | Phase 2 | Complete |
@@ -246,11 +246,11 @@ Every v1 requirement maps to exactly one phase.
 | BATC-10 | Phase 2 | Complete |
 | BATC-11 | Phase 2 | Pending |
 | BATC-12 | Phase 2 | Pending |
-| DOCS-01 | Phase 2 | Pending |
-| DOCS-02 | Phase 2 | Pending |
-| DOCS-03 | Phase 2 | Pending |
-| DOCS-04 | Phase 2 | Pending |
-| DOCS-05 | Phase 2 | Pending |
+| DOCS-01 | Phase 2 | Complete |
+| DOCS-02 | Phase 2 | Complete |
+| DOCS-03 | Phase 2 | Complete |
+| DOCS-04 | Phase 2 | Complete |
+| DOCS-05 | Phase 2 | Complete |
 
 **Coverage:**
 

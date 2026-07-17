@@ -44,6 +44,31 @@ from services.catalog_service import CatalogService  # noqa: E402
 FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 GROUP = 'oracle-catalog-tool-test'
 BATCH = 'batch-entity-001'
+CATALOG_TOOL_NAMES = {
+    'upsert_typed_entities',
+    'upsert_typed_edges',
+    'resolve_typed_entities',
+    'verify_catalog_batch',
+    'upsert_provenance',
+    'get_catalog_ingest_status',
+    'upsert_catalog_batch',
+}
+LEGACY_TOOL_NAMES = {
+    'add_memory',
+    'search_nodes',
+    'search_memory_facts',
+    'add_triplet',
+    'get_entity_edge',
+    'get_episodes',
+    'get_episode_entities',
+    'update_entity',
+    'build_communities',
+    'summarize_saga',
+    'delete_episode',
+    'delete_entity_edge',
+    'clear_graph',
+    'get_status',
+}
 
 
 def _mcp_server():
@@ -2920,3 +2945,19 @@ async def test_mcp_tool_upsert_catalog_batch_registered():
     server = _mcp_server()
     assert hasattr(server, 'upsert_catalog_batch')
     assert callable(server.upsert_catalog_batch)
+
+
+@pytest.mark.asyncio
+async def test_mcp_registers_exactly_seven_catalog_tools_and_preserves_legacy_tools():
+    server = _mcp_server()
+    tools = await server.mcp.list_tools()
+    names = {tool.name for tool in tools}
+    registered_catalog = {name for name in names if name in CATALOG_TOOL_NAMES}
+
+    assert registered_catalog == CATALOG_TOOL_NAMES
+    assert LEGACY_TOOL_NAMES.issubset(names)
+    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 21
+
+    schemas = {tool.name: tool.inputSchema for tool in tools if tool.name in CATALOG_TOOL_NAMES}
+    assert schemas.keys() == CATALOG_TOOL_NAMES
+    assert all(schema['type'] == 'object' for schema in schemas.values())

@@ -597,6 +597,242 @@ Custom entity types and edge (fact) types — including which edge types may con
 can be configured under the `graphiti` section of `config/config.yaml`. See the `entity_types`,
 `edge_types`, and `edge_type_map` keys there.
 
+## Deterministic Catalog Ingestion (Neo4j Only)
+
+> [!WARNING]
+> These seven catalog tools are an administrative structured-ingestion surface for trusted PDF-catalog,
+> DDL, Oracle-dictionary, and SQL-parser pipelines. They write synchronously and return only after commit,
+> rollback, or a structured error. Keep them disabled unless an operator has approved the source, target
+> `group_id`, fixed UUID namespace, allowlists, and batch limits. The implementation supports Neo4j 5.26+
+> only; other backends return `backend_unavailable`.
+
+### Seven catalog tools
+
+The catalog tools have a stable documented order:
+
+1. `upsert_typed_entities` validates and synchronously upserts allowlisted typed entities. The server
+   derives UUIDv5 identities, embeds searchable text before opening the write transaction, and never
+   accepts caller UUIDs as identity authority.
+2. `upsert_typed_edges` validates and synchronously upserts allowlisted facts between exact typed
+   endpoints. Endpoints must already exist; the tool never creates or relabels them implicitly.
+3. `resolve_typed_entities` is read-only. It resolves expected typed entities and reports missing,
+   generic, duplicate, mistyped, UUID-mismatch, and missing-embedding conditions without writing or
+   embedding.
+4. `verify_catalog_batch` is read-only. It verifies entity, edge, endpoint, embedding, and optional
+   provenance expectations by batch ID, explicit keys, or both.
+5. `upsert_provenance` synchronously attaches deterministic sources to existing targets using installed
+   Graphiti provenance shapes. A missing or mistyped target returns `provenance_target_missing` with no
+   partial write.
+6. `get_catalog_ingest_status` is read-only. It loads restart-safe state from a non-`Entity`
+   `CatalogIngestBatch` node scoped by `group_id` and deterministic batch UUID.
+7. `upsert_catalog_batch` validates a complete nested request, resolves same-request and persisted
+   endpoints, creates all entity and edge embeddings before opening one domain transaction, then commits
+   entities, edges, provenance, and committed status atomically. It requires `atomic=true`.
+
+All seven require catalog configuration even though the two resolve/verify tools and status lookup are
+read-only. Every request is isolated by its validated `group_id`.
+
+### Required configuration
+
+```yaml
+# config.yaml or a Kubernetes ConfigMap data entry; no credentials belong here.
+catalog_upsert:
+  enabled: true
+  uuid_namespace: ${GRAPHITI_CATALOG_UUID_NAMESPACE}
+  max_entities_per_batch: 500
+  max_edges_per_batch: 2000
+  max_provenance_links_per_batch: 5000
+```
+
+```yaml
+# Kubernetes workload environment excerpt. Secret values and database credentials are omitted.
+env:
+  - name: GRAPHITI_CATALOG_UUID_NAMESPACE
+    valueFrom:
+      configMapKeyRef:
+        name: graphiti-catalog-config
+        key: GRAPHITI_CATALOG_UUID_NAMESPACE
+  - name: CONFIG_PATH
+    value: /app/config/config.yaml
+```
+
+`catalog_upsert.enabled` defaults to `false`. `GRAPHITI_CATALOG_UUID_NAMESPACE` must be a fixed valid UUID
+when catalog writes are enabled. It is immutable deployment configuration: changing it changes every
+server-derived entity, edge, source, MENTIONS-link, and batch identity. Never generate it at startup,
+rotate it during a retry, or accept a namespace from a catalog request.
+
+The defaults are 500 entities, 2,000 edges, and 5,000 provenance links per batch. Lower deployment limits
+are allowed. Requests above the configured limit fail before persistent side effects.
+
+### Server-owned allowlists
+
+Client values never become Cypher labels or property names. Supported entity types and required
+`graph_key` prefixes are:
+
+| Entity type | Prefix | Entity type | Prefix | Entity type | Prefix |
+|---|---|---|---|---|---|
+| `Database` | `DATABASE::` | `DictionaryDocument` | `DOC::` | `Schema` | `SCHEMA::` |
+| `Table` | `TABLE::` | `View` | `VIEW::` | `MaterializedView` | `MVIEW::` |
+| `Column` | `COLUMN::` | `Constraint` | `CONSTRAINT::` | `Index` | `INDEX::` |
+| `Package` | `PACKAGE::` | `Procedure` | `PROCEDURE::` | `Function` | `FUNCTION::` |
+| `Trigger` | `TRIGGER::` | `Sequence` | `SEQUENCE::` | `Synonym` | `SYNONYM::` |
+
+Supported edge types are `Contains`, `PrimaryKeyOf`, `UniqueKeyOf`, `ForeignKeyTo`, `EnforcedBy`,
+`TriggerOn`, `SynonymFor`, `DocumentedBy`, `Calls`, `ReadsFrom`, `WritesTo`, `JoinsWith`,
+`ReferencesByCode`, `DependsOn`, `DerivedFrom`, and `UsesSequence`. `EnforcedBy` requires explicit DDL or
+Oracle-dictionary evidence. Protected entity properties such as `uuid`, `group_id`, labels, graph key,
+embeddings, timestamps, and content hash cannot be supplied through `attributes`.
+
+### Identity, idempotency, atomicity, and errors
+
+The server derives UUIDv5 values from the configured namespace and canonical identity strings; mutable
+payloads receive canonical 64-character lowercase SHA-256 hashes. Identical retries return `unchanged` and
+preserve one logical object. Changed mutable content updates in place while preserving identity and
+`created_at`. Reusing a committed `batch_id` with different content returns `batch_conflict` without domain
+mutation. If supplied, `content_sha256` or `request_sha256` must match the server's canonical hash.
+
+Primitive entity, edge, and provenance requests honor their documented atomic request behavior. The
+combined `upsert_catalog_batch` accepts only `atomic=true`: after full validation and pre-transaction
+embedding, one Neo4j transaction commits every domain object plus committed status, or rolls everything
+back. A write failure may persist only bounded, sanitized `failed` status in a separate safe transaction.
+Dry runs perform planning and conflict checks without domain or status writes.
+
+Expected failures use structured codes including `validation_error`, `feature_disabled`,
+`invalid_uuid_namespace`, `batch_limit_exceeded`, `content_hash_mismatch`, `entity_type_conflict`,
+`graph_key_prefix_mismatch`, `deterministic_uuid_conflict`, `missing_endpoint`,
+`endpoint_type_mismatch`, `generic_endpoint_conflict`, `edge_identity_conflict`, `batch_conflict`,
+`provenance_target_missing`, `neo4j_transaction_failed`, `embedding_failed`, `internal_error`, and
+`backend_unavailable`. Do not parse exception text as an API contract.
+
+### Semantic memory versus deterministic catalog ingestion
+
+Use `add_memory` for semantic ingestion of prose, messages, or loosely structured JSON. It queues an
+asynchronous episode and uses the configured LLM to extract, deduplicate, summarize, and evolve the graph.
+
+Use the seven catalog tools for trusted PDF-catalog, DDL, Oracle-dictionary, or SQL-parser output where
+identity, type, endpoints, hash, and commit boundaries must be exact. These tools bypass `add_memory`, LLM
+extraction, and the ingestion queue. Entity and edge embeddings still use the configured embedder before
+writes so existing search remains interoperable.
+
+### Sanitized ACCEPT_TAB batch
+
+This synthetic sample contains no production catalog text or credentials. The server derives all UUIDs and
+hashes; callers omit them.
+
+```json
+{
+  "group_id": "oracle-catalog-tool-test",
+  "batch_id": "accept-tab-batch-001",
+  "entities": [
+    {
+      "entity_type": "Table",
+      "graph_key": "TABLE::APP.ACCEPT_TAB",
+      "name_raw": "ACCEPT_TAB",
+      "name_canonical": "accept_tab",
+      "database_qualified_name": "APP.ACCEPT_TAB",
+      "summary": "Synthetic acceptance table",
+      "attributes": {"fixture": "sanitized"},
+      "confidence": 1.0
+    },
+    {
+      "entity_type": "Column",
+      "graph_key": "COLUMN::APP.ACCEPT_TAB.ACCEPT_ID",
+      "name_raw": "ACCEPT_ID",
+      "name_canonical": "accept_id",
+      "database_qualified_name": "APP.ACCEPT_TAB.ACCEPT_ID",
+      "summary": "Synthetic acceptance identifier column",
+      "attributes": {"fixture": "sanitized", "ordinal": 1},
+      "confidence": 1.0
+    },
+    {
+      "entity_type": "Table",
+      "graph_key": "TABLE::APP.ACCEPT_PARENT",
+      "name_raw": "ACCEPT_PARENT",
+      "name_canonical": "accept_parent",
+      "database_qualified_name": "APP.ACCEPT_PARENT",
+      "summary": "Synthetic referenced parent table",
+      "attributes": {"fixture": "sanitized"},
+      "confidence": 1.0
+    }
+  ],
+  "edges": [
+    {
+      "edge_type": "Contains",
+      "edge_key": "CONTAINS::TABLE::APP.ACCEPT_TAB->COLUMN::APP.ACCEPT_TAB.ACCEPT_ID",
+      "source_graph_key": "TABLE::APP.ACCEPT_TAB",
+      "source_entity_type": "Table",
+      "target_graph_key": "COLUMN::APP.ACCEPT_TAB.ACCEPT_ID",
+      "target_entity_type": "Column",
+      "fact": "ACCEPT_TAB contains ACCEPT_ID",
+      "attributes": {"fixture": "sanitized"},
+      "confidence": 1.0
+    },
+    {
+      "edge_type": "ForeignKeyTo",
+      "edge_key": "FK::APP.ACCEPT_TAB.ACCEPT_ID->APP.ACCEPT_PARENT.ACCEPT_ID",
+      "source_graph_key": "TABLE::APP.ACCEPT_TAB",
+      "source_entity_type": "Table",
+      "target_graph_key": "TABLE::APP.ACCEPT_PARENT",
+      "target_entity_type": "Table",
+      "fact": "ACCEPT_TAB.ACCEPT_ID references ACCEPT_PARENT.ACCEPT_ID",
+      "attributes": {"fixture": "sanitized"},
+      "confidence": 1.0
+    }
+  ],
+  "provenance": {
+    "sources": [{
+      "source_key": "SOURCE::SYNTHETIC.ACCEPT_TAB.DDL#1",
+      "reference_time": "2026-01-01T00:00:00Z",
+      "attributes": {"fixture": "sanitized"},
+      "metadata": {"format": "synthetic-ddl"}
+    }],
+    "entity_targets": [
+      {"entity_type": "Table", "graph_key": "TABLE::APP.ACCEPT_TAB"},
+      {"entity_type": "Column", "graph_key": "COLUMN::APP.ACCEPT_TAB.ACCEPT_ID"},
+      {"entity_type": "Table", "graph_key": "TABLE::APP.ACCEPT_PARENT"}
+    ],
+    "edge_targets": [
+      {
+        "edge_type": "Contains",
+        "edge_key": "CONTAINS::TABLE::APP.ACCEPT_TAB->COLUMN::APP.ACCEPT_TAB.ACCEPT_ID"
+      },
+      {
+        "edge_type": "ForeignKeyTo",
+        "edge_key": "FK::APP.ACCEPT_TAB.ACCEPT_ID->APP.ACCEPT_PARENT.ACCEPT_ID"
+      }
+    ]
+  },
+  "dry_run": false,
+  "atomic": true
+}
+```
+
+### Graphiti and Neo4j provenance limits
+
+A deterministic source is an installed-schema `Episodic` node. Entity provenance uses deterministic
+`MENTIONS` relationships. Neo4j cannot attach a relationship directly to another relationship without a
+new schema object, so fact provenance appends source episode UUIDs to the existing `RELATES_TO.episodes`
+list. This is the closest compatible Graphiti representation; it does not claim a separate relationship-
+to-relationship provenance edge.
+
+Catalog batch status uses only the `CatalogIngestBatch` label, never `Entity`, so normal entity search and
+community clustering exclude it. Normal catalog upserts are community-neutral: they never invoke
+`build_communities`. Run that existing maintenance tool explicitly after a separately approved ingest when
+community summaries are desired.
+
+### Rollout and rollback guidance
+
+Before rollout, validate the fixed namespace and allowlists, set conservative limits, list MCP schemas,
+exercise a dry run in a fresh non-production group, then restart the MCP workload so configuration changes
+are loaded. Do not use `oracle-catalog-v2` for validation. A production canary requires separate approval.
+
+After a committed batch, re-run the identical request to confirm `unchanged`, query
+`get_catalog_ingest_status`, then run `verify_catalog_batch`. On failure, inspect only structured codes and
+bounded status summaries; correct the input or configuration and retry the same `batch_id` only with
+identical content. If content must change after a committed batch, use a new `batch_id`. Roll back the MCP
+application/configuration to the prior image and namespace; never change the namespace to undo data, run
+`clear_graph`, or delete existing catalog objects as part of this procedure.
+
 ## Working with JSON Data
 
 The Graphiti MCP server can process structured JSON data through the `add_episode` tool with `source="json"`. This
