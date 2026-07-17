@@ -3147,6 +3147,8 @@ class CatalogService:
                     )
                     row = await self._store.upsert_source_episode(tx, params=params)
                     status = str(row.get('status') or prep.projected_status)
+                    if prep.missing_links and status == 'unchanged':
+                        status = 'updated'
                     for ent_uuid, men_uuid in zip(
                         prep.entity_uuids, prep.mentions_uuids, strict=True
                     ):
@@ -4391,6 +4393,8 @@ class CatalogService:
                     )
                     row = await self._store.upsert_source_episode(tx, params=params)
                     source_status = str(row.get('status') or prep.projected_status)
+                    if prep.missing_links and source_status == 'unchanged':
+                        source_status = 'updated'
                     for entity_uuid, mentions_uuid in zip(
                         prep.entity_uuids, prep.mentions_uuids, strict=True
                     ):

@@ -886,6 +886,7 @@ def test_build_source_episode_upsert_cypher_episodic_no_entity_label():
     assert 'n.source = $source' in cypher
     assert 'n.content = $content' in cypher
     assert 'n.entity_edges = $entity_edges' in cypher
+    assert 'n.entity_edges = reduce(' in cypher
     assert 'n.valid_at = $valid_at' in cypher
     # preserve created_at / identity on update (SET block only)
     assert "status = 'updated'" in cypher

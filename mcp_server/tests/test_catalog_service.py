@@ -2471,6 +2471,59 @@ async def test_provenance_unchanged_link_read_failure_is_internal_error(read_nam
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('target_kind', ['entity', 'edge'])
+async def test_provenance_unchanged_source_new_link_reports_updated(target_kind):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    src_uuid, ent_uuid = _wire_provenance_store(service)
+    source = _source()
+    service._store.get_source_episode_by_uuid = AsyncMock(
+        return_value={
+            'uuid': src_uuid,
+            'content_sha256': canonical_sha256(service.source_canonical_payload(source)),
+            'source_key': source.source_key,
+        }
+    )
+    entity_targets = []
+    edge_targets = []
+    if target_kind == 'entity':
+        service._store.get_mentions_link = AsyncMock(return_value=None)
+    else:
+        edge = _edge()
+        edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
+        edge_targets = [
+            CatalogProvenanceEdgeTarget(edge_type=edge.edge_type, edge_key=edge.edge_key)
+        ]
+        service._store.get_edge_by_uuid = AsyncMock(
+            side_effect=[
+                {'uuid': edge_uuid, 'name': edge.edge_type, 'episodes': []},
+                {'uuid': edge_uuid, 'name': edge.edge_type, 'episodes': []},
+            ]
+        )
+        entity_targets = [
+            CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES')
+        ]
+        service._store.get_mentions_link = AsyncMock(
+            return_value={'uuid': catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, ent_uuid)}
+        )
+    service._store.upsert_source_episode = AsyncMock(
+        return_value={'uuid': src_uuid, 'status': 'unchanged'}
+    )
+
+    resp = await service.upsert_provenance(
+        client=client,
+        request=_prov_request(
+            sources=[source], entity_targets=entity_targets, edge_targets=edge_targets
+        ),
+    )
+
+    assert resp.results[0].status == 'updated'
+    params = cast(AsyncMock, service._store.upsert_source_episode).await_args.kwargs['params']
+    if target_kind == 'edge':
+        assert params['entity_edges'] == [edge_uuid]
+
+
+@pytest.mark.asyncio
 async def test_provenance_non_atomic_transaction_failure_marks_prior_result_rolled_back():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -2708,7 +2761,7 @@ def _wire_batch_preflight(service: CatalogService) -> None:
     service._store.get_batch_status = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     async def _entity_by_uuid(executor, *, uuid, group_id, tx=None):
-        _ = executor, group_id
+        _ = executor, uuid, group_id
         if tx is None:
             return None
         return None
@@ -3230,7 +3283,7 @@ async def test_batch_unchanged_domain_drift_aborts_before_commit_status(kind):
             }
 
         async def _edge_by_uuid(executor, *, uuid, group_id, tx=None):
-            _ = executor, group_id
+            _ = executor, uuid, group_id
             return {
                 'uuid': edge_uuid,
                 'content_sha256': edge_hash if tx is None else 'f' * 64,

@@ -848,7 +848,10 @@ class CatalogNeo4jStore:
                 n.source = $source,
                 n.source_description = $source_description,
                 n.content = $content,
-                n.entity_edges = $entity_edges,
+                n.entity_edges = reduce(
+                    edges = coalesce(n.entity_edges, []), edge IN $entity_edges |
+                    CASE WHEN edge IN edges THEN edges ELSE edges + edge END
+                ),
                 n.valid_at = $valid_at,
                 n.batch_id = $batch_id,
                 n.content_sha256 = $content_sha256,
