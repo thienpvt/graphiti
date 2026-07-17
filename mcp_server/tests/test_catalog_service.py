@@ -17,7 +17,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from config.schema import CatalogConfig  # noqa: E402
-from models.catalog_batch import GetCatalogIngestStatusRequest  # noqa: E402
+from models.catalog_batch import (  # noqa: E402
+    GetCatalogIngestStatusRequest,
+    NestedProvenancePayload,
+    UpsertCatalogBatchRequest,
+)
 from models.catalog_common import CatalogErrorCode  # noqa: E402
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
 from models.catalog_entities import (  # noqa: E402
@@ -2519,3 +2523,184 @@ async def test_mcp_tool_get_catalog_ingest_status_registered():
     server = _mcp_server()
     assert hasattr(server, 'get_catalog_ingest_status')
     assert callable(server.get_catalog_ingest_status)
+
+
+# ------------------------------------------------------------------
+# upsert_catalog_batch preflight (BATC-03..05, BATC-09/10)
+# ------------------------------------------------------------------
+
+BATCH_ATOMIC = 'batch-atomic-001'
+
+
+def _batch_request(
+    *,
+    entities: list[CatalogEntityItem] | None = None,
+    edges: list[CatalogEdgeItem] | None = None,
+    provenance: NestedProvenancePayload | None = None,
+    dry_run: bool = False,
+    request_sha256: str | None = None,
+) -> UpsertCatalogBatchRequest:
+    return UpsertCatalogBatchRequest(
+        group_id=GROUP,
+        batch_id=BATCH_ATOMIC,
+        entities=entities if entities is not None else [_entity()],
+        edges=edges if edges is not None else [],
+        provenance=provenance,
+        dry_run=dry_run,
+        request_sha256=request_sha256,
+    )
+
+
+def _wire_batch_preflight(service: CatalogService) -> None:
+    service._store.get_batch_status = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service._store.get_entity_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service._store.resolve_endpoint_typed = AsyncMock(  # type: ignore[method-assign]
+        return_value=('missing_endpoint', None)
+    )
+    service._store.ensure_uuid_uniqueness_constraints = AsyncMock(  # type: ignore[method-assign]
+        return_value=None
+    )
+    service._store.upsert_batch_status = AsyncMock()  # type: ignore[method-assign]
+    service._store.upsert_entity_item = AsyncMock()  # type: ignore[method-assign]
+    service._store.upsert_edge_item = AsyncMock()  # type: ignore[method-assign]
+
+
+@pytest.mark.asyncio
+async def test_batch_dry_run_endpoint_union_no_writes_or_status():
+    employee = _entity()
+    department = _entity(
+        graph_key='TABLE::HR.DEPARTMENTS',
+        name_raw='DEPARTMENTS',
+        name_canonical='departments',
+        database_qualified_name='HR.DEPARTMENTS',
+        summary='Department master table',
+    )
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    request = _batch_request(
+        entities=[employee, department],
+        edges=[_edge()],
+        dry_run=True,
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.dry_run is True
+    assert resp.status == 'validating'
+    assert resp.failed == 0
+    # Both edge endpoints came from the same-request union; no persisted lookup.
+    cast(AsyncMock, service._store.resolve_endpoint_typed).assert_not_awaited()
+    cast(AsyncMock, service._store.ensure_uuid_uniqueness_constraints).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_batch_status).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_entity_item).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_edge_item).assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_batch_committed_different_hash_returns_batch_conflict_before_embed():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    service._store.get_batch_status = AsyncMock(  # type: ignore[method-assign]
+        return_value={'status': 'committed', 'request_sha256': 'a' * 64}
+    )
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(request_sha256='b' * 64),
+    )
+
+    assert resp.error_code == CatalogErrorCode.batch_conflict
+    assert resp.failed >= 1
+    assert 'embed' not in client.call_order
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_batch_committed_same_hash_returns_unchanged_short_circuit():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    request = _batch_request()
+    expected_hash = CatalogService.batch_request_sha256(request)
+    service._store.get_batch_status = AsyncMock(  # type: ignore[method-assign]
+        return_value={'status': 'committed', 'request_sha256': expected_hash}
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.status == 'committed'
+    assert resp.error_code is None
+    assert resp.entity_unchanged == len(request.entities)
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_batch_missing_endpoint_preflight_stops_embedding():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    request = _batch_request(
+        entities=[],
+        edges=[_edge()],
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.error_code in (
+        CatalogErrorCode.missing_endpoint,
+        CatalogErrorCode.batch_conflict,
+    )
+    assert resp.failed >= 1
+    assert cast(AsyncMock, service._store.resolve_endpoint_typed).await_count >= 1
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_batch_divergent_duplicate_preflight_stops_embedding():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    request = _batch_request(
+        entities=[_entity(summary='first'), _entity(summary='second')],
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.error_code == CatalogErrorCode.batch_conflict
+    assert resp.failed == 2
+    assert all(r.error_code == CatalogErrorCode.deterministic_uuid_conflict for r in resp.results)
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_batch_collects_all_known_conflicts_before_embed():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    service._store.resolve_endpoint_typed = AsyncMock(  # type: ignore[method-assign]
+        return_value=('missing_endpoint', None)
+    )
+    request = _batch_request(
+        entities=[_entity(summary='first'), _entity(summary='second')],
+        edges=[_edge(edge_key='FK::ONE'), _edge(edge_key='FK::TWO', fact='second fk')],
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.failed >= 4
+    assert {r.error_code for r in resp.results} >= {
+        CatalogErrorCode.deterministic_uuid_conflict,
+        CatalogErrorCode.missing_endpoint,
+    }
+    # Both edge items were examined; preflight did not stop at the first conflict.
+    assert cast(AsyncMock, service._store.resolve_endpoint_typed).await_count == 4
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
