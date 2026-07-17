@@ -1,8 +1,8 @@
 # Phase 2 Report — Provenance and Atomic Batch
 
 **Date:** 2026-07-17
-**Executor branch:** `worktree-agent-a24661030d63d622b`
-**Base:** `03bdd7f`
+**Executor branch:** `gsd/phase-1-typed-catalog-primitives`
+**Final implementation base:** `d7c56f7`
 **Neo4j:** local test container on `bolt://localhost:17687` (credentials supplied through the command environment; not recorded)
 **Required test group:** `oracle-catalog-tool-test`
 
@@ -40,7 +40,7 @@ uv run pytest \
   -q --tb=short
 ```
 
-Observed: exit 0 — `260 passed in 1.88s`.
+Observed on final implementation base: exit 0 — `301 passed in 2.10s`.
 
 ### Required live Neo4j integration
 
@@ -54,7 +54,7 @@ CATALOG_INT_REQUIRED=1 \
 uv run pytest tests/test_catalog_neo4j_int.py -q --tb=short --timeout=120
 ```
 
-Observed: exit 0 — `34 passed in 23.14s`; zero skipped. Required mode was active.
+Observed on final implementation base: exit 0 — `34 passed in 24.21s`; zero skipped. Required mode was active.
 
 ### Combined catalog suite
 
@@ -74,7 +74,7 @@ uv run pytest \
   -q --tb=line --timeout=120
 ```
 
-Observed: exit 0 — `294 passed in 24.18s`.
+Observed on final implementation base: exit 0 — `335 passed in 24.94s`.
 
 ### Catalog-scoped Ruff and Pyright
 
@@ -157,7 +157,7 @@ uv run pytest \
   -q --tb=short
 ```
 
-Observed: exit 0 — `86 passed in 1.34s`.
+Observed on final implementation base: exit 0 — `86 passed in 1.33s`.
 
 ### No-LLM, no-queue, and registration spies
 
@@ -169,7 +169,7 @@ uv run pytest tests/test_catalog_service.py \
   -q --tb=short
 ```
 
-Observed: exit 0 — `10 passed, 89 deselected in 0.97s`.
+Observed on final implementation base: exit 0 — `10 passed, 108 deselected`.
 
 ### Named live interoperability, community, and teardown gates
 
@@ -191,6 +191,37 @@ Observed: exit 0 — `4 passed, 30 deselected in 3.24s`. The four selected test 
 - `test_batch_no_llm_queue_or_implicit_community_calls`
 - `test_explicit_community_build_accepts_batch_entities`
 - `test_teardown_scoped_and_fixture_never_calls_clear_graph`
+
+### Second-pass remediation and independent re-audits
+
+The adversarial re-review found four blocking implementation issues plus one dry-run reporting warning. All were remediated and regression-tested:
+
+- BL-01: deterministic source duplicates now coalesce or conflict independent of request order.
+- BL-02: unchanged entities and edges are re-read inside the atomic write transaction.
+- BL-03: new provenance links report `updated`; `Episodic.entity_edges` is append-only.
+- BL-04: provenance link-state read failures return structured `internal_error`.
+- WR-02: dry-run includes stable provenance projections and duplicate occurrence counts.
+
+Evidence: `02-REVIEW-FIX-2.md`.
+
+A final deep review then found two blockers and one warning. Final remediation closed them:
+
+- BLOCKER-01: source identity/hash and preflighted provenance links are re-read inside standalone and nested write transactions, including updated-source paths.
+- BLOCKER-02: full-string `group_id` validation rejects trailing newlines and hidden group variants.
+- WARNING-01: divergent A/B/A entity and edge identities report every occurrence and write none.
+
+Evidence: `02-REVIEW-FIX-3.md`. Current-head totals are 301 unit, 34 required live, and 335 combined. Independent final review, Nyquist, and security delta verdicts follow in the final artifacts.
+
+### Local Ollama end-to-end
+
+A real local end-to-end check used Ollama at `http://127.0.0.1:11434` with `qwen3-embedding:latest` and an explicit no-op cross-encoder. It generated a 1024-dimension embedding, created one synthetic typed entity, returned `unchanged` on identical retry, resolved it as `found`, and verified one entity. Cleanup targeted only exact synthetic IDs.
+
+```text
+OLLAMA_E2E_RESIDUAL_NODES 0
+OLLAMA_E2E_RESIDUAL_RELATIONSHIPS 0
+```
+
+No LLM extraction, queue, community build, deployment, production group, or full catalog ingest was involved.
 
 ### Read-only forbidden-group snapshot
 
@@ -244,9 +275,9 @@ Registration preserved all 14 legacy tools: `add_memory`, `search_nodes`, `searc
 
 | Gate | Result | Evidence |
 |---|---|---|
-| Catalog units | PASS | 260 passed |
+| Catalog units | PASS | 301 passed |
 | Required live Neo4j | PASS | 34 passed, zero skipped, Neo4j 5.26.0 |
-| Combined catalog suite | PASS | 294 passed |
+| Combined catalog suite | PASS | 335 passed |
 | Ruff format/check | PASS | 16 formatted; all lint checks passed |
 | Scoped Pyright | PASS | 0 errors, 0 warnings, 0 informations |
 | Seven catalog schemas | PASS | 7/7; 21 total tools; 14 legacy retained |
@@ -256,6 +287,11 @@ Registration preserved all 14 legacy tools: `add_memory`, `search_nodes`, `searc
 | No LLM/queue/implicit community | PASS | Unit spies and named live test passed |
 | Isolation / forbidden group | PASS | Dedicated group only; read-only forbidden-group snapshot remained empty |
 | Local image build | PASS | Standalone image built locally; no push/deploy |
+| Second-pass remediation | PASS | BL-01..04 and WR-02 closed; focused regressions green |
+| Final remediation | PASS | BLOCKER-01/02 and WARNING-01 closed; `02-REVIEW-FIX-3.md` |
+| Nyquist re-audit | PASS | 31/31 Phase 2 requirements covered |
+| Security re-audit | PASS | 29/29 threat entries closed; 0 open |
+| Local Ollama E2E | PASS | Real 1024-dimensional embedding; create/retry/resolve/verify; zero residual IDs |
 
 ## Isolation
 
@@ -301,6 +337,6 @@ This is recommendation text only. No canary was executed in this plan.
 
 ## Final Verdict
 
-All required observed checks are green, including the unskipped 34-test live Neo4j suite, seven-tool schema listing, legacy compatibility, search, explicit community maintenance, no-LLM/no-queue isolation, forbidden-group protection, and local standalone image build.
+All required observed checks are green: 301 unit tests, the unskipped 34-test live Neo4j suite, 335 combined catalog tests, 86 existing MCP regressions, seven-tool schema listing, legacy compatibility, search, explicit community maintenance, no-LLM/no-queue isolation, forbidden-group protection, local standalone image build, real local Ollama E2E, 31/31 Nyquist coverage, and 29/29 closed security threat entries.
 
 **Overall: PASS**
