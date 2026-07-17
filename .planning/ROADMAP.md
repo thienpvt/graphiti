@@ -58,12 +58,12 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
   4. New tests and development writes use only `oracle-catalog-tool-test`; `oracle-catalog-v2` is never queried or mutated; no canary runs
   5. Dirty-worktree unrelated files and remote state remain untouched (no push/merge/deploy/tag)
 
-**Plans**: 2 plans
+**Plans**: 1/2 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 00-01-PLAN.md — Wave 1: live inventory, offline ACCEPT_TAB evidence, truthful pass/fail/skip check ledger
+- [x] 00-01-PLAN.md — Wave 1: live inventory, offline ACCEPT_TAB evidence, truthful pass/fail/skip check ledger
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
