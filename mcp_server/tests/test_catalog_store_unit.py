@@ -1096,6 +1096,18 @@ def test_build_batch_status_upsert_cypher_no_entity_label():
         assert banned not in lowered
 
 
+def test_batch_status_claim_and_terminal_write_are_conflict_guarded():
+    store = CatalogNeo4jStore()
+    claim = store.build_batch_status_claim_cypher()
+    terminal = store.build_batch_status_upsert_cypher()
+    assert 'MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})' in claim
+    assert "b.status = 'writing'" in claim
+    assert 'b.request_sha256 = $request_sha256' in claim
+    assert "b.status = 'committed' AS already_committed" in terminal
+    assert 'b.request_sha256 <> $request_sha256 AS hash_conflict' in terminal
+    assert 'NOT already_committed AND NOT hash_conflict' in terminal
+
+
 def test_build_get_batch_status_cypher_group_scoped():
     store = CatalogNeo4jStore()
     cypher = store.build_get_batch_status_cypher()

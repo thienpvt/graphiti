@@ -1105,10 +1105,7 @@ class CatalogNeo4jStore:
     BATCH_STATUS_ERROR_SUMMARY_MAX = 512
 
     def build_batch_status_upsert_cypher(self) -> str:
-        """MERGE CatalogIngestBatch by uuid+group_id; never set Entity label.
-
-        Allowlisted properties only — no payloads, secrets, or arbitrary maps.
-        """
+        """Conditionally persist terminal status without overwriting committed state."""
         return """
             MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})
             ON CREATE SET
@@ -1116,15 +1113,24 @@ class CatalogNeo4jStore:
                 b.group_id = $group_id,
                 b.batch_id = $batch_id,
                 b.created_at = $created_at
-            SET b.status = $status,
-                b.request_sha256 = $request_sha256,
-                b.catalog_sha256 = $catalog_sha256,
-                b.entity_count = $entity_count,
-                b.edge_count = $edge_count,
-                b.provenance_count = $provenance_count,
-                b.error_summary = $error_summary,
-                b.updated_at = $updated_at,
-                b.committed_at = $committed_at
+            WITH b,
+                 b.status = 'committed' AS already_committed,
+                 b.request_sha256 IS NOT NULL
+                   AND b.request_sha256 <> $request_sha256 AS hash_conflict
+            FOREACH (_ IN CASE
+              WHEN NOT already_committed AND NOT hash_conflict THEN [1]
+              ELSE []
+            END |
+              SET b.status = $status,
+                  b.request_sha256 = $request_sha256,
+                  b.catalog_sha256 = $catalog_sha256,
+                  b.entity_count = $entity_count,
+                  b.edge_count = $edge_count,
+                  b.provenance_count = $provenance_count,
+                  b.error_summary = $error_summary,
+                  b.updated_at = $updated_at,
+                  b.committed_at = $committed_at
+            )
             RETURN b.uuid AS uuid,
                    b.group_id AS group_id,
                    b.batch_id AS batch_id,
@@ -1137,8 +1143,37 @@ class CatalogNeo4jStore:
                    b.error_summary AS error_summary,
                    b.created_at AS created_at,
                    b.updated_at AS updated_at,
-                   b.committed_at AS committed_at
+                   b.committed_at AS committed_at,
+                   already_committed,
+                   hash_conflict
             """
+
+    def build_batch_status_claim_cypher(self) -> str:
+        """Create/recheck a transaction-local batch claim before domain writes."""
+        return """
+            MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})
+            ON CREATE SET
+                b.uuid = $uuid,
+                b.group_id = $group_id,
+                b.batch_id = $batch_id,
+                b.request_sha256 = $request_sha256,
+                b.status = 'writing',
+                b.created_at = $created_at,
+                b.updated_at = $updated_at
+            RETURN b.uuid AS uuid,
+                   b.status AS status,
+                   b.request_sha256 AS request_sha256
+            """
+
+    async def claim_batch_status(self, tx: Any, *, params: dict[str, Any]) -> dict[str, Any]:
+        """Claim batch identity under the composite uniqueness constraint."""
+        result = await tx.run(self.build_batch_status_claim_cypher(), **params)
+        row = await self._first_from_tx_result(result)
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'batch status claim returned no row', code='neo4j_transaction_failed'
+            )
+        return row
 
     def build_get_batch_status_cypher(self) -> str:
         """MATCH status by composite uuid+group_id; CatalogIngestBatch only."""

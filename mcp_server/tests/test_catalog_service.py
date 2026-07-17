@@ -2595,6 +2595,9 @@ def _wire_batch_preflight(service: CatalogService) -> None:
     service._store.ensure_uuid_uniqueness_constraints = AsyncMock(  # type: ignore[method-assign]
         return_value=None
     )
+    service._store.claim_batch_status = AsyncMock(  # type: ignore[method-assign]
+        return_value={'uuid': 'claim', 'status': 'writing'}
+    )
     service._store.upsert_batch_status = AsyncMock()  # type: ignore[method-assign]
     service._store.upsert_entity_item = AsyncMock()  # type: ignore[method-assign]
     service._store.upsert_edge_item = AsyncMock()  # type: ignore[method-assign]
@@ -2836,8 +2839,22 @@ def _install_batch_write_mocks(service: CatalogService, client) -> list[str]:
     async def _status_write(tx, *, params):
         _ = tx
         events.append(f'status_{params["status"]}')
-        return {'uuid': params['uuid'], 'status': params['status']}
+        return {
+            'uuid': params['uuid'],
+            'status': params['status'],
+            'request_sha256': params.get('request_sha256'),
+        }
 
+    async def _claim(tx, *, params):
+        _ = tx
+        events.append('status_claim')
+        return {
+            'uuid': params['uuid'],
+            'status': 'writing',
+            'request_sha256': params['request_sha256'],
+        }
+
+    service._store.claim_batch_status = AsyncMock(side_effect=_claim)  # type: ignore[method-assign]
     service._store.upsert_entity_item = AsyncMock(side_effect=_entity_write)  # type: ignore[method-assign]
     service._store.upsert_edge_item = AsyncMock(side_effect=_edge_write)  # type: ignore[method-assign]
     service._store.upsert_batch_status = AsyncMock(side_effect=_status_write)  # type: ignore[method-assign]
@@ -2874,7 +2891,13 @@ async def test_batch_embedding_completes_before_single_domain_transaction():
     assert resp.status == 'committed'
     assert client.call_order.count('transaction') == 1
     assert events[:3] == ['embed', 'embed', 'embed']
-    assert events[3:] == ['entity_write', 'entity_write', 'edge_write', 'status_committed']
+    assert events[3:] == [
+        'status_claim',
+        'entity_write',
+        'entity_write',
+        'edge_write',
+        'status_committed',
+    ]
     cast(AsyncMock, service._store.upsert_batch_status).assert_awaited_once()
 
 
@@ -2892,6 +2915,27 @@ async def test_batch_embedding_failure_opens_no_transaction_or_status():
     assert 'transaction' not in client.call_order
     cast(AsyncMock, service._store.upsert_batch_status).assert_not_awaited()
     cast(AsyncMock, service._store.upsert_entity_item).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_batch_transaction_claim_rejects_different_hash_before_domain_write():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    events = _install_batch_write_mocks(service, client)
+    service._store.claim_batch_status = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 'claim',
+            'status': 'writing',
+            'request_sha256': 'f' * 64,
+        }
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=_batch_request())
+
+    assert resp.error_code == CatalogErrorCode.batch_conflict
+    assert 'entity_write' not in events
+    cast(AsyncMock, service._store.upsert_batch_status).assert_not_awaited()
 
 
 @pytest.mark.asyncio

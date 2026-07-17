@@ -4084,6 +4084,23 @@ class CatalogService:
         provenance_results: list[CatalogItemResult] = []
         try:
             async with client.driver.transaction() as tx:
+                claim = await self._store.claim_batch_status(
+                    tx,
+                    params={
+                        'uuid': batch_uuid,
+                        'group_id': request.group_id,
+                        'batch_id': request.batch_id,
+                        'request_sha256': effective_hash,
+                        'created_at': request_ts,
+                        'updated_at': request_ts,
+                    },
+                )
+                claimed_hash = claim.get('request_sha256')
+                claimed_status = claim.get('status')
+                if claimed_hash != effective_hash:
+                    raise self._BatchStatusConflict('different_hash')
+                if claimed_status == 'committed':
+                    raise self._BatchStatusConflict('already_committed')
                 written_request_entities: set[str] = set()
                 for prep in entity_prepared:
                     status = prep.projected_status
@@ -4245,7 +4262,31 @@ class CatalogService:
                     updated_at=request_ts,
                     committed_at=request_ts,
                 )
-                await self._store.upsert_batch_status(tx, params=status_params)
+                committed_row = await self._store.upsert_batch_status(tx, params=status_params)
+                if committed_row.get('request_sha256') != effective_hash:
+                    raise self._BatchStatusConflict('different_hash')
+                if committed_row.get('status') != 'committed':
+                    raise self._BatchStatusConflict('commit_rejected')
+        except self._BatchStatusConflict as exc:
+            if exc.reason == 'already_committed':
+                return CatalogBatchWriteResponse(
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    batch_uuid=batch_uuid,
+                    status='committed',
+                    entity_unchanged=len(request.entities),
+                    edge_unchanged=len(request.edges),
+                    provenance_unchanged=len(provenance_sources),
+                )
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges) + len(provenance_sources), 1),
+                error_code=CatalogErrorCode.batch_conflict,
+                error_message='batch_id has different request_sha256',
+            )
         except Exception as exc:
             logger.error(
                 'catalog upsert_catalog_batch neo4j_transaction_failed batch_id=%s entities=%s edges=%s provenance=%s reason=%s',
@@ -4317,6 +4358,11 @@ class CatalogService:
             len(provenance_sources),
         )
         return response
+
+    class _BatchStatusConflict(Exception):
+        def __init__(self, reason: str):
+            self.reason = reason
+            super().__init__(reason)
 
     async def _batch_recheck_edge_in_tx(
         self,
