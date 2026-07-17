@@ -4,7 +4,7 @@
 
 An extension to the existing Graphiti MCP server that adds synchronous, typed, deterministic, idempotent Neo4j upsert tools for structured database catalogs. It targets PDF catalog, DDL, Oracle dictionary, and SQL parser output where entity and relationship identity must be exact and no LLM extraction or asynchronous ingestion may occur.
 
-The implementation preserves all existing Graphiti and MCP behavior. Work is split into a gated Phase 1 foundation and Phase 2 provenance and atomic batch orchestration.
+The v1.0 implementation preserves existing Graphiti and MCP behavior. It delivered a gated typed-primitives foundation followed by provenance and atomic batch orchestration.
 
 ## Core Value
 
