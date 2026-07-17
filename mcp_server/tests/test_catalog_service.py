@@ -2431,6 +2431,46 @@ async def test_provenance_divergent_duplicate_conflicts_are_order_independent(re
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('read_name', ['get_mentions_link', 'get_edge_by_uuid'])
+async def test_provenance_unchanged_link_read_failure_is_internal_error(read_name):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    src_uuid, ent_uuid = _wire_provenance_store(service)
+    source = _source()
+    source_row = {
+        'uuid': src_uuid,
+        'content_sha256': canonical_sha256(service.source_canonical_payload(source)),
+        'source_key': source.source_key,
+    }
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=source_row)
+    edge_targets = []
+    if read_name == 'get_mentions_link':
+        service._store.get_mentions_link = AsyncMock(side_effect=TimeoutError('timed out'))
+    else:
+        edge = _edge()
+        edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
+        edge_targets = [
+            CatalogProvenanceEdgeTarget(edge_type=edge.edge_type, edge_key=edge.edge_key)
+        ]
+        service._store.get_edge_by_uuid = AsyncMock(
+            side_effect=[{'uuid': edge_uuid, 'name': edge.edge_type}, TimeoutError('timed out')]
+        )
+        service._store.get_mentions_link = AsyncMock(
+            return_value={'uuid': catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, ent_uuid)}
+        )
+
+    resp = await service.upsert_provenance(
+        client=client,
+        request=_prov_request(sources=[source], edge_targets=edge_targets),
+    )
+
+    assert resp.results[0].error_code == CatalogErrorCode.internal_error
+    assert resp.results[0].error_code != CatalogErrorCode.provenance_target_missing
+    assert 'transaction' not in client.call_order
+    cast(AsyncMock, service._store.ensure_uuid_uniqueness_constraints).assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_provenance_non_atomic_transaction_failure_marks_prior_result_rolled_back():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -2875,6 +2915,68 @@ async def test_batch_divergent_provenance_duplicate_is_order_independent(reverse
         result.error_code == CatalogErrorCode.deterministic_uuid_conflict for result in resp.results
     )
     cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('read_name', ['get_mentions_link', 'get_edge_by_uuid'])
+async def test_batch_unchanged_provenance_link_read_failure_is_structured(read_name):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    source = _source()
+    src_uuid = catalog_source_uuid(FIXED_NS, GROUP, source.source_key)
+    source_row = {
+        'uuid': src_uuid,
+        'content_sha256': canonical_sha256(service.source_canonical_payload(source)),
+        'source_key': source.source_key,
+    }
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=source_row)
+    employee = _entity()
+    provenance_kwargs = {
+        'sources': [source],
+        'entity_targets': [
+            CatalogProvenanceEntityTarget(
+                entity_type=employee.entity_type, graph_key=employee.graph_key
+            )
+        ],
+    }
+    if read_name == 'get_mentions_link':
+        service._store.get_mentions_link = AsyncMock(side_effect=TimeoutError('timed out'))
+    else:
+        edge = _edge()
+        provenance_kwargs['edge_targets'] = [
+            CatalogProvenanceEdgeTarget(edge_type=edge.edge_type, edge_key=edge.edge_key)
+        ]
+        service._store.get_edge_by_uuid = AsyncMock(
+            side_effect=[
+                None,
+                TimeoutError('timed out'),
+            ]
+        )
+        service._store.get_mentions_link = AsyncMock(return_value={'uuid': 'existing-mention'})
+
+    entities = [employee]
+    if read_name == 'get_edge_by_uuid':
+        entities.append(
+            _entity(
+                graph_key='TABLE::HR.DEPARTMENTS',
+                name_raw='DEPARTMENTS',
+                name_canonical='departments',
+                database_qualified_name='HR.DEPARTMENTS',
+            )
+        )
+    request = _batch_request(
+        entities=entities,
+        edges=[_edge()] if read_name == 'get_edge_by_uuid' else [],
+        provenance=NestedProvenancePayload(**provenance_kwargs),
+    )
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.error_code == CatalogErrorCode.internal_error
+    assert resp.error_code != CatalogErrorCode.provenance_target_missing
+    client.embedder.create.assert_not_awaited()
+    cast(AsyncMock, service._store.ensure_uuid_uniqueness_constraints).assert_not_awaited()
+    assert 'transaction' not in client.call_order
 
 
 @pytest.mark.asyncio

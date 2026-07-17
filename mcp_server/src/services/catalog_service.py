@@ -3005,23 +3005,55 @@ class CatalogService:
                             mentions_uuid=men_uuid,
                             group_id=request.group_id,
                         )
-                    except Exception:
-                        link = None
+                    except Exception as exc:
+                        logger.error(
+                            'catalog provenance_link_read_failed batch_id=%s kind=entity reason=%s',
+                            request.batch_id,
+                            type(exc).__name__,
+                        )
+                        early_errors[prep.index] = CatalogItemResult(
+                            index=prep.index,
+                            status='error',
+                            uuid=prep.source_uuid,
+                            graph_key=prep.item.source_key,
+                            error_code=CatalogErrorCode.internal_error,
+                            error_message='provenance link pre-read failed',
+                            details={'reason': type(exc).__name__, 'kind': 'entity'},
+                        )
+                        break
                     if link is None:
                         missing_links = True
                         break
+                if prep.index in early_errors:
+                    continue
                 if not missing_links:
                     for edge_uuid in prep.edge_uuids:
                         try:
                             erow = await self._store.get_edge_by_uuid(
                                 driver, uuid=edge_uuid, group_id=request.group_id
                             )
-                        except Exception:
-                            erow = None
+                        except Exception as exc:
+                            logger.error(
+                                'catalog provenance_link_read_failed batch_id=%s kind=edge reason=%s',
+                                request.batch_id,
+                                type(exc).__name__,
+                            )
+                            early_errors[prep.index] = CatalogItemResult(
+                                index=prep.index,
+                                status='error',
+                                uuid=prep.source_uuid,
+                                graph_key=prep.item.source_key,
+                                error_code=CatalogErrorCode.internal_error,
+                                error_message='provenance link pre-read failed',
+                                details={'reason': type(exc).__name__, 'kind': 'edge'},
+                            )
+                            break
                         episodes = (erow or {}).get('episodes') or []
                         if prep.source_uuid not in episodes:
                             missing_links = True
                             break
+                if prep.index in early_errors:
+                    continue
                 if not missing_links:
                     prep.projected_status = 'unchanged'
                 else:
@@ -4025,29 +4057,59 @@ class CatalogService:
                     for entity_uuid in prep.entity_uuids
                 ]
                 if existing is not None and prep.projected_status == 'unchanged':
+                    link_read_error: Exception | None = None
                     for entity_uuid, mentions_uuid in zip(
                         prep.entity_uuids, prep.mentions_uuids, strict=True
                     ):
-                        link = await self._store.get_mentions_link(
-                            client.driver,
-                            episode_uuid=source_uuid,
-                            entity_uuid=entity_uuid,
-                            mentions_uuid=mentions_uuid,
-                            group_id=request.group_id,
-                        )
+                        try:
+                            link = await self._store.get_mentions_link(
+                                client.driver,
+                                episode_uuid=source_uuid,
+                                entity_uuid=entity_uuid,
+                                mentions_uuid=mentions_uuid,
+                                group_id=request.group_id,
+                            )
+                        except Exception as exc:
+                            link_read_error = exc
+                            break
                         if link is None:
                             prep.projected_status = 'updated'
                             prep.missing_links = True
                             break
-                    if prep.projected_status == 'unchanged':
+                    if link_read_error is None and prep.projected_status == 'unchanged':
                         for edge_uuid in prep.edge_uuids:
-                            edge_row = await self._store.get_edge_by_uuid(
-                                client.driver, uuid=edge_uuid, group_id=request.group_id
-                            )
+                            try:
+                                edge_row = await self._store.get_edge_by_uuid(
+                                    client.driver, uuid=edge_uuid, group_id=request.group_id
+                                )
+                            except Exception as exc:
+                                link_read_error = exc
+                                break
                             if source_uuid not in ((edge_row or {}).get('episodes') or []):
                                 prep.projected_status = 'updated'
                                 prep.missing_links = True
                                 break
+                    if link_read_error is not None:
+                        logger.error(
+                            'catalog batch provenance_link_read_failed batch_id=%s reason=%s',
+                            request.batch_id,
+                            type(link_read_error).__name__,
+                        )
+                        errors.append(
+                            CatalogItemResult(
+                                index=result_index,
+                                status='error',
+                                uuid=source_uuid,
+                                graph_key=source.source_key,
+                                error_code=CatalogErrorCode.internal_error,
+                                error_message=(
+                                    'provenance link pre-read failed: '
+                                    f'{type(link_read_error).__name__}'
+                                ),
+                                details={'kind': 'provenance'},
+                            )
+                        )
+                        continue
                 provenance_sources.append(prep)
                 provenance_by_uuid[source_uuid] = prep
 
