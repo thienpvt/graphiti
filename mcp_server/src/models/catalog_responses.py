@@ -11,6 +11,16 @@ from models.catalog_common import CatalogErrorCode
 ItemStatus = Literal['created', 'updated', 'unchanged', 'rolled_back', 'error']
 
 
+class CatalogStructuredError(BaseModel):
+    """SAFE-08 structured validation error DTO (non-strict response surface)."""
+
+    code: CatalogErrorCode
+    message: str = Field(..., max_length=512)
+    field_path: str | None = None
+    retryable: bool = False
+    correlation_id: str
+
+
 class CatalogItemResult(BaseModel):
     """Per-item result preserving input order."""
 

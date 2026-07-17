@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import math
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 
 class StrEnum(str, Enum):
@@ -185,3 +186,45 @@ class CatalogErrorCode(StrEnum):
     prepared_plan_already_consumed = 'prepared_plan_already_consumed'
     manifest_mismatch = 'manifest_mismatch'
     provenance_link_conflict = 'provenance_link_conflict'
+
+
+_MAX_STRUCTURED_ERROR_MESSAGE_LENGTH = 512
+
+
+def catalog_validation_error_to_structured(
+    exc: ValidationError,
+    *,
+    correlation_id: str,
+) -> dict[str, Any]:
+    """Convert a Pydantic ValidationError into a SAFE-08 structured error dict.
+
+    Pure adapter for catch/log paths. FastMCP already rejects invalid typed tool
+    arguments via model_validate before tool bodies run; this helper does not
+    replace that boundary. Never copies input, payload, stack, or secrets.
+    """
+    errors = exc.errors()
+    first = errors[0] if errors else {}
+    loc = tuple(first.get('loc') or ())
+    field_path = '.'.join(str(part) for part in loc) if loc else None
+    loc_names = {str(part) for part in loc}
+
+    if 'identity_schema_version' in loc_names:
+        code = CatalogErrorCode.unsupported_identity_schema
+        message = 'Unsupported identity schema version'
+    elif 'system_key' in loc_names:
+        code = CatalogErrorCode.invalid_system_key
+        message = 'Invalid system key'
+    else:
+        code = CatalogErrorCode.validation_error
+        message = 'Request validation failed'
+
+    if len(message) > _MAX_STRUCTURED_ERROR_MESSAGE_LENGTH:
+        message = message[:_MAX_STRUCTURED_ERROR_MESSAGE_LENGTH]
+
+    return {
+        'code': code,
+        'message': message,
+        'field_path': field_path,
+        'retryable': False,
+        'correlation_id': correlation_id,
+    }

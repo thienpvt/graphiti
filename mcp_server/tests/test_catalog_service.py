@@ -13,6 +13,7 @@ from typing import Literal, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
@@ -845,9 +846,7 @@ async def test_resolve_graph_key_echo_exact_full_system_scoped_key_iden08():
             }
         ]
     )
-    req = _resolve_request(
-        entities=[ResolveEntityRef(entity_type='Table', graph_key=full_key)]
-    )
+    req = _resolve_request(entities=[ResolveEntityRef(entity_type='Table', graph_key=full_key)])
     resp = await service.resolve_typed_entities(client=client, request=req)
     assert len(resp.results) == 1
     assert resp.results[0].graph_key == full_key
@@ -3913,8 +3912,6 @@ async def test_mcp_registers_exactly_seven_catalog_tools_and_preserves_legacy_to
 # ---------------------------------------------------------------------------
 # CONT-07 / SAFE-08 production boundary + no-side-effect spies (01-04)
 # ---------------------------------------------------------------------------
-
-from pydantic import ValidationError  # noqa: E402
 
 
 _FROZEN_CATALOG_TOOL_REQUEST_MODELS = {

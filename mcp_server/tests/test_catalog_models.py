@@ -29,6 +29,7 @@ from models.catalog_common import (  # noqa: E402
     MAX_NESTED_DEPTH,
     MAX_NESTED_NODES,
     MAX_SHORT_STRING_LENGTH,
+    MAX_SUMMARY_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     CatalogErrorCode,
 )
@@ -2126,8 +2127,8 @@ def test_structured_error_message_bounded_and_non_leaking():
         )
     nested_out = convert(nested_exc.value, correlation_id='cccccccc-dddd-4eee-8fff-000000000001')
     assert nested_out['field_path'] == 'entities.0.typo_nested'
-    # oversize message truncation contract (synthetic multi-error still bounded)
-    huge = 'x' * 2000
+    # oversize field value must not leak into bounded structured message
+    huge = 'x' * (MAX_SUMMARY_LENGTH + 50)
     with pytest.raises(ValidationError) as huge_exc:
         UpsertTypedEntitiesRequest.model_validate(
             {
@@ -2140,3 +2141,4 @@ def test_structured_error_message_bounded_and_non_leaking():
     huge_out = convert(huge_exc.value, correlation_id='dddddddd-eeee-4fff-8000-111111111111')
     assert len(huge_out['message']) <= 512
     assert huge not in huge_out['message']
+    assert 'x' * 64 not in huge_out['message']
