@@ -10,21 +10,21 @@ last_updated: "2026-07-17T17:58:25.926Z"
 last_activity: 2026-07-18
 last_activity_desc: Phase 0 complete, transitioned to Phase 1
 progress:
-  total_phases: 1
+  total_phases: 7
   completed_phases: 1
   total_plans: 2
   completed_plans: 2
-  percent: 100
+  percent: 14
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-17)
+See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 0 — Baseline, Inventory, and Compatibility Policy
+**Current focus:** Phase 1 — Strict Contracts and Catalog-v2 Identity
 
 ## Current Position
 
@@ -33,13 +33,13 @@ Plan: Not started
 Status: Ready to plan
 Last activity: 2026-07-18 — Phase 0 complete, transitioned to Phase 1
 
-Progress: [██████████] 100%
+Progress: [█░░░░░░░░░] 14%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 16 (v1.0)
+- Total plans completed: 16 (14 in v1.0, 2 in v1.1)
 - Average duration: tracked in plan summaries
 - Total execution time: tracked in plan summaries
 
@@ -49,8 +49,8 @@ Progress: [██████████] 100%
 |-------|-------|-------|----------|
 | v1.0 Phase 1. Typed Catalog Primitives | 8 | 8 | see summaries |
 | v1.0 Phase 2. Provenance and Atomic Batch | 6 | 6 | see summaries |
-| Phase 0–5 (v1.1, 7 work units) | 0 | TBD | - |
-| 0 | 2 | - | - |
+| Phase 0–5 (v1.1, 7 work units) | 2 | TBD | - |
+| Phase 0 | 2 | 2 | see summaries |
 
 **Prior milestone:**
 
@@ -81,7 +81,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None. Next: `/gsd-plan-phase 0` (or discuss Phase 0 if discuss mode requires it). Not "plan Phase 3".
+None. Next: discuss and plan Phase 1; enforce the Phase 0 compatibility and isolation gate.
 
 ### Blockers/Concerns
 
@@ -108,7 +108,7 @@ None. Next: `/gsd-plan-phase 0` (or discuss Phase 0 if discuss mode requires it)
 
 ## Session Continuity
 
-Last session: 2026-07-17
-Stopped at: ROADMAP/REQUIREMENTS/STATE reconciled to canonical Phase 0/1/2/3A/3B/4/5
+Last session: 2026-07-18
+Stopped at: Phase 0 complete; ready to discuss and plan Phase 1
 Resume file: None
-Next: present roadmap for approval; plan Phase 0 after approval
+Next: Phase 1 — Strict Contracts and Catalog-v2 Identity

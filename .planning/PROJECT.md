@@ -25,6 +25,8 @@ A catalog item can be retried safely and commits as exactly one deterministic, c
 
 ### Validated
 
+- ✓ Phase 0 recorded the live 14 legacy + 7 catalog MCP tool baseline and offline historical canary evidence — Phase 0
+- ✓ Phase 0 froze the catalog-v1 compatibility boundary and test-group/canary/dirty-tree/remote isolation policy — Phase 0
 - ✓ Standard Graphiti MCP tools already expose semantic ingestion, search, triplet, maintenance, and deletion operations — existing
 - ✓ The MCP server already supports YAML configuration with environment expansion and Pydantic validation — existing
 - ✓ Neo4j is supported through an asynchronous driver with real transactions — existing
@@ -144,6 +146,8 @@ Existing unrelated working-tree changes in `mcp_server/k8s/graphiti-neo4j.yaml`,
 | Gate Phase 2 on Phase 1 integration quality | Provenance and orchestration depend on trusted typed primitives | ✓ Gate passed before Phase 2 |
 | Keep normal upserts community-neutral | Community construction is maintenance behavior, not ingestion behavior | ✓ Delivered |
 | Use source CAS and ordered retained target locks | Close provenance validation/mutation TOCTOU under concurrent writes | ✓ Delivered |
+| Treat pre-hardening ACCEPT_TAB artifacts as offline historical evidence only | Catalog-v1 hashes and receipts cannot authorize hardened catalog-v2 behavior | ✓ Phase 0 |
+| Gate Phase 1 on recorded artifacts, safety invariants, and truthful pass/fail/skip results | Baseline failures must remain distinguishable from v1.1 regressions | ✓ Phase 0 |
 
 ## Evolution
 
@@ -163,4 +167,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-17 after starting milestone v1.1*
+*Last updated: 2026-07-18 after Phase 0*
