@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-07-17)
 Phase: 0 of 7 (Baseline, Inventory, and Compatibility Policy) — v1.1 active spine is Phase 0, 1, 2, 3A, 3B, 4, 5
 Plan: —
 Status: Ready to plan Phase 0
-Last activity: 2026-07-17 — planning artifacts remapped to canonical pre-canary phases (138/138)
+Last activity: 2026-07-17 — completed quick task 260717-wvz: canonical roadmap reconciliation (138/138)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -84,6 +84,12 @@ None. Next: `/gsd-plan-phase 0` (or discuss Phase 0 if discuss mode requires it)
 - Preserve unrelated working-tree dirt: `.planning/config.json`, docker/k8s configs, `.codegraph/`, `catalog/`, `mcp_server/sample_catalog.json`
 - Do not push, merge, deploy, or tag without separate approval
 - Neo4j property-size / single-tx limits for prepared payloads and manifests must be validated in Phase 3A/3B planning
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260717-wvz | Reconcile ROADMAP.md and REQUIREMENTS.md to the canonical pre-canary roadmap; preserve 138/138 unique mappings | 2026-07-17 | 37ff944 | [260717-wvz-reconcile-planning-roadmap-md-and-planni](./quick/260717-wvz-reconcile-planning-roadmap-md-and-planni/) |
 
 ## Deferred Items
 
