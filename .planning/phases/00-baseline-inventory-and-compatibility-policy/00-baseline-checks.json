@@ -1,0 +1,40 @@
+{
+  "checks": [
+    {
+      "name": "catalog_unit_and_offline_canary",
+      "command": "cd mcp_server && uv run pytest tests/test_catalog_models.py tests/test_catalog_identity.py tests/test_catalog_service.py tests/test_catalog_store_unit.py tests/test_catalog_canary_scripts.py -q --tb=line",
+      "status": "fail",
+      "exit_code": 1,
+      "first_failure_id": "tests/test_catalog_canary_scripts.py::test_artifact_set_fields_canonical_bytes_hashes_and_manifest_counts",
+      "notes": "8 failed, 319 passed. Pre-existing: CRLF vs LF on Windows artifact bytes; missing catalog/catalog.json in worktree; cascading artifact_hash_mismatch / canonical-LF errors. Not repaired in Phase 0."
+    },
+    {
+      "name": "ruff_catalog_surface",
+      "command": "cd mcp_server && uv run ruff check src/models/catalog_*.py src/services/catalog_*.py tests/test_catalog*.py",
+      "status": "pass",
+      "exit_code": 0,
+      "first_failure_id": null,
+      "notes": "All checks passed"
+    },
+    {
+      "name": "pyright_catalog_scoped",
+      "command": "cd mcp_server && uv run pyright src/models src/services/catalog_identity.py src/services/catalog_service.py src/services/catalog_store.py",
+      "status": "pass",
+      "exit_code": 0,
+      "first_failure_id": null,
+      "notes": "Scoped catalog modules only (research Q2). 0 errors, 0 warnings"
+    },
+    {
+      "name": "catalog_neo4j_int",
+      "command": "cd mcp_server && uv run pytest tests/test_catalog_neo4j_int.py -q --tb=line",
+      "status": "skip",
+      "exit_code": null,
+      "first_failure_id": null,
+      "notes": "Neo4j not required for Phase 0; default skip. Never targets oracle-catalog-v2"
+    }
+  ],
+  "canary_executed": false,
+  "oracle_catalog_v2_queried": false,
+  "recorded_at": "2026-07-17T17:40:00Z",
+  "notes": "Phase 0 records only and does not repair product failures. Unavailable checks are skip, never pass."
+}

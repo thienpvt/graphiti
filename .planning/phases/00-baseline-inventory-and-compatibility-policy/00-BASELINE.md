@@ -88,11 +88,14 @@ Paths, digests, and counts only. Full payloads and source text are not embedded.
 
 ## 5. Check ledger
 
-Filled by Task 2. Status enum: `pass` | `fail` | `skip`.
+Status enum: `pass` | `fail` | `skip`. Recorded 2026-07-17T17:40:00Z (UTC). Phase 0 records only; does not repair product failures.
 
 | name | command | status | exit_code | first_failure_id | notes |
 |------|---------|--------|-----------|------------------|-------|
-| | | | | | |
+| catalog_unit_and_offline_canary | `cd mcp_server && uv run pytest tests/test_catalog_models.py tests/test_catalog_identity.py tests/test_catalog_service.py tests/test_catalog_store_unit.py tests/test_catalog_canary_scripts.py -q --tb=line` | fail | 1 | `tests/test_catalog_canary_scripts.py::test_artifact_set_fields_canonical_bytes_hashes_and_manifest_counts` | 8 failed, 319 passed. Pre-existing: CRLF vs LF on Windows artifact bytes; missing `catalog/catalog.json` in worktree; cascading artifact_hash_mismatch / canonical-LF errors. Not repaired in Phase 0. |
+| ruff_catalog_surface | `cd mcp_server && uv run ruff check src/models/catalog_*.py src/services/catalog_*.py tests/test_catalog*.py` | pass | 0 | null | All checks passed |
+| pyright_catalog_scoped | `cd mcp_server && uv run pyright src/models src/services/catalog_identity.py src/services/catalog_service.py src/services/catalog_store.py` | pass | 0 | null | Scoped catalog modules only (research Q2). 0 errors, 0 warnings |
+| catalog_neo4j_int | `cd mcp_server && uv run pytest tests/test_catalog_neo4j_int.py -q --tb=line` | skip | null | null | Neo4j not required for Phase 0; default skip. Never targets `oracle-catalog-v2` |
 
 ## 6. Safety flags
 
