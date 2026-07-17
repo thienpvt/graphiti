@@ -19,7 +19,6 @@ affects:
   - 01-03 identity UUID material versioning
   - 01-04 validation error conversion / SAFE gates
   - later service/MCP request construction using v2 keys
-  - Plan 04 dead service branches for removed model fields
 
 tech-stack:
   added: []
@@ -46,7 +45,7 @@ key-decisions:
   - "Procedure/Function require terminal nonempty #OVERLOAD; package optional segment"
   - "No dual-version rewrite helper; catalog-v1 prefix-only keys rejected"
   - "Remove ResolveTypedEntitiesRequest.graph_keys and VerifyEdgeRef expected_*_graph_key (UUID expectations only)"
-  - "catalog_service.py left untouched; dead branches deferred to Plan 04"
+  - "catalog_service.py stale graph_keys / expected_*_graph_key reads removed with model fields"
 
 patterns-established:
   - "Pattern: validate_entity_graph_key(*, entity_type, graph_key, system_key) pure fullmatch + system equality"
@@ -165,6 +164,8 @@ status: complete
 | 2 | GREEN — registry module and model hooks | `ac92232` | `catalog_graph_key.py` + model hooks + fixture fix |
 | C1 | RED — cover all graph-key input paths | `b1cc868` | `mcp_server/tests/test_catalog_models.py` |
 | C2 | GREEN — close untyped graph-key bypasses | `4b8c089` | entities/edges/provenance/graph_key + tests |
+| C3 | RED — expose stale graph-key service reads | `a8bcd3e` | `test_catalog_service.py` |
+| C4 | GREEN — remove stale graph-key service reads | `fea1377` | `catalog_service.py` + service tests |
 
 ## TDD Gate Compliance
 
@@ -173,6 +174,8 @@ status: complete
 3. REFACTOR: explicit no-op — GREEN minimal; no further cleanup commit
 4. Correction RED: `test(01-02): cover all graph-key input paths` (`b1cc868`)
 5. Correction GREEN: `fix(01-02): close untyped graph-key validation bypasses` (`4b8c089`)
+6. Service RED: `test(01-02): expose stale graph-key service reads` (`a8bcd3e`)
+7. Service GREEN: `fix(01-02): remove stale graph-key service reads`
 
 ### RED results
 
@@ -183,7 +186,7 @@ status: complete
 ### GREEN results
 
 - Full suite after initial GREEN: `170 passed`
-- Full suite after correction: `181 passed`
+- Full suite after correction: models `181` + focused Phase1 `389 passed`
 - Ruff: all checks passed
 - Pyright: 0 errors (registry + models + test file)
 
@@ -238,9 +241,12 @@ Kept: `expected_source_uuid` / `expected_target_uuid` only.
 
 All remaining paths call `_match_entity_graph_key` and/or `validate_entity_graph_key`.
 
-### Deferred
+### Service compatibility (same plan)
 
-- `catalog_service.py` still references removed fields (`request.graph_keys`, `edge.expected_*_graph_key`) — dead after model validation; deferred to Plan 04. No service edit in this correction.
+- Removed `request.graph_keys` branch from `resolve_typed_entities` (empty typed resolve proceeds via read gate/store; no write)
+- Removed `expected_source_graph_key` / `expected_target_graph_key` compares in `_verify_edges`; UUID expectations only
+- Production `mcp_server/src` has zero matches for the three removed attribute names
+- Service fixtures retargeted to catalog-v2 shell/keys; focused suite: models+identity+service+store_unit
 
 ## Deviations from Plan
 
@@ -264,10 +270,10 @@ All remaining paths call `_match_entity_graph_key` and/or `validate_entity_graph
 - **Found during:** Post-plan review (coordinator)
 - **Issue:** `ResolveTypedEntitiesRequest.graph_keys` and `VerifyEdgeRef.expected_*_graph_key` accepted arbitrary strings without fullmatch/type
 - **Fix:** Field removal + `_match_entity_graph_key` simplification; RED path matrix
-- **Files modified:** `catalog_entities.py`, `catalog_edges.py`, `catalog_provenance.py`, `catalog_graph_key.py`, tests
-- **Commits:** `b1cc868`, `4b8c089`
+- **Files modified:** models + `catalog_service.py` + service fixtures
+- **Commits:** `b1cc868`, `4b8c089`, `a8bcd3e`, `fea1377`
 
-Otherwise plan executed as written. No dual-version rewrite helper. No edge topology map. No UUID material changes. No `catalog_service.py` edit.
+Otherwise plan executed as written. No dual-version rewrite helper. No edge topology map. No UUID material versioning changes beyond grammar.
 
 ## Threat Flags
 
@@ -285,8 +291,9 @@ None new beyond plan mitigations T-01-06..10 (fullmatch registry, system match, 
 - `mcp_server/src/models/catalog_graph_key.py` FOUND
 - `_match_entity_graph_key` + `validate_entity_graph_key` present; `_body` removed
 - Removals: `graph_keys`, `expected_source_graph_key`, `expected_target_graph_key` absent from model fields
-- Commits FOUND: `565a75d`, `ac92232`, `b1cc868`, `4b8c089`
-- Suite: 181 passed; Ruff pass; Pyright 0
+- Production `mcp_server/src` zero matches for removed attribute names
+- Commits FOUND: `565a75d`, `ac92232`, `b1cc868`, `4b8c089`, `a8bcd3e`, `fea1377`
+- Suite: models+identity+service+store_unit 389 passed; Ruff pass; Pyright 0
 - STATE guards unchanged: total_phases=7, completed_phases=1, total_plans=7, completed_plans=4, percent=14
 - No new dependency
 - Unrelated working-tree dirt preserved
