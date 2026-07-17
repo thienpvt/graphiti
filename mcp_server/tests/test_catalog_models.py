@@ -61,7 +61,7 @@ FIXED_NS = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'
 def _entity_kwargs(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         'entity_type': 'Table',
-        'graph_key': 'TABLE::HR.EMPLOYEES',
+        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
         'name_raw': 'EMPLOYEES',
         'name_canonical': 'employees',
         'database_qualified_name': 'ORCL.HR.EMPLOYEES',
@@ -74,10 +74,10 @@ def _entity_kwargs(**overrides: Any) -> dict[str, Any]:
 def _edge_kwargs(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         'edge_type': 'Contains',
-        'edge_key': 'CONTAINS::SCHEMA::HR->TABLE::HR.EMPLOYEES',
-        'source_graph_key': 'SCHEMA::HR',
+        'edge_key': 'CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
+        'source_graph_key': 'SCHEMA::FE::ORCL.HR',
         'source_entity_type': 'Schema',
-        'target_graph_key': 'TABLE::HR.EMPLOYEES',
+        'target_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
         'target_entity_type': 'Table',
         'fact': 'Schema HR contains table EMPLOYEES',
     }
@@ -199,9 +199,10 @@ def test_schema_source_has_no_uuid4_namespace_factory():
 # ---------------------------------------------------------------------------
 
 
-def test_entity_type_prefixes_has_fifteen_types():
-    assert len(ENTITY_TYPE_PREFIXES) == 15
+def test_entity_type_prefixes_has_eighteen_types():
+    assert len(ENTITY_TYPE_PREFIXES) == 18
     expected = {
+        'System': 'SYSTEM::',
         'Database': 'DATABASE::',
         'DictionaryDocument': 'DOC::',
         'Schema': 'SCHEMA::',
@@ -217,6 +218,8 @@ def test_entity_type_prefixes_has_fifteen_types():
         'Trigger': 'TRIGGER::',
         'Sequence': 'SEQUENCE::',
         'Synonym': 'SYNONYM::',
+        'DatabaseLink': 'DBLINK::',
+        'SourceArtifact': 'SOURCE::',
     }
     assert expected == ENTITY_TYPE_PREFIXES
 
@@ -323,7 +326,11 @@ def test_upsert_entities_rejects_invalid_group_id():
         ),
         (
             ResolveTypedEntitiesRequest,
-            lambda: {'entities': [{'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'}]},
+            lambda: {
+                'entities': [
+                    {'entity_type': 'Table', 'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES'}
+                ]
+            },
         ),
         (VerifyCatalogBatchRequest, lambda: {'batch_id': 'batch-1'}),
         (
@@ -369,7 +376,7 @@ def test_entity_item_rejects_unknown_type():
 
 def test_entity_item_rejects_wrong_prefix():
     with pytest.raises(ValidationError) as exc:
-        _entity(graph_key='SCHEMA::HR.EMPLOYEES')
+        _entity(graph_key='SCHEMA::FE::ORCL.HR.EMPLOYEES')
     msg = str(exc.value).lower()
     assert 'prefix' in msg or 'graph_key' in msg
 
@@ -421,7 +428,10 @@ def test_entity_item_accepts_valid_content_sha256():
 
 
 def test_entity_collection_above_default_constructs_within_hard_max():
-    entities = [_entity_kwargs(graph_key=f'TABLE::T{i}') for i in range(501)]
+    entities = [
+        _entity_kwargs(graph_key=f'TABLE::FE::ORCL.HR.T{i}', name_raw=f'T{i}', name_canonical=f't{i}')
+        for i in range(501)
+    ]
     request = UpsertTypedEntitiesRequest.model_validate(
         {
             'identity_schema_version': 'catalog-v2',
@@ -436,7 +446,8 @@ def test_entity_collection_above_default_constructs_within_hard_max():
 
 def test_entity_collection_above_hard_max_rejected():
     entities = [
-        _entity_kwargs(graph_key=f'TABLE::T{i}') for i in range(HARD_MAX_ENTITIES_PER_BATCH + 1)
+        _entity_kwargs(graph_key=f'TABLE::FE::ORCL.HR.T{i}', name_raw=f'T{i}', name_canonical=f't{i}')
+        for i in range(HARD_MAX_ENTITIES_PER_BATCH + 1)
     ]
     with pytest.raises(ValidationError):
         UpsertTypedEntitiesRequest.model_validate(
@@ -502,7 +513,7 @@ def test_resolve_accepts_valid():
             'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'entities': [
-                {'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'},
+                {'entity_type': 'Table', 'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES'},
             ],
         }
     )
@@ -658,12 +669,12 @@ def test_verify_edge_ref_is_backward_compatible_and_accepts_expected_endpoints()
     ref = VerifyEdgeRef(
         edge_type='Contains',
         edge_key='CONTAINS::K',
-        expected_source_graph_key='SCHEMA::HR',
-        expected_target_graph_key='TABLE::HR.EMPLOYEES',
+        expected_source_graph_key='SCHEMA::FE::ORCL.HR',
+        expected_target_graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
         expected_source_uuid=FIXED_NS,
         expected_target_uuid=FIXED_NS,
     )
-    assert ref.expected_source_graph_key == 'SCHEMA::HR'
+    assert ref.expected_source_graph_key == 'SCHEMA::FE::ORCL.HR'
     uppercase = FIXED_NS.upper()
     assert (
         VerifyEdgeRef(
@@ -704,7 +715,7 @@ def _source_kwargs(**overrides: Any) -> dict[str, Any]:
 def _entity_target(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         'entity_type': 'Table',
-        'graph_key': 'TABLE::HR.EMPLOYEES',
+        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
     }
     base.update(overrides)
     return base
@@ -713,7 +724,7 @@ def _entity_target(**overrides: Any) -> dict[str, Any]:
 def _edge_target(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         'edge_type': 'Contains',
-        'edge_key': 'CONTAINS::SCHEMA::HR->TABLE::HR.EMPLOYEES',
+        'edge_key': 'CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
     }
     base.update(overrides)
     return base
@@ -755,7 +766,7 @@ def test_provenance_entity_target_allowlist_and_prefix():
         CatalogProvenanceEntityTarget.model_validate(_entity_target(entity_type='Widget'))
     with pytest.raises(ValidationError):
         CatalogProvenanceEntityTarget.model_validate(
-            _entity_target(graph_key='SCHEMA::HR.EMPLOYEES')
+            _entity_target(graph_key='SCHEMA::FE::ORCL.HR.EMPLOYEES')
         )
 
 
@@ -820,7 +831,7 @@ def test_upsert_provenance_rejects_invalid_group_id():
 
 def test_upsert_provenance_rejects_oversize_links():
     targets = [
-        _entity_target(graph_key=f'TABLE::T{i}')
+        _entity_target(graph_key=f'TABLE::FE::ORCL.HR.T{i}')
         for i in range(HARD_MAX_PROVENANCE_LINKS_PER_BATCH + 1)
     ]
     with pytest.raises(ValidationError):
@@ -841,7 +852,9 @@ def test_upsert_provenance_rejects_generated_link_product_over_hard_max():
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'batch-1',
                 'sources': [_source_kwargs(source_key=f'DOC::SRC::{i}') for i in range(201)],
-                'entity_targets': [_entity_target(graph_key=f'TABLE::T{i}') for i in range(100)],
+                'entity_targets': [
+                    _entity_target(graph_key=f'TABLE::FE::ORCL.HR.T{i}') for i in range(100)
+                ],
             }
         )
 
@@ -874,12 +887,15 @@ def test_upsert_catalog_batch_accepts_nested_entities():
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
             'entities': [
-                _entity_kwargs(graph_key='TABLE::A', name_raw='A', name_canonical='a'),
-                _entity_kwargs(graph_key='TABLE::B', name_raw='B', name_canonical='b'),
+                _entity_kwargs(graph_key='TABLE::FE::ORCL.HR.A', name_raw='A', name_canonical='a'),
+                _entity_kwargs(graph_key='TABLE::FE::ORCL.HR.B', name_raw='B', name_canonical='b'),
             ],
         }
     )
-    assert [e.graph_key for e in req2.entities] == ['TABLE::A', 'TABLE::B']
+    assert [e.graph_key for e in req2.entities] == [
+        'TABLE::FE::ORCL.HR.A',
+        'TABLE::FE::ORCL.HR.B',
+    ]
 
 
 def test_upsert_catalog_batch_rejects_atomic_false():
@@ -938,7 +954,7 @@ def test_nested_batch_rejects_generated_link_product_over_hard_max():
                 'provenance': {
                     'sources': [_source_kwargs(source_key=f'DOC::SRC::{i}') for i in range(201)],
                     'entity_targets': [
-                        _entity_target(graph_key=f'TABLE::T{i}') for i in range(100)
+                        _entity_target(graph_key=f'TABLE::FE::ORCL.HR.T{i}') for i in range(100)
                     ],
                 },
             }
@@ -1225,7 +1241,12 @@ def _loc_paths(exc: ValidationError) -> list[tuple[Any, ...]]:
             ResolveTypedEntitiesRequest,
             {
                 **_v2_shell(
-                    entities=[{'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'}],
+                    entities=[
+                        {
+                            'entity_type': 'Table',
+                            'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                        }
+                    ],
                 ),
                 'extra_resolve': 1,
             },
@@ -1256,7 +1277,11 @@ def _loc_paths(exc: ValidationError) -> list[tuple[Any, ...]]:
         ),
         (
             ResolveEntityRef,
-            {'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES', 'sneaky': 1},
+            {
+                'entity_type': 'Table',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'sneaky': 1,
+            },
             ('sneaky',),
         ),
         (
@@ -1355,7 +1380,12 @@ def test_atomic_false_rejected_on_entity_edge_provenance_batch_writes(model, pay
             ResolveTypedEntitiesRequest,
             lambda: {
                 'group_id': 'oracle-catalog-tool-test',
-                'entities': [{'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'}],
+                'entities': [
+                    {
+                        'entity_type': 'Table',
+                        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                    }
+                ],
             },
         ),
         (
@@ -1364,7 +1394,11 @@ def test_atomic_false_rejected_on_entity_edge_provenance_batch_writes(model, pay
         ),
         (
             UpsertTypedEdgesRequest,
-            lambda: {'group_id': 'oracle-catalog-tool-test', 'batch_id': 'b', 'edges': [_edge_kwargs()]},
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'b',
+                'edges': [_edge_kwargs()],
+            },
         ),
         (
             UpsertProvenanceRequest,
@@ -1429,7 +1463,12 @@ def test_identity_schema_version_required_and_rejects_non_v2(model_payload):
             ResolveTypedEntitiesRequest,
             lambda: {
                 'group_id': 'oracle-catalog-tool-test',
-                'entities': [{'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'}],
+                'entities': [
+                    {
+                        'entity_type': 'Table',
+                        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                    }
+                ],
                 'identity_schema_version': 'catalog-v2',
             },
         ),
@@ -1470,6 +1509,31 @@ def test_identity_schema_version_required_and_rejects_non_v2(model_payload):
         ),
     ],
 )
+def _retarget_graph_keys_for_system(payload: dict[str, Any], system_key: str) -> dict[str, Any]:
+    """Rewrite nested FE graph keys so shell system_key matches (no silent product rewrite)."""
+
+    def rewrite(value: Any) -> Any:
+        if isinstance(value, dict):
+            out: dict[str, Any] = {}
+            for key, child in value.items():
+                if key in {
+                    'graph_key',
+                    'source_graph_key',
+                    'target_graph_key',
+                    'expected_source_graph_key',
+                    'expected_target_graph_key',
+                } and isinstance(child, str):
+                    out[key] = child.replace('::FE::', f'::{system_key}::', 1)
+                else:
+                    out[key] = rewrite(child)
+            return out
+        if isinstance(value, list):
+            return [rewrite(item) for item in value]
+        return value
+
+    return rewrite(payload)
+
+
 def test_system_key_required_closed_set(model_payload):
     model, payload_factory = model_payload
     base = payload_factory()
@@ -1483,7 +1547,7 @@ def test_system_key_required_closed_set(model_payload):
             model.model_validate({**base, 'system_key': bad})
 
     for good in ('FE', 'BO', 'COMMON'):
-        req = model.model_validate({**base, 'system_key': good})
+        req = model.model_validate(_retarget_graph_keys_for_system({**base, 'system_key': good}, good))
         assert req.system_key == good
 
 
@@ -1518,14 +1582,14 @@ def test_catalog_error_code_includes_phase1_codes_without_removing_existing():
 
 def test_valid_entity_list_order_preserved():
     entities = [
-        _entity_kwargs(graph_key='TABLE::Z', name_raw='Z', name_canonical='z'),
-        _entity_kwargs(graph_key='TABLE::A', name_raw='A', name_canonical='a'),
-        _entity_kwargs(graph_key='TABLE::M', name_raw='M', name_canonical='m'),
+        _entity_kwargs(graph_key='TABLE::FE::ORCL.HR.Z', name_raw='Z', name_canonical='z'),
+        _entity_kwargs(graph_key='TABLE::FE::ORCL.HR.A', name_raw='A', name_canonical='a'),
+        _entity_kwargs(graph_key='TABLE::FE::ORCL.HR.M', name_raw='M', name_canonical='m'),
     ]
     # Two identical nested items remain separate list entries (no merge-on-equality).
     entities_dup = [
-        _entity_kwargs(graph_key='TABLE::SAME', name_raw='S', name_canonical='s'),
-        _entity_kwargs(graph_key='TABLE::SAME', name_raw='S', name_canonical='s'),
+        _entity_kwargs(graph_key='TABLE::FE::ORCL.HR.SAME', name_raw='S', name_canonical='s'),
+        _entity_kwargs(graph_key='TABLE::FE::ORCL.HR.SAME', name_raw='S', name_canonical='s'),
     ]
     req = UpsertTypedEntitiesRequest.model_validate(
         {
@@ -1533,9 +1597,9 @@ def test_valid_entity_list_order_preserved():
         }
     )
     assert [e.graph_key for e in req.entities] == [
-        'TABLE::Z',
-        'TABLE::A',
-        'TABLE::M',
+        'TABLE::FE::ORCL.HR.Z',
+        'TABLE::FE::ORCL.HR.A',
+        'TABLE::FE::ORCL.HR.M',
     ]
     req_dup = UpsertTypedEntitiesRequest.model_validate(
         {
@@ -1543,4 +1607,234 @@ def test_valid_entity_list_order_preserved():
         }
     )
     assert len(req_dup.entities) == 2
-    assert [e.graph_key for e in req_dup.entities] == ['TABLE::SAME', 'TABLE::SAME']
+    assert [e.graph_key for e in req_dup.entities] == [
+        'TABLE::FE::ORCL.HR.SAME',
+        'TABLE::FE::ORCL.HR.SAME',
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Catalog-v2 graph-key grammar (IDEN-03..06,08,09,12)
+# ---------------------------------------------------------------------------
+
+
+_GRAMMAR_POSITIVE_KEYS: list[tuple[str, str]] = [
+    ('System', 'SYSTEM::FE::CORE'),
+    ('Database', 'DATABASE::FE::ORCL'),
+    ('DictionaryDocument', 'DOC::FE::ORCL.HR_DICT'),
+    ('Schema', 'SCHEMA::FE::ORCL.HR'),
+    ('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'),
+    ('View', 'VIEW::FE::ORCL.HR.EMP_V'),
+    ('MaterializedView', 'MVIEW::FE::ORCL.HR.EMP_MV'),
+    ('Column', 'COLUMN::FE::ORCL.HR.EMPLOYEES.EMP_ID'),
+    ('Constraint', 'CONSTRAINT::FE::ORCL.HR.EMP_PK'),
+    ('Index', 'INDEX::FE::ORCL.HR.EMP_IX'),
+    ('Package', 'PACKAGE::FE::ORCL.HR.EMP_PKG'),
+    ('Procedure', 'PROCEDURE::FE::ORCL.HR.EMP_PKG.HIRE#1'),
+    ('Function', 'FUNCTION::FE::ORCL.HR.EMP_PKG.GET_SAL#ARGS(P_ID)'),
+    ('Trigger', 'TRIGGER::FE::ORCL.HR.EMP_BI'),
+    ('Sequence', 'SEQUENCE::FE::ORCL.HR.EMP_SEQ'),
+    ('Synonym', 'SYNONYM::FE::ORCL.HR.EMP_SYN'),
+    ('DatabaseLink', 'DBLINK::FE::ORCL.REMOTE_HR'),
+    ('SourceArtifact', 'SOURCE::FE::PDF/HR_CATALOG#p12'),
+]
+
+
+def _entity_for_type(entity_type: str, graph_key: str, **overrides: Any) -> dict[str, Any]:
+    leaf = graph_key.rsplit('.', 1)[-1].split('#', 1)[0]
+    if entity_type == 'SourceArtifact':
+        leaf = graph_key.split('::', 2)[-1]
+    return _entity_kwargs(
+        entity_type=entity_type,
+        graph_key=graph_key,
+        name_raw=leaf[:64] or 'X',
+        name_canonical=(leaf[:64] or 'x').lower(),
+        database_qualified_name=graph_key.split('::', 2)[-1][:512],
+        **overrides,
+    )
+
+
+@pytest.mark.parametrize(('entity_type', 'graph_key'), _GRAMMAR_POSITIVE_KEYS)
+def test_grammar_positive_key_per_entity_type(entity_type: str, graph_key: str):
+    item = CatalogEntityItem.model_validate(_entity_for_type(entity_type, graph_key))
+    assert item.entity_type == entity_type
+    assert item.graph_key == graph_key
+
+    req = UpsertTypedEntitiesRequest.model_validate(
+        {
+            **_v2_shell(batch_id='grammar-pos', entities=[_entity_for_type(entity_type, graph_key)]),
+        }
+    )
+    assert req.entities[0].graph_key == graph_key
+    assert req.system_key == 'FE'
+
+
+@pytest.mark.parametrize(
+    ('entity_type', 'graph_key', 'marker'),
+    [
+        ('Table', 'TABLE::HR.EMPLOYEES', 'catalog_v1'),
+        ('Table', 'TABLE::fe::ORCL.HR.EMPLOYEES', 'lowercase_system'),
+        ('Table', 'TABLE::XX::ORCL.HR.EMPLOYEES', 'unknown_system'),
+        ('Table', 'TABLE::FE::ORCL.HR', 'wrong_segment_count'),
+        ('Table', 'TABLE::FE::orcl.HR.EMPLOYEES', 'lowercase_ident'),
+        ('Schema', 'TABLE::FE::ORCL.HR', 'type_prefix_mismatch'),
+        ('Procedure', 'PROCEDURE::FE::ORCL.HR.EMP_PKG.HIRE', 'missing_overload'),
+        ('Procedure', 'PROCEDURE::FE::ORCL.HR.EMP_PKG.HIRE#', 'empty_overload'),
+        ('Function', 'FUNCTION::FE::ORCL.HR.GET_SAL', 'missing_overload'),
+        ('Function', 'FUNCTION::FE::ORCL.HR.GET_SAL#', 'empty_overload'),
+        ('Table', '', 'empty_graph_key'),
+        ('Table', 'TABLE::FE::' + ('A' * 1100), 'overlong_graph_key'),
+    ],
+)
+def test_grammar_negative_rejects_invalid_keys(entity_type: str, graph_key: str, marker: str):
+    with pytest.raises(ValidationError) as exc:
+        CatalogEntityItem.model_validate(_entity_for_type(entity_type, graph_key))
+    msg = str(exc.value).lower()
+    assert any(
+        token in msg
+        for token in (
+            'graph_key',
+            'prefix',
+            'grammar',
+            'overload',
+            'system',
+            'invalid',
+            'string_too_long',
+            'max_length',
+            'at least',
+            'ensure this value',
+        )
+    ), (marker, msg)
+
+
+def test_grammar_rejects_catalog_v1_key_without_rewrite():
+    v1 = 'TABLE::HR.EMPLOYEES'
+    with pytest.raises(ValidationError) as exc:
+        CatalogEntityItem.model_validate(_entity_for_type('Table', v1))
+    msg = str(exc.value).lower()
+    assert 'graph_key' in msg or 'grammar' in msg or 'prefix' in msg
+    # No dual-version rewrite helper may exist or be used.
+    import models.catalog_common as common
+
+    assert not hasattr(common, 'rewrite_v1_graph_key')
+    assert not hasattr(common, 'normalize_graph_key')
+
+
+def test_grammar_system_mismatch_rejects_nested_entity_under_shell():
+    with pytest.raises(ValidationError) as exc:
+        UpsertTypedEntitiesRequest.model_validate(
+            {
+                **_v2_shell(
+                    system_key='BO',
+                    batch_id='mismatch',
+                    entities=[_entity_kwargs(graph_key='TABLE::FE::ORCL.HR.EMPLOYEES')],
+                ),
+            }
+        )
+    msg = str(exc.value).lower()
+    assert 'system' in msg or 'graph_key' in msg or 'invalid_system_key' in msg
+
+
+def test_grammar_fe_bo_same_body_valid_under_matching_shells_and_unequal():
+    body = 'ORCL.HR.EMPLOYEES'
+    fe_key = f'TABLE::FE::{body}'
+    bo_key = f'TABLE::BO::{body}'
+    fe_req = UpsertTypedEntitiesRequest.model_validate(
+        {
+            **_v2_shell(
+                system_key='FE',
+                batch_id='fe-body',
+                entities=[_entity_kwargs(graph_key=fe_key)],
+            ),
+        }
+    )
+    bo_req = UpsertTypedEntitiesRequest.model_validate(
+        {
+            **_v2_shell(
+                system_key='BO',
+                batch_id='bo-body',
+                entities=[_entity_kwargs(graph_key=bo_key)],
+            ),
+        }
+    )
+    assert fe_req.entities[0].graph_key == fe_key
+    assert bo_req.entities[0].graph_key == bo_key
+    assert fe_req.entities[0].graph_key != bo_req.entities[0].graph_key
+
+
+def test_grammar_procedure_function_require_nonempty_overload_package_and_standalone():
+    package_ok = 'PROCEDURE::FE::ORCL.HR.EMP_PKG.HIRE#OVERLOAD_A'
+    standalone_ok = 'FUNCTION::FE::ORCL.HR.GET_SAL#1'
+    assert (
+        CatalogEntityItem.model_validate(_entity_for_type('Procedure', package_ok)).graph_key
+        == package_ok
+    )
+    assert (
+        CatalogEntityItem.model_validate(_entity_for_type('Function', standalone_ok)).graph_key
+        == standalone_ok
+    )
+    with pytest.raises(ValidationError):
+        CatalogEntityItem.model_validate(
+            _entity_for_type('Procedure', 'PROCEDURE::FE::ORCL.HR.EMP_PKG.HIRE')
+        )
+    with pytest.raises(ValidationError):
+        CatalogEntityItem.model_validate(
+            _entity_for_type('Function', 'FUNCTION::FE::ORCL.HR.GET_SAL#')
+        )
+
+
+def test_source_artifact_graph_key_distinct_from_provenance_source_key_concept():
+    artifact_key = 'SOURCE::FE::PDF/HR_CATALOG#p12'
+    item = CatalogEntityItem.model_validate(_entity_for_type('SourceArtifact', artifact_key))
+    assert item.graph_key == artifact_key
+    # Provenance source_key remains a free-form identity input, not SourceArtifact grammar.
+    source = CatalogSourceItem.model_validate(_source_kwargs(source_key='DOC::HR.PDF#p12'))
+    assert source.source_key == 'DOC::HR.PDF#p12'
+    assert source.source_key != item.graph_key
+    assert not source.source_key.startswith('SOURCE::')
+
+
+def test_graph_key_echo_exact_equality_iden08_long_multi_segment():
+    long_key = (
+        'COLUMN::FE::ORCL.HR.EMPLOYEES.'
+        'VERY_LONG_COLUMN_NAME_WITH_MANY_SEGMENTS_AND_DETAILS_001'
+    )
+    submitted = _entity_for_type('Column', long_key)
+    item = CatalogEntityItem.model_validate(submitted)
+    assert item.graph_key == long_key
+    assert item.graph_key == submitted['graph_key']
+
+    edge_source = 'SCHEMA::FE::ORCL.HR'
+    edge_target = 'TABLE::FE::ORCL.HR.EMPLOYEES'
+    edge = CatalogEdgeItem.model_validate(
+        _edge_kwargs(source_graph_key=edge_source, target_graph_key=edge_target)
+    )
+    assert edge.source_graph_key == edge_source
+    assert edge.target_graph_key == edge_target
+
+    req = UpsertTypedEntitiesRequest.model_validate(
+        {
+            **_v2_shell(batch_id='echo', entities=[submitted]),
+        }
+    )
+    assert req.entities[0].graph_key == long_key
+
+    resolve = ResolveTypedEntitiesRequest.model_validate(
+        {
+            **_v2_shell(
+                entities=[{'entity_type': 'Column', 'graph_key': long_key}],
+            ),
+        }
+    )
+    assert resolve.entities[0].graph_key == long_key
+
+    prov = UpsertProvenanceRequest.model_validate(
+        {
+            **_v2_shell(
+                batch_id='prov-echo',
+                sources=[_source_kwargs()],
+                entity_targets=[{'entity_type': 'Column', 'graph_key': long_key}],
+            ),
+        }
+    )
+    assert prov.entity_targets[0].graph_key == long_key
