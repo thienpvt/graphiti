@@ -8,10 +8,28 @@ from graphiti_core.nodes import EntityNode
 from models.response_types import EdgeResult, NodeResult
 
 
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    iso_format = getattr(value, 'iso_format', None)
+    if callable(iso_format):
+        return iso_format()
+    isoformat = getattr(value, 'isoformat', None)
+    if callable(isoformat):
+        return isoformat()
+    return str(value)
+
+
 def to_node_result(node: EntityNode) -> NodeResult:
     """Build a NodeResult TypedDict from an EntityNode, dropping embeddings."""
     attrs = node.attributes if node.attributes else {}
-    attrs = {k: v for k, v in attrs.items() if 'embedding' not in k.lower()}
+    attrs = {
+        key: _json_safe(value) for key, value in attrs.items() if 'embedding' not in key.lower()
+    }
     return NodeResult(
         uuid=node.uuid,
         name=node.name,
@@ -39,44 +57,16 @@ def to_edge_result(edge: EntityEdge) -> EdgeResult:
 
 
 def format_node_result(node: EntityNode) -> dict[str, Any]:
-    """Format an entity node into a readable result.
-
-    Since EntityNode is a Pydantic BaseModel, we can use its built-in serialization capabilities.
-    Excludes embedding vectors to reduce payload size and avoid exposing internal representations.
-
-    Args:
-        node: The EntityNode to format
-
-    Returns:
-        A dictionary representation of the node with serialized dates and excluded embeddings
-    """
-    result = node.model_dump(
-        mode='json',
-        exclude={
-            'name_embedding',
-        },
-    )
-    # Remove any embedding that might be in attributes
-    result.get('attributes', {}).pop('name_embedding', None)
-    return result
+    """Format an entity node into a readable result without embedding vectors."""
+    return dict(to_node_result(node))
 
 
 def format_fact_result(edge: EntityEdge) -> dict[str, Any]:
-    """Format an entity edge into a readable result.
-
-    Since EntityEdge is a Pydantic BaseModel, we can use its built-in serialization capabilities.
-
-    Args:
-        edge: The EntityEdge to format
-
-    Returns:
-        A dictionary representation of the edge with serialized dates and excluded embeddings
-    """
-    result = edge.model_dump(
-        mode='json',
-        exclude={
-            'fact_embedding',
-        },
-    )
-    result.get('attributes', {}).pop('fact_embedding', None)
+    """Format an entity edge into a readable result without embedding vectors."""
+    result = dict(to_edge_result(edge))
+    result['attributes'] = {
+        key: _json_safe(value)
+        for key, value in (edge.attributes or {}).items()
+        if 'embedding' not in key.lower()
+    }
     return result

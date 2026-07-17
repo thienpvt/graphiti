@@ -1,0 +1,451 @@
+{
+  "artifact_sha256": "a89e3427a3b1ceec10f36d361fcdbe9e7e30243db4ff51ca59848dfb33968a33",
+  "artifact_size": 28951,
+  "mode": "dry-run",
+  "payload_path": "catalog/canary-v2-requests/accept-tab.payload.json",
+  "protocol_response": {
+    "content": [
+      {
+        "_meta": null,
+        "annotations": null,
+        "text": "{\n  \"group_id\": \"oracle-catalog-v2\",\n  \"batch_id\": \"canary-v2::accept-tab\",\n  \"batch_uuid\": \"0b1c5cf3-0643-59bb-b2c0-42ab2b7e7dbd\",\n  \"dry_run\": true,\n  \"atomic\": true,\n  \"status\": \"validating\",\n  \"results\": [\n    {\n      \"index\": 0,\n      \"status\": \"created\",\n      \"uuid\": \"bf4b75b3-b876-5e56-a512-b3604ae0be80\",\n      \"content_sha256\": \"2470866bb9088857a1470b66858cd18cfa4e19c66b4544f655edeca4b5c5a859\",\n      \"graph_key\": \"DOC::docling-14451470779352042667\",\n      \"edge_key\": null,\n      \"entity_type\": \"DictionaryDocument\",\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"entity\"\n      }\n    },\n    {\n      \"index\": 1,\n      \"status\": \"created\",\n      \"uuid\": \"beba7b6a-9380-5e61-a347-2c383698edbd\",\n      \"content_sha256\": \"d71f44e3683af02ef3bd0943d54e0275a0f15e33ed562a97245512d82940f036\",\n      \"graph_key\": \"SCHEMA::SVFE_SHB\",\n      \"edge_key\": null,\n      \"entity_type\": \"Schema\",\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"entity\"\n      }\n    },\n    {\n      \"index\": 2,\n      \"status\": \"created\",\n      \"uuid\": \"dd4e7929-303e-5c50-8b62-49ee2ad351b5\",\n      \"content_sha256\": \"04f26692aea02908a929a205fb8e941efab5ddf8b994cc1cf7c18e6ef631894e\",\n      \"graph_key\": \"TABLE::SVFE_SHB.ACCEPT_TAB\",\n      \"edge_key\": null,\n      \"entity_type\": \"Table\",\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"entity\"\n      }\n    },\n    {\n      \"index\": 3,\n      \"status\": \"created\",\n      \"uuid\": \"98a1aa13-c114-5a37-8b64-344543f89a18\",\n      \"content_sha256\": \"5229c1cade0c86b27c7257cdee509f23f0e3151150e92a3ad0624edfb765121b\",\n      \"graph_key\": \"COLUMN::SVFE_SHB.ACCEPT_TAB.ISO\",\n      \"edge_key\": null,\n      \"entity_type\": \"Column\",\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"entity\"\n      }\n    },\n    {\n      \"index\": 4,\n      \"status\": \"created\",\n      \"uuid\": \"737d5770-ebb8-564a-aaf7-a6814bd14b64\",\n      \"content_sha256\": \"a07cfb3c4791df1dc01a845fa3f382326b6f86dd15bb58a0c0911cdc8330890f\",\n      \"graph_key\": \"COLUMN::SVFE_SHB.ACCEPT_TAB.REMOVE\",\n      \"edge_key\": null,\n      \"entity_type\": \"Column\",\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"entity\"\n      }\n    },\n    {\n      \"index\": 5,\n      \"status\": \"created\",\n      \"uuid\": \"894dd9f6-5181-5c3f-85e9-1522b7cdb69a\",\n      \"content_sha256\": \"d1b804618b973eb17deceab6245a8f91a832cee3283422afaf1309fd217ff73a\",\n      \"graph_key\": \"COLUMN::SVFE_SHB.ACCEPT_TAB.ATM\",\n      \"edge_key\": null,\n      \"entity_type\": \"Column\",\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"entity\"\n      }\n    },\n    {\n      \"index\": 6,\n      \"status\": \"created\",\n      \"uuid\": \"93b50c57-ca04-541a-a80e-1d061e2e055f\",\n      \"content_sha256\": \"9efe7ba74d46d6f79c169605bee989d0542b472c02d7d1e4276c7d6503f93e9a\",\n      \"graph_key\": \"COLUMN::SVFE_SHB.ACCEPT_TAB.POS\",\n      \"edge_key\": null,\n      \"entity_type\": \"Column\",\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"entity\"\n      }\n    },\n    {\n      \"index\": 7,\n      \"status\": \"created\",\n      \"uuid\": \"e11373d1-cd6b-54d0-9b87-11f737752df5\",\n      \"content_sha256\": \"639e3bdab10ccd928cf634743b9ca4fe47da05590b482a2dad3cd3b52d08c7f1\",\n      \"graph_key\": \"COLUMN::SVFE_SHB.ACCEPT_TAB.PAPER\",\n      \"edge_key\": null,\n      \"entity_type\": \"Column\",\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"entity\"\n      }\n    },\n    {\n      \"index\": 8,\n      \"status\": \"created\",\n      \"uuid\": \"b674245c-9e9b-5b97-9398-0b174f85ce09\",\n      \"content_sha256\": \"d5bff5e3bf2aed5cfaf38e83e5480237fa96653867a4fbf326356be72ad9ab30\",\n      \"graph_key\": \"COLUMN::SVFE_SHB.ACCEPT_TAB.BRAND\",\n      \"edge_key\": null,\n      \"entity_type\": \"Column\",\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"entity\"\n      }\n    },\n    {\n      \"index\": 9,\n      \"status\": \"created\",\n      \"uuid\": \"d1b07bae-973d-589f-bed5-edf80be99a95\",\n      \"content_sha256\": \"db6d5d05a33cf7a01e9315354bc20b9006511ac768848e28b5fefb5d10b95483\",\n      \"graph_key\": \"INDEX::SVFE_SHB.ACCEPT_INDX\",\n      \"edge_key\": null,\n      \"entity_type\": \"Index\",\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"entity\"\n      }\n    },\n    {\n      \"index\": 10,\n      \"status\": \"created\",\n      \"uuid\": \"600860be-0d11-53ef-9701-0804cedbb72e\",\n      \"content_sha256\": \"4af9891b84dc26d1eda76a48d1648349b93708251a1eabb07632ae4b4e91f844\",\n      \"graph_key\": null,\n      \"edge_key\": \"contains|SCHEMA::SVFE_SHB|TABLE::SVFE_SHB.ACCEPT_TAB\",\n      \"entity_type\": null,\n      \"edge_type\": \"Contains\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 11,\n      \"status\": \"created\",\n      \"uuid\": \"91e6fda9-4494-5fbb-9ae5-1d778ab22b6e\",\n      \"content_sha256\": \"1ff14640f8a271579587c67d5ba463a1f2f65201f879e03df3f06fa907562db7\",\n      \"graph_key\": null,\n      \"edge_key\": \"contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.ISO\",\n      \"entity_type\": null,\n      \"edge_type\": \"Contains\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 12,\n      \"status\": \"created\",\n      \"uuid\": \"f1204bbf-c239-5370-bfd7-2f581f88b7f4\",\n      \"content_sha256\": \"2456b6a9c0559098b5e002259e3f34962b49c6125facf3e9bb47f020c7ee2b70\",\n      \"graph_key\": null,\n      \"edge_key\": \"documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.ISO|DOC::docling-14451470779352042667\",\n      \"entity_type\": null,\n      \"edge_type\": \"DocumentedBy\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 13,\n      \"status\": \"created\",\n      \"uuid\": \"bac38129-20d5-5ef8-8b4e-84622def31a2\",\n      \"content_sha256\": \"4aebfcaecec51aec65fbf6dd4bfe58564b70d7a175d26dad5bfa739fb33fac2f\",\n      \"graph_key\": null,\n      \"edge_key\": \"contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.REMOVE\",\n      \"entity_type\": null,\n      \"edge_type\": \"Contains\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 14,\n      \"status\": \"created\",\n      \"uuid\": \"ff6591fa-0739-5172-9c57-b03c7bc8b073\",\n      \"content_sha256\": \"d586324b36a6962d99df79d80b76633ad23effc81455103b389fd3ce577443b5\",\n      \"graph_key\": null,\n      \"edge_key\": \"documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.REMOVE|DOC::docling-14451470779352042667\",\n      \"entity_type\": null,\n      \"edge_type\": \"DocumentedBy\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 15,\n      \"status\": \"created\",\n      \"uuid\": \"ef89aab4-de2b-56b1-9ef2-72976173cda0\",\n      \"content_sha256\": \"5313540b6f49780a76d2e7f5ec34b0ecfbf6bbb212254e700a1800f9fefcb95d\",\n      \"graph_key\": null,\n      \"edge_key\": \"contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.ATM\",\n      \"entity_type\": null,\n      \"edge_type\": \"Contains\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 16,\n      \"status\": \"created\",\n      \"uuid\": \"5060faaa-6086-5180-8f82-0734fcea2500\",\n      \"content_sha256\": \"565db699d68a1b737998fe0c1c30caa73eb539a6877678ae2b170d32e16f4d43\",\n      \"graph_key\": null,\n      \"edge_key\": \"documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.ATM|DOC::docling-14451470779352042667\",\n      \"entity_type\": null,\n      \"edge_type\": \"DocumentedBy\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 17,\n      \"status\": \"created\",\n      \"uuid\": \"8cd33f3c-3fa2-5f7c-8c0d-1c6e15ce8ccc\",\n      \"content_sha256\": \"d94d1af10dd41b785dcc236a140dc940efa2cbe21aaf573a24d3bd3cea6bde29\",\n      \"graph_key\": null,\n      \"edge_key\": \"contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.POS\",\n      \"entity_type\": null,\n      \"edge_type\": \"Contains\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 18,\n      \"status\": \"created\",\n      \"uuid\": \"386ec3ea-d502-5ca8-9ee1-a5a4482ff82e\",\n      \"content_sha256\": \"da9ef9a50e5499b3427a1bee7f5fc70d5e91c5365f43b1948d342ccd1cfba301\",\n      \"graph_key\": null,\n      \"edge_key\": \"documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.POS|DOC::docling-14451470779352042667\",\n      \"entity_type\": null,\n      \"edge_type\": \"DocumentedBy\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 19,\n      \"status\": \"created\",\n      \"uuid\": \"14ead546-51d6-520b-a5b4-f7429cc5bba1\",\n      \"content_sha256\": \"7dd767bfadb074fc7d7a6debc6c505e1b70cedf33e75eb5ba8b126f868f6bf91\",\n      \"graph_key\": null,\n      \"edge_key\": \"contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.PAPER\",\n      \"entity_type\": null,\n      \"edge_type\": \"Contains\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 20,\n      \"status\": \"created\",\n      \"uuid\": \"72ab2c0a-467a-5b04-9b2c-8fbc6b950fe0\",\n      \"content_sha256\": \"a38d18cf4719e5251c88a556021a7fd17ade22603814f45a729b0823e4f0d708\",\n      \"graph_key\": null,\n      \"edge_key\": \"documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.PAPER|DOC::docling-14451470779352042667\",\n      \"entity_type\": null,\n      \"edge_type\": \"DocumentedBy\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 21,\n      \"status\": \"created\",\n      \"uuid\": \"08d417cb-48dd-568c-8872-a417444301e0\",\n      \"content_sha256\": \"380d3270c040dfc15c87583fd731cf729340bed61df731906bd991cc077c04e4\",\n      \"graph_key\": null,\n      \"edge_key\": \"contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.BRAND\",\n      \"entity_type\": null,\n      \"edge_type\": \"Contains\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 22,\n      \"status\": \"created\",\n      \"uuid\": \"b5e3153d-97fc-57fb-b7ad-4a0004a66bb6\",\n      \"content_sha256\": \"629f286e63448c738983c4b6b60c250ff13084a6b62519e17aff7fe4b1b01e68\",\n      \"graph_key\": null,\n      \"edge_key\": \"documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.BRAND|DOC::docling-14451470779352042667\",\n      \"entity_type\": null,\n      \"edge_type\": \"DocumentedBy\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 23,\n      \"status\": \"created\",\n      \"uuid\": \"780f82ab-6646-5596-a374-b3d504731d99\",\n      \"content_sha256\": \"23f74bd90865fcb3f9afaf2c8dc729f7d5f7d3ad7908b0430aa9b7ea528e38a6\",\n      \"graph_key\": null,\n      \"edge_key\": \"contains|TABLE::SVFE_SHB.ACCEPT_TAB|INDEX::SVFE_SHB.ACCEPT_INDX\",\n      \"entity_type\": null,\n      \"edge_type\": \"Contains\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 24,\n      \"status\": \"created\",\n      \"uuid\": \"7f17adf9-4753-5979-b111-3e9383ff058d\",\n      \"content_sha256\": \"a7cd3969ebf690d11141627c632bd7154c953eae5cee7133661ba15c757eb7f9\",\n      \"graph_key\": null,\n      \"edge_key\": \"contains|INDEX::SVFE_SHB.ACCEPT_INDX|COLUMN::SVFE_SHB.ACCEPT_TAB.ISO\",\n      \"entity_type\": null,\n      \"edge_type\": \"Contains\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 25,\n      \"status\": \"created\",\n      \"uuid\": \"f7e93d1d-db88-5d06-9a77-d1d981af5487\",\n      \"content_sha256\": \"c19f61f682400f7a39c8df12eeba7d283ae69d1bf680e4b2c8eb0c08e63d3467\",\n      \"graph_key\": null,\n      \"edge_key\": \"documented_by|TABLE::SVFE_SHB.ACCEPT_TAB|DOC::docling-14451470779352042667\",\n      \"entity_type\": null,\n      \"edge_type\": \"DocumentedBy\",\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"edge\"\n      }\n    },\n    {\n      \"index\": 26,\n      \"status\": \"created\",\n      \"uuid\": \"6be4b404-d464-5c00-a850-189666df8a9c\",\n      \"content_sha256\": \"a7e71dc21fa74bead901fddee88893d25d95709b9f7cc29608a1f8b5c0921401\",\n      \"graph_key\": \"canary-v2::accept-tab|3882cb4bc50064215ead782b0fa0dfbf0098cb344b50184e6c207145377e832f\",\n      \"edge_key\": null,\n      \"entity_type\": null,\n      \"edge_type\": null,\n      \"error_code\": null,\n      \"error_message\": null,\n      \"details\": {\n        \"kind\": \"provenance\"\n      }\n    }\n  ],\n  \"entity_created\": 10,\n  \"entity_updated\": 0,\n  \"entity_unchanged\": 0,\n  \"edge_created\": 16,\n  \"edge_updated\": 0,\n  \"edge_unchanged\": 0,\n  \"provenance_created\": 1,\n  \"provenance_updated\": 0,\n  \"provenance_unchanged\": 0,\n  \"failed\": 0,\n  \"rolled_back\": 0,\n  \"error_code\": null,\n  \"error_message\": null\n}",
+        "type": "text"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "result": {
+        "atomic": true,
+        "batch_id": "canary-v2::accept-tab",
+        "batch_uuid": "0b1c5cf3-0643-59bb-b2c0-42ab2b7e7dbd",
+        "dry_run": true,
+        "edge_created": 16,
+        "edge_unchanged": 0,
+        "edge_updated": 0,
+        "entity_created": 10,
+        "entity_unchanged": 0,
+        "entity_updated": 0,
+        "error_code": null,
+        "error_message": null,
+        "failed": 0,
+        "group_id": "oracle-catalog-v2",
+        "provenance_created": 1,
+        "provenance_unchanged": 0,
+        "provenance_updated": 0,
+        "results": [
+          {
+            "content_sha256": "2470866bb9088857a1470b66858cd18cfa4e19c66b4544f655edeca4b5c5a859",
+            "details": {
+              "kind": "entity"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": "DictionaryDocument",
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "DOC::docling-14451470779352042667",
+            "index": 0,
+            "status": "created",
+            "uuid": "bf4b75b3-b876-5e56-a512-b3604ae0be80"
+          },
+          {
+            "content_sha256": "d71f44e3683af02ef3bd0943d54e0275a0f15e33ed562a97245512d82940f036",
+            "details": {
+              "kind": "entity"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": "Schema",
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "SCHEMA::SVFE_SHB",
+            "index": 1,
+            "status": "created",
+            "uuid": "beba7b6a-9380-5e61-a347-2c383698edbd"
+          },
+          {
+            "content_sha256": "04f26692aea02908a929a205fb8e941efab5ddf8b994cc1cf7c18e6ef631894e",
+            "details": {
+              "kind": "entity"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": "Table",
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "TABLE::SVFE_SHB.ACCEPT_TAB",
+            "index": 2,
+            "status": "created",
+            "uuid": "dd4e7929-303e-5c50-8b62-49ee2ad351b5"
+          },
+          {
+            "content_sha256": "5229c1cade0c86b27c7257cdee509f23f0e3151150e92a3ad0624edfb765121b",
+            "details": {
+              "kind": "entity"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": "Column",
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "COLUMN::SVFE_SHB.ACCEPT_TAB.ISO",
+            "index": 3,
+            "status": "created",
+            "uuid": "98a1aa13-c114-5a37-8b64-344543f89a18"
+          },
+          {
+            "content_sha256": "a07cfb3c4791df1dc01a845fa3f382326b6f86dd15bb58a0c0911cdc8330890f",
+            "details": {
+              "kind": "entity"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": "Column",
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "COLUMN::SVFE_SHB.ACCEPT_TAB.REMOVE",
+            "index": 4,
+            "status": "created",
+            "uuid": "737d5770-ebb8-564a-aaf7-a6814bd14b64"
+          },
+          {
+            "content_sha256": "d1b804618b973eb17deceab6245a8f91a832cee3283422afaf1309fd217ff73a",
+            "details": {
+              "kind": "entity"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": "Column",
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "COLUMN::SVFE_SHB.ACCEPT_TAB.ATM",
+            "index": 5,
+            "status": "created",
+            "uuid": "894dd9f6-5181-5c3f-85e9-1522b7cdb69a"
+          },
+          {
+            "content_sha256": "9efe7ba74d46d6f79c169605bee989d0542b472c02d7d1e4276c7d6503f93e9a",
+            "details": {
+              "kind": "entity"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": "Column",
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "COLUMN::SVFE_SHB.ACCEPT_TAB.POS",
+            "index": 6,
+            "status": "created",
+            "uuid": "93b50c57-ca04-541a-a80e-1d061e2e055f"
+          },
+          {
+            "content_sha256": "639e3bdab10ccd928cf634743b9ca4fe47da05590b482a2dad3cd3b52d08c7f1",
+            "details": {
+              "kind": "entity"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": "Column",
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "COLUMN::SVFE_SHB.ACCEPT_TAB.PAPER",
+            "index": 7,
+            "status": "created",
+            "uuid": "e11373d1-cd6b-54d0-9b87-11f737752df5"
+          },
+          {
+            "content_sha256": "d5bff5e3bf2aed5cfaf38e83e5480237fa96653867a4fbf326356be72ad9ab30",
+            "details": {
+              "kind": "entity"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": "Column",
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "COLUMN::SVFE_SHB.ACCEPT_TAB.BRAND",
+            "index": 8,
+            "status": "created",
+            "uuid": "b674245c-9e9b-5b97-9398-0b174f85ce09"
+          },
+          {
+            "content_sha256": "db6d5d05a33cf7a01e9315354bc20b9006511ac768848e28b5fefb5d10b95483",
+            "details": {
+              "kind": "entity"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": "Index",
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "INDEX::SVFE_SHB.ACCEPT_INDX",
+            "index": 9,
+            "status": "created",
+            "uuid": "d1b07bae-973d-589f-bed5-edf80be99a95"
+          },
+          {
+            "content_sha256": "4af9891b84dc26d1eda76a48d1648349b93708251a1eabb07632ae4b4e91f844",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "contains|SCHEMA::SVFE_SHB|TABLE::SVFE_SHB.ACCEPT_TAB",
+            "edge_type": "Contains",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 10,
+            "status": "created",
+            "uuid": "600860be-0d11-53ef-9701-0804cedbb72e"
+          },
+          {
+            "content_sha256": "1ff14640f8a271579587c67d5ba463a1f2f65201f879e03df3f06fa907562db7",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.ISO",
+            "edge_type": "Contains",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 11,
+            "status": "created",
+            "uuid": "91e6fda9-4494-5fbb-9ae5-1d778ab22b6e"
+          },
+          {
+            "content_sha256": "2456b6a9c0559098b5e002259e3f34962b49c6125facf3e9bb47f020c7ee2b70",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.ISO|DOC::docling-14451470779352042667",
+            "edge_type": "DocumentedBy",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 12,
+            "status": "created",
+            "uuid": "f1204bbf-c239-5370-bfd7-2f581f88b7f4"
+          },
+          {
+            "content_sha256": "4aebfcaecec51aec65fbf6dd4bfe58564b70d7a175d26dad5bfa739fb33fac2f",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.REMOVE",
+            "edge_type": "Contains",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 13,
+            "status": "created",
+            "uuid": "bac38129-20d5-5ef8-8b4e-84622def31a2"
+          },
+          {
+            "content_sha256": "d586324b36a6962d99df79d80b76633ad23effc81455103b389fd3ce577443b5",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.REMOVE|DOC::docling-14451470779352042667",
+            "edge_type": "DocumentedBy",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 14,
+            "status": "created",
+            "uuid": "ff6591fa-0739-5172-9c57-b03c7bc8b073"
+          },
+          {
+            "content_sha256": "5313540b6f49780a76d2e7f5ec34b0ecfbf6bbb212254e700a1800f9fefcb95d",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.ATM",
+            "edge_type": "Contains",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 15,
+            "status": "created",
+            "uuid": "ef89aab4-de2b-56b1-9ef2-72976173cda0"
+          },
+          {
+            "content_sha256": "565db699d68a1b737998fe0c1c30caa73eb539a6877678ae2b170d32e16f4d43",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.ATM|DOC::docling-14451470779352042667",
+            "edge_type": "DocumentedBy",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 16,
+            "status": "created",
+            "uuid": "5060faaa-6086-5180-8f82-0734fcea2500"
+          },
+          {
+            "content_sha256": "d94d1af10dd41b785dcc236a140dc940efa2cbe21aaf573a24d3bd3cea6bde29",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.POS",
+            "edge_type": "Contains",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 17,
+            "status": "created",
+            "uuid": "8cd33f3c-3fa2-5f7c-8c0d-1c6e15ce8ccc"
+          },
+          {
+            "content_sha256": "da9ef9a50e5499b3427a1bee7f5fc70d5e91c5365f43b1948d342ccd1cfba301",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.POS|DOC::docling-14451470779352042667",
+            "edge_type": "DocumentedBy",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 18,
+            "status": "created",
+            "uuid": "386ec3ea-d502-5ca8-9ee1-a5a4482ff82e"
+          },
+          {
+            "content_sha256": "7dd767bfadb074fc7d7a6debc6c505e1b70cedf33e75eb5ba8b126f868f6bf91",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.PAPER",
+            "edge_type": "Contains",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 19,
+            "status": "created",
+            "uuid": "14ead546-51d6-520b-a5b4-f7429cc5bba1"
+          },
+          {
+            "content_sha256": "a38d18cf4719e5251c88a556021a7fd17ade22603814f45a729b0823e4f0d708",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.PAPER|DOC::docling-14451470779352042667",
+            "edge_type": "DocumentedBy",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 20,
+            "status": "created",
+            "uuid": "72ab2c0a-467a-5b04-9b2c-8fbc6b950fe0"
+          },
+          {
+            "content_sha256": "380d3270c040dfc15c87583fd731cf729340bed61df731906bd991cc077c04e4",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "contains|TABLE::SVFE_SHB.ACCEPT_TAB|COLUMN::SVFE_SHB.ACCEPT_TAB.BRAND",
+            "edge_type": "Contains",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 21,
+            "status": "created",
+            "uuid": "08d417cb-48dd-568c-8872-a417444301e0"
+          },
+          {
+            "content_sha256": "629f286e63448c738983c4b6b60c250ff13084a6b62519e17aff7fe4b1b01e68",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "documented_by|COLUMN::SVFE_SHB.ACCEPT_TAB.BRAND|DOC::docling-14451470779352042667",
+            "edge_type": "DocumentedBy",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 22,
+            "status": "created",
+            "uuid": "b5e3153d-97fc-57fb-b7ad-4a0004a66bb6"
+          },
+          {
+            "content_sha256": "23f74bd90865fcb3f9afaf2c8dc729f7d5f7d3ad7908b0430aa9b7ea528e38a6",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "contains|TABLE::SVFE_SHB.ACCEPT_TAB|INDEX::SVFE_SHB.ACCEPT_INDX",
+            "edge_type": "Contains",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 23,
+            "status": "created",
+            "uuid": "780f82ab-6646-5596-a374-b3d504731d99"
+          },
+          {
+            "content_sha256": "a7cd3969ebf690d11141627c632bd7154c953eae5cee7133661ba15c757eb7f9",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "contains|INDEX::SVFE_SHB.ACCEPT_INDX|COLUMN::SVFE_SHB.ACCEPT_TAB.ISO",
+            "edge_type": "Contains",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 24,
+            "status": "created",
+            "uuid": "7f17adf9-4753-5979-b111-3e9383ff058d"
+          },
+          {
+            "content_sha256": "c19f61f682400f7a39c8df12eeba7d283ae69d1bf680e4b2c8eb0c08e63d3467",
+            "details": {
+              "kind": "edge"
+            },
+            "edge_key": "documented_by|TABLE::SVFE_SHB.ACCEPT_TAB|DOC::docling-14451470779352042667",
+            "edge_type": "DocumentedBy",
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": null,
+            "index": 25,
+            "status": "created",
+            "uuid": "f7e93d1d-db88-5d06-9a77-d1d981af5487"
+          },
+          {
+            "content_sha256": "a7e71dc21fa74bead901fddee88893d25d95709b9f7cc29608a1f8b5c0921401",
+            "details": {
+              "kind": "provenance"
+            },
+            "edge_key": null,
+            "edge_type": null,
+            "entity_type": null,
+            "error_code": null,
+            "error_message": null,
+            "graph_key": "canary-v2::accept-tab|3882cb4bc50064215ead782b0fa0dfbf0098cb344b50184e6c207145377e832f",
+            "index": 26,
+            "status": "created",
+            "uuid": "6be4b404-d464-5c00-a850-189666df8a9c"
+          }
+        ],
+        "rolled_back": 0,
+        "status": "validating"
+      }
+    }
+  },
+  "recorded_at": "2026-07-17T12:47:20.601992Z",
+  "schema_version": 1,
+  "server_request_sha256": "a84e8a7ad71c3d5c9ebd3655a3a049e883b9bf97cc7c5c9ece640c77e1b2539a",
+  "tool": "upsert_catalog_batch"
+}

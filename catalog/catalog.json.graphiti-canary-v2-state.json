@@ -1,0 +1,215 @@
+{
+  "attempts": [
+    {
+      "artifact_sha256": "a89e3427a3b1ceec10f36d361fcdbe9e7e30243db4ff51ca59848dfb33968a33",
+      "artifact_size": 28951,
+      "batch_id": "canary-v2::accept-tab",
+      "completed_at": "2026-07-17T12:47:20.613717Z",
+      "counts": {
+        "edge_created": 16,
+        "edge_unchanged": 0,
+        "edge_updated": 0,
+        "entity_created": 10,
+        "entity_unchanged": 0,
+        "entity_updated": 0,
+        "failed": 0,
+        "provenance_created": 1,
+        "provenance_unchanged": 0,
+        "provenance_updated": 0,
+        "rolled_back": 0
+      },
+      "idempotent_replay": false,
+      "mode": "dry-run",
+      "payload_path": "catalog/canary-v2-requests/accept-tab.payload.json",
+      "previous_failure": {
+        "error_code": "content_hash_mismatch",
+        "writes": 0
+      },
+      "response_path": "catalog/canary-v2-requests/accept-tab.dry-run.response.json",
+      "response_sha256": "5d4f17ac588ae782b942d780e374f15be98943775673f23d759ef9c6e0ff1f60",
+      "retry_from_immutable_artifact": true,
+      "server_request_sha256": "a84e8a7ad71c3d5c9ebd3655a3a049e883b9bf97cc7c5c9ece640c77e1b2539a",
+      "started_at": "2026-07-17T12:47:19.150159Z",
+      "status": "dry_run_passed"
+    },
+    {
+      "artifact_sha256": "a89e3427a3b1ceec10f36d361fcdbe9e7e30243db4ff51ca59848dfb33968a33",
+      "artifact_size": 28951,
+      "batch_id": "canary-v2::accept-tab",
+      "completed_at": "2026-07-17T12:48:05.113538Z",
+      "counts": null,
+      "dry_run_receipt_path": "catalog/canary-v2-requests/accept-tab.dry-run.response.json",
+      "dry_run_receipt_sha256": "5d4f17ac588ae782b942d780e374f15be98943775673f23d759ef9c6e0ff1f60",
+      "error_code": "post_commit_verification_failed",
+      "error_type": "ExceptionGroup",
+      "idempotent_replay": false,
+      "mode": "commit",
+      "payload_path": "catalog/canary-v2-requests/accept-tab.payload.json",
+      "previous_failure": {
+        "error_code": "content_hash_mismatch",
+        "writes": 0
+      },
+      "response_path": "catalog/canary-v2-requests/accept-tab.commit.response.json",
+      "response_sha256": "8c3debd9c2a735094ea3a559fd0f4233cd405e872931216411c326a4f59c5e4a",
+      "retry_from_immutable_artifact": true,
+      "server_request_sha256": "a84e8a7ad71c3d5c9ebd3655a3a049e883b9bf97cc7c5c9ece640c77e1b2539a",
+      "started_at": "2026-07-17T12:47:35.160526Z",
+      "status": "committed_verification_failed"
+    }
+  ],
+  "batches": {
+    "canary-v2::accept-tab": {
+      "edge_counts": {
+        "Contains": 9,
+        "DocumentedBy": 7
+      },
+      "entity_counts": {
+        "Column": 6,
+        "DictionaryDocument": 1,
+        "Index": 1,
+        "Schema": 1,
+        "Table": 1
+      },
+      "errors": [
+        "Commit failed: content_hash_mismatch; 26 failed, 0 created/updated/unchanged, 0 rolled_back. Post-failure group verification remains empty. No automatic retry."
+      ],
+      "provenance_counts": {
+        "edge_targets": 16,
+        "entity_targets": 10,
+        "sources": 1
+      },
+      "request_sha256": "a84e8a7ad71c3d5c9ebd3655a3a049e883b9bf97cc7c5c9ece640c77e1b2539a",
+      "results": {
+        "dry_run_passed": {
+          "edges_created": 16,
+          "entities_created": 10,
+          "failed": 0,
+          "no_writes_verified": true,
+          "provenance_created": 1,
+          "request_sha256": "a84e8a7ad71c3d5c9ebd3655a3a049e883b9bf97cc7c5c9ece640c77e1b2539a",
+          "rolled_back": 0,
+          "status": "validating"
+        },
+        "failed": {
+          "edges_created": 0,
+          "entities_created": 0,
+          "error_code": "content_hash_mismatch",
+          "failed": 26,
+          "provenance_created": 0,
+          "request_sha256": "a84e8a7ad71c3d5c9ebd3655a3a049e883b9bf97cc7c5c9ece640c77e1b2539a",
+          "rolled_back": 0,
+          "status": "failed"
+        }
+      },
+      "status": "failed",
+      "verified_at": null
+    },
+    "canary-v2::documented-foreign-keys": {
+      "edge_counts": {
+        "ForeignKeyTo": 3
+      },
+      "entity_counts": {},
+      "errors": [],
+      "provenance_counts": {
+        "edge_targets": 3,
+        "entity_targets": 0,
+        "sources": 1
+      },
+      "request_sha256": "b395ae2cdfa43ee1ceecfba5ff42e38a085d5033a54601539d0d549960be976f",
+      "status": "planned",
+      "verified_at": null
+    },
+    "canary-v2::form-cfg": {
+      "edge_counts": {
+        "Contains": 4,
+        "DocumentedBy": 4
+      },
+      "entity_counts": {
+        "Column": 3,
+        "DictionaryDocument": 1,
+        "Schema": 1,
+        "Table": 1
+      },
+      "errors": [],
+      "provenance_counts": {
+        "edge_targets": 8,
+        "entity_targets": 6,
+        "sources": 1
+      },
+      "request_sha256": "021cbd1a00fd628d15519282588dad58d4fa3f7a768ac914f3a1016ec282897a",
+      "status": "planned",
+      "verified_at": null
+    },
+    "canary-v2::pre-auth-txn-type": {
+      "edge_counts": {
+        "Contains": 27,
+        "DocumentedBy": 7
+      },
+      "entity_counts": {
+        "Column": 6,
+        "Constraint": 3,
+        "DictionaryDocument": 1,
+        "Index": 3,
+        "Schema": 1,
+        "Table": 1
+      },
+      "errors": [],
+      "provenance_counts": {
+        "edge_targets": 34,
+        "entity_targets": 15,
+        "sources": 1
+      },
+      "request_sha256": "28210a6670e13086081dcefd0494e31ed5fca89d0701f247d68e2541c173c68b",
+      "status": "planned",
+      "verified_at": null
+    },
+    "canary-v2::trans-type": {
+      "edge_counts": {
+        "Contains": 9,
+        "DocumentedBy": 5,
+        "PrimaryKeyOf": 1
+      },
+      "entity_counts": {
+        "Column": 4,
+        "Constraint": 2,
+        "DictionaryDocument": 1,
+        "Schema": 1,
+        "Table": 1
+      },
+      "errors": [],
+      "provenance_counts": {
+        "edge_targets": 15,
+        "entity_targets": 9,
+        "sources": 1
+      },
+      "request_sha256": "fcf59877c6971e2c0c27a4305197126c490e3b6e37f7cd64d5f8a7324b4ffcce",
+      "status": "planned",
+      "verified_at": null
+    },
+    "canary-v2::trans-type-class": {
+      "edge_counts": {
+        "Contains": 5,
+        "DocumentedBy": 3,
+        "PrimaryKeyOf": 1
+      },
+      "entity_counts": {
+        "Column": 2,
+        "Constraint": 1,
+        "DictionaryDocument": 1,
+        "Schema": 1,
+        "Table": 1
+      },
+      "errors": [],
+      "provenance_counts": {
+        "edge_targets": 9,
+        "entity_targets": 6,
+        "sources": 1
+      },
+      "request_sha256": "a9cf4cf2fd70a518a19e3ade1894c3acf209f62db9154c4849e42668b27ddd75",
+      "status": "planned",
+      "verified_at": null
+    }
+  },
+  "catalog_sha256": "3882cb4bc50064215ead782b0fa0dfbf0098cb344b50184e6c207145377e832f",
+  "target_group_id": "oracle-catalog-v2"
+}
