@@ -2368,6 +2368,31 @@ async def test_provenance_idempotent_unchanged_skips_write():
 
 
 @pytest.mark.asyncio
+async def test_provenance_non_atomic_transaction_failure_marks_prior_result_rolled_back():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    first = _source()
+    second = _source(source_key='SRC::ddl.sql#departments')
+    _wire_provenance_store(service)
+    service._store.upsert_source_episode = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            {'uuid': 'first', 'status': 'created'},
+            RuntimeError('second source failed'),
+        ]
+    )
+
+    resp = await service.upsert_provenance(
+        client=client,
+        request=_prov_request(sources=[first, second], atomic=False),
+    )
+
+    assert resp.created == 0
+    assert resp.rolled_back == 1
+    assert resp.failed == 1
+    assert [result.status for result in resp.results] == ['rolled_back', 'error']
+
+
+@pytest.mark.asyncio
 async def test_provenance_feature_disabled_no_write():
     client = _make_client()
     service = CatalogService(catalog_config=_disabled_config())

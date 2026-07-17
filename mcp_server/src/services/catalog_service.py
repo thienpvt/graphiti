@@ -3122,15 +3122,22 @@ class CatalogService:
                     request, errs, trigger_indices=set(errs.keys())
                 )
             for i in write_set:
-                if i not in written:
-                    written[i] = CatalogItemResult(
-                        index=i,
-                        status='error',
-                        graph_key=request.sources[i].source_key,
-                        error_code=CatalogErrorCode.neo4j_transaction_failed,
-                        error_message='neo4j transaction failed',
-                        details={'reason': type(exc).__name__},
-                    )
+                written[i] = CatalogItemResult(
+                    index=i,
+                    status='error' if i not in written else 'rolled_back',
+                    graph_key=request.sources[i].source_key,
+                    error_code=(
+                        CatalogErrorCode.neo4j_transaction_failed
+                        if i not in written
+                        else CatalogErrorCode.batch_conflict
+                    ),
+                    error_message=(
+                        'neo4j transaction failed'
+                        if i not in written
+                        else 'rolled back due to sibling failure'
+                    ),
+                    details={'reason': type(exc).__name__},
+                )
 
         results = []
         for i, item in enumerate(request.sources):
