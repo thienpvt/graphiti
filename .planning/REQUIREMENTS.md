@@ -107,14 +107,14 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 - [ ] **BATC-01**: MCP client can call `upsert_catalog_batch` with group, batch and catalog hashes, entities, edges, provenance, dry-run, and atomic controls
 - [ ] **BATC-02**: Server validates the complete nested request and all configured limits before any persistent side effect
-- [ ] **BATC-03**: Server computes canonical request SHA-256 and returns `batch_conflict` for a committed batch ID reused with different content
-- [ ] **BATC-04**: Batch endpoint resolution includes both entities already in Neo4j and entities included in the same request
-- [ ] **BATC-05**: Server detects all known identity, type, endpoint, hash, and provenance conflicts before domain writes
-- [ ] **BATC-06**: Server generates all required entity and edge embeddings before opening the domain write transaction
-- [ ] **BATC-07**: One Neo4j transaction upserts typed entities, typed edges, provenance, and committed batch state atomically
-- [ ] **BATC-08**: A domain write failure rolls back every domain mutation and persists failed status in a separate safe transaction
-- [ ] **BATC-09**: An identical committed batch ID and request hash returns unchanged without duplicating domain objects
-- [ ] **BATC-10**: Batch dry-run performs complete validation, identity resolution, endpoint planning, and conflict checks without graph writes or persistent status
+- [x] **BATC-03**: Server computes canonical request SHA-256 and returns `batch_conflict` for a committed batch ID reused with different content
+- [x] **BATC-04**: Batch endpoint resolution includes both entities already in Neo4j and entities included in the same request
+- [x] **BATC-05**: Server detects all known identity, type, endpoint, hash, and provenance conflicts before domain writes
+- [x] **BATC-06**: Server generates all required entity and edge embeddings before opening the domain write transaction
+- [x] **BATC-07**: One Neo4j transaction upserts typed entities, typed edges, provenance, and committed batch state atomically
+- [x] **BATC-08**: A domain write failure rolls back every domain mutation and persists failed status in a separate safe transaction
+- [x] **BATC-09**: An identical committed batch ID and request hash returns unchanged without duplicating domain objects
+- [x] **BATC-10**: Batch dry-run performs complete validation, identity resolution, endpoint planning, and conflict checks without graph writes or persistent status
 - [ ] **BATC-11**: Combined ACCEPT_TAB fixture batch, retry, conflict, missing-endpoint rollback, persisted failure/success status, search interop, and service reinitialization tests pass
 - [ ] **BATC-12**: `build_communities` executes against batch-created entities without schema errors, but normal upserts never invoke it
 
@@ -236,14 +236,14 @@ Every v1 requirement maps to exactly one phase.
 | STAT-06 | Phase 2 | Complete |
 | BATC-01 | Phase 2 | Pending |
 | BATC-02 | Phase 2 | Pending |
-| BATC-03 | Phase 2 | Pending |
-| BATC-04 | Phase 2 | Pending |
-| BATC-05 | Phase 2 | Pending |
-| BATC-06 | Phase 2 | Pending |
-| BATC-07 | Phase 2 | Pending |
-| BATC-08 | Phase 2 | Pending |
-| BATC-09 | Phase 2 | Pending |
-| BATC-10 | Phase 2 | Pending |
+| BATC-03 | Phase 2 | Complete |
+| BATC-04 | Phase 2 | Complete |
+| BATC-05 | Phase 2 | Complete |
+| BATC-06 | Phase 2 | Complete |
+| BATC-07 | Phase 2 | Complete |
+| BATC-08 | Phase 2 | Complete |
+| BATC-09 | Phase 2 | Complete |
+| BATC-10 | Phase 2 | Complete |
 | BATC-11 | Phase 2 | Pending |
 | BATC-12 | Phase 2 | Pending |
 | DOCS-01 | Phase 2 | Pending |
