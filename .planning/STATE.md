@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-current_phase: 1
-current_phase_name: Strict Contracts and Catalog-v2 Identity
-status: in_progress
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-07-18T00:00:00.000Z"
+current_phase: 2
+current_phase_name: Topology Authority, Evidence Contract, Hashes, Capabilities
+status: ready_to_plan
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-07-18T20:10:00.000Z"
 last_activity: 2026-07-18
-last_activity_desc: Completed 01-04-PLAN.md (structured errors + CONT-07 boundary)
+last_activity_desc: Completed 01-05-PLAN.md (Phase 1 hard gate; ready_for_phase_2=true)
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 7
-  completed_plans: 6
-  percent: 14
+  completed_plans: 7
+  percent: 29
 ---
 
 # Project State
@@ -24,22 +24,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 1 — Strict Contracts and Catalog-v2 Identity
+**Current focus:** Phase 2 — Topology Authority, Evidence Contract, Hashes, Capabilities
 
 ## Current Position
 
-Phase: 1 — Strict Contracts and Catalog-v2 Identity
-Plan: 04 complete; next 05
-Status: In progress — Phase 1 incomplete; Phase 2 blocked until Phase 1 gate
-Last activity: 2026-07-18 — Completed 01-04-PLAN.md (structured errors + CONT-07 boundary)
+Phase: 1 complete — Strict Contracts and Catalog-v2 Identity
+Plan: 05 complete; Phase 1 gate green
+Status: Phase 1 complete; ready_for_phase_2=true; next Phase 2 planning
+Last activity: 2026-07-18 — Completed 01-05-PLAN.md (Phase 1 hard gate)
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [██░░░░░░░░] 29%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 16 (14 in v1.0, 2 in v1.1)
+- Total plans completed: 21 (14 in v1.0, 7 in v1.1 Phase 0+1)
 - Average duration: tracked in plan summaries
 - Total execution time: tracked in plan summaries
 
@@ -49,8 +49,9 @@ Progress: [█░░░░░░░░░] 14%
 |-------|-------|-------|----------|
 | v1.0 Phase 1. Typed Catalog Primitives | 8 | 8 | see summaries |
 | v1.0 Phase 2. Provenance and Atomic Batch | 6 | 6 | see summaries |
-| Phase 0–5 (v1.1, 7 work units) | 2 | TBD | - |
+| Phase 0–5 (v1.1, 7 work units) | 7 | TBD | - |
 | Phase 0 | 2 | 2 | see summaries |
+| Phase 1 | 5 | 5 | see summaries |
 
 **Prior milestone:**
 
@@ -66,6 +67,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 01 P02 | 25min | 2 tasks | 7 files |
 | Phase 01 P03 | 3min | 2 tasks | 3 files |
 | Phase 01 P04 | 40min | 2 tasks + hard-gate | 5 files |
+| Phase 01 P05 | 15min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -100,10 +102,12 @@ Recent decisions affecting current work:
 - [Phase 1]: Fresh ToolError(JSON) outside except; legacy/non-validation ToolErrors unchanged
 - [Phase 1]: CONT-07 proven via FastMCP call_tool + typed request annotations on all seven catalog tools
 - [Phase 1]: REFACTOR no-op for 01-04; no dual-version helpers
+- [Phase 1]: 01-PHASE1-GATE ready_for_phase_2=true from real focused pytest/ruff/pyright + safety + edge-probe 53/53
+- [Phase 1]: catalog_neo4j_int=skip without live probe; Phase 0 canary-script fails remain baseline noise
 
 ### Pending Todos
 
-Next: execute 01-05 Phase 1 gate. Phase 1 incomplete; Phase 2 blocked until Phase 1 gate.
+Next: plan/execute Phase 2 (topology authority, evidence contract, hashes, capabilities). Phase 1 complete; ready_for_phase_2=true.
 
 ### Blockers/Concerns
 
@@ -130,7 +134,7 @@ Next: execute 01-05 Phase 1 gate. Phase 1 incomplete; Phase 2 blocked until Phas
 
 ## Session Continuity
 
-Last session: 2026-07-17T19:42:23.698Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-07-17T20:10:00.000Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None
-Next: Phase 1 — Strict Contracts and Catalog-v2 Identity
+Next: Phase 2 — Topology Authority, Evidence Contract, Hashes, Capabilities
