@@ -789,6 +789,22 @@ def test_upsert_provenance_rejects_oversize_links():
         )
 
 
+def test_upsert_provenance_rejects_generated_link_product_over_hard_max():
+    with pytest.raises(ValidationError):
+        UpsertProvenanceRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'batch-1',
+                'sources': [
+                    _source_kwargs(source_key=f'DOC::SRC::{i}') for i in range(201)
+                ],
+                'entity_targets': [
+                    _entity_target(graph_key=f'TABLE::T{i}') for i in range(100)
+                ],
+            }
+        )
+
+
 # ---------------------------------------------------------------------------
 # Nested atomic batch (BATC-01 / BATC-02)
 # ---------------------------------------------------------------------------
@@ -863,6 +879,25 @@ def test_upsert_catalog_batch_accepts_provenance_only():
     )
     assert req.provenance is not None
     assert len(req.provenance.sources) == 1
+
+
+def test_nested_batch_rejects_generated_link_product_over_hard_max():
+    with pytest.raises(ValidationError):
+        UpsertCatalogBatchRequest.model_validate(
+            {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'batch-1',
+                'entities': [],
+                'provenance': {
+                    'sources': [
+                        _source_kwargs(source_key=f'DOC::SRC::{i}') for i in range(201)
+                    ],
+                    'entity_targets': [
+                        _entity_target(graph_key=f'TABLE::T{i}') for i in range(100)
+                    ],
+                },
+            }
+        )
 
 
 def test_upsert_catalog_batch_optional_hashes():

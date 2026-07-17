@@ -117,7 +117,9 @@ class UpsertProvenanceRequest(BaseModel):
 
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
-    sources: list[CatalogSourceItem] = Field(..., min_length=1)
+    sources: list[CatalogSourceItem] = Field(
+        ..., min_length=1, max_length=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
+    )
     entity_targets: list[CatalogProvenanceEntityTarget] = Field(
         default_factory=list, max_length=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
     )
@@ -137,7 +139,7 @@ class UpsertProvenanceRequest(BaseModel):
 
     @model_validator(mode='after')
     def _link_collection_bounds(self) -> UpsertProvenanceRequest:
-        total_links = len(self.entity_targets) + len(self.edge_targets)
+        total_links = len(self.sources) * (len(self.entity_targets) + len(self.edge_targets))
         if total_links > HARD_MAX_PROVENANCE_LINKS_PER_BATCH:
             raise ValueError(
                 f'provenance links exceed hard max ({HARD_MAX_PROVENANCE_LINKS_PER_BATCH})'

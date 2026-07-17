@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from models.catalog_common import (
     HARD_MAX_EDGES_PER_BATCH,
     HARD_MAX_ENTITIES_PER_BATCH,
+    HARD_MAX_PROVENANCE_LINKS_PER_BATCH,
     MAX_SHORT_STRING_LENGTH,
     SHA256_HEX_RE,
 )
@@ -34,9 +35,20 @@ def _validate_group_id(group_id: str | None) -> bool:
 class NestedProvenancePayload(BaseModel):
     """Provenance nested under UpsertCatalogBatchRequest."""
 
-    sources: list[CatalogSourceItem] = Field(..., min_length=1)
+    sources: list[CatalogSourceItem] = Field(
+        ..., min_length=1, max_length=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
+    )
     entity_targets: list[CatalogProvenanceEntityTarget] = Field(default_factory=list)
     edge_targets: list[CatalogProvenanceEdgeTarget] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def _link_collection_bounds(self) -> NestedProvenancePayload:
+        total_links = len(self.sources) * (len(self.entity_targets) + len(self.edge_targets))
+        if total_links > HARD_MAX_PROVENANCE_LINKS_PER_BATCH:
+            raise ValueError(
+                f'provenance links exceed hard max ({HARD_MAX_PROVENANCE_LINKS_PER_BATCH})'
+            )
+        return self
 
 
 class UpsertCatalogBatchRequest(BaseModel):

@@ -2615,7 +2615,9 @@ class CatalogService:
                 CatalogErrorCode.backend_unavailable,
                 'catalog writes require Neo4j backend',
             )
-        link_n = len(request.entity_targets) + len(request.edge_targets)
+        link_n = len(request.sources) * (
+            len(request.entity_targets) + len(request.edge_targets)
+        )
         max_links = self.catalog_config.max_provenance_links_per_batch
         if link_n > max_links:
             return _all_error(
@@ -3343,7 +3345,11 @@ class CatalogService:
             (len(request.edges), self.catalog_config.max_edges_per_batch, 'edges'),
             (
                 (
-                    len(request.provenance.entity_targets) + len(request.provenance.edge_targets)
+                    len(request.provenance.sources)
+                    * (
+                        len(request.provenance.entity_targets)
+                        + len(request.provenance.edge_targets)
+                    )
                     if request.provenance is not None
                     else 0
                 ),
