@@ -99,6 +99,9 @@ class _PreparedSource:
     entity_uuids: list[str] = field(default_factory=list)
     edge_uuids: list[str] = field(default_factory=list)
     mentions_uuids: list[str] = field(default_factory=list)
+    existing_mentions: set[str] = field(default_factory=set)
+    existing_edge_links: set[str] = field(default_factory=set)
+    links_checked: bool = False
     missing_links: bool = False  # True when any MENTIONS/episode attach still needed
     coalesced_indices: list[int] = field(default_factory=list)
 
@@ -2768,6 +2771,58 @@ class CatalogService:
             details={'kind': 'provenance'} if batch else None,
         )
 
+    async def _recheck_provenance_in_tx(
+        self,
+        tx: Any,
+        prep: _PreparedSource,
+        *,
+        group_id: str,
+    ) -> None:
+        existing = await self._store.get_source_episode_by_uuid(
+            None,
+            uuid=prep.source_uuid,
+            group_id=group_id,
+            tx=tx,
+        )
+        if existing is not None:
+            if existing.get('source_key') != prep.item.source_key:
+                raise self._ProvenanceInvariantRace(CatalogErrorCode.deterministic_uuid_conflict)
+            if prep.existing is None or existing.get('content_sha256') != prep.existing.get(
+                'content_sha256'
+            ):
+                raise self._ProvenanceInvariantRace(CatalogErrorCode.batch_conflict)
+        elif prep.existing is not None:
+            raise self._ProvenanceInvariantRace(CatalogErrorCode.batch_conflict)
+
+        if prep.links_checked:
+            for entity_uuid, mentions_uuid in zip(
+                prep.entity_uuids, prep.mentions_uuids, strict=True
+            ):
+                link = await self._store.get_mentions_link(
+                    None,
+                    episode_uuid=prep.source_uuid,
+                    entity_uuid=entity_uuid,
+                    mentions_uuid=mentions_uuid,
+                    group_id=group_id,
+                    tx=tx,
+                )
+                if (link is not None) != (mentions_uuid in prep.existing_mentions):
+                    raise self._ProvenanceInvariantRace(CatalogErrorCode.batch_conflict)
+            for edge_uuid in prep.edge_uuids:
+                edge = await self._store.get_edge_by_uuid(
+                    None, uuid=edge_uuid, group_id=group_id, tx=tx
+                )
+                if edge is None:
+                    raise self._ProvenanceInvariantRace(CatalogErrorCode.provenance_target_missing)
+                linked = prep.source_uuid in (edge.get('episodes') or [])
+                if linked != (edge_uuid in prep.existing_edge_links):
+                    raise self._ProvenanceInvariantRace(CatalogErrorCode.batch_conflict)
+
+    class _ProvenanceInvariantRace(Exception):
+        def __init__(self, code: CatalogErrorCode):
+            self.code = code
+            super().__init__(code.value)
+
     async def upsert_provenance(
         self,
         *,
@@ -3025,7 +3080,7 @@ class CatalogService:
                 continue
             prep.existing = existing
             missing_links = False
-            if existing is not None and existing.get('content_sha256') == prep.content_sha256:
+            if existing is not None:
                 for ent_uuid, men_uuid in zip(prep.entity_uuids, prep.mentions_uuids, strict=True):
                     try:
                         link = await self._store.get_mentions_link(
@@ -3053,48 +3108,48 @@ class CatalogService:
                         break
                     if link is None:
                         missing_links = True
+                    else:
+                        prep.existing_mentions.add(men_uuid)
+                if prep.index in early_errors:
+                    continue
+                for edge_uuid in prep.edge_uuids:
+                    try:
+                        erow = await self._store.get_edge_by_uuid(
+                            driver, uuid=edge_uuid, group_id=request.group_id
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            'catalog provenance_link_read_failed batch_id=%s kind=edge reason=%s',
+                            request.batch_id,
+                            type(exc).__name__,
+                        )
+                        early_errors[prep.index] = CatalogItemResult(
+                            index=prep.index,
+                            status='error',
+                            uuid=prep.source_uuid,
+                            graph_key=prep.item.source_key,
+                            error_code=CatalogErrorCode.internal_error,
+                            error_message='provenance link pre-read failed',
+                            details={'reason': type(exc).__name__, 'kind': 'edge'},
+                        )
                         break
+                    episodes = (erow or {}).get('episodes') or []
+                    if prep.source_uuid not in episodes:
+                        missing_links = True
+                    else:
+                        prep.existing_edge_links.add(edge_uuid)
                 if prep.index in early_errors:
                     continue
-                if not missing_links:
-                    for edge_uuid in prep.edge_uuids:
-                        try:
-                            erow = await self._store.get_edge_by_uuid(
-                                driver, uuid=edge_uuid, group_id=request.group_id
-                            )
-                        except Exception as exc:
-                            logger.error(
-                                'catalog provenance_link_read_failed batch_id=%s kind=edge reason=%s',
-                                request.batch_id,
-                                type(exc).__name__,
-                            )
-                            early_errors[prep.index] = CatalogItemResult(
-                                index=prep.index,
-                                status='error',
-                                uuid=prep.source_uuid,
-                                graph_key=prep.item.source_key,
-                                error_code=CatalogErrorCode.internal_error,
-                                error_message='provenance link pre-read failed',
-                                details={'reason': type(exc).__name__, 'kind': 'edge'},
-                            )
-                            break
-                        episodes = (erow or {}).get('episodes') or []
-                        if prep.source_uuid not in episodes:
-                            missing_links = True
-                            break
-                if prep.index in early_errors:
-                    continue
-                if not missing_links:
-                    prep.projected_status = 'unchanged'
-                else:
-                    prep.projected_status = 'updated'
-                    prep.missing_links = True
-            elif existing is None:
+                prep.links_checked = True
+                prep.missing_links = missing_links
+                prep.projected_status = (
+                    'unchanged'
+                    if existing.get('content_sha256') == prep.content_sha256 and not missing_links
+                    else 'updated'
+                )
+            else:
                 prep.projected_status = 'created'
                 prep.missing_links = bool(prep.entity_uuids or prep.edge_uuids)
-            else:
-                prep.projected_status = 'updated'
-                prep.missing_links = True
 
         if early_errors and request.atomic:
             return self._provenance_atomic_fail_response(
@@ -3155,6 +3210,7 @@ class CatalogService:
                 for prep in prepared:
                     if prep.index in early_errors:
                         continue
+                    await self._recheck_provenance_in_tx(tx, prep, group_id=request.group_id)
                     if prep.projected_status == 'unchanged' and not prep.missing_links:
                         written[prep.index] = self._source_result(prep, prep.index, 'unchanged')
                         for index in prep.coalesced_indices:
@@ -3200,6 +3256,26 @@ class CatalogService:
                     written[prep.index] = self._source_result(prep, prep.index, status)
                     for index in prep.coalesced_indices:
                         written[index] = self._source_result(prep, index, status)
+        except self._ProvenanceInvariantRace as exc:
+            logger.error(
+                'catalog upsert_provenance invariant_race batch_id=%s code=%s',
+                request.batch_id,
+                exc.code.value,
+            )
+            errs = {
+                i: CatalogItemResult(
+                    index=i,
+                    status='error',
+                    graph_key=request.sources[i].source_key,
+                    error_code=exc.code,
+                    error_message='provenance invariant changed in write transaction',
+                )
+                for i in write_set
+            }
+            errs.update(early_errors)
+            return self._provenance_atomic_fail_response(
+                request, errs, trigger_indices=set(errs.keys())
+            )
         except Exception as exc:
             logger.error(
                 'catalog upsert_provenance neo4j_transaction_failed batch_id=%s reason=%s',
@@ -4117,7 +4193,7 @@ class CatalogService:
                     catalog_mentions_uuid(namespace, request.group_id, source_uuid, entity_uuid)
                     for entity_uuid in prep.entity_uuids
                 ]
-                if existing is not None and prep.projected_status == 'unchanged':
+                if existing is not None:
                     link_read_error: Exception | None = None
                     for entity_uuid, mentions_uuid in zip(
                         prep.entity_uuids, prep.mentions_uuids, strict=True
@@ -4136,8 +4212,9 @@ class CatalogService:
                         if link is None:
                             prep.projected_status = 'updated'
                             prep.missing_links = True
-                            break
-                    if link_read_error is None and prep.projected_status == 'unchanged':
+                        else:
+                            prep.existing_mentions.add(mentions_uuid)
+                    if link_read_error is None:
                         for edge_uuid in prep.edge_uuids:
                             try:
                                 edge_row = await self._store.get_edge_by_uuid(
@@ -4149,7 +4226,10 @@ class CatalogService:
                             if source_uuid not in ((edge_row or {}).get('episodes') or []):
                                 prep.projected_status = 'updated'
                                 prep.missing_links = True
-                                break
+                            else:
+                                prep.existing_edge_links.add(edge_uuid)
+                    if link_read_error is None:
+                        prep.links_checked = True
                     if link_read_error is not None:
                         logger.error(
                             'catalog batch provenance_link_read_failed batch_id=%s reason=%s',
@@ -4435,6 +4515,7 @@ class CatalogService:
                         )
 
                 for prep in provenance_sources:
+                    await self._recheck_provenance_in_tx(tx, prep, group_id=request.group_id)
                     params = self._store.prepare_source_episode_params(
                         uuid=prep.source_uuid,
                         group_id=request.group_id,

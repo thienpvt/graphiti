@@ -323,9 +323,7 @@ def test_upsert_entities_rejects_invalid_group_id():
         ),
         (
             ResolveTypedEntitiesRequest,
-            lambda: {
-                'entities': [{'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'}]
-            },
+            lambda: {'entities': [{'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'}]},
         ),
         (VerifyCatalogBatchRequest, lambda: {'batch_id': 'batch-1'}),
         (
@@ -345,9 +343,7 @@ def test_upsert_entities_rejects_invalid_group_id():
 )
 def test_phase2_requests_reject_group_id_trailing_newline(model, payload_factory):
     with pytest.raises(ValidationError):
-        model.model_validate(
-            {'group_id': 'oracle-catalog-tool-test\n', **payload_factory()}
-        )
+        model.model_validate({'group_id': 'oracle-catalog-tool-test\n', **payload_factory()})
 
 
 def test_upsert_entities_accepts_valid_request():

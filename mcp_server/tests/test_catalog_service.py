@@ -2343,6 +2343,19 @@ def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = Fa
     return src_uuid, ent_uuid
 
 
+def _wire_provenance_source_sequence(
+    service: CatalogService,
+    *,
+    preflight: dict | None,
+    in_tx: dict | None,
+) -> None:
+    async def _source_by_uuid(executor, *, uuid, group_id, tx=None):
+        _ = executor, uuid, group_id
+        return preflight if tx is None else in_tx
+
+    service._store.get_source_episode_by_uuid = AsyncMock(side_effect=_source_by_uuid)
+
+
 # late import for prepare helper wiring
 from services.catalog_store import CatalogNeo4jStore  # noqa: E402
 
@@ -2538,10 +2551,7 @@ async def test_provenance_unchanged_source_new_link_reports_updated(target_kind)
             CatalogProvenanceEdgeTarget(edge_type=edge.edge_type, edge_key=edge.edge_key)
         ]
         service._store.get_edge_by_uuid = AsyncMock(
-            side_effect=[
-                {'uuid': edge_uuid, 'name': edge.edge_type, 'episodes': []},
-                {'uuid': edge_uuid, 'name': edge.edge_type, 'episodes': []},
-            ]
+            return_value={'uuid': edge_uuid, 'name': edge.edge_type, 'episodes': []}
         )
         entity_targets = [
             CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES')
@@ -2566,6 +2576,49 @@ async def test_provenance_unchanged_source_new_link_reports_updated(target_kind)
     params = source_call.kwargs['params']
     if target_kind == 'edge':
         assert params['entity_edges'] == [edge_uuid]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('drift', ['source_key', 'content_sha256', 'mentions', 'updated_mentions'])
+async def test_provenance_transaction_local_drift_aborts_before_mutation(drift):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    src_uuid, ent_uuid = _wire_provenance_store(service)
+    source = _source(attributes={'version': 2}) if drift == 'updated_mentions' else _source()
+    digest = canonical_sha256(service.source_canonical_payload(source))
+    stored_digest = (
+        canonical_sha256(service.source_canonical_payload(_source(attributes={'version': 1})))
+        if drift == 'updated_mentions'
+        else digest
+    )
+    preflight = {
+        'uuid': src_uuid,
+        'source_key': source.source_key,
+        'content_sha256': stored_digest,
+    }
+    in_tx = dict(preflight)
+    if drift == 'source_key':
+        in_tx['source_key'] = 'SRC::drifted'
+    elif drift == 'content_sha256':
+        in_tx['content_sha256'] = 'f' * 64
+    _wire_provenance_source_sequence(service, preflight=preflight, in_tx=in_tx)
+    mention = {'uuid': catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, ent_uuid)}
+    service._store.get_mentions_link = AsyncMock(
+        side_effect=[mention, None if drift in {'mentions', 'updated_mentions'} else mention]
+    )
+
+    resp = await service.upsert_provenance(
+        client=client,
+        request=_prov_request(sources=[source]),
+    )
+
+    assert resp.failed == 1
+    assert resp.results[0].error_code in {
+        CatalogErrorCode.deterministic_uuid_conflict,
+        CatalogErrorCode.batch_conflict,
+    }
+    cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_mentions_link).assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3383,6 +3436,60 @@ async def test_batch_unchanged_domain_drift_aborts_before_commit_status(kind):
         CatalogErrorCode.neo4j_transaction_failed,
     )
     assert 'status_committed' not in events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('drift', ['source_key', 'content_sha256', 'mentions', 'updated_mentions'])
+async def test_batch_transaction_local_provenance_drift_aborts_before_mutation(drift):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    _install_batch_write_mocks(service, client)
+    source = _source(attributes={'version': 2}) if drift == 'updated_mentions' else _source()
+    src_uuid = catalog_source_uuid(FIXED_NS, GROUP, source.source_key)
+    digest = canonical_sha256(service.source_canonical_payload(source))
+    stored_digest = (
+        canonical_sha256(service.source_canonical_payload(_source(attributes={'version': 1})))
+        if drift == 'updated_mentions'
+        else digest
+    )
+    preflight = {
+        'uuid': src_uuid,
+        'source_key': source.source_key,
+        'content_sha256': stored_digest,
+    }
+    in_tx = dict(preflight)
+    if drift == 'source_key':
+        in_tx['source_key'] = 'SRC::drifted'
+    elif drift == 'content_sha256':
+        in_tx['content_sha256'] = 'f' * 64
+    _wire_provenance_source_sequence(service, preflight=preflight, in_tx=in_tx)
+    employee = _entity()
+    entity_uuid = catalog_entity_uuid(FIXED_NS, GROUP, employee.entity_type, employee.graph_key)
+    mentions_uuid = catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, entity_uuid)
+    mention = {'uuid': mentions_uuid}
+    service._store.get_mentions_link = AsyncMock(
+        side_effect=[mention, None if drift in {'mentions', 'updated_mentions'} else mention]
+    )
+    provenance = NestedProvenancePayload(
+        sources=[source],
+        entity_targets=[
+            CatalogProvenanceEntityTarget(
+                entity_type=employee.entity_type,
+                graph_key=employee.graph_key,
+            )
+        ],
+    )
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(entities=[employee], provenance=provenance),
+    )
+
+    assert resp.status == 'failed'
+    assert resp.error_code == CatalogErrorCode.neo4j_transaction_failed
+    cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_mentions_link).assert_not_awaited()
 
 
 @pytest.mark.asyncio
