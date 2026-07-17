@@ -58,7 +58,7 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
   4. New tests and development writes use only `oracle-catalog-tool-test`; `oracle-catalog-v2` is never queried or mutated; no canary runs
   5. Dirty-worktree unrelated files and remote state remain untouched (no push/merge/deploy/tag)
 
-**Plans**: 1/2 plans executed
+**Plans**: 2/2 plans executed
 
 Plans:
 **Wave 1**
@@ -67,7 +67,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 00-02-PLAN.md — Wave 2 (depends on 01): compatibility freeze, isolation/remote safety policy, Phase 0 gate report
+- [x] 00-02-PLAN.md — Wave 2 (depends on 01): compatibility freeze, isolation/remote safety policy, Phase 0 gate report
 
 ### Phase 1: Strict Contracts and Catalog-v2 Identity
 
