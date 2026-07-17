@@ -9,6 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -2236,13 +2237,13 @@ def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = Fa
     service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)
     service._store.get_mentions_link = AsyncMock(return_value=None)
     service._store.ensure_uuid_uniqueness_constraints = AsyncMock(return_value=None)
-    service._store.upsert_source_episode = AsyncMock(
+    service._store.upsert_source_episode = AsyncMock(  # type: ignore[method-assign]
         return_value={'uuid': src_uuid, 'content_sha256': 'h', 'status': 'created'}
     )
-    service._store.upsert_mentions_link = AsyncMock(
+    service._store.upsert_mentions_link = AsyncMock(  # type: ignore[method-assign]
         return_value={'uuid': 'm1', 'status': 'created'}
     )
-    service._store.append_edge_episode = AsyncMock(
+    service._store.append_edge_episode = AsyncMock(  # type: ignore[method-assign]
         return_value={'uuid': 'e1', 'episodes': [src_uuid]}
     )
     service._store.prepare_source_episode_params = CatalogNeo4jStore().prepare_source_episode_params
@@ -2264,14 +2265,16 @@ async def test_provenance_happy_path_writes_source_and_mentions_no_embed():
     assert resp.failed == 0
     assert resp.created >= 1 or resp.updated >= 1 or resp.unchanged >= 0
     assert any(r.uuid == src_uuid for r in resp.results)
-    service._store.upsert_source_episode.assert_awaited()
-    service._store.upsert_mentions_link.assert_awaited()
+    cast(AsyncMock, service._store.upsert_source_episode).assert_awaited()
+    cast(AsyncMock, service._store.upsert_mentions_link).assert_awaited()
     # no embedder / queue / llm on provenance path
     assert 'embed' not in client.call_order
     client.embedder.create.assert_not_awaited()
     queue.assert_not_called()
     # MENTIONS uses deterministic uuid
-    call_kwargs = service._store.upsert_mentions_link.await_args.kwargs
+    mentions_call = cast(AsyncMock, service._store.upsert_mentions_link).await_args
+    assert mentions_call is not None
+    call_kwargs = mentions_call.kwargs
     expected_men = catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, ent_uuid)
     assert call_kwargs['mentions_uuid'] == expected_men
     assert call_kwargs['entity_uuid'] == ent_uuid
@@ -2286,9 +2289,9 @@ async def test_provenance_missing_target_fail_closed_no_writes():
     resp = await service.upsert_provenance(client=client, request=_prov_request())
     assert resp.failed >= 1
     assert any(r.error_code == CatalogErrorCode.provenance_target_missing for r in resp.results)
-    service._store.upsert_source_episode.assert_not_awaited()
-    service._store.upsert_mentions_link.assert_not_awaited()
-    service._store.append_edge_episode.assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_mentions_link).assert_not_awaited()
+    cast(AsyncMock, service._store.append_edge_episode).assert_not_awaited()
     assert 'transaction' not in client.call_order
     assert 'embed' not in client.call_order
 
@@ -2302,8 +2305,8 @@ async def test_provenance_dry_run_no_writes():
     resp = await service.upsert_provenance(client=client, request=_prov_request(dry_run=True))
     assert resp.dry_run is True
     assert resp.failed == 0
-    service._store.upsert_source_episode.assert_not_awaited()
-    service._store.upsert_mentions_link.assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_mentions_link).assert_not_awaited()
     assert 'transaction' not in client.call_order
     assert 'embed' not in client.call_order
 
@@ -2315,8 +2318,6 @@ async def test_provenance_idempotent_unchanged_skips_write():
     src_uuid, ent_uuid = _wire_provenance_store(service)
     item = _source()
     digest = CatalogService.source_canonical_payload(item)
-    from services.catalog_identity import canonical_sha256
-
     sha = canonical_sha256(digest)
     service._store.get_source_episode_by_uuid = AsyncMock(
         return_value={
@@ -2333,8 +2334,8 @@ async def test_provenance_idempotent_unchanged_skips_write():
     assert resp.failed == 0
     assert resp.unchanged >= 1
     assert all(r.status == 'unchanged' for r in resp.results)
-    service._store.upsert_source_episode.assert_not_awaited()
-    service._store.upsert_mentions_link.assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_mentions_link).assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2367,7 +2368,7 @@ async def test_status_found_maps_response_no_payload_fields():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     batch_uuid = catalog_batch_uuid(FIXED_NS, GROUP, BATCH)
-    service._store.get_batch_status = AsyncMock(
+    service._store.get_batch_status = AsyncMock(  # type: ignore[method-assign]
         return_value={
             'uuid': batch_uuid,
             'group_id': GROUP,
@@ -2396,8 +2397,11 @@ async def test_status_found_maps_response_no_payload_fields():
     dumped = resp.model_dump()
     for banned in ('payload', 'entities', 'edges', 'sources', 'api_key', 'password'):
         assert banned not in dumped
-    service._store.get_batch_status.assert_awaited_once()
-    call_kwargs = service._store.get_batch_status.await_args.kwargs
+    get_status = cast(AsyncMock, service._store.get_batch_status)
+    get_status.assert_awaited_once()
+    status_call = get_status.await_args
+    assert status_call is not None
+    call_kwargs = status_call.kwargs
     assert call_kwargs['uuid'] == batch_uuid
     assert call_kwargs['group_id'] == GROUP
     # read-only: no write tx / embed
