@@ -438,11 +438,11 @@ def test_edge_on_create_and_changed_match_include_batch_id():
     assert 'CASE' in cypher.upper()
     assert 'content_sha256' in cypher
     assert 'ON MATCH SET' not in cypher
-    # create sets episodes; content update must NOT wipe provenance (Phase 2)
+    # Create seeds []; update heals only legacy null and preserves appended provenance.
     assert 'e.episodes = $episodes' in cypher
     assert "status = 'updated'" in cypher
-    # updated SET block must not assign episodes (append-only provenance path owns that)
     updated_block = cypher.split("status = 'updated'")[1] if "status = 'updated'" in cypher else ''
+    assert 'e.episodes = coalesce(e.episodes, $episodes)' in updated_block
     assert 'e.episodes = $episodes' not in updated_block
 
 

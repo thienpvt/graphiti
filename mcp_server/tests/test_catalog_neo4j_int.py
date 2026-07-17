@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import os
 import sys
 import uuid
@@ -28,6 +29,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from config.schema import CatalogConfig  # noqa: E402
+from models.catalog_batch import (  # noqa: E402
+    GetCatalogIngestStatusRequest,
+    NestedProvenancePayload,
+    UpsertCatalogBatchRequest,
+)
 from models.catalog_common import CatalogErrorCode  # noqa: E402
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
 from models.catalog_entities import (  # noqa: E402
@@ -39,7 +45,17 @@ from models.catalog_entities import (  # noqa: E402
     VerifyEdgeRef,
     VerifyEntityRef,
 )
-from services.catalog_identity import catalog_edge_uuid, catalog_entity_uuid  # noqa: E402
+from models.catalog_provenance import (  # noqa: E402
+    CatalogProvenanceEdgeTarget,
+    CatalogProvenanceEntityTarget,
+    CatalogSourceItem,
+)
+from services.catalog_identity import (  # noqa: E402
+    catalog_batch_uuid,
+    catalog_edge_uuid,
+    catalog_entity_uuid,
+    catalog_source_uuid,
+)
 from services.catalog_service import CatalogService  # noqa: E402
 
 pytestmark = [
@@ -55,6 +71,8 @@ FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 EMBED_DIM = 8
 BATCH = 'gate02-batch-001'
 EDGE_BATCH = 'gate02-edge-batch-001'
+ACCEPT_TAB_BATCH = 'accept-tab-batch-001'
+ACCEPT_TAB_FIXTURE = Path(__file__).parent / 'fixtures' / 'accept_tab_sanitized.json'
 
 
 def _catalog_int_required() -> bool:
@@ -389,11 +407,41 @@ async def _seed_wrong_type_entity(driver: Any, name: str, label: str = 'View') -
     return u
 
 
-async def _teardown_group(driver: Any) -> None:
-    await driver.execute_query(
-        'MATCH (n) WHERE n.group_id = $g DETACH DELETE n',
-        params={'g': GROUP},
+async def _snapshot_group_elements(driver: Any, group_id: str = GROUP) -> tuple[set[str], set[str]]:
+    nodes = await driver.execute_query(
+        'MATCH (n) WHERE n.group_id = $g RETURN elementId(n) AS id',
+        params={'g': group_id},
     )
+    edges = await driver.execute_query(
+        'MATCH ()-[e]->() WHERE e.group_id = $g RETURN elementId(e) AS id',
+        params={'g': group_id},
+    )
+    return (
+        {str(row['id']) for row in (nodes[0] if nodes else [])},
+        {str(row['id']) for row in (edges[0] if edges else [])},
+    )
+
+
+async def _teardown_created_elements(
+    driver: Any,
+    before_nodes: set[str],
+    before_edges: set[str],
+    *,
+    group_id: str = GROUP,
+) -> None:
+    current_nodes, current_edges = await _snapshot_group_elements(driver, group_id)
+    created_edges = sorted(current_edges - before_edges)
+    created_nodes = sorted(current_nodes - before_nodes)
+    if created_edges:
+        await driver.execute_query(
+            'MATCH ()-[e]->() WHERE e.group_id = $g AND elementId(e) IN $ids DELETE e',
+            params={'g': group_id, 'ids': created_edges},
+        )
+    if created_nodes:
+        await driver.execute_query(
+            'MATCH (n) WHERE n.group_id = $g AND elementId(n) IN $ids DETACH DELETE n',
+            params={'g': group_id, 'ids': created_nodes},
+        )
 
 
 @pytest.fixture
@@ -422,14 +470,26 @@ async def neo4j_driver():
     # Fixture issues ZERO DROP statements — safe on shared authorized DBs.
     await asyncio.sleep(0.5)
 
-    await _teardown_group(driver)
+    group_nodes_before, group_edges_before = await _snapshot_group_elements(driver)
     other_groups_before = await _snapshot_other_groups(driver)
+    forbidden_before = (
+        await _count_group_nodes(driver, FORBIDDEN_GROUP),
+        await _count_group_edges(driver, FORBIDDEN_GROUP),
+    )
     try:
         yield driver
     finally:
         try:
-            await _teardown_group(driver)
+            await _teardown_created_elements(driver, group_nodes_before, group_edges_before)
+            assert await _snapshot_group_elements(driver) == (
+                group_nodes_before,
+                group_edges_before,
+            )
             assert await _snapshot_other_groups(driver) == other_groups_before
+            assert (
+                await _count_group_nodes(driver, FORBIDDEN_GROUP),
+                await _count_group_edges(driver, FORBIDDEN_GROUP),
+            ) == forbidden_before
         finally:
             await driver.close()
 
@@ -496,6 +556,259 @@ async def _seed_happy_graph(ctx) -> dict[str, Any]:
         'entity_resp': eresp,
         'edge_resp': edresp,
     }
+
+
+def _accept_tab_request(
+    *,
+    dry_run: bool = False,
+    batch_id: str = ACCEPT_TAB_BATCH,
+) -> UpsertCatalogBatchRequest:
+    payload = json.loads(ACCEPT_TAB_FIXTURE.read_text(encoding='utf-8'))
+    assert payload['batch_id'] == ACCEPT_TAB_BATCH
+    return UpsertCatalogBatchRequest(
+        group_id=GROUP,
+        batch_id=batch_id,
+        entities=[CatalogEntityItem.model_validate(item) for item in payload['entities']],
+        edges=[CatalogEdgeItem.model_validate(item) for item in payload['edges']],
+        provenance=NestedProvenancePayload(
+            sources=[
+                CatalogSourceItem.model_validate(item) for item in payload['provenance']['sources']
+            ],
+            entity_targets=[
+                CatalogProvenanceEntityTarget.model_validate(item)
+                for item in payload['provenance']['entity_targets']
+            ],
+            edge_targets=[
+                CatalogProvenanceEdgeTarget.model_validate(item)
+                for item in payload['provenance']['edge_targets']
+            ],
+        ),
+        dry_run=dry_run,
+    )
+
+
+async def _upsert_accept_tab(ctx, *, dry_run: bool = False, batch_id: str = ACCEPT_TAB_BATCH):
+    request = _accept_tab_request(dry_run=dry_run, batch_id=batch_id)
+    response = await ctx.service.upsert_catalog_batch(client=ctx.client, request=request)
+    return request, response
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 Task 1: atomic ACCEPT_TAB batch
+# ---------------------------------------------------------------------------
+
+
+async def test_accept_tab_dry_run_leaves_graph_and_status_untouched(catalog_client):
+    ctx = catalog_client
+    before = await _snapshot_group_elements(ctx.driver)
+    request, response = await _upsert_accept_tab(ctx, dry_run=True)
+
+    assert response.dry_run is True
+    assert response.status == 'validating'
+    assert response.failed == 0
+    assert response.entity_created == len(request.entities)
+    assert response.edge_created == len(request.edges)
+    assert await _snapshot_group_elements(ctx.driver) == before
+
+    status = await ctx.service.get_catalog_ingest_status(
+        client=ctx.client,
+        request=GetCatalogIngestStatusRequest(group_id=GROUP, batch_id=ACCEPT_TAB_BATCH),
+    )
+    assert status.error_code == CatalogErrorCode.validation_error
+    assert status.error_summary == 'batch status not found'
+
+
+async def test_accept_tab_commit_retry_conflict_status_reinitialization_and_verify(catalog_client):
+    ctx = catalog_client
+    request, committed = await _upsert_accept_tab(ctx)
+    assert request.provenance is not None
+
+    assert committed.status == 'committed'
+    assert committed.failed == 0
+    assert committed.entity_created == len(request.entities)
+    assert committed.edge_created == len(request.edges)
+    assert committed.provenance_created == len(request.provenance.sources)
+
+    expected_entities = {
+        catalog_entity_uuid(FIXED_NS, GROUP, item.entity_type, item.graph_key)
+        for item in request.entities
+    }
+    expected_edges = {
+        catalog_edge_uuid(FIXED_NS, GROUP, item.edge_type, item.edge_key) for item in request.edges
+    }
+    source = request.provenance.sources[0]
+    expected_source = catalog_source_uuid(FIXED_NS, GROUP, source.source_key)
+    expected_batch = catalog_batch_uuid(FIXED_NS, GROUP, request.batch_id)
+
+    snapshot = await ctx.driver.execute_query(
+        """
+        MATCH (b:CatalogIngestBatch {uuid: $batch_uuid, group_id: $g})
+        OPTIONAL MATCH (ep:Episodic {uuid: $source_uuid, group_id: $g})
+        OPTIONAL MATCH (ep)-[m:MENTIONS]->(n:Entity)
+        WHERE m.group_id = $g AND n.group_id = $g
+        WITH b, ep, collect(DISTINCT n.uuid) AS mentioned
+        MATCH (s:Entity)-[e:RELATES_TO]->(t:Entity)
+        WHERE e.group_id = $g AND e.uuid IN $edge_uuids
+        RETURN labels(b) AS batch_labels, b.status AS status,
+               ep.uuid AS source_uuid, labels(ep) AS source_labels,
+               mentioned, collect(DISTINCT e.uuid) AS edges,
+               collect(DISTINCT e.episodes) AS edge_episodes
+        """,
+        params={
+            'g': GROUP,
+            'batch_uuid': expected_batch,
+            'source_uuid': expected_source,
+            'edge_uuids': sorted(expected_edges),
+        },
+    )
+    row = snapshot[0][0]
+    assert row['batch_labels'] == ['CatalogIngestBatch']
+    assert row['status'] == 'committed'
+    assert row['source_uuid'] == expected_source
+    assert set(row['source_labels']) == {'Episodic'}
+    assert set(row['mentioned']) == expected_entities
+    assert set(row['edges']) == expected_edges
+    assert all(episodes == [expected_source] for episodes in row['edge_episodes'])
+
+    physical_before = await _snapshot_group_elements(ctx.driver)
+    _, retry = await _upsert_accept_tab(ctx)
+    assert retry.status == 'committed'
+    assert retry.entity_unchanged == len(request.entities)
+    assert retry.edge_unchanged == len(request.edges)
+    assert retry.provenance_unchanged == len(request.provenance.sources)
+    assert await _snapshot_group_elements(ctx.driver) == physical_before
+
+    conflict_request = request.model_copy(
+        update={
+            'entities': [
+                request.entities[0].model_copy(update={'summary': 'Conflicting synthetic summary'}),
+                *request.entities[1:],
+            ]
+        }
+    )
+    conflict = await ctx.service.upsert_catalog_batch(client=ctx.client, request=conflict_request)
+    assert conflict.error_code == CatalogErrorCode.batch_conflict
+    assert conflict.status == 'failed'
+    assert await _snapshot_group_elements(ctx.driver) == physical_before
+
+    restarted = CatalogService(catalog_config=_enabled_config(), queue_service=RecordingQueue())
+    status = await restarted.get_catalog_ingest_status(
+        client=ctx.client,
+        request=GetCatalogIngestStatusRequest(group_id=GROUP, batch_id=request.batch_id),
+    )
+    assert status.status == 'committed'
+    assert status.batch_uuid == expected_batch
+    assert status.entity_count == len(request.entities)
+    assert status.edge_count == len(request.edges)
+    assert status.provenance_count == len(request.provenance.sources)
+
+    verified = await restarted.verify_catalog_batch(
+        client=ctx.client,
+        request=VerifyCatalogBatchRequest(
+            group_id=GROUP,
+            batch_id=request.batch_id,
+            entities=[
+                VerifyEntityRef(entity_type=item.entity_type, graph_key=item.graph_key)
+                for item in request.entities
+            ],
+            edges=[
+                VerifyEdgeRef(edge_type=item.edge_type, edge_key=item.edge_key)
+                for item in request.edges
+            ],
+            require_provenance=True,
+        ),
+    )
+    assert verified.error_code is None
+    assert verified.missing == []
+    assert verified.anomalies == []
+    assert verified.missing_provenance == []
+
+
+async def test_accept_tab_concurrent_identical_batch_is_one_logical_set(catalog_client):
+    ctx = catalog_client
+
+    async def _once():
+        service = CatalogService(catalog_config=_enabled_config(), queue_service=RecordingQueue())
+        client = SimpleNamespace(
+            driver=ctx.driver, embedder=FakeEmbedder(), llm_client=RecordingLLM()
+        )
+        return await service.upsert_catalog_batch(client=client, request=_accept_tab_request())
+
+    responses = await asyncio.gather(*[_once() for _ in range(4)])
+    assert all(response.status == 'committed' for response in responses)
+    request = _accept_tab_request()
+    assert request.provenance is not None
+    for item in request.entities:
+        expected = catalog_entity_uuid(FIXED_NS, GROUP, item.entity_type, item.graph_key)
+        assert await _count_entity_uuid(ctx.driver, expected) == 1
+    for item in request.edges:
+        expected = catalog_edge_uuid(FIXED_NS, GROUP, item.edge_type, item.edge_key)
+        assert await _count_edge_uuid(ctx.driver, expected) == 1
+    assert await _count_group_nodes(ctx.driver) == len(request.entities) + 2
+    assert await _count_group_edges(ctx.driver) == len(request.edges) + len(
+        request.provenance.entity_targets
+    )
+
+
+async def test_accept_tab_missing_endpoint_batch_has_no_partial_domain_write(catalog_client):
+    ctx = catalog_client
+    good = _accept_tab_request()
+    missing = good.edges[1].model_copy(
+        update={
+            'target_graph_key': 'TABLE::APP.MISSING_PARENT',
+            'edge_key': 'FK::APP.ACCEPT_TAB.ACCEPT_ID->APP.MISSING_PARENT.ACCEPT_ID',
+        }
+    )
+    request = good.model_copy(
+        update={
+            'batch_id': 'accept-tab-missing-endpoint',
+            'entities': good.entities[:2],
+            'edges': [good.edges[0], missing],
+            'provenance': None,
+        }
+    )
+    before = await _snapshot_group_elements(ctx.driver)
+    response = await ctx.service.upsert_catalog_batch(client=ctx.client, request=request)
+
+    assert response.status == 'failed'
+    assert response.error_code == CatalogErrorCode.missing_endpoint
+    assert await _snapshot_group_elements(ctx.driver) == before
+
+
+async def test_accept_tab_real_transaction_failure_rolls_back_and_persists_failed_status(
+    catalog_client, monkeypatch
+):
+    ctx = catalog_client
+    request = _accept_tab_request(batch_id='accept-tab-injected-failure')
+    original = ctx.service._store.upsert_edge_item
+    calls = 0
+
+    async def _fail_first_edge(tx, *, params):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError('synthetic injected failure')
+        return await original(tx, params=params)
+
+    monkeypatch.setattr(ctx.service._store, 'upsert_edge_item', _fail_first_edge)
+    response = await ctx.service.upsert_catalog_batch(client=ctx.client, request=request)
+
+    assert response.status == 'failed'
+    assert response.error_code == CatalogErrorCode.neo4j_transaction_failed
+    for item in request.entities:
+        expected = catalog_entity_uuid(FIXED_NS, GROUP, item.entity_type, item.graph_key)
+        assert await _count_entity_uuid(ctx.driver, expected) == 0
+    for item in request.edges:
+        expected = catalog_edge_uuid(FIXED_NS, GROUP, item.edge_type, item.edge_key)
+        assert await _count_edge_uuid(ctx.driver, expected) == 0
+
+    restarted = CatalogService(catalog_config=_enabled_config())
+    status = await restarted.get_catalog_ingest_status(
+        client=ctx.client,
+        request=GetCatalogIngestStatusRequest(group_id=GROUP, batch_id=request.batch_id),
+    )
+    assert status.status == 'failed'
+    assert status.error_summary == 'RuntimeError'
 
 
 # ---------------------------------------------------------------------------
@@ -1364,12 +1677,13 @@ async def test_no_llm_no_queue_calls(catalog_client):
 
 
 async def test_teardown_scoped_and_fixture_never_calls_clear_graph(catalog_client):
-    """Fixture contract: only GROUP deletion; no clear_graph invocation."""
+    """Fixture contract: deletes exact created elementIds; never clears a group."""
     ctx = catalog_client
+    before_nodes, before_edges = await _snapshot_group_elements(ctx.driver)
     await _upsert_entities(ctx, [_six_entities()[0]])
-    assert await _count_group_nodes(ctx.driver) == 1
-    await _teardown_group(ctx.driver)
-    assert await _count_group_nodes(ctx.driver) == 0
+    assert (await _snapshot_group_elements(ctx.driver))[0] > before_nodes
+    await _teardown_created_elements(ctx.driver, before_nodes, before_edges)
+    assert await _snapshot_group_elements(ctx.driver) == (before_nodes, before_edges)
 
     tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
     clear_calls = [
@@ -1384,6 +1698,8 @@ async def test_teardown_scoped_and_fixture_never_calls_clear_graph(catalog_clien
         )
     ]
     assert clear_calls == []
+    source = Path(__file__).read_text(encoding='utf-8')
+    assert 'MATCH (n) WHERE n.group_id = $g DETACH DELETE n' not in source
     assert FORBIDDEN_GROUP == 'oracle-catalog-v2'
 
 
@@ -1536,3 +1852,42 @@ async def test_edge_update_heals_null_episodes_for_search(catalog_client):
         if getattr(e, 'uuid', None) == eu:
             assert list(getattr(e, 'episodes', None) or []) == []
             break
+
+
+async def test_edge_update_preserves_existing_provenance_episodes(catalog_client):
+    ctx = catalog_client
+    await _upsert_entities(ctx, [_six_entities()[2], _extra_table()])
+    edge = _edge(
+        'ForeignKeyTo',
+        'FK::episodes-preserved',
+        'TABLE::HR.EMPLOYEES',
+        'Table',
+        'TABLE::HR.DEPARTMENTS',
+        'Table',
+        'original fact',
+    )
+    created = await _upsert_edges(ctx, [edge], batch_id='episodes-create')
+    edge_uuid = created.results[0].uuid
+    assert edge_uuid
+    source_uuid = str(uuid.uuid4())
+    await ctx.driver.execute_query(
+        """
+        MATCH ()-[e:RELATES_TO {uuid: $u}]->()
+        WHERE e.group_id = $g
+        SET e.episodes = [$source_uuid]
+        """,
+        params={'u': edge_uuid, 'g': GROUP, 'source_uuid': source_uuid},
+    )
+
+    updated = edge.model_copy(update={'fact': 'updated fact'})
+    response = await _upsert_edges(ctx, [updated], batch_id='episodes-update')
+    assert response.results[0].status == 'updated'
+    stored = await ctx.driver.execute_query(
+        """
+        MATCH ()-[e:RELATES_TO {uuid: $u}]->()
+        WHERE e.group_id = $g
+        RETURN e.episodes AS episodes
+        """,
+        params={'u': edge_uuid, 'g': GROUP},
+    )
+    assert stored[0][0]['episodes'] == [source_uuid]
