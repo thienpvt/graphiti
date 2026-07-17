@@ -2771,28 +2771,38 @@ class CatalogService:
             details={'kind': 'provenance'} if batch else None,
         )
 
-    async def _recheck_provenance_in_tx(
+    async def _lock_and_recheck_provenance_targets(
         self,
         tx: Any,
         prep: _PreparedSource,
         *,
         group_id: str,
+        created_targets: set[tuple[str, str]] | None = None,
     ) -> None:
-        existing = await self._store.get_source_episode_by_uuid(
-            None,
-            uuid=prep.source_uuid,
+        rows = await self._store.lock_provenance_targets(
+            tx,
             group_id=group_id,
-            tx=tx,
+            entity_uuids=prep.entity_uuids,
+            edge_uuids=prep.edge_uuids,
         )
-        if existing is not None:
-            if existing.get('source_key') != prep.item.source_key:
-                raise self._ProvenanceInvariantRace(CatalogErrorCode.deterministic_uuid_conflict)
-            if prep.existing is None or existing.get('content_sha256') != prep.existing.get(
-                'content_sha256'
-            ):
-                raise self._ProvenanceInvariantRace(CatalogErrorCode.batch_conflict)
-        elif prep.existing is not None:
-            raise self._ProvenanceInvariantRace(CatalogErrorCode.batch_conflict)
+        by_target = {(str(row.get('kind')), str(row.get('uuid'))): row for row in rows}
+        created_targets = created_targets or set()
+        for entity_uuid in prep.entity_uuids:
+            row = by_target.get(('entity', entity_uuid))
+            if row is None and ('entity', entity_uuid) in created_targets:
+                continue
+            if row is None or 'Entity' not in (row.get('labels') or []):
+                raise self._ProvenanceInvariantRace(CatalogErrorCode.provenance_target_missing)
+        for edge_uuid in prep.edge_uuids:
+            row = by_target.get(('edge', edge_uuid))
+            if row is None and ('edge', edge_uuid) in created_targets:
+                continue
+            if row is None:
+                raise self._ProvenanceInvariantRace(CatalogErrorCode.provenance_target_missing)
+            if prep.links_checked:
+                linked = prep.source_uuid in (row.get('episodes') or [])
+                if linked != (edge_uuid in prep.existing_edge_links):
+                    raise self._ProvenanceInvariantRace(CatalogErrorCode.batch_conflict)
 
         if prep.links_checked:
             for entity_uuid, mentions_uuid in zip(
@@ -2808,15 +2818,36 @@ class CatalogService:
                 )
                 if (link is not None) != (mentions_uuid in prep.existing_mentions):
                     raise self._ProvenanceInvariantRace(CatalogErrorCode.batch_conflict)
-            for edge_uuid in prep.edge_uuids:
-                edge = await self._store.get_edge_by_uuid(
-                    None, uuid=edge_uuid, group_id=group_id, tx=tx
-                )
-                if edge is None:
-                    raise self._ProvenanceInvariantRace(CatalogErrorCode.provenance_target_missing)
-                linked = prep.source_uuid in (edge.get('episodes') or [])
-                if linked != (edge_uuid in prep.existing_edge_links):
-                    raise self._ProvenanceInvariantRace(CatalogErrorCode.batch_conflict)
+
+    @staticmethod
+    def _source_expected_state(prep: _PreparedSource) -> tuple[bool, str | None, str | None]:
+        return (
+            prep.existing is not None,
+            prep.existing.get('source_key') if prep.existing is not None else None,
+            prep.existing.get('content_sha256') if prep.existing is not None else None,
+        )
+
+    @staticmethod
+    def _source_cas_matches_concurrent_identical(
+        prep: _PreparedSource, row: dict[str, Any]
+    ) -> bool:
+        return (
+            prep.existing is None
+            and row.get('error_code') == CatalogErrorCode.batch_conflict.value
+            and row.get('source_key') == prep.item.source_key
+            and row.get('content_sha256') == prep.content_sha256
+        )
+
+    def _raise_source_cas_error(self, row: dict[str, Any]) -> None:
+        error_code = row.get('error_code')
+        if error_code is None:
+            return
+        code = (
+            CatalogErrorCode.deterministic_uuid_conflict
+            if error_code == CatalogErrorCode.deterministic_uuid_conflict.value
+            else CatalogErrorCode.batch_conflict
+        )
+        raise self._ProvenanceInvariantRace(code)
 
     class _ProvenanceInvariantRace(Exception):
         def __init__(self, code: CatalogErrorCode):
@@ -3204,18 +3235,17 @@ class CatalogService:
 
         written: dict[int, CatalogItemResult] = {}
         write_set = {p.index for p in prepared if p.index not in early_errors}
+        sources_to_write = sorted(
+            (prep for prep in prepared if prep.index not in early_errors),
+            key=lambda prep: prep.source_uuid,
+        )
 
         try:
             async with client.driver.transaction() as tx:
-                for prep in prepared:
-                    if prep.index in early_errors:
-                        continue
-                    await self._recheck_provenance_in_tx(tx, prep, group_id=request.group_id)
-                    if prep.projected_status == 'unchanged' and not prep.missing_links:
-                        written[prep.index] = self._source_result(prep, prep.index, 'unchanged')
-                        for index in prep.coalesced_indices:
-                            written[index] = self._source_result(prep, index, 'unchanged')
-                        continue
+                for prep in sources_to_write:
+                    expected_exists, expected_source_key, expected_content_sha256 = (
+                        self._source_expected_state(prep)
+                    )
                     params = self._store.prepare_source_episode_params(
                         uuid=prep.source_uuid,
                         group_id=request.group_id,
@@ -3228,31 +3258,42 @@ class CatalogService:
                         valid_at=prep.valid_at,
                         created_at=request_ts,
                         updated_at=request_ts,
+                        expected_exists=expected_exists,
+                        expected_source_key=expected_source_key,
+                        expected_content_sha256=expected_content_sha256,
                         entity_edges=list(prep.edge_uuids),
                         name=prep.item.source_key,
                     )
                     row = await self._store.upsert_source_episode(tx, params=params)
+                    if self._source_cas_matches_concurrent_identical(prep, row):
+                        row = {**row, 'status': 'unchanged', 'error_code': None}
+                    self._raise_source_cas_error(row)
+                    await self._lock_and_recheck_provenance_targets(
+                        tx, prep, group_id=request.group_id
+                    )
                     status = str(row.get('status') or prep.projected_status)
                     if prep.missing_links and status == 'unchanged':
                         status = 'updated'
                     for ent_uuid, men_uuid in zip(
                         prep.entity_uuids, prep.mentions_uuids, strict=True
                     ):
-                        await self._store.upsert_mentions_link(
-                            tx,
-                            episode_uuid=prep.source_uuid,
-                            entity_uuid=ent_uuid,
-                            mentions_uuid=men_uuid,
-                            group_id=request.group_id,
-                            created_at=request_ts,
-                        )
+                        if men_uuid not in prep.existing_mentions:
+                            await self._store.upsert_mentions_link(
+                                tx,
+                                episode_uuid=prep.source_uuid,
+                                entity_uuid=ent_uuid,
+                                mentions_uuid=men_uuid,
+                                group_id=request.group_id,
+                                created_at=request_ts,
+                            )
                     for edge_uuid in prep.edge_uuids:
-                        await self._store.append_edge_episode(
-                            tx,
-                            edge_uuid=edge_uuid,
-                            episode_uuid=prep.source_uuid,
-                            group_id=request.group_id,
-                        )
+                        if edge_uuid not in prep.existing_edge_links:
+                            await self._store.append_edge_episode(
+                                tx,
+                                edge_uuid=edge_uuid,
+                                episode_uuid=prep.source_uuid,
+                                group_id=request.group_id,
+                            )
                     written[prep.index] = self._source_result(prep, prep.index, status)
                     for index in prep.coalesced_indices:
                         written[index] = self._source_result(prep, index, status)
@@ -4514,8 +4555,14 @@ class CatalogService:
                             )
                         )
 
-                for prep in provenance_sources:
-                    await self._recheck_provenance_in_tx(tx, prep, group_id=request.group_id)
+                created_targets = {
+                    *(('entity', uuid) for uuid in written_request_entities),
+                    *(('edge', result.uuid) for result in edge_results if result.uuid),
+                }
+                for prep in sorted(provenance_sources, key=lambda source: source.source_uuid):
+                    expected_exists, expected_source_key, expected_content_sha256 = (
+                        self._source_expected_state(prep)
+                    )
                     params = self._store.prepare_source_episode_params(
                         uuid=prep.source_uuid,
                         group_id=request.group_id,
@@ -4528,31 +4575,45 @@ class CatalogService:
                         valid_at=prep.valid_at,
                         created_at=request_ts,
                         updated_at=request_ts,
+                        expected_exists=expected_exists,
+                        expected_source_key=expected_source_key,
+                        expected_content_sha256=expected_content_sha256,
                         entity_edges=list(prep.edge_uuids),
                         name=prep.item.source_key,
                     )
                     row = await self._store.upsert_source_episode(tx, params=params)
+                    if self._source_cas_matches_concurrent_identical(prep, row):
+                        row = {**row, 'status': 'unchanged', 'error_code': None}
+                    self._raise_source_cas_error(row)
+                    await self._lock_and_recheck_provenance_targets(
+                        tx,
+                        prep,
+                        group_id=request.group_id,
+                        created_targets=created_targets,
+                    )
                     source_status = str(row.get('status') or prep.projected_status)
                     if prep.missing_links and source_status == 'unchanged':
                         source_status = 'updated'
                     for entity_uuid, mentions_uuid in zip(
                         prep.entity_uuids, prep.mentions_uuids, strict=True
                     ):
-                        await self._store.upsert_mentions_link(
-                            tx,
-                            episode_uuid=prep.source_uuid,
-                            entity_uuid=entity_uuid,
-                            mentions_uuid=mentions_uuid,
-                            group_id=request.group_id,
-                            created_at=request_ts,
-                        )
+                        if mentions_uuid not in prep.existing_mentions:
+                            await self._store.upsert_mentions_link(
+                                tx,
+                                episode_uuid=prep.source_uuid,
+                                entity_uuid=entity_uuid,
+                                mentions_uuid=mentions_uuid,
+                                group_id=request.group_id,
+                                created_at=request_ts,
+                            )
                     for edge_uuid in prep.edge_uuids:
-                        await self._store.append_edge_episode(
-                            tx,
-                            edge_uuid=edge_uuid,
-                            episode_uuid=prep.source_uuid,
-                            group_id=request.group_id,
-                        )
+                        if edge_uuid not in prep.existing_edge_links:
+                            await self._store.append_edge_episode(
+                                tx,
+                                edge_uuid=edge_uuid,
+                                episode_uuid=prep.source_uuid,
+                                group_id=request.group_id,
+                            )
                     provenance_offset = len(request.entities) + len(request.edges)
                     provenance_results.append(
                         self._source_result(

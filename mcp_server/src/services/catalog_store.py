@@ -839,9 +839,10 @@ class CatalogNeo4jStore:
     # ------------------------------------------------------------------
 
     def build_source_episode_upsert_cypher(self) -> str:
-        """MERGE Episodic source without Entity label; preserve created_at on update.
+        """Lock and compare-and-set an Episodic source in one fixed query.
 
-        Never uses stock SET n = $map wipe. Identity + source_key only ON CREATE.
+        The self-SET takes a write lock before matched-source properties are compared.
+        Expected absence/presence and identity/hash drift return an error without updating.
         """
         updated_set = """
                 n.name = $name,
@@ -874,13 +875,32 @@ class CatalogNeo4jStore:
                 n.created_at = $created_at,
                 n.updated_at = $updated_at,
                 n._catalog_create_token = $create_token
-            WITH n,
-                 coalesce(n._catalog_create_token, '') = $create_token AS created,
-                 n.content_sha256 = $content_sha256 AS same
-            WITH n, created, same,
+            WITH n, coalesce(n._catalog_create_token, '') = $create_token AS created
+            SET n.uuid = n.uuid
+            WITH n, created,
                  CASE
+                   WHEN $expected_exists AND created THEN 'batch_conflict'
+                   WHEN $expected_exists AND NOT created AND (
+                     (n.source_key IS NULL AND $expected_source_key IS NOT NULL)
+                     OR (n.source_key IS NOT NULL AND $expected_source_key IS NULL)
+                     OR n.source_key <> $expected_source_key
+                   ) THEN 'batch_conflict'
+                   WHEN NOT created AND (
+                     n.source_key IS NULL OR n.source_key <> $source_key
+                   ) THEN 'deterministic_uuid_conflict'
+                   WHEN $expected_exists AND NOT created AND (
+                     n.content_sha256 IS NULL
+                     OR n.content_sha256 <> $expected_content_sha256
+                   ) THEN 'batch_conflict'
+                   WHEN NOT $expected_exists AND NOT created
+                     AND n.content_sha256 <> $content_sha256 THEN 'batch_conflict'
+                   ELSE null
+                 END AS error_code
+            WITH n, created, error_code,
+                 CASE
+                   WHEN error_code IS NOT NULL THEN 'error'
                    WHEN created THEN 'created'
-                   WHEN same THEN 'unchanged'
+                   WHEN n.content_sha256 = $content_sha256 THEN 'unchanged'
                    ELSE 'updated'
                  END AS status
             FOREACH (_ IN CASE WHEN status = 'updated' THEN [1] ELSE [] END |
@@ -893,7 +913,8 @@ class CatalogNeo4jStore:
                    n.created_at AS created_at,
                    n.updated_at AS updated_at,
                    n.source_key AS source_key,
-                   status
+                   status,
+                   error_code
             """
 
     def prepare_source_episode_params(
@@ -910,6 +931,9 @@ class CatalogNeo4jStore:
         valid_at: datetime,
         created_at: datetime,
         updated_at: datetime,
+        expected_exists: bool,
+        expected_source_key: str | None,
+        expected_content_sha256: str | None,
         entity_edges: list[str] | None = None,
         name: str | None = None,
     ) -> dict[str, Any]:
@@ -928,6 +952,9 @@ class CatalogNeo4jStore:
             'content_sha256': content_sha256,
             'created_at': created_at,
             'updated_at': updated_at,
+            'expected_exists': expected_exists,
+            'expected_source_key': expected_source_key,
+            'expected_content_sha256': expected_content_sha256,
             'create_token': uuid4().hex,
         }
 
@@ -953,6 +980,57 @@ class CatalogNeo4jStore:
                 code='neo4j_transaction_failed',
             )
         return row
+
+    def build_lock_provenance_targets_cypher(self) -> str:
+        """Acquire retained write locks on fixed-label provenance targets in UUID order."""
+        return """
+            UNWIND $targets AS target
+            CALL (target) {
+              WITH target WHERE target.kind = 'entity'
+              MATCH (n:Entity {uuid: target.uuid, group_id: $group_id})
+              SET n.uuid = n.uuid
+              RETURN target.uuid AS uuid, 'entity' AS kind,
+                     labels(n) AS labels, [] AS episodes
+              UNION ALL
+              WITH target WHERE target.kind = 'edge'
+              MATCH ()-[e:RELATES_TO {uuid: target.uuid, group_id: $group_id}]->()
+              SET e.uuid = e.uuid
+              RETURN target.uuid AS uuid, 'edge' AS kind,
+                     [] AS labels, coalesce(e.episodes, []) AS episodes
+            }
+            RETURN uuid, kind, labels, episodes
+            """
+
+    async def lock_provenance_targets(
+        self,
+        tx: Any,
+        *,
+        group_id: str,
+        entity_uuids: list[str],
+        edge_uuids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Lock all existing provenance targets; return rows for under-lock checks."""
+        targets = sorted(
+            [
+                *({'kind': 'entity', 'uuid': uuid} for uuid in set(entity_uuids)),
+                *({'kind': 'edge', 'uuid': uuid} for uuid in set(edge_uuids)),
+            ],
+            key=lambda target: (target['uuid'], target['kind']),
+        )
+        if not targets:
+            return []
+        result = await tx.run(
+            self.build_lock_provenance_targets_cypher(),
+            group_id=group_id,
+            targets=targets,
+        )
+        if hasattr(result, 'data'):
+            return [dict(row) for row in await result.data()]
+        rows: list[dict[str, Any]] = []
+        if hasattr(result, '__aiter__'):
+            async for record in result:
+                rows.append(dict(record))
+        return rows
 
     def build_mentions_merge_cypher(self) -> str:
         """MERGE deterministic MENTIONS; both ends MATCH group-scoped; ON CREATE only."""

@@ -49,8 +49,10 @@ from models.catalog_provenance import (  # noqa: E402
     CatalogProvenanceEdgeTarget,
     CatalogProvenanceEntityTarget,
     CatalogSourceItem,
+    UpsertProvenanceRequest,
 )
 from services.catalog_identity import (  # noqa: E402
+    canonical_sha256,
     catalog_batch_uuid,
     catalog_edge_uuid,
     catalog_entity_uuid,
@@ -763,6 +765,70 @@ async def test_accept_tab_concurrent_identical_batch_is_one_logical_set(catalog_
     assert await _count_group_edges(ctx.driver) == len(request.edges) + len(
         request.provenance.entity_targets
     )
+
+
+async def test_concurrent_conflicting_source_updates_only_one_commits(catalog_client):
+    ctx = catalog_client
+    target = _six_entities()[2]
+    target_response = await _upsert_entities(ctx, [target], batch_id='source-cas-target')
+    assert target_response.created == 1
+    source_key = 'SRC::source-cas-live'
+    original = CatalogSourceItem(
+        source_key=source_key,
+        reference_time='2026-07-17T00:00:00Z',
+        attributes={'version': 0},
+    )
+
+    async def _write(source: CatalogSourceItem, batch_id: str):
+        service = CatalogService(catalog_config=_enabled_config())
+        client = SimpleNamespace(
+            driver=ctx.driver, embedder=FakeEmbedder(), llm_client=RecordingLLM()
+        )
+        return await service.upsert_provenance(
+            client=client,
+            request=UpsertProvenanceRequest(
+                group_id=GROUP,
+                batch_id=batch_id,
+                sources=[source],
+                entity_targets=[
+                    CatalogProvenanceEntityTarget(
+                        entity_type=target.entity_type,
+                        graph_key=target.graph_key,
+                    )
+                ],
+            ),
+        )
+
+    created = await _write(original, 'source-cas-create')
+    assert created.created == 1
+    first = original.model_copy(update={'attributes': {'version': 1}})
+    second = original.model_copy(update={'attributes': {'version': 2}})
+    responses = await asyncio.gather(
+        _write(first, 'source-cas-first'),
+        _write(second, 'source-cas-second'),
+    )
+
+    assert sum(response.updated == 1 for response in responses) == 1
+    assert (
+        sum(
+            response.results[0].error_code == CatalogErrorCode.batch_conflict
+            for response in responses
+        )
+        == 1
+    )
+    source_uuid = catalog_source_uuid(FIXED_NS, GROUP, source_key)
+    stored = await ctx.driver.execute_query(
+        """
+        MATCH (n:Episodic {uuid: $uuid, group_id: $group_id})
+        RETURN n.content_sha256 AS content_sha256, n.source_key AS source_key
+        """,
+        params={'uuid': source_uuid, 'group_id': GROUP},
+    )
+    assert stored[0][0]['source_key'] == source_key
+    assert stored[0][0]['content_sha256'] in {
+        canonical_sha256(CatalogService.source_canonical_payload(first)),
+        canonical_sha256(CatalogService.source_canonical_payload(second)),
+    }
 
 
 async def test_accept_tab_missing_endpoint_batch_has_no_partial_domain_write(catalog_client):

@@ -2329,9 +2329,34 @@ def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = Fa
     service._store.get_edge_by_uuid = AsyncMock(return_value=None)
     service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)
     service._store.get_mentions_link = AsyncMock(return_value=None)
+
+    async def _lock_targets(tx, *, group_id, entity_uuids, edge_uuids):
+        _ = tx, group_id
+        return [
+            *(
+                {'uuid': entity_uuid, 'kind': 'entity', 'labels': ['Entity', 'Table']}
+                for entity_uuid in entity_uuids
+            ),
+            *({'uuid': edge_uuid, 'kind': 'edge', 'episodes': []} for edge_uuid in edge_uuids),
+        ]
+
+    service._store.lock_provenance_targets = AsyncMock(  # type: ignore[method-assign]
+        side_effect=_lock_targets
+    )
     service._store.ensure_uuid_uniqueness_constraints = AsyncMock(return_value=None)
+
+    async def _source_upsert(tx, *, params):
+        _ = tx
+        return {
+            'uuid': src_uuid,
+            'content_sha256': params['content_sha256'],
+            'source_key': params['source_key'],
+            'status': 'unchanged' if params['expected_exists'] else 'created',
+            'error_code': None,
+        }
+
     service._store.upsert_source_episode = AsyncMock(  # type: ignore[method-assign]
-        return_value={'uuid': src_uuid, 'content_sha256': 'h', 'status': 'created'}
+        side_effect=_source_upsert
     )
     service._store.upsert_mentions_link = AsyncMock(  # type: ignore[method-assign]
         return_value={'uuid': 'm1', 'status': 'created'}
@@ -2341,19 +2366,6 @@ def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = Fa
     )
     service._store.prepare_source_episode_params = CatalogNeo4jStore().prepare_source_episode_params
     return src_uuid, ent_uuid
-
-
-def _wire_provenance_source_sequence(
-    service: CatalogService,
-    *,
-    preflight: dict | None,
-    in_tx: dict | None,
-) -> None:
-    async def _source_by_uuid(executor, *, uuid, group_id, tx=None):
-        _ = executor, uuid, group_id
-        return preflight if tx is None else in_tx
-
-    service._store.get_source_episode_by_uuid = AsyncMock(side_effect=_source_by_uuid)
 
 
 # late import for prepare helper wiring
@@ -2440,7 +2452,11 @@ async def test_provenance_idempotent_unchanged_skips_write():
     assert resp.failed == 0
     assert resp.unchanged >= 1
     assert all(r.status == 'unchanged' for r in resp.results)
-    cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
+    source_write = cast(AsyncMock, service._store.upsert_source_episode)
+    source_write.assert_awaited_once()
+    source_call = source_write.await_args
+    assert source_call is not None
+    assert source_call.kwargs['params']['expected_exists'] is True
     cast(AsyncMock, service._store.upsert_mentions_link).assert_not_awaited()
 
 
@@ -2580,7 +2596,7 @@ async def test_provenance_unchanged_source_new_link_reports_updated(target_kind)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('drift', ['source_key', 'content_sha256', 'mentions', 'updated_mentions'])
-async def test_provenance_transaction_local_drift_aborts_before_mutation(drift):
+async def test_provenance_atomic_cas_or_locked_link_drift_aborts_before_link_mutation(drift):
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     src_uuid, ent_uuid = _wire_provenance_store(service)
@@ -2596,15 +2612,24 @@ async def test_provenance_transaction_local_drift_aborts_before_mutation(drift):
         'source_key': source.source_key,
         'content_sha256': stored_digest,
     }
-    in_tx = dict(preflight)
-    if drift == 'source_key':
-        in_tx['source_key'] = 'SRC::drifted'
-    elif drift == 'content_sha256':
-        in_tx['content_sha256'] = 'f' * 64
-    _wire_provenance_source_sequence(service, preflight=preflight, in_tx=in_tx)
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=preflight)
     mention = {'uuid': catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, ent_uuid)}
     service._store.get_mentions_link = AsyncMock(
         side_effect=[mention, None if drift in {'mentions', 'updated_mentions'} else mention]
+    )
+    cas_error = (
+        CatalogErrorCode.deterministic_uuid_conflict.value
+        if drift == 'source_key'
+        else CatalogErrorCode.batch_conflict.value
+        if drift == 'content_sha256'
+        else None
+    )
+    service._store.upsert_source_episode = AsyncMock(
+        return_value={
+            'uuid': src_uuid,
+            'status': 'error' if cas_error else 'updated',
+            'error_code': cas_error,
+        }
     )
 
     resp = await service.upsert_provenance(
@@ -2617,7 +2642,15 @@ async def test_provenance_transaction_local_drift_aborts_before_mutation(drift):
         CatalogErrorCode.deterministic_uuid_conflict,
         CatalogErrorCode.batch_conflict,
     }
-    cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
+    source_write = cast(AsyncMock, service._store.upsert_source_episode)
+    source_write.assert_awaited_once()
+    if cas_error:
+        source_call = source_write.await_args
+        assert source_call is not None
+        params = source_call.kwargs['params']
+        assert params['expected_exists'] is True
+        assert params['expected_source_key'] == source.source_key
+        assert params['expected_content_sha256'] == stored_digest
     cast(AsyncMock, service._store.upsert_mentions_link).assert_not_awaited()
 
 
@@ -2883,6 +2916,9 @@ def _wire_batch_preflight(service: CatalogService) -> None:
     service._store.upsert_source_episode = AsyncMock()  # type: ignore[method-assign]
     service._store.upsert_mentions_link = AsyncMock()  # type: ignore[method-assign]
     service._store.append_edge_episode = AsyncMock()  # type: ignore[method-assign]
+    service._store.lock_provenance_targets = AsyncMock(  # type: ignore[method-assign]
+        return_value=[]
+    )
 
 
 @pytest.mark.asyncio
@@ -3440,7 +3476,7 @@ async def test_batch_unchanged_domain_drift_aborts_before_commit_status(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('drift', ['source_key', 'content_sha256', 'mentions', 'updated_mentions'])
-async def test_batch_transaction_local_provenance_drift_aborts_before_mutation(drift):
+async def test_batch_atomic_cas_or_locked_link_drift_aborts_before_link_mutation(drift):
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     _wire_batch_preflight(service)
@@ -3458,18 +3494,30 @@ async def test_batch_transaction_local_provenance_drift_aborts_before_mutation(d
         'source_key': source.source_key,
         'content_sha256': stored_digest,
     }
-    in_tx = dict(preflight)
-    if drift == 'source_key':
-        in_tx['source_key'] = 'SRC::drifted'
-    elif drift == 'content_sha256':
-        in_tx['content_sha256'] = 'f' * 64
-    _wire_provenance_source_sequence(service, preflight=preflight, in_tx=in_tx)
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=preflight)
     employee = _entity()
     entity_uuid = catalog_entity_uuid(FIXED_NS, GROUP, employee.entity_type, employee.graph_key)
+    service._store.lock_provenance_targets = AsyncMock(
+        return_value=[{'uuid': entity_uuid, 'kind': 'entity', 'labels': ['Entity', 'Table']}]
+    )
     mentions_uuid = catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, entity_uuid)
     mention = {'uuid': mentions_uuid}
     service._store.get_mentions_link = AsyncMock(
         side_effect=[mention, None if drift in {'mentions', 'updated_mentions'} else mention]
+    )
+    cas_error = (
+        CatalogErrorCode.deterministic_uuid_conflict.value
+        if drift == 'source_key'
+        else CatalogErrorCode.batch_conflict.value
+        if drift == 'content_sha256'
+        else None
+    )
+    service._store.upsert_source_episode = AsyncMock(
+        return_value={
+            'uuid': src_uuid,
+            'status': 'error' if cas_error else 'updated',
+            'error_code': cas_error,
+        }
     )
     provenance = NestedProvenancePayload(
         sources=[source],
@@ -3488,7 +3536,13 @@ async def test_batch_transaction_local_provenance_drift_aborts_before_mutation(d
 
     assert resp.status == 'failed'
     assert resp.error_code == CatalogErrorCode.neo4j_transaction_failed
-    cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
+    source_write = cast(AsyncMock, service._store.upsert_source_episode)
+    source_write.assert_awaited_once()
+    if cas_error:
+        source_call = source_write.await_args
+        assert source_call is not None
+        params = source_call.kwargs['params']
+        assert params['expected_content_sha256'] == stored_digest
     cast(AsyncMock, service._store.upsert_mentions_link).assert_not_awaited()
 
 

@@ -897,6 +897,49 @@ def test_build_source_episode_upsert_cypher_episodic_no_entity_label():
     assert 'n.source_key =' not in set_block
     assert '_catalog_create_token' in cypher
     assert 'REMOVE n._catalog_create_token' in cypher
+    assert 'SET n.uuid = n.uuid' in cypher
+    assert '$expected_exists' in cypher
+    assert '$expected_content_sha256' in cypher
+    assert "THEN 'deterministic_uuid_conflict'" in cypher
+    assert 'error_code' in cypher
+
+
+def test_lock_provenance_targets_cypher_is_fixed_group_scoped_and_retained():
+    store = CatalogNeo4jStore()
+    cypher = store.build_lock_provenance_targets_cypher()
+    assert 'UNWIND $targets AS target' in cypher
+    assert 'MATCH (n:Entity {uuid: target.uuid, group_id: $group_id})' in cypher
+    assert 'MATCH ()-[e:RELATES_TO {uuid: target.uuid, group_id: $group_id}]->()' in cypher
+    assert 'SET n.uuid = n.uuid' in cypher
+    assert 'SET e.uuid = e.uuid' in cypher
+    assert 'apoc.' not in cypher.lower()
+
+
+@pytest.mark.asyncio
+async def test_lock_provenance_targets_sorts_uuid_before_query():
+    store = CatalogNeo4jStore()
+    captured: dict = {}
+
+    class _Tx:
+        async def run(self, cypher, **params):
+            captured['cypher'] = cypher
+            captured['params'] = params
+            return _Rows(
+                [{'uuid': target['uuid'], 'kind': target['kind']} for target in params['targets']]
+            )
+
+    rows = await store.lock_provenance_targets(
+        _Tx(),
+        group_id=GROUP,
+        entity_uuids=['z-entity', 'a-entity'],
+        edge_uuids=['m-edge'],
+    )
+    assert captured['params']['targets'] == [
+        {'kind': 'entity', 'uuid': 'a-entity'},
+        {'kind': 'edge', 'uuid': 'm-edge'},
+        {'kind': 'entity', 'uuid': 'z-entity'},
+    ]
+    assert [row['uuid'] for row in rows] == ['a-entity', 'm-edge', 'z-entity']
 
 
 def test_build_mentions_merge_cypher_group_scoped_deterministic_uuid():
@@ -958,6 +1001,9 @@ def test_prepare_source_episode_params_shape():
         valid_at=FIXED_TS,
         created_at=FIXED_TS,
         updated_at=FIXED_TS,
+        expected_exists=False,
+        expected_source_key=None,
+        expected_content_sha256=None,
         entity_edges=[],
         name='SRC::ddl.sql#1',
     )
@@ -967,6 +1013,9 @@ def test_prepare_source_episode_params_shape():
     assert params['content_sha256'] == HASH
     assert params['source'] == 'json'
     assert params['entity_edges'] == []
+    assert params['expected_exists'] is False
+    assert params['expected_source_key'] is None
+    assert params['expected_content_sha256'] is None
     assert isinstance(params.get('create_token'), str)
     assert len(params['create_token']) >= 16
 
@@ -1009,6 +1058,9 @@ async def test_upsert_source_episode_uses_tx_run():
         valid_at=FIXED_TS,
         created_at=FIXED_TS,
         updated_at=FIXED_TS,
+        expected_exists=False,
+        expected_source_key=None,
+        expected_content_sha256=None,
         entity_edges=[],
         name='SRC::k',
     )
