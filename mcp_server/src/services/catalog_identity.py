@@ -11,36 +11,64 @@ import math
 import uuid
 from typing import Any
 
-from models.catalog_common import CatalogErrorCode
+from models.catalog_common import IDENTITY_SCHEMA_VERSION, CatalogErrorCode
 
 
 def catalog_entity_uuid(
     namespace: uuid.UUID, group_id: str, entity_type: str, graph_key: str
 ) -> str:
-    """Server-derived entity identity: UUIDv5(ns, group_id|entity_type|graph_key)."""
-    return str(uuid.uuid5(namespace, f'{group_id}|{entity_type}|{graph_key}'))
+    """Server-derived entity identity: UUIDv5(ns, group_id|catalog-v2|entity_type|graph_key)."""
+    return str(
+        uuid.uuid5(namespace, f'{group_id}|{IDENTITY_SCHEMA_VERSION}|{entity_type}|{graph_key}')
+    )
 
 
 def catalog_edge_uuid(namespace: uuid.UUID, group_id: str, edge_type: str, edge_key: str) -> str:
-    """Server-derived edge identity: UUIDv5(ns, group_id|edge_type|edge_key)."""
-    return str(uuid.uuid5(namespace, f'{group_id}|{edge_type}|{edge_key}'))
+    """Server-derived edge identity: UUIDv5(ns, group_id|catalog-v2|edge_type|edge_key)."""
+    return str(
+        uuid.uuid5(namespace, f'{group_id}|{IDENTITY_SCHEMA_VERSION}|{edge_type}|{edge_key}')
+    )
 
 
 def catalog_source_uuid(namespace: uuid.UUID, group_id: str, source_key: str) -> str:
-    """Server-derived source identity: UUIDv5(ns, group_id|Source|source_key)."""
-    return str(uuid.uuid5(namespace, f'{group_id}|Source|{source_key}'))
+    """Server-derived source identity: UUIDv5(ns, group_id|catalog-v2|Source|source_key)."""
+    return str(uuid.uuid5(namespace, f'{group_id}|{IDENTITY_SCHEMA_VERSION}|Source|{source_key}'))
 
 
 def catalog_batch_uuid(namespace: uuid.UUID, group_id: str, batch_id: str) -> str:
-    """Server-derived batch identity: UUIDv5(ns, group_id|Batch|batch_id)."""
-    return str(uuid.uuid5(namespace, f'{group_id}|Batch|{batch_id}'))
+    """Server-derived batch identity: UUIDv5(ns, group_id|catalog-v2|Batch|batch_id)."""
+    return str(uuid.uuid5(namespace, f'{group_id}|{IDENTITY_SCHEMA_VERSION}|Batch|{batch_id}'))
 
 
 def catalog_mentions_uuid(
     namespace: uuid.UUID, group_id: str, source_uuid: str, entity_uuid: str
 ) -> str:
-    """Server-derived MENTIONS link identity: UUIDv5(ns, group_id|Mentions|source|entity)."""
-    return str(uuid.uuid5(namespace, f'{group_id}|Mentions|{source_uuid}|{entity_uuid}'))
+    """Server-derived MENTIONS link identity: UUIDv5(ns, group_id|catalog-v2|Mentions|source|entity)."""
+    return str(
+        uuid.uuid5(
+            namespace,
+            f'{group_id}|{IDENTITY_SCHEMA_VERSION}|Mentions|{source_uuid}|{entity_uuid}',
+        )
+    )
+
+
+def catalog_evidence_link_uuid(namespace: uuid.UUID, group_id: str, link_key: str) -> str:
+    """Pure EvidenceLink identity: UUIDv5(ns, group_id|catalog-v2|EvidenceLink|link_key)."""
+    return str(
+        uuid.uuid5(namespace, f'{group_id}|{IDENTITY_SCHEMA_VERSION}|EvidenceLink|{link_key}')
+    )
+
+
+def catalog_manifest_uuid(namespace: uuid.UUID, group_id: str, batch_id: str) -> str:
+    """Pure Manifest identity: UUIDv5(ns, group_id|catalog-v2|Manifest|batch_id)."""
+    return str(uuid.uuid5(namespace, f'{group_id}|{IDENTITY_SCHEMA_VERSION}|Manifest|{batch_id}'))
+
+
+def catalog_prepared_plan_uuid(namespace: uuid.UUID, group_id: str, plan_id: str) -> str:
+    """Pure PreparedPlan identity: UUIDv5(ns, group_id|catalog-v2|PreparedPlan|plan_id)."""
+    return str(
+        uuid.uuid5(namespace, f'{group_id}|{IDENTITY_SCHEMA_VERSION}|PreparedPlan|{plan_id}')
+    )
 
 
 def _reject_non_finite(obj: Any) -> None:

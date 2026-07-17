@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from models.catalog_common import CatalogErrorCode, IDENTITY_SCHEMA_VERSION  # noqa: E402
+from models.catalog_common import IDENTITY_SCHEMA_VERSION, CatalogErrorCode  # noqa: E402
 from services import catalog_identity as identity_mod  # noqa: E402
 from services.catalog_identity import (  # noqa: E402
     assert_optional_client_hash,
