@@ -617,6 +617,27 @@ async def test_entity_same_identity_different_hash_is_conflict():
 
 
 @pytest.mark.asyncio
+async def test_entity_divergent_duplicate_marks_later_repeat_conflicted():
+    first = _entity(summary='A')
+    divergent = _entity(summary='B')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_entity_item = AsyncMock()
+
+    resp = await service.upsert_typed_entities(
+        client=client,
+        request=_request([first, divergent, first.model_copy(deep=True)]),
+    )
+
+    assert [result.index for result in resp.results] == [0, 1, 2]
+    assert all(
+        result.error_code == CatalogErrorCode.deterministic_uuid_conflict for result in resp.results
+    )
+    service._store.upsert_entity_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_mcp_tool_upsert_typed_entities_registered():
     server = _mcp_server()
     assert hasattr(server, 'upsert_typed_entities')
@@ -1764,6 +1785,28 @@ async def test_edge_identity_conflict_no_mutation():
     service._store.upsert_edge_item = AsyncMock()
     resp = await service.upsert_typed_edges(client=client, request=_edge_request([edge]))
     assert any(r.error_code == CatalogErrorCode.edge_identity_conflict for r in resp.results)
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_divergent_duplicate_marks_later_repeat_conflicted():
+    first = _edge(fact='A')
+    divergent = _edge(fact='B')
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    service._store.upsert_edge_item = AsyncMock()
+
+    resp = await service.upsert_typed_edges(
+        client=client,
+        request=_edge_request([first, divergent, first.model_copy(deep=True)]),
+    )
+
+    assert [result.index for result in resp.results] == [0, 1, 2]
+    assert all(
+        result.error_code == CatalogErrorCode.deterministic_uuid_conflict for result in resp.results
+    )
     service._store.upsert_edge_item.assert_not_awaited()
 
 
@@ -3072,6 +3115,35 @@ async def test_batch_divergent_duplicate_preflight_stops_embedding():
     assert all(r.error_code == CatalogErrorCode.deterministic_uuid_conflict for r in resp.results)
     client.embedder.create.assert_not_awaited()
     assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['entity', 'edge'])
+async def test_batch_divergent_duplicate_marks_later_repeat_conflicted(kind):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    if kind == 'entity':
+        first = _entity(summary='A')
+        request = _batch_request(
+            entities=[first, _entity(summary='B'), first.model_copy(deep=True)],
+        )
+    else:
+        first = _edge(fact='A')
+        request = _batch_request(
+            entities=[],
+            edges=[first, _edge(fact='B'), first.model_copy(deep=True)],
+        )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert [result.index for result in resp.results] == [0, 1, 2]
+    assert all(
+        result.error_code == CatalogErrorCode.deterministic_uuid_conflict for result in resp.results
+    )
+    cast(AsyncMock, service._store.upsert_entity_item).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_edge_item).assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

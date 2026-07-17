@@ -298,6 +298,8 @@ class CatalogService:
         request_ts = datetime.now(timezone.utc)
         prepared: list[_PreparedEntity] = []
         identity_to_prep: dict[str, _PreparedEntity] = {}
+        identity_occurrences: dict[str, list[int]] = {}
+        conflicted_entity_uuids: set[str] = set()
         early_errors: dict[int, CatalogItemResult] = {}
 
         # 1) identity + hash + coalesce
@@ -326,22 +328,34 @@ class CatalogService:
             ent_uuid = catalog_entity_uuid(
                 namespace, request.group_id, item.entity_type, item.graph_key
             )
+            occurrences = identity_occurrences.setdefault(ent_uuid, [])
+            occurrences.append(idx)
+            if ent_uuid in conflicted_entity_uuids:
+                early_errors[idx] = CatalogItemResult(
+                    index=idx,
+                    status='error',
+                    uuid=ent_uuid,
+                    graph_key=item.graph_key,
+                    entity_type=item.entity_type,
+                    error_code=CatalogErrorCode.deterministic_uuid_conflict,
+                    error_message='same identity different canonical payload in request',
+                )
+                continue
             if ent_uuid in identity_to_prep:
                 prior = identity_to_prep[ent_uuid]
                 if prior.content_sha256 != digest:
-                    # same identity, different payload → conflict for both
-                    for i in [prior.index, *prior.coalesced_indices, idx]:
-                        it = request.entities[i]
-                        early_errors[i] = CatalogItemResult(
-                            index=i,
+                    conflicted_entity_uuids.add(ent_uuid)
+                    for occurrence in occurrences:
+                        occurrence_item = request.entities[occurrence]
+                        early_errors[occurrence] = CatalogItemResult(
+                            index=occurrence,
                             status='error',
                             uuid=ent_uuid,
-                            graph_key=it.graph_key,
-                            entity_type=it.entity_type,
+                            graph_key=occurrence_item.graph_key,
+                            entity_type=occurrence_item.entity_type,
                             error_code=CatalogErrorCode.deterministic_uuid_conflict,
                             error_message='same identity different canonical payload in request',
                         )
-                    # remove prior from prepared write set
                     if prior in prepared:
                         prepared.remove(prior)
                     identity_to_prep.pop(ent_uuid, None)
@@ -1729,6 +1743,8 @@ class CatalogService:
         request_ts = datetime.now(timezone.utc)
         prepared: list[_PreparedEdge] = []
         identity_to_prep: dict[str, _PreparedEdge] = {}
+        identity_occurrences: dict[str, list[int]] = {}
+        conflicted_edge_uuids: set[str] = set()
         early_errors: dict[int, CatalogItemResult] = {}
 
         # 1) identity + hash + coalesce
@@ -1757,17 +1773,31 @@ class CatalogService:
             edge_uuid = catalog_edge_uuid(
                 namespace, request.group_id, item.edge_type, item.edge_key
             )
+            occurrences = identity_occurrences.setdefault(edge_uuid, [])
+            occurrences.append(idx)
+            if edge_uuid in conflicted_edge_uuids:
+                early_errors[idx] = CatalogItemResult(
+                    index=idx,
+                    status='error',
+                    uuid=edge_uuid,
+                    edge_key=item.edge_key,
+                    edge_type=item.edge_type,
+                    error_code=CatalogErrorCode.deterministic_uuid_conflict,
+                    error_message='same identity different canonical payload in request',
+                )
+                continue
             if edge_uuid in identity_to_prep:
                 prior = identity_to_prep[edge_uuid]
                 if prior.content_sha256 != digest:
-                    for i in [prior.index, *prior.coalesced_indices, idx]:
-                        it = request.edges[i]
-                        early_errors[i] = CatalogItemResult(
-                            index=i,
+                    conflicted_edge_uuids.add(edge_uuid)
+                    for occurrence in occurrences:
+                        occurrence_item = request.edges[occurrence]
+                        early_errors[occurrence] = CatalogItemResult(
+                            index=occurrence,
                             status='error',
                             uuid=edge_uuid,
-                            edge_key=it.edge_key,
-                            edge_type=it.edge_type,
+                            edge_key=occurrence_item.edge_key,
+                            edge_type=occurrence_item.edge_type,
                             error_code=CatalogErrorCode.deterministic_uuid_conflict,
                             error_message='same identity different canonical payload in request',
                         )
@@ -3575,6 +3605,7 @@ class CatalogService:
 
         entity_prepared: list[_PreparedEntity] = []
         entity_by_identity: dict[tuple[str, str], _PreparedEntity] = {}
+        entity_occurrences: dict[tuple[str, str], list[int]] = {}
         errors: list[CatalogItemResult] = []
         conflicted_entity_ids: set[str] = set()
 
@@ -3599,36 +3630,47 @@ class CatalogService:
                 namespace, request.group_id, item.entity_type, item.graph_key
             )
             identity = (item.entity_type, item.graph_key)
+            occurrences = entity_occurrences.setdefault(identity, [])
+            occurrences.append(index)
+            if entity_uuid in conflicted_entity_ids:
+                errors.append(
+                    CatalogItemResult(
+                        index=index,
+                        status='error',
+                        uuid=entity_uuid,
+                        graph_key=item.graph_key,
+                        entity_type=item.entity_type,
+                        error_code=CatalogErrorCode.deterministic_uuid_conflict,
+                        error_message='same identity different canonical payload in request',
+                        details={'kind': 'entity'},
+                    )
+                )
+                continue
             prior = entity_by_identity.get(identity)
             if prior is not None:
                 if prior.content_sha256 == digest:
                     prior.coalesced_indices.append(index)
                 else:
                     conflicted_entity_ids.add(entity_uuid)
-                    errors.extend(
-                        [
+                    errors = [
+                        result
+                        for result in errors
+                        if not (result.details == {'kind': 'entity'} and result.uuid == entity_uuid)
+                    ]
+                    for occurrence in occurrences:
+                        occurrence_item = request.entities[occurrence]
+                        errors.append(
                             CatalogItemResult(
-                                index=prior.index,
+                                index=occurrence,
                                 status='error',
                                 uuid=entity_uuid,
-                                graph_key=prior.item.graph_key,
-                                entity_type=prior.item.entity_type,
+                                graph_key=occurrence_item.graph_key,
+                                entity_type=occurrence_item.entity_type,
                                 error_code=CatalogErrorCode.deterministic_uuid_conflict,
                                 error_message='same identity different canonical payload in request',
                                 details={'kind': 'entity'},
-                            ),
-                            CatalogItemResult(
-                                index=index,
-                                status='error',
-                                uuid=entity_uuid,
-                                graph_key=item.graph_key,
-                                entity_type=item.entity_type,
-                                error_code=CatalogErrorCode.deterministic_uuid_conflict,
-                                error_message='same identity different canonical payload in request',
-                                details={'kind': 'entity'},
-                            ),
-                        ]
-                    )
+                            )
+                        )
                 continue
             prep = _PreparedEntity(
                 index=index,
@@ -3688,6 +3730,8 @@ class CatalogService:
 
         edge_prepared: list[_PreparedEdge] = []
         edge_by_uuid: dict[str, _PreparedEdge] = {}
+        edge_occurrences: dict[str, list[int]] = {}
+        conflicted_edge_ids: set[str] = set()
         edge_offset = len(request.entities)
         request_entity_uuids = {
             identity: prep.entity_uuid
@@ -3741,32 +3785,47 @@ class CatalogService:
             edge_uuid = catalog_edge_uuid(
                 namespace, request.group_id, item.edge_type, item.edge_key
             )
+            occurrences = edge_occurrences.setdefault(edge_uuid, [])
+            occurrences.append(local_index)
+            if edge_uuid in conflicted_edge_ids:
+                errors.append(
+                    CatalogItemResult(
+                        index=result_index,
+                        status='error',
+                        uuid=edge_uuid,
+                        edge_key=item.edge_key,
+                        edge_type=item.edge_type,
+                        error_code=CatalogErrorCode.deterministic_uuid_conflict,
+                        error_message='same identity different canonical payload in request',
+                        details={'kind': 'edge'},
+                    )
+                )
+                continue
             prior = edge_by_uuid.get(edge_uuid)
             if prior is not None:
                 if prior.content_sha256 == digest:
                     prior.coalesced_indices.append(local_index)
                 else:
-                    errors.extend(
-                        [
-                            self._batch_result_for_edge(
-                                prior,
-                                index=edge_offset + prior.index,
-                                status='error',
-                                error_code=CatalogErrorCode.deterministic_uuid_conflict,
-                                error_message='same identity different canonical payload in request',
-                            ),
+                    conflicted_edge_ids.add(edge_uuid)
+                    errors = [
+                        result
+                        for result in errors
+                        if not (result.details == {'kind': 'edge'} and result.uuid == edge_uuid)
+                    ]
+                    for occurrence in occurrences:
+                        occurrence_item = request.edges[occurrence]
+                        errors.append(
                             CatalogItemResult(
-                                index=result_index,
+                                index=edge_offset + occurrence,
                                 status='error',
                                 uuid=edge_uuid,
-                                edge_key=item.edge_key,
-                                edge_type=item.edge_type,
+                                edge_key=occurrence_item.edge_key,
+                                edge_type=occurrence_item.edge_type,
                                 error_code=CatalogErrorCode.deterministic_uuid_conflict,
                                 error_message='same identity different canonical payload in request',
                                 details={'kind': 'edge'},
-                            ),
-                        ]
-                    )
+                            )
+                        )
                 continue
             prep = _PreparedEdge(
                 index=local_index,
