@@ -27,7 +27,7 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 - [x] **v1.0 Phase 1: Typed Catalog Primitives** - Config, identity, entity/edge upsert, resolve, verify (shipped)
 - [x] **v1.0 Phase 2: Provenance and Atomic Batch** - Provenance, batch status, atomic batch, docs (shipped)
 - [ ] **Phase 0: Baseline, Inventory, and Compatibility Policy** - Live baseline, isolation policy, worktree/remote safety
-- [x] **Phase 1: Strict Contracts and Catalog-v2 Identity** - Recursive forbid contracts, FE/BO/COMMON grammar, fail-closed identity
+- [ ] **Phase 1: Strict Contracts and Catalog-v2 Identity** - Recursive forbid contracts, FE/BO/COMMON grammar, fail-closed identity
 - [ ] **Phase 2: Topology Authority, Evidence Contract, Hashes, Capabilities** - Endpoint map, exact evidence schema, authoritative hashes, capabilities
 - [ ] **Phase 3A: Immutable Prepare/Commit Control Plane** - Prepare/discard/token, immutable payload, zero domain write on prepare
 - [ ] **Phase 3B: Atomic Catalog, Exact Evidence, Durable Manifest Writes** - Domain+evidence+manifest co-commit, rollback, search interop
@@ -82,9 +82,14 @@ Plans:
   4. Caller UUIDs never control identity; structured errors expose safe diagnostics only
   5. Unit coverage for recursive forbid, immutable flags, full entity grammar, FE/BO/overload separation, and UUID material versioning passes before Phase 2 write-adjacent work
 
-**Plans**: 5/5 plans executed
+**Plans**: 6/8 plans executed
 
 Plans:
+
+- [x] 01-06-PLAN.md
+- [ ] 01-07-PLAN.md
+- [ ] 01-08-PLAN.md
+
 **Wave 1**
 
 - [x] 01-01-PLAN.md — Strict CatalogStrictModel shells, Literal flags, version/system_key, CONT-08 codes, models suite
@@ -105,7 +110,7 @@ Plans:
 
 - [x] 01-05-PLAN.md — Truthful 01-PHASE1-GATE.md hard gate, VALIDATION refresh, edge-probe 53/53 assert
 
-**Gate**: Strict-model and identity unit gates passed (`01-PHASE1-GATE.md` ready_for_phase_2=true)
+**Gate**: Fail closed (`01-PHASE1-GATE.md` ready_for_phase_2=false) pending Plans 01-07 and 01-08
 
 ### Phase 2: Topology Authority, Evidence Contract, Hashes, and Capabilities
 
@@ -200,7 +205,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | v1.0 Phase 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
 | v1.0 Phase 2. Provenance and Atomic Batch | 6/6 | Complete | 2026-07-17 |
 | Phase 0. Baseline, Inventory, and Compatibility Policy | 2/2 | Complete | 2026-07-17 |
-| Phase 1. Strict Contracts and Catalog-v2 Identity | 5/5 | Complete | 2026-07-18 |
+| Phase 1. Strict Contracts and Catalog-v2 Identity | 6/8 | In Progress | - |
 | Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 0/TBD | Not started | - |
 | Phase 3A. Immutable Prepare/Commit Control Plane | 0/TBD | Not started | - |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 0/TBD | Not started | - |

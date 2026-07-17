@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-current_phase: 2
-current_phase_name: Topology Authority, Evidence Contract, Hashes, Capabilities
-status: ready_to_plan
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-07-18T20:10:00.000Z"
+current_phase: 1
+current_phase_name: Strict Contracts and Catalog-v2 Identity
+status: Phase 1 gap closure; ready_for_phase_2=false
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-07-17T22:30:22.433Z"
 last_activity: 2026-07-18
-last_activity_desc: Completed 01-05-PLAN.md (Phase 1 hard gate; ready_for_phase_2=true)
+last_activity_desc: Completed 01-06-PLAN.md; readiness remains false pending 01-07/01-08
 progress:
-  total_phases: 7
-  completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
-  percent: 29
+  total_phases: 2
+  completed_phases: 1
+  total_plans: 10
+  completed_plans: 8
+  percent: 50
 ---
 
 # Project State
@@ -24,22 +24,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 2 — Topology Authority, Evidence Contract, Hashes, Capabilities
+**Current focus:** Phase 1 — Strict Contracts and Catalog-v2 Identity (gap closure)
 
 ## Current Position
 
-Phase: 1 complete — Strict Contracts and Catalog-v2 Identity
-Plan: 05 complete; Phase 1 gate green
-Status: Phase 1 complete; ready_for_phase_2=true; next Phase 2 planning
-Last activity: 2026-07-18 — Completed 01-05-PLAN.md (Phase 1 hard gate)
+Phase: 1 of 7 (Strict Contracts and Catalog-v2 Identity) — IN PROGRESS
+Plan: 07 of 08; 01-06 complete
+Status: Phase 1 gap closure; ready_for_phase_2=false
+Last activity: 2026-07-18 — Completed 01-06-PLAN.md; readiness remains false pending 01-07/01-08
 
-Progress: [██░░░░░░░░] 29%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 21 (14 in v1.0, 7 in v1.1 Phase 0+1)
+- Total plans completed: 22 (14 in v1.0, 8 in v1.1 Phase 0+1)
 - Average duration: tracked in plan summaries
 - Total execution time: tracked in plan summaries
 
@@ -51,7 +51,7 @@ Progress: [██░░░░░░░░] 29%
 | v1.0 Phase 2. Provenance and Atomic Batch | 6 | 6 | see summaries |
 | Phase 0–5 (v1.1, 7 work units) | 7 | TBD | - |
 | Phase 0 | 2 | 2 | see summaries |
-| Phase 1 | 5 | 5 | see summaries |
+| Phase 1 | 8 | 6 | see summaries |
 
 **Prior milestone:**
 
@@ -68,6 +68,7 @@ Progress: [██░░░░░░░░] 29%
 | Phase 01 P03 | 3min | 2 tasks | 3 files |
 | Phase 01 P04 | 40min | 2 tasks + hard-gate | 5 files |
 | Phase 01 P05 | 15min | 2 tasks | 4 files |
+| Phase 01 P06 | 40min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -102,12 +103,15 @@ Recent decisions affecting current work:
 - [Phase 1]: Fresh ToolError(JSON) outside except; legacy/non-validation ToolErrors unchanged
 - [Phase 1]: CONT-07 proven via FastMCP call_tool + typed request annotations on all seven catalog tools
 - [Phase 1]: REFACTOR no-op for 01-04; no dual-version helpers
-- [Phase 1]: 01-PHASE1-GATE ready_for_phase_2=true from real focused pytest/ruff/pyright + safety + edge-probe 53/53
+- [Phase 1]: 01-PHASE1-GATE was green after 01-05; Plan 01-06 invalidated it to ready_for_phase_2=false pending 01-07/01-08 gap closure
 - [Phase 1]: catalog_neo4j_int=skip without live probe; Phase 0 canary-script fails remain baseline noise
+- [Phase 1]: Missing system_key remains Pydantic missing/validation_error; only explicit invalid_system_key errors receive that structured code
+- [Phase 1]: CatalogSourceRef models are dumped to plain JSON dictionaries before canonical hashing and store serialization
+- [Phase 1]: Strict scalar aliases reject coercion before Literal handling; nested graph-key scope errors retain exact request-relative locations
 
 ### Pending Todos
 
-Next: plan/execute Phase 2 (topology authority, evidence contract, hashes, capabilities). Phase 1 complete; ready_for_phase_2=true.
+Next: execute 01-07 only when separately dispatched. Phase 1 is 6/8; ready_for_phase_2=false pending 01-07/01-08.
 
 ### Blockers/Concerns
 
@@ -134,7 +138,7 @@ Next: plan/execute Phase 2 (topology authority, evidence contract, hashes, capab
 
 ## Session Continuity
 
-Last session: 2026-07-17T20:10:00.000Z
-Stopped at: Completed 01-05-PLAN.md
+Last session: 2026-07-17T22:30:04.233Z
+Stopped at: Completed 01-06-PLAN.md
 Resume file: None
-Next: Phase 2 — Topology Authority, Evidence Contract, Hashes, Capabilities
+Next: Plan 01-07 — catalog logging and executable edge-probe gap closure
