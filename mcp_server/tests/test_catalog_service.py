@@ -578,11 +578,44 @@ async def test_entity_preserves_input_order_and_deterministic_uuid():
     assert [r.index for r in resp.results] == [0, 1]
     assert resp.results[0].graph_key == 'TABLE::FE::ORCL.A.T1'
     assert resp.results[1].graph_key == 'TABLE::FE::ORCL.A.T2'
+    # IDEN-08: write result echoes complete system-scoped keys (exact equality)
+    assert resp.results[0].graph_key == e1.graph_key
+    assert resp.results[1].graph_key == e2.graph_key
     assert resp.results[0].uuid == catalog_entity_uuid(
         FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.A.T1'
     )
     assert resp.results[0].content_sha256 is not None
     assert len(resp.results[0].content_sha256) == 64
+
+
+@pytest.mark.asyncio
+async def test_entity_result_graph_key_echo_exact_full_system_scoped_key_iden08():
+    """IDEN-08: upsert result graph_key equals full submitted system-scoped key (exact ==)."""
+    full_key = 'TABLE::FE::ORCL.HR.EMPLOYEES_LONG_NAME'
+    entity = _entity(
+        graph_key=full_key,
+        database_qualified_name='ORCL.HR.EMPLOYEES_LONG_NAME',
+        name_raw='EMPLOYEES_LONG_NAME',
+    )
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(return_value=None)
+
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'created',
+        }
+
+    service._store.upsert_entity_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_entities(client=client, request=_request([entity]))
+    assert resp.results[0].graph_key == full_key
+    assert resp.results[0].graph_key == entity.graph_key
+    assert resp.results[0].uuid == catalog_entity_uuid(FIXED_NS, GROUP, 'Table', full_key)
 
 
 @pytest.mark.asyncio
@@ -780,6 +813,8 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
     assert r0.has_name_embedding is True
     assert r0.generic_duplicates == []
     assert r0.typed_duplicates == []
+    # IDEN-08: exact complete system-scoped graph_key echo (no truncation/reformat)
+    assert r0.graph_key == 'TABLE::FE::ORCL.HR.EMPLOYEES'
     client.embedder.create.assert_not_awaited()
     client.embedder.create_batch.assert_not_awaited()
     assert 'transaction' not in client.call_order
@@ -787,6 +822,40 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
     service._store.match_entities_for_resolve.assert_awaited()
     assert resolve_call.get('group_id') == GROUP
     assert 'TABLE::FE::ORCL.HR.EMPLOYEES' in (resolve_call.get('graph_keys') or [])
+
+
+@pytest.mark.asyncio
+async def test_resolve_graph_key_echo_exact_full_system_scoped_key_iden08():
+    """IDEN-08: resolve result graph_key equals full submitted system-scoped key (exact ==)."""
+    full_key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', full_key)
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(
+        return_value=[
+            {
+                'uuid': ent_uuid,
+                'graph_key': full_key,
+                'name': full_key,
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'content_sha256': 'a' * 64,
+                'has_name_embedding': True,
+                'batch_id': BATCH,
+            }
+        ]
+    )
+    req = _resolve_request(
+        entities=[ResolveEntityRef(entity_type='Table', graph_key=full_key)]
+    )
+    resp = await service.resolve_typed_entities(client=client, request=req)
+    assert len(resp.results) == 1
+    assert resp.results[0].graph_key == full_key
+    assert resp.results[0].graph_key is full_key or resp.results[0].graph_key == str(full_key)
+    # not truncated to body-only or FE-less form
+    assert resp.results[0].graph_key != 'TABLE::ORCL.HR.EMPLOYEES'
+    assert resp.results[0].graph_key != 'HR.EMPLOYEES'
+    assert resp.results[0].uuid == ent_uuid
 
 
 @pytest.mark.asyncio
@@ -1134,6 +1203,35 @@ async def test_verify_entity_counts_and_anomaly_lists():
     assert 'VIEW::FE::ORCL.HR.V1' in resp.entities.missing
     assert 'TABLE::FE::ORCL.HR.EMPLOYEES' in resp.entities.generic_duplicate
     assert 'TABLE::FE::ORCL.HR.EMPLOYEES' in resp.entities.missing_embedding
+    # IDEN-08: verify anomaly lists carry complete system-scoped keys (exact membership)
+    assert any(k == 'TABLE::FE::ORCL.HR.EMPLOYEES' for k in resp.entities.generic_duplicate)
+    assert any(k == 'VIEW::FE::ORCL.HR.V1' for k in resp.entities.missing)
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_verify_graph_key_echo_exact_full_system_scoped_key_iden08():
+    """IDEN-08: verify missing/anomaly lists echo full submitted system-scoped keys (exact ==)."""
+    full_key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
+    missing_key = 'VIEW::FE::ORCL.HR.V_LONG_NAME'
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    req = _verify_request(
+        entities=[
+            VerifyEntityRef(entity_type='Table', graph_key=full_key),
+            VerifyEntityRef(entity_type='View', graph_key=missing_key),
+        ],
+        edges=[],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert full_key in resp.entities.missing
+    assert missing_key in resp.entities.missing
+    # not truncated / reformatted
+    assert 'TABLE::ORCL.HR.EMPLOYEES' not in resp.entities.missing
+    assert 'HR.EMPLOYEES' not in resp.entities.missing
     client.embedder.create.assert_not_awaited()
     assert 'transaction' not in client.call_order
 
