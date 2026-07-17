@@ -1064,3 +1064,463 @@ def test_catalog_ingest_status_missing_required_fields():
         CatalogIngestStatusResponse.model_validate(
             {'group_id': 'g', 'batch_id': 'b', 'status': 'committed'}
         )
+
+
+# ---------------------------------------------------------------------------
+# Catalog-v2 strict contracts (CONT-01..06, CONT-08, IDEN-01/02, TEST-01)
+# ---------------------------------------------------------------------------
+
+_PHASE1_ERROR_CODES = (
+    'unsupported_identity_schema',
+    'invalid_system_key',
+    'edge_endpoint_pair_not_allowed',
+    'prepared_plan_not_found',
+    'prepared_plan_expired',
+    'prepared_plan_conflict',
+    'prepared_plan_already_consumed',
+    'manifest_mismatch',
+    'provenance_link_conflict',
+)
+
+_PREEXISTING_ERROR_CODES = (
+    'validation_error',
+    'feature_disabled',
+    'invalid_uuid_namespace',
+    'batch_limit_exceeded',
+    'content_hash_mismatch',
+    'entity_type_conflict',
+    'graph_key_prefix_mismatch',
+    'deterministic_uuid_conflict',
+    'missing_endpoint',
+    'endpoint_type_mismatch',
+    'generic_endpoint_conflict',
+    'edge_identity_conflict',
+    'batch_conflict',
+    'provenance_target_missing',
+    'neo4j_transaction_failed',
+    'embedding_failed',
+    'internal_error',
+    'backend_unavailable',
+)
+
+
+def _v2_shell(**overrides: Any) -> dict[str, Any]:
+    """Domain shell fields required by catalog-v2 request contracts."""
+    base: dict[str, Any] = {
+        'group_id': 'oracle-catalog-tool-test',
+        'identity_schema_version': 'catalog-v2',
+        'system_key': 'FE',
+    }
+    base.update(overrides)
+    return base
+
+
+def _loc_paths(exc: ValidationError) -> list[tuple[Any, ...]]:
+    return [tuple(err['loc']) for err in exc.errors()]
+
+
+@pytest.mark.parametrize(
+    ('model', 'payload', 'expected_loc_fragment'),
+    [
+        (
+            UpsertTypedEntitiesRequest,
+            {
+                **_v2_shell(batch_id='batch-1', entities=[_entity_kwargs()]),
+                'unknown_shell_field': True,
+            },
+            ('unknown_shell_field',),
+        ),
+        (
+            UpsertTypedEntitiesRequest,
+            {
+                **_v2_shell(
+                    batch_id='batch-1',
+                    entities=[{**_entity_kwargs(), 'typo_nested': 1}],
+                ),
+            },
+            ('entities', 0, 'typo_nested'),
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            {
+                **_v2_shell(batch_id='batch-1', edges=[_edge_kwargs()]),
+                'rogue': 'x',
+            },
+            ('rogue',),
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            {
+                **_v2_shell(
+                    batch_id='batch-1',
+                    edges=[{**_edge_kwargs(), 'extra_edge_field': 'nope'}],
+                ),
+            },
+            ('edges', 0, 'extra_edge_field'),
+        ),
+        (
+            UpsertProvenanceRequest,
+            {
+                **_v2_shell(batch_id='batch-1', sources=[_source_kwargs()]),
+                'unexpected': 1,
+            },
+            ('unexpected',),
+        ),
+        (
+            UpsertProvenanceRequest,
+            {
+                **_v2_shell(
+                    batch_id='batch-1',
+                    sources=[{**_source_kwargs(), 'leak_field': 'secret'}],
+                ),
+            },
+            ('sources', 0, 'leak_field'),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            {
+                **_v2_shell(batch_id='batch-1', entities=[_entity_kwargs()]),
+                'not_a_field': True,
+            },
+            ('not_a_field',),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            {
+                **_v2_shell(
+                    batch_id='batch-1',
+                    entities=[],
+                    edges=[],
+                    provenance={
+                        'sources': [_source_kwargs()],
+                        'entity_targets': [],
+                        'edge_targets': [],
+                        'nested_unknown': True,
+                    },
+                ),
+            },
+            ('provenance', 'nested_unknown'),
+        ),
+        (
+            ResolveTypedEntitiesRequest,
+            {
+                **_v2_shell(
+                    entities=[{'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'}],
+                ),
+                'extra_resolve': 1,
+            },
+            ('extra_resolve',),
+        ),
+        (
+            VerifyCatalogBatchRequest,
+            {
+                **_v2_shell(batch_id='batch-1'),
+                'verify_extra': False,
+            },
+            ('verify_extra',),
+        ),
+        (
+            CatalogEntityItem,
+            {**_entity_kwargs(), 'sneaky': 1},
+            ('sneaky',),
+        ),
+        (
+            CatalogEdgeItem,
+            {**_edge_kwargs(), 'sneaky': 1},
+            ('sneaky',),
+        ),
+        (
+            CatalogSourceItem,
+            {**_source_kwargs(), 'sneaky': 1},
+            ('sneaky',),
+        ),
+        (
+            ResolveEntityRef,
+            {'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES', 'sneaky': 1},
+            ('sneaky',),
+        ),
+        (
+            CatalogProvenanceEntityTarget,
+            {**_entity_target(), 'sneaky': 1},
+            ('sneaky',),
+        ),
+        (
+            CatalogProvenanceEdgeTarget,
+            {**_edge_target(), 'sneaky': 1},
+            ('sneaky',),
+        ),
+    ],
+)
+def test_catalog_strict_model_rejects_unknown_shell_and_nested_fields(
+    model, payload, expected_loc_fragment
+):
+    with pytest.raises(ValidationError) as exc:
+        model.model_validate(payload)
+    locs = _loc_paths(exc.value)
+    assert any(
+        loc[-len(expected_loc_fragment) :] == expected_loc_fragment for loc in locs
+    ), f'expected loc fragment {expected_loc_fragment!r} in {locs!r}'
+
+
+def test_misspelled_optional_fields_rejected():
+    with pytest.raises(ValidationError) as exc:
+        UpsertTypedEntitiesRequest.model_validate(
+            {
+                **_v2_shell(batch_id='batch-1', entities=[_entity_kwargs()]),
+                'dry_rn': True,  # misspelled dry_run
+            }
+        )
+    locs = _loc_paths(exc.value)
+    assert any(loc[-1] == 'dry_rn' for loc in locs)
+
+    with pytest.raises(ValidationError) as exc:
+        UpsertTypedEdgesRequest.model_validate(
+            {
+                **_v2_shell(batch_id='batch-1', edges=[_edge_kwargs()]),
+                'strict_endponts': False,  # misspelled strict_endpoints
+            }
+        )
+    locs = _loc_paths(exc.value)
+    assert any(loc[-1] == 'strict_endponts' for loc in locs)
+
+
+def test_strict_endpoints_false_rejected():
+    with pytest.raises(ValidationError) as exc:
+        UpsertTypedEdgesRequest.model_validate(
+            {
+                **_v2_shell(batch_id='batch-1', edges=[_edge_kwargs()]),
+                'strict_endpoints': False,
+            }
+        )
+    msg = str(exc.value).lower()
+    assert 'strict_endpoints' in msg
+
+
+@pytest.mark.parametrize(
+    ('model', 'payload'),
+    [
+        (
+            UpsertTypedEntitiesRequest,
+            {**_v2_shell(batch_id='batch-1', entities=[_entity_kwargs()]), 'atomic': False},
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            {**_v2_shell(batch_id='batch-1', edges=[_edge_kwargs()]), 'atomic': False},
+        ),
+        (
+            UpsertProvenanceRequest,
+            {**_v2_shell(batch_id='batch-1', sources=[_source_kwargs()]), 'atomic': False},
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            {**_v2_shell(batch_id='batch-1', entities=[_entity_kwargs()]), 'atomic': False},
+        ),
+    ],
+)
+def test_atomic_false_rejected_on_entity_edge_provenance_batch_writes(model, payload):
+    with pytest.raises(ValidationError) as exc:
+        model.model_validate(payload)
+    msg = str(exc.value).lower()
+    assert 'atomic' in msg
+
+
+@pytest.mark.parametrize(
+    'model_payload',
+    [
+        (
+            UpsertTypedEntitiesRequest,
+            lambda: {'group_id': 'oracle-catalog-tool-test', 'batch_id': 'b', 'entities': [_entity_kwargs()]},
+        ),
+        (
+            ResolveTypedEntitiesRequest,
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'entities': [{'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'}],
+            },
+        ),
+        (
+            VerifyCatalogBatchRequest,
+            lambda: {'group_id': 'oracle-catalog-tool-test', 'batch_id': 'b'},
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            lambda: {'group_id': 'oracle-catalog-tool-test', 'batch_id': 'b', 'edges': [_edge_kwargs()]},
+        ),
+        (
+            UpsertProvenanceRequest,
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'b',
+                'sources': [_source_kwargs()],
+            },
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'b',
+                'entities': [_entity_kwargs()],
+            },
+        ),
+    ],
+)
+def test_identity_schema_version_required_and_rejects_non_v2(model_payload):
+    model, payload_factory = model_payload
+    base = payload_factory()
+
+    with pytest.raises(ValidationError) as exc:
+        model.model_validate({**base, 'system_key': 'FE'})
+    assert any(
+        'identity_schema_version' in (err.get('loc') or ()) for err in exc.value.errors()
+    ) or any('identity_schema_version' in str(err.get('loc')) for err in exc.value.errors())
+
+    with pytest.raises(ValidationError) as exc:
+        model.model_validate(
+            {**base, 'identity_schema_version': 'catalog-v1', 'system_key': 'FE'}
+        )
+    msg = str(exc.value).lower()
+    assert 'identity_schema_version' in msg or 'catalog-v' in msg
+
+    with pytest.raises(ValidationError):
+        model.model_validate({**base, 'identity_schema_version': '', 'system_key': 'FE'})
+
+    with pytest.raises(ValidationError):
+        model.model_validate({**base, 'identity_schema_version': None, 'system_key': 'FE'})
+
+    ok = model.model_validate(
+        {**base, 'identity_schema_version': 'catalog-v2', 'system_key': 'FE'}
+    )
+    assert ok.identity_schema_version == 'catalog-v2'
+
+
+@pytest.mark.parametrize(
+    'model_payload',
+    [
+        (
+            UpsertTypedEntitiesRequest,
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'b',
+                'entities': [_entity_kwargs()],
+                'identity_schema_version': 'catalog-v2',
+            },
+        ),
+        (
+            ResolveTypedEntitiesRequest,
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'entities': [{'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'}],
+                'identity_schema_version': 'catalog-v2',
+            },
+        ),
+        (
+            VerifyCatalogBatchRequest,
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'b',
+                'identity_schema_version': 'catalog-v2',
+            },
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'b',
+                'edges': [_edge_kwargs()],
+                'identity_schema_version': 'catalog-v2',
+            },
+        ),
+        (
+            UpsertProvenanceRequest,
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'b',
+                'sources': [_source_kwargs()],
+                'identity_schema_version': 'catalog-v2',
+            },
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'b',
+                'entities': [_entity_kwargs()],
+                'identity_schema_version': 'catalog-v2',
+            },
+        ),
+    ],
+)
+def test_system_key_required_closed_set(model_payload):
+    model, payload_factory = model_payload
+    base = payload_factory()
+
+    with pytest.raises(ValidationError) as exc:
+        model.model_validate(base)
+    assert any('system_key' in str(err.get('loc')) for err in exc.value.errors())
+
+    for bad in ('', None, 'fe', 'COMMONN', 'be', 'frontend'):
+        with pytest.raises(ValidationError):
+            model.model_validate({**base, 'system_key': bad})
+
+    for good in ('FE', 'BO', 'COMMON'):
+        req = model.model_validate({**base, 'system_key': good})
+        assert req.system_key == good
+
+
+def test_source_and_reference_time_preserve_trailing_space():
+    source_key = 'DOC::HR.PDF#p12 '
+    reference_time = '2024-01-15T10:30:00+00:00 '
+    item = CatalogSourceItem.model_validate(
+        _source_kwargs(source_key=source_key, reference_time=reference_time)
+    )
+    assert item.source_key == source_key
+    assert item.reference_time == reference_time
+    assert item.source_key.endswith(' ')
+    assert item.reference_time.endswith(' ')
+
+
+def test_catalog_error_code_includes_phase1_codes_without_removing_existing():
+    values = {c.value for c in CatalogErrorCode}
+    names = {c.name for c in CatalogErrorCode}
+    for code in _PREEXISTING_ERROR_CODES:
+        assert code in values, f'missing preexisting code: {code}'
+        assert code in names
+    for code in _PHASE1_ERROR_CODES:
+        assert code in values, f'missing CONT-08 code: {code}'
+        assert code in names
+    # No dual-version dead helper: identity version constant is catalog-v2 only.
+    from models import catalog_common as common
+
+    assert getattr(common, 'IDENTITY_SCHEMA_VERSION', None) == 'catalog-v2'
+    assert 'CatalogStrictModel' in dir(common)
+    assert frozenset({'FE', 'BO', 'COMMON'}) == getattr(common, 'SYSTEM_KEYS', frozenset())
+
+
+def test_valid_entity_list_order_preserved():
+    entities = [
+        _entity_kwargs(graph_key='TABLE::Z', name_raw='Z', name_canonical='z'),
+        _entity_kwargs(graph_key='TABLE::A', name_raw='A', name_canonical='a'),
+        _entity_kwargs(graph_key='TABLE::M', name_raw='M', name_canonical='m'),
+    ]
+    # Two identical nested items remain separate list entries (no merge-on-equality).
+    entities_dup = [
+        _entity_kwargs(graph_key='TABLE::SAME', name_raw='S', name_canonical='s'),
+        _entity_kwargs(graph_key='TABLE::SAME', name_raw='S', name_canonical='s'),
+    ]
+    req = UpsertTypedEntitiesRequest.model_validate(
+        {
+            **_v2_shell(batch_id='batch-order', entities=entities),
+        }
+    )
+    assert [e.graph_key for e in req.entities] == [
+        'TABLE::Z',
+        'TABLE::A',
+        'TABLE::M',
+    ]
+    req_dup = UpsertTypedEntitiesRequest.model_validate(
+        {
+            **_v2_shell(batch_id='batch-dup', entities=entities_dup),
+        }
+    )
+    assert len(req_dup.entities) == 2
+    assert [e.graph_key for e in req_dup.entities] == ['TABLE::SAME', 'TABLE::SAME']
