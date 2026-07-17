@@ -36,6 +36,7 @@ from models.catalog_entities import (
     UpsertTypedEntitiesRequest,
     VerifyCatalogBatchRequest,
 )
+from models.catalog_provenance import UpsertProvenanceRequest
 from models.catalog_responses import (
     CatalogWriteResponse,
     ResolveTypedEntitiesResponse,
@@ -1339,6 +1340,35 @@ async def upsert_typed_edges(
             type(e).__name__,
         )
         return ErrorResponse(error='catalog upsert_typed_edges failed')
+
+
+@mcp.tool()
+async def upsert_provenance(
+    request: UpsertProvenanceRequest,
+) -> CatalogWriteResponse | ErrorResponse:
+    """Deterministic catalog provenance upsert (synchronous, Neo4j-only).
+
+    Writes Episodic sources, MENTIONS entity links, and RELATES_TO.episodes appends.
+    Never calls add_episode, LLM, or the ingestion queue. Targets must pre-exist.
+    """
+    global graphiti_service, catalog_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+
+    try:
+        client = await graphiti_service.get_client()
+        return await catalog_service.upsert_provenance(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'upsert_provenance failed batch_id=%s count=%s reason=%s',
+            getattr(request, 'batch_id', None),
+            len(getattr(request, 'sources', []) or []),
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog upsert_provenance failed')
 
 
 @mcp.custom_route('/health', methods=['GET'])

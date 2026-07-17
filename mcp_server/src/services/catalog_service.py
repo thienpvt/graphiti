@@ -6,6 +6,7 @@ No LLM, no queue, no EntityNode.save.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from models.catalog_entities import (
     UpsertTypedEntitiesRequest,
     VerifyCatalogBatchRequest,
 )
+from models.catalog_provenance import CatalogSourceItem, UpsertProvenanceRequest
 from models.catalog_responses import (
     CatalogItemResult,
     CatalogWriteResponse,
@@ -36,6 +38,8 @@ from services.catalog_identity import (
     canonical_sha256,
     catalog_edge_uuid,
     catalog_entity_uuid,
+    catalog_mentions_uuid,
+    catalog_source_uuid,
 )
 from services.catalog_store import CatalogNeo4jStore, CatalogStoreError
 
@@ -71,6 +75,25 @@ class _PreparedEdge:
     projected_status: str = 'created'
     error_code: CatalogErrorCode | None = None
     error_message: str | None = None
+
+
+@dataclass
+class _PreparedSource:
+    index: int
+    item: CatalogSourceItem
+    source_uuid: str
+    content_sha256: str
+    content_json: str
+    valid_at: datetime
+    existing: dict[str, Any] | None = None
+    projected_status: str = 'created'  # created|updated|unchanged|error
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+    # resolved targets after preflight
+    entity_uuids: list[str] = field(default_factory=list)
+    edge_uuids: list[str] = field(default_factory=list)
+    mentions_uuids: list[str] = field(default_factory=list)
+    missing_links: bool = False  # True when any MENTIONS/episode attach still needed
 
 
 class CatalogService:
@@ -2520,6 +2543,610 @@ class CatalogService:
             'catalog upsert_typed_edges batch_id=%s count=%s created=%s updated=%s unchanged=%s failed=%s',
             request.batch_id,
             len(request.edges),
+            resp.created,
+            resp.updated,
+            resp.unchanged,
+            resp.failed,
+        )
+        return resp
+
+    # ------------------------------------------------------------------
+    # Provenance (PROV-01, PROV-03..06) — no add_episode / LLM / queue / embed
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def source_canonical_payload(item: CatalogSourceItem) -> dict[str, Any]:
+        """Mutable canonical fields for source content_sha256 (identity excluded)."""
+        return {
+            'source_key': item.source_key,
+            'reference_time': item.reference_time,
+            'attributes': item.attributes,
+            'metadata': item.metadata,
+        }
+
+    def _provenance_gate_errors(
+        self,
+        client: Any,
+        request: UpsertProvenanceRequest,
+    ) -> CatalogWriteResponse | None:
+        n = len(request.sources)
+
+        def _all_error(code: CatalogErrorCode, message: str) -> CatalogWriteResponse:
+            results = [
+                CatalogItemResult(
+                    index=i,
+                    status='error',
+                    graph_key=request.sources[i].source_key,
+                    error_code=code,
+                    error_message=message,
+                )
+                for i in range(n)
+            ]
+            return CatalogWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                dry_run=request.dry_run,
+                atomic=request.atomic,
+                results=results,
+                failed=n,
+            )
+
+        if not self.catalog_config.enabled:
+            return _all_error(
+                CatalogErrorCode.feature_disabled,
+                'catalog_upsert.enabled is false',
+            )
+        ns = self._namespace()
+        if ns is None:
+            return _all_error(
+                CatalogErrorCode.invalid_uuid_namespace,
+                'uuid_namespace missing or invalid',
+            )
+        provider = getattr(getattr(client, 'driver', None), 'provider', None)
+        provider_val = getattr(provider, 'value', provider)
+        if provider_val != 'neo4j':
+            return _all_error(
+                CatalogErrorCode.backend_unavailable,
+                'catalog writes require Neo4j backend',
+            )
+        link_n = len(request.entity_targets) + len(request.edge_targets)
+        max_links = self.catalog_config.max_provenance_links_per_batch
+        if link_n > max_links:
+            return _all_error(
+                CatalogErrorCode.batch_limit_exceeded,
+                f'provenance links exceed max_provenance_links_per_batch ({max_links})',
+            )
+        return None
+
+    def _provenance_atomic_fail_response(
+        self,
+        request: UpsertProvenanceRequest,
+        early_errors: dict[int, CatalogItemResult],
+        trigger_indices: set[int],
+    ) -> CatalogWriteResponse:
+        results: list[CatalogItemResult] = []
+        for i, item in enumerate(request.sources):
+            if i in early_errors:
+                results.append(early_errors[i])
+            elif i in trigger_indices:
+                results.append(
+                    CatalogItemResult(
+                        index=i,
+                        status='error',
+                        graph_key=item.source_key,
+                        error_code=CatalogErrorCode.neo4j_transaction_failed,
+                        error_message='neo4j transaction failed',
+                    )
+                )
+            else:
+                results.append(
+                    CatalogItemResult(
+                        index=i,
+                        status='rolled_back',
+                        graph_key=item.source_key,
+                        error_code=CatalogErrorCode.batch_conflict,
+                        error_message='rolled back due to sibling failure',
+                    )
+                )
+        results = sorted(results, key=lambda r: r.index)
+        resp = self._count_provenance_response(request, results)
+        logger.info(
+            'catalog upsert_provenance atomic_fail batch_id=%s count=%s failed=%s rolled_back=%s',
+            request.batch_id,
+            len(request.sources),
+            resp.failed,
+            resp.rolled_back,
+        )
+        return resp
+
+    def _count_provenance_response(
+        self,
+        request: UpsertProvenanceRequest,
+        results: list[CatalogItemResult],
+    ) -> CatalogWriteResponse:
+        created = sum(1 for r in results if r.status == 'created')
+        updated = sum(1 for r in results if r.status == 'updated')
+        unchanged = sum(1 for r in results if r.status == 'unchanged')
+        failed = sum(1 for r in results if r.status == 'error')
+        rolled_back = sum(1 for r in results if r.status == 'rolled_back')
+        return CatalogWriteResponse(
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            dry_run=request.dry_run,
+            atomic=request.atomic,
+            results=results,
+            created=created,
+            updated=updated,
+            unchanged=unchanged,
+            failed=failed,
+            rolled_back=rolled_back,
+        )
+
+    @staticmethod
+    def _parse_source_valid_at(reference_time: str) -> datetime:
+        """Parse ISO-8601 reference_time to UTC datetime."""
+        normalized = reference_time.strip()
+        if normalized.endswith('Z') or normalized.endswith('z'):
+            normalized = normalized[:-1] + '+00:00'
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    async def upsert_provenance(
+        self,
+        *,
+        client: Any,
+        request: UpsertProvenanceRequest,
+    ) -> CatalogWriteResponse:
+        """Deterministic provenance upsert (PROV-01, PROV-03..06).
+
+        Order: gate → identity/hash → resolve all targets → dry_run or single tx
+        (sources + MENTIONS + edge episode append). No embedder, LLM, queue, add_episode.
+        """
+        _ = self._queue_service
+        gate = self._provenance_gate_errors(client, request)
+        if gate is not None:
+            logger.info(
+                'catalog upsert_provenance gated batch_id=%s count=%s failed=%s',
+                request.batch_id,
+                len(request.sources),
+                gate.failed,
+            )
+            return gate
+
+        namespace = self._namespace()
+        assert namespace is not None
+        request_ts = datetime.now(timezone.utc)
+        prepared: list[_PreparedSource] = []
+        early_errors: dict[int, CatalogItemResult] = {}
+        driver = client.driver
+
+        for idx, item in enumerate(request.sources):
+            try:
+                payload = self.source_canonical_payload(item)
+                digest = canonical_sha256(payload)
+                assert_optional_client_hash(item.content_sha256, digest)
+                valid_at = self._parse_source_valid_at(item.reference_time)
+            except ValueError as exc:
+                msg = str(exc)
+                code = (
+                    CatalogErrorCode.content_hash_mismatch
+                    if 'content_hash_mismatch' in msg
+                    else CatalogErrorCode.validation_error
+                )
+                early_errors[idx] = CatalogItemResult(
+                    index=idx,
+                    status='error',
+                    graph_key=item.source_key,
+                    error_code=code,
+                    error_message=msg,
+                )
+                continue
+
+            source_uuid = catalog_source_uuid(namespace, request.group_id, item.source_key)
+            content_json = json.dumps(
+                {
+                    'source_key': item.source_key,
+                    'reference_time': item.reference_time,
+                    'attributes': item.attributes,
+                    'metadata': item.metadata,
+                },
+                sort_keys=True,
+                separators=(',', ':'),
+                ensure_ascii=False,
+            )
+            prepared.append(
+                _PreparedSource(
+                    index=idx,
+                    item=item,
+                    source_uuid=source_uuid,
+                    content_sha256=digest,
+                    content_json=content_json,
+                    valid_at=valid_at,
+                )
+            )
+
+        if early_errors and request.atomic:
+            return self._provenance_atomic_fail_response(
+                request, early_errors, trigger_indices=set(early_errors.keys())
+            )
+
+        resolved_entity_uuids: list[str] = []
+        resolved_edge_uuids: list[str] = []
+        target_error: CatalogItemResult | None = None
+
+        for t in request.entity_targets:
+            expected = catalog_entity_uuid(namespace, request.group_id, t.entity_type, t.graph_key)
+            try:
+                code, row = await self._store.resolve_endpoint_typed(
+                    driver,
+                    group_id=request.group_id,
+                    graph_key=t.graph_key,
+                    entity_type=t.entity_type,
+                    expected_uuid=expected,
+                )
+            except Exception as exc:
+                logger.error(
+                    'catalog provenance_target_resolve_failed batch_id=%s kind=entity reason=%s',
+                    request.batch_id,
+                    type(exc).__name__,
+                )
+                target_error = CatalogItemResult(
+                    index=0,
+                    status='error',
+                    graph_key=t.graph_key,
+                    entity_type=t.entity_type,
+                    error_code=CatalogErrorCode.internal_error,
+                    error_message='entity target pre-resolve failed',
+                    details={'reason': type(exc).__name__},
+                )
+                break
+            if code is not None or row is None:
+                target_error = CatalogItemResult(
+                    index=0,
+                    status='error',
+                    graph_key=t.graph_key,
+                    entity_type=t.entity_type,
+                    error_code=CatalogErrorCode.provenance_target_missing,
+                    error_message=f'entity target missing or mistyped: {code or "missing"}',
+                )
+                break
+            resolved_entity_uuids.append(str(row['uuid']))
+
+        if target_error is None:
+            for t in request.edge_targets:
+                edge_uuid = catalog_edge_uuid(namespace, request.group_id, t.edge_type, t.edge_key)
+                try:
+                    row = await self._store.get_edge_by_uuid(
+                        driver, uuid=edge_uuid, group_id=request.group_id
+                    )
+                except Exception as exc:
+                    logger.error(
+                        'catalog provenance_target_resolve_failed batch_id=%s kind=edge reason=%s',
+                        request.batch_id,
+                        type(exc).__name__,
+                    )
+                    target_error = CatalogItemResult(
+                        index=0,
+                        status='error',
+                        edge_key=t.edge_key,
+                        edge_type=t.edge_type,
+                        error_code=CatalogErrorCode.internal_error,
+                        error_message='edge target pre-resolve failed',
+                        details={'reason': type(exc).__name__},
+                    )
+                    break
+                if row is None:
+                    target_error = CatalogItemResult(
+                        index=0,
+                        status='error',
+                        edge_key=t.edge_key,
+                        edge_type=t.edge_type,
+                        error_code=CatalogErrorCode.provenance_target_missing,
+                        error_message='edge target missing',
+                    )
+                    break
+                if row.get('name') is not None and row.get('name') != t.edge_type:
+                    target_error = CatalogItemResult(
+                        index=0,
+                        status='error',
+                        edge_key=t.edge_key,
+                        edge_type=t.edge_type,
+                        error_code=CatalogErrorCode.provenance_target_missing,
+                        error_message='edge target type mismatch',
+                    )
+                    break
+                resolved_edge_uuids.append(str(row['uuid']))
+
+        if target_error is not None:
+            errs: dict[int, CatalogItemResult] = {}
+            for prep in prepared:
+                errs[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.source_uuid,
+                    content_sha256=prep.content_sha256,
+                    graph_key=prep.item.source_key,
+                    error_code=target_error.error_code,
+                    error_message=target_error.error_message,
+                    details=target_error.details,
+                )
+            for idx in early_errors:
+                errs[idx] = early_errors[idx]
+            if request.atomic:
+                return self._provenance_atomic_fail_response(
+                    request, errs, trigger_indices=set(errs.keys())
+                )
+            results = [
+                errs.get(
+                    i,
+                    CatalogItemResult(
+                        index=i,
+                        status='error',
+                        graph_key=request.sources[i].source_key,
+                        error_code=target_error.error_code,
+                        error_message=target_error.error_message,
+                    ),
+                )
+                for i in range(len(request.sources))
+            ]
+            return self._count_provenance_response(request, results)
+
+        for prep in prepared:
+            prep.entity_uuids = list(resolved_entity_uuids)
+            prep.edge_uuids = list(resolved_edge_uuids)
+            prep.mentions_uuids = [
+                catalog_mentions_uuid(namespace, request.group_id, prep.source_uuid, ent_uuid)
+                for ent_uuid in prep.entity_uuids
+            ]
+
+        for prep in prepared:
+            try:
+                existing = await self._store.get_source_episode_by_uuid(
+                    driver, uuid=prep.source_uuid, group_id=request.group_id
+                )
+            except Exception as exc:
+                logger.error(
+                    'catalog provenance_source_read_failed batch_id=%s reason=%s',
+                    request.batch_id,
+                    type(exc).__name__,
+                )
+                early_errors[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.source_uuid,
+                    graph_key=prep.item.source_key,
+                    error_code=CatalogErrorCode.internal_error,
+                    error_message='source pre-read failed',
+                    details={'reason': type(exc).__name__},
+                )
+                continue
+            prep.existing = existing
+            missing_links = False
+            if existing is not None and existing.get('content_sha256') == prep.content_sha256:
+                for ent_uuid, men_uuid in zip(prep.entity_uuids, prep.mentions_uuids, strict=True):
+                    try:
+                        link = await self._store.get_mentions_link(
+                            driver,
+                            episode_uuid=prep.source_uuid,
+                            entity_uuid=ent_uuid,
+                            mentions_uuid=men_uuid,
+                            group_id=request.group_id,
+                        )
+                    except Exception:
+                        link = None
+                    if link is None:
+                        missing_links = True
+                        break
+                if not missing_links:
+                    for edge_uuid in prep.edge_uuids:
+                        try:
+                            erow = await self._store.get_edge_by_uuid(
+                                driver, uuid=edge_uuid, group_id=request.group_id
+                            )
+                        except Exception:
+                            erow = None
+                        episodes = (erow or {}).get('episodes') or []
+                        if prep.source_uuid not in episodes:
+                            missing_links = True
+                            break
+                if not missing_links:
+                    prep.projected_status = 'unchanged'
+                else:
+                    prep.projected_status = 'updated'
+                    prep.missing_links = True
+            elif existing is None:
+                prep.projected_status = 'created'
+                prep.missing_links = bool(prep.entity_uuids or prep.edge_uuids)
+            else:
+                prep.projected_status = 'updated'
+                prep.missing_links = True
+
+        if early_errors and request.atomic:
+            return self._provenance_atomic_fail_response(
+                request, early_errors, trigger_indices=set(early_errors.keys())
+            )
+
+        if request.dry_run:
+            results = []
+            for i, item in enumerate(request.sources):
+                if i in early_errors:
+                    results.append(early_errors[i])
+                    continue
+                prep = next((p for p in prepared if p.index == i), None)
+                if prep is None:
+                    results.append(
+                        CatalogItemResult(
+                            index=i,
+                            status='error',
+                            graph_key=item.source_key,
+                            error_code=CatalogErrorCode.internal_error,
+                            error_message='source not prepared',
+                        )
+                    )
+                    continue
+                results.append(
+                    CatalogItemResult(
+                        index=i,
+                        status=prep.projected_status,  # type: ignore[arg-type]
+                        uuid=prep.source_uuid,
+                        content_sha256=prep.content_sha256,
+                        graph_key=item.source_key,
+                    )
+                )
+            resp = self._count_provenance_response(request, results)
+            logger.info(
+                'catalog upsert_provenance dry_run batch_id=%s count=%s created=%s updated=%s unchanged=%s failed=%s',
+                request.batch_id,
+                len(request.sources),
+                resp.created,
+                resp.updated,
+                resp.unchanged,
+                resp.failed,
+            )
+            return resp
+
+        try:
+            await self._ensure_schema(client)
+        except Exception as exc:
+            logger.error(
+                'catalog schema_init_failed kind=provenance reason=%s',
+                type(exc).__name__,
+            )
+            n = len(request.sources)
+            return CatalogWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                dry_run=False,
+                atomic=request.atomic,
+                results=[
+                    CatalogItemResult(
+                        index=i,
+                        status='error',
+                        graph_key=request.sources[i].source_key,
+                        error_code=CatalogErrorCode.neo4j_transaction_failed,
+                        error_message='catalog schema initialization failed',
+                        details={'reason': type(exc).__name__},
+                    )
+                    for i in range(n)
+                ],
+                failed=n,
+            )
+
+        written: dict[int, CatalogItemResult] = {}
+        write_set = {p.index for p in prepared if p.index not in early_errors}
+
+        try:
+            async with client.driver.transaction() as tx:
+                for prep in prepared:
+                    if prep.index in early_errors:
+                        continue
+                    if prep.projected_status == 'unchanged' and not prep.missing_links:
+                        written[prep.index] = CatalogItemResult(
+                            index=prep.index,
+                            status='unchanged',
+                            uuid=prep.source_uuid,
+                            content_sha256=prep.content_sha256,
+                            graph_key=prep.item.source_key,
+                        )
+                        continue
+                    params = self._store.prepare_source_episode_params(
+                        uuid=prep.source_uuid,
+                        group_id=request.group_id,
+                        batch_id=request.batch_id,
+                        source_key=prep.item.source_key,
+                        content_sha256=prep.content_sha256,
+                        content=prep.content_json,
+                        source='json',
+                        source_description='catalog provenance source',
+                        valid_at=prep.valid_at,
+                        created_at=request_ts,
+                        updated_at=request_ts,
+                        entity_edges=list(prep.edge_uuids),
+                        name=prep.item.source_key,
+                    )
+                    row = await self._store.upsert_source_episode(tx, params=params)
+                    status = str(row.get('status') or prep.projected_status)
+                    for ent_uuid, men_uuid in zip(
+                        prep.entity_uuids, prep.mentions_uuids, strict=True
+                    ):
+                        await self._store.upsert_mentions_link(
+                            tx,
+                            episode_uuid=prep.source_uuid,
+                            entity_uuid=ent_uuid,
+                            mentions_uuid=men_uuid,
+                            group_id=request.group_id,
+                            created_at=request_ts,
+                        )
+                    for edge_uuid in prep.edge_uuids:
+                        await self._store.append_edge_episode(
+                            tx,
+                            edge_uuid=edge_uuid,
+                            episode_uuid=prep.source_uuid,
+                            group_id=request.group_id,
+                        )
+                    written[prep.index] = CatalogItemResult(
+                        index=prep.index,
+                        status=status,  # type: ignore[arg-type]
+                        uuid=prep.source_uuid,
+                        content_sha256=prep.content_sha256,
+                        graph_key=prep.item.source_key,
+                    )
+        except Exception as exc:
+            logger.error(
+                'catalog upsert_provenance neo4j_transaction_failed batch_id=%s reason=%s',
+                request.batch_id,
+                type(exc).__name__,
+            )
+            if request.atomic:
+                errs = {
+                    i: CatalogItemResult(
+                        index=i,
+                        status='error',
+                        graph_key=request.sources[i].source_key,
+                        error_code=CatalogErrorCode.neo4j_transaction_failed,
+                        error_message='neo4j transaction failed',
+                        details={'reason': type(exc).__name__},
+                    )
+                    for i in write_set
+                }
+                errs.update(early_errors)
+                return self._provenance_atomic_fail_response(
+                    request, errs, trigger_indices=set(errs.keys())
+                )
+            for i in write_set:
+                if i not in written:
+                    written[i] = CatalogItemResult(
+                        index=i,
+                        status='error',
+                        graph_key=request.sources[i].source_key,
+                        error_code=CatalogErrorCode.neo4j_transaction_failed,
+                        error_message='neo4j transaction failed',
+                        details={'reason': type(exc).__name__},
+                    )
+
+        results = []
+        for i, item in enumerate(request.sources):
+            if i in early_errors:
+                results.append(early_errors[i])
+            elif i in written:
+                results.append(written[i])
+            else:
+                results.append(
+                    CatalogItemResult(
+                        index=i,
+                        status='error',
+                        graph_key=item.source_key,
+                        error_code=CatalogErrorCode.internal_error,
+                        error_message='source result missing',
+                    )
+                )
+        resp = self._count_provenance_response(request, results)
+        logger.info(
+            'catalog upsert_provenance batch_id=%s count=%s created=%s updated=%s unchanged=%s failed=%s',
+            request.batch_id,
+            len(request.sources),
             resp.created,
             resp.updated,
             resp.unchanged,

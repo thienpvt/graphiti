@@ -2172,3 +2172,180 @@ async def test_mcp_tool_upsert_typed_edges_registered():
     server = _mcp_server()
     assert hasattr(server, 'upsert_typed_edges')
     assert callable(server.upsert_typed_edges)
+
+
+# ---------------------------------------------------------------------------
+# Provenance service (Phase 2 PROV-01, PROV-03..06)
+# ---------------------------------------------------------------------------
+
+from models.catalog_provenance import (  # noqa: E402
+    CatalogProvenanceEdgeTarget,
+    CatalogProvenanceEntityTarget,
+    CatalogSourceItem,
+    UpsertProvenanceRequest,
+)
+from services.catalog_identity import catalog_mentions_uuid, catalog_source_uuid  # noqa: E402
+
+
+def _source(**overrides) -> CatalogSourceItem:
+    data = {
+        'source_key': 'SRC::ddl.sql#employees',
+        'reference_time': '2026-07-16T12:00:00Z',
+        'attributes': {'doc': 'ddl.sql'},
+        'metadata': None,
+    }
+    data.update(overrides)
+    return CatalogSourceItem.model_validate(data)
+
+
+def _prov_request(
+    sources: list[CatalogSourceItem] | None = None,
+    *,
+    entity_targets: list[CatalogProvenanceEntityTarget] | None = None,
+    edge_targets: list[CatalogProvenanceEdgeTarget] | None = None,
+    dry_run: bool = False,
+    atomic: bool = True,
+    batch_id: str = 'batch-prov-001',
+) -> UpsertProvenanceRequest:
+    return UpsertProvenanceRequest(
+        group_id=GROUP,
+        batch_id=batch_id,
+        sources=sources or [_source()],
+        entity_targets=entity_targets
+        or [CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES')],
+        edge_targets=edge_targets or [],
+        dry_run=dry_run,
+        atomic=atomic,
+    )
+
+
+def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = False):
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    src_uuid = catalog_source_uuid(FIXED_NS, GROUP, 'SRC::ddl.sql#employees')
+
+    async def _resolve(executor, *, group_id, graph_key, entity_type, expected_uuid=None, tx=None):
+        _ = executor, group_id, entity_type, expected_uuid, tx
+        if missing_entity:
+            return 'missing_endpoint', None
+        return None, {'uuid': ent_uuid, 'name': graph_key, 'neo4j_labels': ['Entity', 'Table']}
+
+    service._store.resolve_endpoint_typed = AsyncMock(side_effect=_resolve)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)
+    service._store.get_mentions_link = AsyncMock(return_value=None)
+    service._store.ensure_uuid_uniqueness_constraints = AsyncMock(return_value=None)
+    service._store.upsert_source_episode = AsyncMock(
+        return_value={'uuid': src_uuid, 'content_sha256': 'h', 'status': 'created'}
+    )
+    service._store.upsert_mentions_link = AsyncMock(
+        return_value={'uuid': 'm1', 'status': 'created'}
+    )
+    service._store.append_edge_episode = AsyncMock(
+        return_value={'uuid': 'e1', 'episodes': [src_uuid]}
+    )
+    service._store.prepare_source_episode_params = CatalogNeo4jStore().prepare_source_episode_params
+    return src_uuid, ent_uuid
+
+
+# late import for prepare helper wiring
+from services.catalog_store import CatalogNeo4jStore  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_provenance_happy_path_writes_source_and_mentions_no_embed():
+    client = _make_client()
+    queue = MagicMock()
+    service = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
+    src_uuid, ent_uuid = _wire_provenance_store(service)
+
+    resp = await service.upsert_provenance(client=client, request=_prov_request())
+    assert resp.failed == 0
+    assert resp.created >= 1 or resp.updated >= 1 or resp.unchanged >= 0
+    assert any(r.uuid == src_uuid for r in resp.results)
+    service._store.upsert_source_episode.assert_awaited()
+    service._store.upsert_mentions_link.assert_awaited()
+    # no embedder / queue / llm on provenance path
+    assert 'embed' not in client.call_order
+    client.embedder.create.assert_not_awaited()
+    queue.assert_not_called()
+    # MENTIONS uses deterministic uuid
+    call_kwargs = service._store.upsert_mentions_link.await_args.kwargs
+    expected_men = catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, ent_uuid)
+    assert call_kwargs['mentions_uuid'] == expected_men
+    assert call_kwargs['entity_uuid'] == ent_uuid
+
+
+@pytest.mark.asyncio
+async def test_provenance_missing_target_fail_closed_no_writes():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_provenance_store(service, missing_entity=True)
+
+    resp = await service.upsert_provenance(client=client, request=_prov_request())
+    assert resp.failed >= 1
+    assert any(r.error_code == CatalogErrorCode.provenance_target_missing for r in resp.results)
+    service._store.upsert_source_episode.assert_not_awaited()
+    service._store.upsert_mentions_link.assert_not_awaited()
+    service._store.append_edge_episode.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_provenance_dry_run_no_writes():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_provenance_store(service)
+
+    resp = await service.upsert_provenance(client=client, request=_prov_request(dry_run=True))
+    assert resp.dry_run is True
+    assert resp.failed == 0
+    service._store.upsert_source_episode.assert_not_awaited()
+    service._store.upsert_mentions_link.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_provenance_idempotent_unchanged_skips_write():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    src_uuid, ent_uuid = _wire_provenance_store(service)
+    item = _source()
+    digest = CatalogService.source_canonical_payload(item)
+    from services.catalog_identity import canonical_sha256
+
+    sha = canonical_sha256(digest)
+    service._store.get_source_episode_by_uuid = AsyncMock(
+        return_value={
+            'uuid': src_uuid,
+            'content_sha256': sha,
+            'source_key': item.source_key,
+        }
+    )
+    service._store.get_mentions_link = AsyncMock(
+        return_value={'uuid': catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, ent_uuid)}
+    )
+
+    resp = await service.upsert_provenance(client=client, request=_prov_request(sources=[item]))
+    assert resp.failed == 0
+    assert resp.unchanged >= 1
+    assert all(r.status == 'unchanged' for r in resp.results)
+    service._store.upsert_source_episode.assert_not_awaited()
+    service._store.upsert_mentions_link.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provenance_feature_disabled_no_write():
+    client = _make_client()
+    service = CatalogService(catalog_config=_disabled_config())
+    resp = await service.upsert_provenance(client=client, request=_prov_request())
+    assert any(r.error_code == CatalogErrorCode.feature_disabled for r in resp.results)
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_upsert_provenance_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'upsert_provenance')
+    assert callable(server.upsert_provenance)

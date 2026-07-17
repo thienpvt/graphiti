@@ -993,6 +993,57 @@ class CatalogNeo4jStore:
             )
         return row
 
+    def build_get_source_episode_by_uuid_cypher(self) -> str:
+        return """
+            MATCH (n:Episodic {uuid: $uuid, group_id: $group_id})
+            RETURN n.uuid AS uuid,
+                   n.group_id AS group_id,
+                   n.source_key AS source_key,
+                   n.content_sha256 AS content_sha256,
+                   n.batch_id AS batch_id,
+                   n.created_at AS created_at,
+                   n.updated_at AS updated_at
+            """
+
+    async def get_source_episode_by_uuid(
+        self,
+        executor: Any,
+        *,
+        uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        cypher = self.build_get_source_episode_by_uuid_cypher()
+        params = {'uuid': uuid, 'group_id': group_id}
+        return await self._read_one(executor, cypher, params, tx=tx)
+
+    def build_get_mentions_link_cypher(self) -> str:
+        return """
+            MATCH (episode:Episodic {uuid: $episode_uuid, group_id: $group_id})
+                  -[e:MENTIONS {uuid: $mentions_uuid}]->
+                  (node:Entity {uuid: $entity_uuid, group_id: $group_id})
+            RETURN e.uuid AS uuid, e.group_id AS group_id
+            """
+
+    async def get_mentions_link(
+        self,
+        executor: Any,
+        *,
+        episode_uuid: str,
+        entity_uuid: str,
+        mentions_uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        cypher = self.build_get_mentions_link_cypher()
+        params = {
+            'episode_uuid': episode_uuid,
+            'entity_uuid': entity_uuid,
+            'mentions_uuid': mentions_uuid,
+            'group_id': group_id,
+        }
+        return await self._read_one(executor, cypher, params, tx=tx)
+
     # ------------------------------------------------------------------
     # Typed edge endpoint resolution + edge upsert
     # ------------------------------------------------------------------
@@ -1200,6 +1251,7 @@ class CatalogNeo4jStore:
                    e.created_at AS created_at,
                    e.updated_at AS updated_at,
                    e.fact_embedding IS NOT NULL AS has_fact_embedding,
+                   coalesce(e.episodes, []) AS episodes,
                    coalesce(e.source_node_uuid, s.uuid) AS source_uuid,
                    coalesce(e.target_node_uuid, t.uuid) AS target_uuid,
                    s.uuid AS source_node_uuid,
