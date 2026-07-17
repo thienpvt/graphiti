@@ -2,9 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
+current_phase: 0
+current_phase_name: Baseline, Inventory, and Compatibility Policy
 status: roadmap_ready
-last_updated: "2026-07-17T16:50:00.000Z"
+stopped_at: ROADMAP/REQUIREMENTS/STATE reconciled to canonical Phase 0/1/2/3A/3B/4/5
+last_updated: "2026-07-17T17:33:45.172Z"
 last_activity: 2026-07-17
+last_activity_desc: "completed quick task 260717-wvz: canonical roadmap reconciliation (138/138)"
 progress:
   total_phases: 7
   completed_phases: 0
