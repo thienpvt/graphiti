@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 1
 current_phase_name: Strict Contracts and Catalog-v2 Identity
-status: Phase 1 final audit-gap closure; ready_for_phase_2=false
-stopped_at: Executing 01-08-PLAN.md final gate
-last_updated: "2026-07-17T22:49:10Z"
+status: Phase 1 evidence gate green; awaiting independent re-audit; ready_for_phase_2=true
+stopped_at: Completed 01-08-PLAN.md; awaiting independent Phase 1 re-audit
+last_updated: "2026-07-17T23:14:23.555Z"
 last_activity: 2026-07-18
-last_activity_desc: Plan 01-07 complete; Plan 01-08 remapped IDEN-08 to Phase 4 and IDEN-13 to Phase 5; readiness remains false pending final gate
+last_activity_desc: IDEN-08 ownership superseded to Phase 4; IDEN-13 ownership superseded to Phase 5; Phase 1 evidence remains partial until final gate
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 10
-  completed_plans: 8
-  percent: 50
+  completed_plans: 10
+  percent: 100
 ---
 
 # Project State
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 1 of 7 (Strict Contracts and Catalog-v2 Identity) — IN PROGRESS
-Plan: 08 of 08; 01-07 complete
-Status: Phase 1 final audit-gap closure; ready_for_phase_2=false
-Last activity: 2026-07-18 — IDEN-08 ownership superseded to Phase 4; IDEN-13 ownership superseded to Phase 5; Phase 1 evidence remains partial until final gate
+Plan: 08 of 08 complete
+Status: Phase 1 evidence gate green; awaiting independent re-audit; ready_for_phase_2=true
+Last activity: 2026-07-18 — Completed 01-08 final matrix: 9/9 mandatory real checks pass; Neo4j integration remains skip without probe
 
-Progress: [████████░░] 80%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -51,7 +51,7 @@ Progress: [████████░░] 80%
 | v1.0 Phase 2. Provenance and Atomic Batch | 6 | 6 | see summaries |
 | Phase 0–5 (v1.1, 7 work units) | 7 | TBD | - |
 | Phase 0 | 2 | 2 | see summaries |
-| Phase 1 | 8 | 6 | see summaries |
+| Phase 1 | 8 | 8 | see summaries |
 
 **Prior milestone:**
 
@@ -69,6 +69,7 @@ Progress: [████████░░] 80%
 | Phase 01 P04 | 40min | 2 tasks + hard-gate | 5 files |
 | Phase 01 P05 | 15min | 2 tasks | 4 files |
 | Phase 01 P06 | 40min | 2 tasks | 13 files |
+| Phase 01 P08 | 23min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -110,10 +111,11 @@ Recent decisions affecting current work:
 - [Phase 1]: Strict scalar aliases reject coercion before Literal handling; nested graph-key scope errors retain exact request-relative locations
 - [Phase 1]: IDEN-08 unique completion belongs to Phase 4; Phase 1 graph-key echo tests are partial foundation evidence only
 - [Phase 1]: IDEN-13 unique completion belongs to Phase 5; Phase 1 v1-material inequality and historical-golden guards are partial foundation evidence only
+- [Phase 1]: Final evidence gate is green; stop before Phase 2 for independent orchestrator re-audit
 
 ### Pending Todos
 
-Next: complete 01-08 final evidence matrix only. Phase 1 is 7/8; ready_for_phase_2=false until every hard gate passes. Do not transition to Phase 2; independent re-audit follows.
+Next: independent Phase 1 re-audit. Plan 01-08 is complete; evidence gate reports ready_for_phase_2=true. Do not transition or execute Phase 2 in this session.
 
 ### Blockers/Concerns
 
@@ -140,7 +142,7 @@ Next: complete 01-08 final evidence matrix only. Phase 1 is 7/8; ready_for_phase
 
 ## Session Continuity
 
-Last session: 2026-07-17T22:49:10Z
-Stopped at: Executing 01-08-PLAN.md final gate
+Last session: 2026-07-17T23:14:23.548Z
+Stopped at: Completed 01-08-PLAN.md; awaiting independent Phase 1 re-audit
 Resume file: None
-Next: Finish Plan 01-08; stop before Phase 2 for independent re-audit
+Next: Independent Phase 1 re-audit; stop before Phase 2 execution

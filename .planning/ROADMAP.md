@@ -82,13 +82,13 @@ Plans:
   4. Caller UUIDs never control identity; structured errors expose safe diagnostics only
   5. Unit coverage for recursive forbid, immutable flags, full entity grammar, FE/BO/overload separation, and UUID material versioning passes before Phase 2 write-adjacent work
 
-**Plans**: 6/8 plans executed
+**Plans**: 8/8 plans executed
 
 Plans:
 
 - [x] 01-06-PLAN.md
-- [ ] 01-07-PLAN.md
-- [ ] 01-08-PLAN.md
+- [x] 01-07-PLAN.md
+- [x] 01-08-PLAN.md
 
 **Wave 1**
 
