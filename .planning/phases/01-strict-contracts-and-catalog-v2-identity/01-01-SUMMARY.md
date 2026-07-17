@@ -164,7 +164,10 @@ Each task was committed atomically:
 1. **Task 1: RED — strictness flag version system_key error-code matrix** - `72baa2d` (test)
 2. **Task 2: GREEN — CatalogStrictModel shells flags codes** - `6e685e5` (feat)
 
-**Plan metadata:** (pending docs commit)
+**Plan metadata:**
+- `78297b8` docs(01-01): complete strict contract matrix plan
+- `d92d322` docs(01-01): fix STATE position after plan 01
+- subsequent `docs(01-01): correct milestone progress projection` corrects GSD total_phases/percent projection (this commit)
 
 _Note: REFACTOR gate recorded as no-op; isort cleanup included in GREEN. No dual-version helpers._
 
