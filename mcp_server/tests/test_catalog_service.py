@@ -16,6 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from config.schema import CatalogConfig  # noqa: E402
+from models.catalog_batch import GetCatalogIngestStatusRequest  # noqa: E402
 from models.catalog_common import CatalogErrorCode  # noqa: E402
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
 from models.catalog_entities import (  # noqa: E402
@@ -27,7 +28,6 @@ from models.catalog_entities import (  # noqa: E402
     VerifyEdgeRef,
     VerifyEntityRef,
 )
-from models.catalog_batch import GetCatalogIngestStatusRequest  # noqa: E402
 from services.catalog_identity import (  # noqa: E402
     canonical_sha256,
     catalog_batch_uuid,
@@ -2427,9 +2427,9 @@ async def test_status_missing_returns_structured_not_found_no_write():
         'batch_not_found',
         'provenance_target_missing',
     )
-    # Prefer explicit not-found semantics when available
-    assert resp.error_message
-    assert 'not' in resp.error_message.lower() or 'missing' in resp.error_message.lower()
+    # Prefer explicit not-found semantics when available (error_summary, no error_message field)
+    assert resp.error_summary
+    assert 'not' in resp.error_summary.lower() or 'missing' in resp.error_summary.lower()
     assert 'transaction' not in client.call_order
     assert 'embed' not in client.call_order
     # get_batch_status still called (read)

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from config.schema import CatalogConfig
+from models.catalog_batch import GetCatalogIngestStatusRequest
 from models.catalog_common import CatalogErrorCode
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest
 from models.catalog_entities import (
@@ -25,6 +26,8 @@ from models.catalog_entities import (
 )
 from models.catalog_provenance import CatalogSourceItem, UpsertProvenanceRequest
 from models.catalog_responses import (
+    CatalogIngestStatus,
+    CatalogIngestStatusResponse,
     CatalogItemResult,
     CatalogWriteResponse,
     ResolveEntityResult,
@@ -36,6 +39,7 @@ from models.catalog_responses import (
 from services.catalog_identity import (
     assert_optional_client_hash,
     canonical_sha256,
+    catalog_batch_uuid,
     catalog_edge_uuid,
     catalog_entity_uuid,
     catalog_mentions_uuid,
@@ -3153,3 +3157,128 @@ class CatalogService:
             resp.failed,
         )
         return resp
+
+    # ------------------------------------------------------------------
+    # Read-only batch ingest status (STAT-01/04/05/06)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _status_ts(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
+
+    async def get_catalog_ingest_status(
+        self,
+        *,
+        client: Any,
+        request: GetCatalogIngestStatusRequest,
+    ) -> CatalogIngestStatusResponse:
+        """Read-only status for group_id+batch_id; Neo4j-persisted, restart-safe.
+
+        No writes, embedder, LLM, or queue. Missing row returns structured error.
+        """
+        batch_id = request.batch_id
+        group_id = request.group_id
+        ns = self._namespace()
+        batch_uuid = catalog_batch_uuid(ns, group_id, batch_id) if ns is not None else ''
+
+        gate = self._read_gate(client, group_id=group_id, item_count=1)
+        if gate is not None:
+            code, message = gate
+            logger.info(
+                'catalog get_catalog_ingest_status gated group_id=%s batch_id=%s code=%s',
+                group_id,
+                batch_id,
+                code,
+            )
+            return CatalogIngestStatusResponse(
+                group_id=group_id,
+                batch_id=batch_id,
+                batch_uuid=batch_uuid or '00000000-0000-0000-0000-000000000000',
+                status='failed',
+                error_code=code,
+                error_summary=(message or '')[:512],
+            )
+
+        assert ns is not None
+        batch_uuid = catalog_batch_uuid(ns, group_id, batch_id)
+
+        try:
+            row = await self._store.get_batch_status(
+                client.driver,
+                uuid=batch_uuid,
+                group_id=group_id,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog get_catalog_ingest_status read_failed group_id=%s batch_id=%s reason=%s',
+                group_id,
+                batch_id,
+                type(exc).__name__,
+            )
+            return CatalogIngestStatusResponse(
+                group_id=group_id,
+                batch_id=batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                error_code=CatalogErrorCode.internal_error,
+                error_summary='status read failed',
+            )
+
+        if row is None:
+            logger.info(
+                'catalog get_catalog_ingest_status missing group_id=%s batch_id=%s',
+                group_id,
+                batch_id,
+            )
+            return CatalogIngestStatusResponse(
+                group_id=group_id,
+                batch_id=batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                error_code=CatalogErrorCode.validation_error,
+                error_summary='batch status not found',
+            )
+
+        raw_status = str(row.get('status') or 'failed')
+        allowed: set[str] = {
+            'planned',
+            'validating',
+            'embedding',
+            'writing',
+            'committed',
+            'failed',
+        }
+        status: CatalogIngestStatus = (  # type: ignore[assignment]
+            raw_status if raw_status in allowed else 'failed'
+        )
+        err_summary = row.get('error_summary') or ''
+        if not isinstance(err_summary, str):
+            err_summary = str(err_summary)
+        if len(err_summary) > 512:
+            err_summary = err_summary[:512]
+
+        logger.info(
+            'catalog get_catalog_ingest_status group_id=%s batch_id=%s status=%s',
+            group_id,
+            batch_id,
+            status,
+        )
+        return CatalogIngestStatusResponse(
+            group_id=str(row.get('group_id') or group_id),
+            batch_id=str(row.get('batch_id') or batch_id),
+            batch_uuid=str(row.get('uuid') or batch_uuid),
+            status=status,
+            request_sha256=row.get('request_sha256'),
+            catalog_sha256=row.get('catalog_sha256'),
+            entity_count=int(row.get('entity_count') or 0),
+            edge_count=int(row.get('edge_count') or 0),
+            provenance_count=int(row.get('provenance_count') or 0),
+            created_at=self._status_ts(row.get('created_at')),
+            updated_at=self._status_ts(row.get('updated_at')),
+            committed_at=self._status_ts(row.get('committed_at')),
+            error_summary=err_summary,
+        )
