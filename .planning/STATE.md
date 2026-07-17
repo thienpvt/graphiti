@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 1 — Strict Contracts and Catalog-v2 Identity
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-07-18 — Phase 0 complete, transitioned to Phase 1
+Plan: 01 complete; next 02
+Status: In progress — executing Phase 1 plans
+Last activity: 2026-07-17 — Completed 01-01-PLAN.md (CatalogStrictModel shells)
 
 Progress: [████░░░░░░] 43%
 
@@ -84,13 +84,13 @@ Recent decisions affecting current work:
 - Approved edge vocabulary remains the existing 16 types; `LikelyReferencesTo`, `MapsTo`, and `SynchronizesTo` are deferred
 - Phase 6 canary is separate/out of scope and carries no requirement IDs
 - Phase 3A/3B and Phase 4 require phase-specific research during planning
-- [Phase ?]: Shared CatalogStrictModel base; required catalog-v2/system_key shells; Literal True write flags
-- [Phase ?]: Response models remain non-strict BaseModel; status request omits version/system_key
-- [Phase ?]: REFACTOR no-op for 01-01; no dual-version compatibility helpers
+- [Phase 1]: Shared CatalogStrictModel base; required catalog-v2/system_key shells; Literal True write flags
+- [Phase 1]: Response models remain non-strict BaseModel; status request omits version/system_key
+- [Phase 1]: REFACTOR no-op for 01-01; no dual-version compatibility helpers
 
 ### Pending Todos
 
-None. Next: discuss and plan Phase 1; enforce the Phase 0 compatibility and isolation gate.
+Next: execute 01-02 (graph-key grammar). Phase 1 not complete; Phase 2 blocked until Phase 1 gate.
 
 ### Blockers/Concerns
 
