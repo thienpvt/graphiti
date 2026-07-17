@@ -2615,9 +2615,7 @@ class CatalogService:
                 CatalogErrorCode.backend_unavailable,
                 'catalog writes require Neo4j backend',
             )
-        link_n = len(request.sources) * (
-            len(request.entity_targets) + len(request.edge_targets)
-        )
+        link_n = len(request.sources) * (len(request.entity_targets) + len(request.edge_targets))
         max_links = self.catalog_config.max_provenance_links_per_batch
         if link_n > max_links:
             return _all_error(
@@ -3761,6 +3759,210 @@ class CatalogService:
                     'unchanged' if existing.get('content_sha256') == digest else 'updated'
                 )
 
+        provenance_sources: list[_PreparedSource] = []
+        provenance = request.provenance
+        if provenance is not None:
+            invalid_uuids = {result.uuid for result in errors if result.uuid}
+            provenance_entity_uuids: list[str] = []
+            provenance_edge_uuids: list[str] = []
+
+            for target in provenance.entity_targets:
+                target_uuid = catalog_entity_uuid(
+                    namespace, request.group_id, target.entity_type, target.graph_key
+                )
+                row = None
+                code: str | None = None
+                if target_uuid not in invalid_uuids:
+                    if (target.entity_type, target.graph_key) in request_entity_uuids:
+                        row = {'uuid': target_uuid}
+                    else:
+                        try:
+                            code, row = await self._store.resolve_endpoint_typed(
+                                client.driver,
+                                group_id=request.group_id,
+                                graph_key=target.graph_key,
+                                entity_type=target.entity_type,
+                                expected_uuid=target_uuid,
+                            )
+                        except Exception as exc:
+                            code = 'internal_error'
+                            logger.error(
+                                'catalog batch provenance_target_read_failed batch_id=%s kind=entity reason=%s',
+                                request.batch_id,
+                                type(exc).__name__,
+                            )
+                if code is not None or row is None or str(row.get('uuid')) != target_uuid:
+                    errors.append(
+                        CatalogItemResult(
+                            index=len(request.entities) + len(request.edges),
+                            status='error',
+                            uuid=target_uuid,
+                            graph_key=target.graph_key,
+                            entity_type=target.entity_type,
+                            error_code=CatalogErrorCode.provenance_target_missing,
+                            error_message=f'provenance entity target missing or mistyped: {code or "missing"}',
+                            details={'kind': 'provenance'},
+                        )
+                    )
+                else:
+                    provenance_entity_uuids.append(target_uuid)
+
+            for target in provenance.edge_targets:
+                target_uuid = catalog_edge_uuid(
+                    namespace, request.group_id, target.edge_type, target.edge_key
+                )
+                request_edge = edge_by_uuid.get(target_uuid)
+                if target_uuid in invalid_uuids:
+                    row = None
+                elif request_edge is not None:
+                    row = {
+                        'uuid': target_uuid,
+                        'name': target.edge_type,
+                        'edge_key': target.edge_key,
+                    }
+                else:
+                    try:
+                        row = await self._store.get_edge_by_uuid(
+                            client.driver, uuid=target_uuid, group_id=request.group_id
+                        )
+                    except Exception as exc:
+                        row = None
+                        logger.error(
+                            'catalog batch provenance_target_read_failed batch_id=%s kind=edge reason=%s',
+                            request.batch_id,
+                            type(exc).__name__,
+                        )
+                if (
+                    row is None
+                    or str(row.get('uuid') or '') != target_uuid
+                    or row.get('name') not in (None, target.edge_type)
+                    or row.get('edge_key') not in (None, target.edge_key)
+                ):
+                    errors.append(
+                        CatalogItemResult(
+                            index=len(request.entities) + len(request.edges),
+                            status='error',
+                            uuid=target_uuid,
+                            edge_key=target.edge_key,
+                            edge_type=target.edge_type,
+                            error_code=CatalogErrorCode.provenance_target_missing,
+                            error_message='provenance edge target missing or mistyped',
+                            details={'kind': 'provenance'},
+                        )
+                    )
+                else:
+                    provenance_edge_uuids.append(target_uuid)
+
+            for index, source in enumerate(provenance.sources):
+                result_index = len(request.entities) + len(request.edges) + index
+                try:
+                    digest = canonical_sha256(self.source_canonical_payload(source))
+                    assert_optional_client_hash(source.content_sha256, digest)
+                    valid_at = self._parse_source_valid_at(source.reference_time)
+                except ValueError as exc:
+                    code = (
+                        CatalogErrorCode.content_hash_mismatch
+                        if 'content_hash_mismatch' in str(exc)
+                        else CatalogErrorCode.validation_error
+                    )
+                    errors.append(
+                        CatalogItemResult(
+                            index=result_index,
+                            status='error',
+                            graph_key=source.source_key,
+                            error_code=code,
+                            error_message=str(exc),
+                            details={'kind': 'provenance'},
+                        )
+                    )
+                    continue
+                source_uuid = catalog_source_uuid(namespace, request.group_id, source.source_key)
+                try:
+                    existing = await self._store.get_source_episode_by_uuid(
+                        client.driver, uuid=source_uuid, group_id=request.group_id
+                    )
+                except Exception as exc:
+                    errors.append(
+                        CatalogItemResult(
+                            index=result_index,
+                            status='error',
+                            uuid=source_uuid,
+                            graph_key=source.source_key,
+                            error_code=CatalogErrorCode.internal_error,
+                            error_message=f'provenance source pre-read failed: {type(exc).__name__}',
+                            details={'kind': 'provenance'},
+                        )
+                    )
+                    continue
+                if existing is not None and existing.get('source_key') not in (
+                    None,
+                    source.source_key,
+                ):
+                    errors.append(
+                        CatalogItemResult(
+                            index=result_index,
+                            status='error',
+                            uuid=source_uuid,
+                            graph_key=source.source_key,
+                            error_code=CatalogErrorCode.deterministic_uuid_conflict,
+                            error_message='existing provenance source identity conflicts with request',
+                            details={'kind': 'provenance'},
+                        )
+                    )
+                    continue
+                prep = _PreparedSource(
+                    index=index,
+                    item=source,
+                    source_uuid=source_uuid,
+                    content_sha256=digest,
+                    content_json=json.dumps(
+                        self.source_canonical_payload(source),
+                        sort_keys=True,
+                        separators=(',', ':'),
+                        ensure_ascii=False,
+                    ),
+                    valid_at=valid_at,
+                    existing=existing,
+                    projected_status=(
+                        'created'
+                        if existing is None
+                        else (
+                            'unchanged' if existing.get('content_sha256') == digest else 'updated'
+                        )
+                    ),
+                    entity_uuids=list(provenance_entity_uuids),
+                    edge_uuids=list(provenance_edge_uuids),
+                )
+                prep.mentions_uuids = [
+                    catalog_mentions_uuid(namespace, request.group_id, source_uuid, entity_uuid)
+                    for entity_uuid in prep.entity_uuids
+                ]
+                if existing is not None and prep.projected_status == 'unchanged':
+                    for entity_uuid, mentions_uuid in zip(
+                        prep.entity_uuids, prep.mentions_uuids, strict=True
+                    ):
+                        link = await self._store.get_mentions_link(
+                            client.driver,
+                            episode_uuid=source_uuid,
+                            entity_uuid=entity_uuid,
+                            mentions_uuid=mentions_uuid,
+                            group_id=request.group_id,
+                        )
+                        if link is None:
+                            prep.projected_status = 'updated'
+                            prep.missing_links = True
+                            break
+                    if prep.projected_status == 'unchanged':
+                        for edge_uuid in prep.edge_uuids:
+                            edge_row = await self._store.get_edge_by_uuid(
+                                client.driver, uuid=edge_uuid, group_id=request.group_id
+                            )
+                            if source_uuid not in ((edge_row or {}).get('episodes') or []):
+                                prep.projected_status = 'updated'
+                                prep.missing_links = True
+                                break
+                provenance_sources.append(prep)
+
         if errors:
             errors.sort(key=lambda item: item.index)
             logger.info(
@@ -3877,85 +4079,6 @@ class CatalogService:
             )
 
         request_ts = datetime.now(timezone.utc)
-        provenance_sources: list[_PreparedSource] = []
-        provenance_entity_uuids: list[str] = []
-        provenance_edge_uuids: list[str] = []
-        provenance = request.provenance
-        if provenance is not None:
-            for target in provenance.entity_targets:
-                identity = (target.entity_type, target.graph_key)
-                target_uuid = request_entity_uuids.get(identity)
-                if target_uuid is None:
-                    target_uuid = catalog_entity_uuid(
-                        namespace,
-                        request.group_id,
-                        target.entity_type,
-                        target.graph_key,
-                    )
-                provenance_entity_uuids.append(target_uuid)
-            for target in provenance.edge_targets:
-                provenance_edge_uuids.append(
-                    catalog_edge_uuid(
-                        namespace,
-                        request.group_id,
-                        target.edge_type,
-                        target.edge_key,
-                    )
-                )
-            for index, source in enumerate(provenance.sources):
-                digest = canonical_sha256(self.source_canonical_payload(source))
-                source_uuid = catalog_source_uuid(namespace, request.group_id, source.source_key)
-                try:
-                    existing = await self._store.get_source_episode_by_uuid(
-                        client.driver,
-                        uuid=source_uuid,
-                        group_id=request.group_id,
-                    )
-                except Exception as exc:
-                    return CatalogBatchWriteResponse(
-                        group_id=request.group_id,
-                        batch_id=request.batch_id,
-                        batch_uuid=batch_uuid,
-                        status='failed',
-                        failed=1,
-                        error_code=CatalogErrorCode.internal_error,
-                        error_message=f'provenance source pre-read failed: {type(exc).__name__}',
-                    )
-                content_json = json.dumps(
-                    {
-                        'source_key': source.source_key,
-                        'reference_time': source.reference_time,
-                        'attributes': source.attributes,
-                        'metadata': source.metadata,
-                    },
-                    sort_keys=True,
-                    separators=(',', ':'),
-                    ensure_ascii=False,
-                )
-                prep = _PreparedSource(
-                    index=index,
-                    item=source,
-                    source_uuid=source_uuid,
-                    content_sha256=digest,
-                    content_json=content_json,
-                    valid_at=self._parse_source_valid_at(source.reference_time),
-                    existing=existing,
-                    projected_status=(
-                        'created'
-                        if existing is None
-                        else (
-                            'unchanged' if existing.get('content_sha256') == digest else 'updated'
-                        )
-                    ),
-                    entity_uuids=list(provenance_entity_uuids),
-                    edge_uuids=list(provenance_edge_uuids),
-                )
-                prep.mentions_uuids = [
-                    catalog_mentions_uuid(namespace, request.group_id, source_uuid, entity_uuid)
-                    for entity_uuid in prep.entity_uuids
-                ]
-                provenance_sources.append(prep)
-
         entity_results: list[CatalogItemResult] = []
         edge_results: list[CatalogItemResult] = []
         provenance_results: list[CatalogItemResult] = []

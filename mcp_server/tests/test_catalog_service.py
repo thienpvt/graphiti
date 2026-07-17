@@ -2695,6 +2695,53 @@ async def test_batch_committed_same_hash_returns_unchanged_short_circuit():
 
 
 @pytest.mark.asyncio
+async def test_batch_dry_run_rejects_bad_nested_source_hash_before_side_effects():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    provenance = NestedProvenancePayload(
+        sources=[_source().model_copy(update={'content_sha256': 'a' * 64})]
+    )
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(entities=[], provenance=provenance, dry_run=True),
+    )
+
+    assert resp.error_code == CatalogErrorCode.content_hash_mismatch
+    client.embedder.create.assert_not_awaited()
+    cast(AsyncMock, service._store.ensure_uuid_uniqueness_constraints).assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_batch_dry_run_resolves_missing_provenance_target_before_side_effects():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    provenance = NestedProvenancePayload(
+        sources=[_source()],
+        entity_targets=[
+            CatalogProvenanceEntityTarget(
+                entity_type='Table', graph_key='TABLE::HR.MISSING'
+            )
+        ],
+    )
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(entities=[], provenance=provenance, dry_run=True),
+    )
+
+    assert resp.error_code == CatalogErrorCode.provenance_target_missing
+    client.embedder.create.assert_not_awaited()
+    cast(AsyncMock, service._store.ensure_uuid_uniqueness_constraints).assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
 async def test_batch_missing_endpoint_preflight_stops_embedding():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
