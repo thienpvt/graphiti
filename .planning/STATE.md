@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: Provenance and Atomic Batch
 status: executing
-stopped_at: Phase 1 complete after independent verification; stopped per user directive before Phase 2
-last_updated: "2026-07-17T00:19:33.840Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-07-17T00:34:47.454Z"
 last_activity: 2026-07-17
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 14
-  completed_plans: 8
+  completed_plans: 10
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-07-16)
 ## Current Position
 
 Phase: 02 (Provenance and Atomic Batch) — EXECUTING
-Plan: 1 of 6
-Status: Executing Phase 02
+Plan: 3 of 6
+Status: Ready to execute
 Last activity: 2026-07-17 — Phase 02 execution started
 
-Progress: [██████████] Phase 1 complete | Phase 2 not started
+Progress: [███████░░░] 71%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [██████████] Phase 1 complete | Phase 2 not starte
 | Phase 01 P06 | 25min | 2 tasks | 8 files |
 | Phase 01 P07 | 13min | 3 tasks | 11 files |
 | Phase 01 P08 | 20min | 3 tasks | 7 files |
+| Phase 02 P02 | 8min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,8 @@ Recent decisions affecting current work:
 - Twin diagnostics: all-row anomaly aggregation; entity/edge verify use elementId physical-row dedup
 - User directive 2026-07-17: **stop after Phase 1 done** — do not discuss/plan/execute Phase 2 this session
 - Earlier Phase 2 discussion defaults and local Ollama E2E-before-cleanup remain deferred for a later session
+- [Phase ?]: Edge content update no longer SETs e.episodes; append-only provenance owns list
+- [Phase ?]: upsert_provenance: target preflight fail-closed; sources skip embedder
 
 ### Pending Todos
 
@@ -98,6 +101,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-07-17
-Stopped at: Phase 1 complete + tracking synced; Phase 2 not started
-Resume file: None — resume with Phase 2 discuss when authorized
+Last session: 2026-07-17T00:34:36.735Z
+Stopped at: Completed 02-02-PLAN.md
+Resume file: None

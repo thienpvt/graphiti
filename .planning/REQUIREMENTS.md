@@ -87,12 +87,12 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Provenance
 
-- [ ] **PROV-01**: MCP client can call `upsert_provenance` with deterministic source metadata and existing entity/edge targets
+- [x] **PROV-01**: MCP client can call `upsert_provenance` with deterministic source metadata and existing entity/edge targets
 - [ ] **PROV-02**: Provenance write uses deterministic source UUID, canonical source hash, exact reference time, and safe source attributes
-- [ ] **PROV-03**: Provenance reuses the installed Graphiti 0.29.2 Episodic/MENTIONS and fact-provenance representation without calling `add_episode`, LLM extraction, or the queue
-- [ ] **PROV-04**: Provenance links sources to existing entities and attaches source identity to existing facts using the closest compatible installed Graphiti representation
-- [ ] **PROV-05**: Provenance rejects missing entity or edge targets with `provenance_target_missing` and no partial write
-- [ ] **PROV-06**: Identical provenance reruns return unchanged and never create an unrelated generic domain entity
+- [x] **PROV-03**: Provenance reuses the installed Graphiti 0.29.2 Episodic/MENTIONS and fact-provenance representation without calling `add_episode`, LLM extraction, or the queue
+- [x] **PROV-04**: Provenance links sources to existing entities and attaches source identity to existing facts using the closest compatible installed Graphiti representation
+- [x] **PROV-05**: Provenance rejects missing entity or edge targets with `provenance_target_missing` and no partial write
+- [x] **PROV-06**: Identical provenance reruns return unchanged and never create an unrelated generic domain entity
 
 ### Persistent Ingest Status
 
@@ -222,12 +222,12 @@ Every v1 requirement maps to exactly one phase.
 | GATE-05 | Phase 1 | Complete |
 | IDEN-03 | Phase 2 | Pending |
 | IDEN-04 | Phase 2 | Pending |
-| PROV-01 | Phase 2 | Pending |
+| PROV-01 | Phase 2 | Complete |
 | PROV-02 | Phase 2 | Pending |
-| PROV-03 | Phase 2 | Pending |
-| PROV-04 | Phase 2 | Pending |
-| PROV-05 | Phase 2 | Pending |
-| PROV-06 | Phase 2 | Pending |
+| PROV-03 | Phase 2 | Complete |
+| PROV-04 | Phase 2 | Complete |
+| PROV-05 | Phase 2 | Complete |
+| PROV-06 | Phase 2 | Complete |
 | STAT-01 | Phase 2 | Pending |
 | STAT-02 | Phase 2 | Pending |
 | STAT-03 | Phase 2 | Pending |

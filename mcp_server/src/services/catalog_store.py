@@ -751,13 +751,21 @@ class CatalogNeo4jStore:
         return rows
 
     def build_match_provenance_presence_cypher(self) -> str:
-        """Report whether requested entity/edge UUIDs have any MENTIONS provenance."""
+        """Report whether requested entity/edge UUIDs have provenance.
+
+        Entities: any group-scoped MENTIONS from Episodic.
+        Edges: non-empty coalesce(e.episodes, []) on group-scoped RELATES_TO.
+        """
         return """
             UNWIND $target_uuids AS target_uuid
             OPTIONAL MATCH (ep:Episodic)-[:MENTIONS]->(n {uuid: target_uuid})
             WHERE ep.group_id = $group_id AND n.group_id = $group_id
             WITH target_uuid, count(ep) AS mention_count
-            RETURN target_uuid AS uuid, mention_count > 0 AS has_provenance
+            OPTIONAL MATCH ()-[e:RELATES_TO {uuid: target_uuid, group_id: $group_id}]->()
+            WITH target_uuid, mention_count,
+                 size(coalesce(e.episodes, [])) AS episode_count
+            RETURN target_uuid AS uuid,
+                   (mention_count > 0 OR episode_count > 0) AS has_provenance
             """
 
     async def match_provenance_presence(
@@ -774,6 +782,267 @@ class CatalogNeo4jStore:
         cypher = self.build_match_provenance_presence_cypher()
         params = {'group_id': group_id, 'target_uuids': list(target_uuids)}
         return await self._read_many(executor, cypher, params, tx=tx)
+
+    # ------------------------------------------------------------------
+    # Provenance: Episodic sources, MENTIONS, RELATES_TO.episodes append
+    # ------------------------------------------------------------------
+
+    def build_source_episode_upsert_cypher(self) -> str:
+        """MERGE Episodic source without Entity label; preserve created_at on update.
+
+        Never uses stock SET n = $map wipe. Identity + source_key only ON CREATE.
+        """
+        updated_set = """
+                n.name = $name,
+                n.source = $source,
+                n.source_description = $source_description,
+                n.content = $content,
+                n.entity_edges = $entity_edges,
+                n.valid_at = $valid_at,
+                n.batch_id = $batch_id,
+                n.content_sha256 = $content_sha256,
+                n.updated_at = $updated_at
+        """.strip()
+        return f"""
+            MERGE (n:Episodic {{uuid: $uuid, group_id: $group_id}})
+            ON CREATE SET
+                n.uuid = $uuid,
+                n.group_id = $group_id,
+                n.name = $name,
+                n.source = $source,
+                n.source_description = $source_description,
+                n.content = $content,
+                n.entity_edges = $entity_edges,
+                n.valid_at = $valid_at,
+                n.source_key = $source_key,
+                n.batch_id = $batch_id,
+                n.content_sha256 = $content_sha256,
+                n.created_at = $created_at,
+                n.updated_at = $updated_at,
+                n._catalog_create_token = $create_token
+            WITH n,
+                 coalesce(n._catalog_create_token, '') = $create_token AS created,
+                 n.content_sha256 = $content_sha256 AS same
+            WITH n, created, same,
+                 CASE
+                   WHEN created THEN 'created'
+                   WHEN same THEN 'unchanged'
+                   ELSE 'updated'
+                 END AS status
+            FOREACH (_ IN CASE WHEN status = 'updated' THEN [1] ELSE [] END |
+              SET {updated_set}
+            )
+            REMOVE n._catalog_create_token
+            RETURN n.uuid AS uuid,
+                   n.content_sha256 AS content_sha256,
+                   n.batch_id AS batch_id,
+                   n.created_at AS created_at,
+                   n.updated_at AS updated_at,
+                   n.source_key AS source_key,
+                   status
+            """
+
+    def prepare_source_episode_params(
+        self,
+        *,
+        uuid: str,
+        group_id: str,
+        batch_id: str,
+        source_key: str,
+        content_sha256: str,
+        content: str,
+        source: str,
+        source_description: str,
+        valid_at: datetime,
+        created_at: datetime,
+        updated_at: datetime,
+        entity_edges: list[str] | None = None,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        """Build parameterized map for source episode upsert (no embeddings)."""
+        return {
+            'uuid': uuid,
+            'group_id': group_id,
+            'batch_id': batch_id,
+            'source_key': source_key,
+            'name': name if name is not None else source_key,
+            'source': source,
+            'source_description': source_description,
+            'content': content,
+            'entity_edges': list(entity_edges or []),
+            'valid_at': valid_at,
+            'content_sha256': content_sha256,
+            'created_at': created_at,
+            'updated_at': updated_at,
+            'create_token': uuid4().hex,
+        }
+
+    async def upsert_source_episode(
+        self,
+        tx: Any,
+        *,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute Episodic source MERGE inside open transaction."""
+        cypher = self.build_source_episode_upsert_cypher()
+        result = await tx.run(cypher, **params)
+        row: dict[str, Any] = {}
+        if hasattr(result, 'data'):
+            rows = await result.data()
+            row = rows[0] if rows else {}
+        elif hasattr(result, 'single'):
+            record = await result.single()
+            row = dict(record) if record is not None else {}
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'source episode upsert returned no row',
+                code='neo4j_transaction_failed',
+            )
+        return row
+
+    def build_mentions_merge_cypher(self) -> str:
+        """MERGE deterministic MENTIONS; both ends MATCH group-scoped; ON CREATE only."""
+        return """
+            MATCH (episode:Episodic {uuid: $episode_uuid, group_id: $group_id})
+            MATCH (node:Entity {uuid: $entity_uuid, group_id: $group_id})
+            MERGE (episode)-[e:MENTIONS {uuid: $mentions_uuid}]->(node)
+            ON CREATE SET
+                e.uuid = $mentions_uuid,
+                e.group_id = $group_id,
+                e.created_at = $created_at,
+                e._catalog_create_token = $create_token
+            WITH e,
+                 coalesce(e._catalog_create_token, '') = $create_token AS created
+            REMOVE e._catalog_create_token
+            RETURN e.uuid AS uuid,
+                   CASE WHEN created THEN 'created' ELSE 'unchanged' END AS status
+            """
+
+    async def upsert_mentions_link(
+        self,
+        tx: Any,
+        *,
+        episode_uuid: str,
+        entity_uuid: str,
+        mentions_uuid: str,
+        group_id: str,
+        created_at: datetime,
+    ) -> dict[str, Any]:
+        """MERGE MENTIONS link inside open transaction."""
+        cypher = self.build_mentions_merge_cypher()
+        params = {
+            'episode_uuid': episode_uuid,
+            'entity_uuid': entity_uuid,
+            'mentions_uuid': mentions_uuid,
+            'group_id': group_id,
+            'created_at': created_at,
+            'create_token': uuid4().hex,
+        }
+        result = await tx.run(cypher, **params)
+        row: dict[str, Any] = {}
+        if hasattr(result, 'data'):
+            rows = await result.data()
+            row = rows[0] if rows else {}
+        elif hasattr(result, 'single'):
+            record = await result.single()
+            row = dict(record) if record is not None else {}
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'mentions upsert returned no row (endpoint miss or write failure)',
+                code='neo4j_transaction_failed',
+            )
+        return row
+
+    def build_append_edge_episode_cypher(self) -> str:
+        """APOC-free append of episode uuid onto RELATES_TO.episodes with membership dedup."""
+        return """
+            MATCH ()-[e:RELATES_TO {uuid: $edge_uuid, group_id: $group_id}]->()
+            WITH e, coalesce(e.episodes, []) AS eps
+            WITH e, CASE WHEN $episode_uuid IN eps THEN eps ELSE eps + $episode_uuid END AS next
+            SET e.episodes = next
+            RETURN e.uuid AS uuid, e.episodes AS episodes
+            """
+
+    async def append_edge_episode(
+        self,
+        tx: Any,
+        *,
+        edge_uuid: str,
+        episode_uuid: str,
+        group_id: str,
+    ) -> dict[str, Any]:
+        """Append episode uuid to edge.episodes (dedup) inside open transaction."""
+        cypher = self.build_append_edge_episode_cypher()
+        params = {
+            'edge_uuid': edge_uuid,
+            'episode_uuid': episode_uuid,
+            'group_id': group_id,
+        }
+        result = await tx.run(cypher, **params)
+        row: dict[str, Any] = {}
+        if hasattr(result, 'data'):
+            rows = await result.data()
+            row = rows[0] if rows else {}
+        elif hasattr(result, 'single'):
+            record = await result.single()
+            row = dict(record) if record is not None else {}
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'append edge episode returned no row (edge miss or write failure)',
+                code='neo4j_transaction_failed',
+            )
+        return row
+
+    def build_get_source_episode_by_uuid_cypher(self) -> str:
+        return """
+            MATCH (n:Episodic {uuid: $uuid, group_id: $group_id})
+            RETURN n.uuid AS uuid,
+                   n.group_id AS group_id,
+                   n.source_key AS source_key,
+                   n.content_sha256 AS content_sha256,
+                   n.batch_id AS batch_id,
+                   n.created_at AS created_at,
+                   n.updated_at AS updated_at
+            """
+
+    async def get_source_episode_by_uuid(
+        self,
+        executor: Any,
+        *,
+        uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        cypher = self.build_get_source_episode_by_uuid_cypher()
+        params = {'uuid': uuid, 'group_id': group_id}
+        return await self._read_one(executor, cypher, params, tx=tx)
+
+    def build_get_mentions_link_cypher(self) -> str:
+        return """
+            MATCH (episode:Episodic {uuid: $episode_uuid, group_id: $group_id})
+                  -[e:MENTIONS {uuid: $mentions_uuid}]->
+                  (node:Entity {uuid: $entity_uuid, group_id: $group_id})
+            RETURN e.uuid AS uuid, e.group_id AS group_id
+            """
+
+    async def get_mentions_link(
+        self,
+        executor: Any,
+        *,
+        episode_uuid: str,
+        entity_uuid: str,
+        mentions_uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        cypher = self.build_get_mentions_link_cypher()
+        params = {
+            'episode_uuid': episode_uuid,
+            'entity_uuid': entity_uuid,
+            'mentions_uuid': mentions_uuid,
+            'group_id': group_id,
+        }
+        return await self._read_one(executor, cypher, params, tx=tx)
 
     # ------------------------------------------------------------------
     # Typed edge endpoint resolution + edge upsert
@@ -898,6 +1167,8 @@ class CatalogNeo4jStore:
         zero property mutation on matched unchanged; vector only on created/updated.
         Identity fields set only ON CREATE.
         """
+        # Never SET e.episodes on content update — provenance append owns the list.
+        # Create path still seeds episodes=[] for EntityEdge hydration.
         updated_set = """
                 e.fact = $fact,
                 e.evidence = $evidence,
@@ -905,9 +1176,7 @@ class CatalogNeo4jStore:
                 e.confidence = $confidence,
                 e.batch_id = $batch_id,
                 e.content_sha256 = $content_sha256,
-                e.updated_at = $updated_at,
-                // Heal null/missing episodes on content update so EntityEdge search hydrates.
-                e.episodes = $episodes
+                e.updated_at = $updated_at
         """.strip()
 
         return f"""
@@ -982,6 +1251,7 @@ class CatalogNeo4jStore:
                    e.created_at AS created_at,
                    e.updated_at AS updated_at,
                    e.fact_embedding IS NOT NULL AS has_fact_embedding,
+                   coalesce(e.episodes, []) AS episodes,
                    coalesce(e.source_node_uuid, s.uuid) AS source_uuid,
                    coalesce(e.target_node_uuid, t.uuid) AS target_uuid,
                    s.uuid AS source_node_uuid,
