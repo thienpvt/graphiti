@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-current_phase: 0
-current_phase_name: Baseline, Inventory, and Compatibility Policy
-status: verifying
+current_phase: 1
+current_phase_name: Strict Contracts and Catalog-v2 Identity
+status: planning
 stopped_at: ROADMAP/REQUIREMENTS/STATE reconciled to canonical Phase 0/1/2/3A/3B/4/5
-last_updated: "2026-07-17T17:47:55.004Z"
+last_updated: "2026-07-17T17:58:25.926Z"
 last_activity: 2026-07-18
-last_activity_desc: Phase 0 execution started
+last_activity_desc: Phase 0 complete, transitioned to Phase 1
 progress:
   total_phases: 1
   completed_phases: 1
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-17)
 
 ## Current Position
 
-Phase: 0 (Baseline, Inventory, and Compatibility Policy) — EXECUTING
-Plan: 2 of 2
-Status: Phase complete — ready for verification
-Last activity: 2026-07-18 — Phase 0 execution started
+Phase: 1 — Strict Contracts and Catalog-v2 Identity
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-07-18 — Phase 0 complete, transitioned to Phase 1
 
 Progress: [██████████] 100%
 
@@ -39,7 +39,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 14 (v1.0)
+- Total plans completed: 16 (v1.0)
 - Average duration: tracked in plan summaries
 - Total execution time: tracked in plan summaries
 
@@ -50,6 +50,7 @@ Progress: [██████████] 100%
 | v1.0 Phase 1. Typed Catalog Primitives | 8 | 8 | see summaries |
 | v1.0 Phase 2. Provenance and Atomic Batch | 6 | 6 | see summaries |
 | Phase 0–5 (v1.1, 7 work units) | 0 | TBD | - |
+| 0 | 2 | - | - |
 
 **Prior milestone:**
 
