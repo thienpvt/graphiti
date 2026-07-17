@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib
 import logging
 import sys
@@ -70,6 +71,82 @@ LEGACY_TOOL_NAMES = {
     'clear_graph',
     'get_status',
 }
+
+
+def _literal_logger_template(expression: ast.expr) -> tuple[str, list[str]] | None:
+    if isinstance(expression, ast.Constant) and isinstance(expression.value, str):
+        return expression.value, []
+    if not isinstance(expression, ast.JoinedStr):
+        return None
+
+    parts: list[str] = []
+    arguments: list[str] = []
+    for value in expression.values:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            parts.append(value.value)
+        elif isinstance(value, ast.FormattedValue):
+            parts.append('{}')
+            arguments.append(ast.unparse(value.value))
+        else:
+            return None
+    return ''.join(parts), arguments
+
+
+def _logger_calls(path: Path) -> list[tuple[str | None, str, str, list[str]]]:
+    """Return function, logger method, literal template, and argument expressions."""
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    calls: list[tuple[str | None, str, str, list[str]]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if not isinstance(node.func.value, ast.Name) or node.func.value.id != 'logger':
+            continue
+        if not node.args:
+            continue
+        parsed = _literal_logger_template(node.args[0])
+        if parsed is None:
+            continue
+        template, formatted_arguments = parsed
+        owner = parents.get(node)
+        while owner is not None and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            owner = parents.get(owner)
+        function_name = (
+            owner.name if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)) else None
+        )
+        calls.append(
+            (
+                function_name,
+                node.func.attr,
+                template,
+                formatted_arguments + [ast.unparse(argument) for argument in node.args[1:]],
+            )
+        )
+    return calls
+
+
+def test_catalog_logger_templates_omit_group_id():
+    src = Path(__file__).parent.parent / 'src'
+    wrapper_calls = _logger_calls(src / 'graphiti_mcp_server.py')
+    service_calls = _logger_calls(src / 'services' / 'catalog_service.py')
+
+    catalog_wrapper_calls = [call for call in wrapper_calls if call[0] in CATALOG_TOOL_NAMES]
+    catalog_service_calls = [call for call in service_calls if call[2].startswith('catalog ')]
+    catalog_calls = catalog_wrapper_calls + catalog_service_calls
+
+    assert catalog_wrapper_calls
+    assert catalog_service_calls
+    assert any('Using group_id' in call[2] for call in wrapper_calls)
+    assert any('Group ID' in call[2] for call in wrapper_calls)
+    assert all('group_id' not in template.lower() for _, _, template, _ in catalog_calls)
+    assert all(
+        all('group_id' not in argument for argument in arguments)
+        for _, _, _, arguments in catalog_calls
+    )
 
 
 def _mcp_server():
