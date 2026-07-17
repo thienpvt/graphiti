@@ -20,7 +20,7 @@
 - Safe retry, conflict, dry-run, rollback, search, community, isolation, and concurrency coverage.
 - Final gates: 303 unit, 35 live Neo4j, 338 combined catalog, 86 MCP regression tests.
 
-## Deferred Beyond v1.0
+## Future Work
 
 - FalkorDB or other backend support requires equivalent transaction, provenance, and concurrency semantics.
 - Production canary against `oracle-catalog-v2` requires separate approval.
