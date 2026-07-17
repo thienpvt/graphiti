@@ -10,7 +10,7 @@
 | 2. Provenance and Atomic Batch | 6/6 | Verified: 5/5 truths, 31/31 requirements |
 | **v1.0 total** | **14/14** | **86/86 requirements; 6/6 integration flows** |
 
-## v1.0 Outcomes
+## Delivered Outcomes
 
 - Seven additive deterministic catalog MCP tools; all 14 legacy tools preserved.
 - Fixed server-owned types and properties; UUIDv5 identities; canonical SHA-256 audit.
