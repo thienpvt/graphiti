@@ -5,10 +5,22 @@ from __future__ import annotations
 import math
 from enum import Enum
 
+from pydantic import BaseModel, ConfigDict
+
 
 class StrEnum(str, Enum):
     """str Enum compatible with Python 3.10 (stdlib StrEnum is 3.11+)."""
 
+
+class CatalogStrictModel(BaseModel):
+    """Fail-closed request base: unknown fields rejected at every nesting depth."""
+
+    model_config = ConfigDict(extra='forbid')
+
+
+# Catalog-v2 identity shell constants (immutable request contract)
+IDENTITY_SCHEMA_VERSION = 'catalog-v2'
+SYSTEM_KEYS: frozenset[str] = frozenset({'FE', 'BO', 'COMMON'})
 
 # Default batch collection limits (CONF-04)
 DEFAULT_MAX_ENTITIES_PER_BATCH = 500
@@ -160,3 +172,13 @@ class CatalogErrorCode(StrEnum):
     embedding_failed = 'embedding_failed'
     internal_error = 'internal_error'
     backend_unavailable = 'backend_unavailable'
+    # Phase 1 CONT-08 (append-only; never remove preexisting members)
+    unsupported_identity_schema = 'unsupported_identity_schema'
+    invalid_system_key = 'invalid_system_key'
+    edge_endpoint_pair_not_allowed = 'edge_endpoint_pair_not_allowed'
+    prepared_plan_not_found = 'prepared_plan_not_found'
+    prepared_plan_expired = 'prepared_plan_expired'
+    prepared_plan_conflict = 'prepared_plan_conflict'
+    prepared_plan_already_consumed = 'prepared_plan_already_consumed'
+    manifest_mismatch = 'manifest_mismatch'
+    provenance_link_conflict = 'provenance_link_conflict'

@@ -349,6 +349,8 @@ def test_phase2_requests_reject_group_id_trailing_newline(model, payload_factory
 def test_upsert_entities_accepts_valid_request():
     req = UpsertTypedEntitiesRequest.model_validate(
         {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
             'entities': [_entity_kwargs()],
@@ -422,6 +424,8 @@ def test_entity_collection_above_default_constructs_within_hard_max():
     entities = [_entity_kwargs(graph_key=f'TABLE::T{i}') for i in range(501)]
     request = UpsertTypedEntitiesRequest.model_validate(
         {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
             'entities': entities,
@@ -494,6 +498,8 @@ def test_resolve_typed_entities_requires_group_id():
 def test_resolve_accepts_valid():
     req = ResolveTypedEntitiesRequest.model_validate(
         {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'entities': [
                 {'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'},
@@ -541,6 +547,8 @@ def test_edge_rejects_empty_fact():
 def test_upsert_edges_accepts_valid_request():
     req = UpsertTypedEdgesRequest.model_validate(
         {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
             'edges': [_edge_kwargs()],
@@ -555,6 +563,8 @@ def test_edge_collection_above_default_constructs_within_hard_max():
     edges = [_edge_kwargs(edge_key=f'CONTAINS::E{i}') for i in range(2001)]
     request = UpsertTypedEdgesRequest.model_validate(
         {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
             'edges': edges,
@@ -758,6 +768,8 @@ def test_provenance_edge_target_allowlist():
 def test_upsert_provenance_request_accepts_valid():
     req = UpsertProvenanceRequest.model_validate(
         {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
             'sources': [_source_kwargs()],
@@ -842,6 +854,8 @@ def test_upsert_provenance_rejects_generated_link_product_over_hard_max():
 def test_upsert_catalog_batch_accepts_nested_entities():
     req = UpsertCatalogBatchRequest.model_validate(
         {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
             'entities': [_entity_kwargs()],
@@ -855,6 +869,8 @@ def test_upsert_catalog_batch_accepts_nested_entities():
     # Nested list order preserved
     req2 = UpsertCatalogBatchRequest.model_validate(
         {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
             'entities': [
@@ -896,6 +912,8 @@ def test_upsert_catalog_batch_rejects_empty_all_collections():
 def test_upsert_catalog_batch_accepts_provenance_only():
     req = UpsertCatalogBatchRequest.model_validate(
         {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
             'entities': [],
@@ -931,6 +949,8 @@ def test_upsert_catalog_batch_optional_hashes():
     digest = 'b' * 64
     req = UpsertCatalogBatchRequest.model_validate(
         {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
             'entities': [_entity_kwargs()],

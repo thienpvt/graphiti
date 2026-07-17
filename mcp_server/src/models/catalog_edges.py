@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from models.catalog_common import (
     CATALOG_EDGE_TYPES,
@@ -19,6 +19,7 @@ from models.catalog_common import (
     MAX_SHORT_STRING_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
+    CatalogStrictModel,
     validate_nested_json,
 )
 
@@ -32,7 +33,7 @@ def _validate_group_id(group_id: str | None) -> bool:
     return True
 
 
-class CatalogEdgeItem(BaseModel):
+class CatalogEdgeItem(CatalogStrictModel):
     """Single typed catalog edge for upsert."""
 
     edge_type: str
@@ -118,15 +119,17 @@ class CatalogEdgeItem(BaseModel):
         return self
 
 
-class UpsertTypedEdgesRequest(BaseModel):
+class UpsertTypedEdgesRequest(CatalogStrictModel):
     """Request for upsert_typed_edges. No excluded_entity_types field."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: Literal['FE', 'BO', 'COMMON']
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     edges: list[CatalogEdgeItem] = Field(..., min_length=1, max_length=HARD_MAX_EDGES_PER_BATCH)
     dry_run: bool = False
-    atomic: bool = True
-    strict_endpoints: bool = True
+    atomic: Literal[True] = True
+    strict_endpoints: Literal[True] = True
 
     @field_validator('group_id')
     @classmethod

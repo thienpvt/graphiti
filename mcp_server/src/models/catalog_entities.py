@@ -5,9 +5,9 @@ from __future__ import annotations
 import math
 import re
 import uuid
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from models.catalog_common import (
     ENTITY_TYPE_PREFIXES,
@@ -20,6 +20,7 @@ from models.catalog_common import (
     MAX_SUMMARY_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
+    CatalogStrictModel,
     validate_nested_json,
 )
 
@@ -39,7 +40,7 @@ def _require_non_empty_str(v: str, field_name: str) -> str:
     return v
 
 
-class CatalogEntityItem(BaseModel):
+class CatalogEntityItem(CatalogStrictModel):
     """Single typed catalog entity for upsert/resolve."""
 
     entity_type: str
@@ -116,7 +117,7 @@ class CatalogEntityItem(BaseModel):
         return self
 
 
-class ResolveEntityRef(BaseModel):
+class ResolveEntityRef(CatalogStrictModel):
     """Minimal entity identity for resolve_typed_entities."""
 
     entity_type: str
@@ -139,16 +140,18 @@ class ResolveEntityRef(BaseModel):
         return self
 
 
-class UpsertTypedEntitiesRequest(BaseModel):
+class UpsertTypedEntitiesRequest(CatalogStrictModel):
     """Request for upsert_typed_entities. No excluded_entity_types field."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: Literal['FE', 'BO', 'COMMON']
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     entities: list[CatalogEntityItem] = Field(
         ..., min_length=1, max_length=HARD_MAX_ENTITIES_PER_BATCH
     )
     dry_run: bool = False
-    atomic: bool = True
+    atomic: Literal[True] = True
 
     @field_validator('group_id')
     @classmethod
@@ -159,9 +162,11 @@ class UpsertTypedEntitiesRequest(BaseModel):
         return v
 
 
-class ResolveTypedEntitiesRequest(BaseModel):
+class ResolveTypedEntitiesRequest(CatalogStrictModel):
     """Request for resolve_typed_entities (read-only)."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: Literal['FE', 'BO', 'COMMON']
     group_id: str = Field(..., min_length=1)
     entities: list[ResolveEntityRef] = Field(
         default_factory=list, max_length=HARD_MAX_ENTITIES_PER_BATCH
@@ -177,7 +182,7 @@ class ResolveTypedEntitiesRequest(BaseModel):
         return v
 
 
-class VerifyEntityRef(BaseModel):
+class VerifyEntityRef(CatalogStrictModel):
     """Optional explicit entity key for verify_catalog_batch."""
 
     entity_type: str
@@ -200,7 +205,7 @@ class VerifyEntityRef(BaseModel):
         return self
 
 
-class VerifyEdgeRef(BaseModel):
+class VerifyEdgeRef(CatalogStrictModel):
     """Optional explicit edge key and expected endpoints for verify_catalog_batch."""
 
     edge_type: str
@@ -234,9 +239,11 @@ class VerifyEdgeRef(BaseModel):
             raise ValueError('expected endpoint UUID must be valid') from exc
 
 
-class VerifyCatalogBatchRequest(BaseModel):
+class VerifyCatalogBatchRequest(CatalogStrictModel):
     """Request for verify_catalog_batch (read-only)."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: Literal['FE', 'BO', 'COMMON']
     group_id: str = Field(..., min_length=1)
     batch_id: str | None = Field(default=None, max_length=MAX_SHORT_STRING_LENGTH)
     entities: list[VerifyEntityRef] = Field(

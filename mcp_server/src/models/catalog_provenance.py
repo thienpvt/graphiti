@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from models.catalog_common import (
     CATALOG_EDGE_TYPES,
@@ -16,6 +16,7 @@ from models.catalog_common import (
     MAX_SHORT_STRING_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
+    CatalogStrictModel,
     validate_nested_json,
 )
 
@@ -29,7 +30,7 @@ def _validate_group_id(group_id: str | None) -> bool:
     return True
 
 
-class CatalogSourceItem(BaseModel):
+class CatalogSourceItem(CatalogStrictModel):
     """Single provenance source (maps to Episodic later). PROV-02."""
 
     source_key: str = Field(..., min_length=1, max_length=MAX_GRAPH_KEY_LENGTH)
@@ -68,7 +69,7 @@ class CatalogSourceItem(BaseModel):
         return v
 
 
-class CatalogProvenanceEntityTarget(BaseModel):
+class CatalogProvenanceEntityTarget(CatalogStrictModel):
     """Entity identity target for provenance MENTIONS links."""
 
     entity_type: str
@@ -91,7 +92,7 @@ class CatalogProvenanceEntityTarget(BaseModel):
         return self
 
 
-class CatalogProvenanceEdgeTarget(BaseModel):
+class CatalogProvenanceEdgeTarget(CatalogStrictModel):
     """Edge identity target for provenance episode attachment."""
 
     edge_type: str
@@ -112,9 +113,11 @@ class CatalogProvenanceEdgeTarget(BaseModel):
         return v
 
 
-class UpsertProvenanceRequest(BaseModel):
+class UpsertProvenanceRequest(CatalogStrictModel):
     """Request for upsert_provenance (no LLM/queue)."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: Literal['FE', 'BO', 'COMMON']
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     sources: list[CatalogSourceItem] = Field(
@@ -127,7 +130,7 @@ class UpsertProvenanceRequest(BaseModel):
         default_factory=list, max_length=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
     )
     dry_run: bool = False
-    atomic: bool = True
+    atomic: Literal[True] = True
 
     @field_validator('group_id')
     @classmethod

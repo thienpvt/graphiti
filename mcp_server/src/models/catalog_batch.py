@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from models.catalog_common import (
     HARD_MAX_EDGES_PER_BATCH,
@@ -13,6 +13,7 @@ from models.catalog_common import (
     HARD_MAX_PROVENANCE_LINKS_PER_BATCH,
     MAX_SHORT_STRING_LENGTH,
     SHA256_HEX_RE,
+    CatalogStrictModel,
 )
 from models.catalog_edges import CatalogEdgeItem
 from models.catalog_entities import CatalogEntityItem
@@ -32,7 +33,7 @@ def _validate_group_id(group_id: str | None) -> bool:
     return True
 
 
-class NestedProvenancePayload(BaseModel):
+class NestedProvenancePayload(CatalogStrictModel):
     """Provenance nested under UpsertCatalogBatchRequest."""
 
     sources: list[CatalogSourceItem] = Field(
@@ -51,9 +52,11 @@ class NestedProvenancePayload(BaseModel):
         return self
 
 
-class UpsertCatalogBatchRequest(BaseModel):
+class UpsertCatalogBatchRequest(CatalogStrictModel):
     """Atomic nested catalog batch (BATC-01/02). atomic must be true."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: Literal['FE', 'BO', 'COMMON']
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     entities: list[CatalogEntityItem] = Field(
@@ -102,7 +105,7 @@ class UpsertCatalogBatchRequest(BaseModel):
         return self
 
 
-class GetCatalogIngestStatusRequest(BaseModel):
+class GetCatalogIngestStatusRequest(CatalogStrictModel):
     """Request for get_catalog_ingest_status — group_id + batch_id only."""
 
     group_id: str = Field(..., min_length=1)
