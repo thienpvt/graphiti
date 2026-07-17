@@ -15,6 +15,8 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
+from pydantic import BaseModel
+
 from models.catalog_common import (
     CATALOG_EDGE_TYPES,
     CATALOG_ENTITY_TYPES,
@@ -70,11 +72,26 @@ class CatalogStoreError(ValueError):
         super().__init__(message)
 
 
+def _json_compatible(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode='json')
+    if isinstance(value, list):
+        return [_json_compatible(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_compatible(item) for key, item in value.items()}
+    return value
+
+
 def serialize_nested_json(value: Any) -> str | None:
     """Serialize nested structures to a JSON string for Neo4j primitive storage."""
     if value is None:
         return None
-    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    return json.dumps(
+        _json_compatible(value),
+        sort_keys=True,
+        separators=(',', ':'),
+        ensure_ascii=False,
+    )
 
 
 def _strip_protected_attributes(attributes: dict[str, Any] | None) -> dict[str, Any] | None:

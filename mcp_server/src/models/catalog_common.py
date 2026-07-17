@@ -6,9 +6,10 @@ import math
 import re
 import uuid as _uuid
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError, WithJsonSchema
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 
 class StrEnum(str, Enum):
@@ -24,6 +25,44 @@ class CatalogStrictModel(BaseModel):
 # Catalog-v2 identity shell constants (immutable request contract)
 IDENTITY_SCHEMA_VERSION = 'catalog-v2'
 SYSTEM_KEYS: frozenset[str] = frozenset({'FE', 'BO', 'COMMON'})
+
+
+def _validate_strict_true(value: Any) -> Any:
+    if value is not True:
+        raise PydanticCustomError('strict_true', 'Input must be true')
+    return value
+
+
+def _validate_system_key(value: Any) -> Any:
+    if not isinstance(value, str) or value not in SYSTEM_KEYS:
+        raise PydanticCustomError('invalid_system_key', 'Invalid system key')
+    return value
+
+
+StrictTrue = Annotated[
+    Literal[True],
+    BeforeValidator(_validate_strict_true),
+    WithJsonSchema({'type': 'boolean', 'const': True}),
+]
+SystemKey = Annotated[
+    Literal['FE', 'BO', 'COMMON'],
+    BeforeValidator(_validate_system_key),
+]
+
+
+def invalid_system_key_validation_error(
+    *,
+    title: str,
+    loc: tuple[str | int, ...],
+    input_value: Any,
+) -> ValidationError:
+    line_error: InitErrorDetails = {
+        'type': PydanticCustomError('invalid_system_key', 'Invalid system key'),
+        'loc': loc,
+        'input': input_value,
+    }
+    return ValidationError.from_exception_data(title, [line_error])
+
 
 # Default batch collection limits (CONF-04)
 DEFAULT_MAX_ENTITIES_PER_BATCH = 500
@@ -250,12 +289,12 @@ def catalog_validation_error_to_structured(
     field_path = _sanitize_field_path(loc)
     loc_names = {str(part) for part in loc}
 
-    if 'identity_schema_version' in loc_names:
-        code = CatalogErrorCode.unsupported_identity_schema
-        message = 'Unsupported identity schema version'
-    elif 'system_key' in loc_names:
+    if first.get('type') == 'invalid_system_key':
         code = CatalogErrorCode.invalid_system_key
         message = 'Invalid system key'
+    elif 'identity_schema_version' in loc_names:
+        code = CatalogErrorCode.unsupported_identity_schema
+        message = 'Unsupported identity schema version'
     else:
         code = CatalogErrorCode.validation_error
         message = 'Request validation failed'

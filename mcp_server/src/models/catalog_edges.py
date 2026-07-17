@@ -20,9 +20,11 @@ from models.catalog_common import (
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
     CatalogStrictModel,
+    StrictTrue,
+    SystemKey,
     validate_nested_json,
 )
-from models.catalog_graph_key import _match_entity_graph_key, validate_entity_graph_key
+from models.catalog_graph_key import _match_entity_graph_key, validate_entity_graph_key_at
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -117,13 +119,13 @@ class UpsertTypedEdgesRequest(CatalogStrictModel):
     """Request for upsert_typed_edges. No excluded_entity_types field."""
 
     identity_schema_version: Literal['catalog-v2']
-    system_key: Literal['FE', 'BO', 'COMMON']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     edges: list[CatalogEdgeItem] = Field(..., min_length=1, max_length=HARD_MAX_EDGES_PER_BATCH)
     dry_run: bool = False
-    atomic: Literal[True] = True
-    strict_endpoints: Literal[True] = True
+    atomic: StrictTrue = True
+    strict_endpoints: StrictTrue = True
 
     @field_validator('group_id')
     @classmethod
@@ -135,15 +137,19 @@ class UpsertTypedEdgesRequest(CatalogStrictModel):
 
     @model_validator(mode='after')
     def _nested_endpoint_keys_match_shell_system(self) -> UpsertTypedEdgesRequest:
-        for edge in self.edges:
-            validate_entity_graph_key(
+        for index, edge in enumerate(self.edges):
+            validate_entity_graph_key_at(
                 entity_type=edge.source_entity_type,
                 graph_key=edge.source_graph_key,
                 system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('edges', index, 'source_graph_key'),
             )
-            validate_entity_graph_key(
+            validate_entity_graph_key_at(
                 entity_type=edge.target_entity_type,
                 graph_key=edge.target_graph_key,
                 system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('edges', index, 'target_graph_key'),
             )
         return self

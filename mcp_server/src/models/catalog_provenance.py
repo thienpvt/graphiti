@@ -17,9 +17,11 @@ from models.catalog_common import (
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
     CatalogStrictModel,
+    StrictTrue,
+    SystemKey,
     validate_nested_json,
 )
-from models.catalog_graph_key import _match_entity_graph_key, validate_entity_graph_key
+from models.catalog_graph_key import _match_entity_graph_key, validate_entity_graph_key_at
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -114,7 +116,7 @@ class UpsertProvenanceRequest(CatalogStrictModel):
     """Request for upsert_provenance (no LLM/queue)."""
 
     identity_schema_version: Literal['catalog-v2']
-    system_key: Literal['FE', 'BO', 'COMMON']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     sources: list[CatalogSourceItem] = Field(
@@ -127,7 +129,7 @@ class UpsertProvenanceRequest(CatalogStrictModel):
         default_factory=list, max_length=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
     )
     dry_run: bool = False
-    atomic: Literal[True] = True
+    atomic: StrictTrue = True
 
     @field_validator('group_id')
     @classmethod
@@ -144,10 +146,12 @@ class UpsertProvenanceRequest(CatalogStrictModel):
             raise ValueError(
                 f'provenance links exceed hard max ({HARD_MAX_PROVENANCE_LINKS_PER_BATCH})'
             )
-        for target in self.entity_targets:
-            validate_entity_graph_key(
+        for index, target in enumerate(self.entity_targets):
+            validate_entity_graph_key_at(
                 entity_type=target.entity_type,
                 graph_key=target.graph_key,
                 system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entity_targets', index, 'graph_key'),
             )
         return self

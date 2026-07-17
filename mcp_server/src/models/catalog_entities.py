@@ -7,13 +7,14 @@ import re
 import uuid
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, StrictInt, StrictStr, field_validator, model_validator
 
 from models.catalog_common import (
     ENTITY_TYPE_PREFIXES,
     HARD_MAX_EDGES_PER_BATCH,
     HARD_MAX_ENTITIES_PER_BATCH,
     MAX_ATTRIBUTE_KEYS,
+    MAX_EVIDENCE_LENGTH,
     MAX_GRAPH_KEY_LENGTH,
     MAX_SHORT_STRING_LENGTH,
     MAX_SOURCE_REFS,
@@ -21,9 +22,11 @@ from models.catalog_common import (
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
     CatalogStrictModel,
+    StrictTrue,
+    SystemKey,
     validate_nested_json,
 )
-from models.catalog_graph_key import _match_entity_graph_key, validate_entity_graph_key
+from models.catalog_graph_key import _match_entity_graph_key, validate_entity_graph_key_at
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -41,6 +44,18 @@ def _require_non_empty_str(v: str, field_name: str) -> str:
     return v
 
 
+class CatalogSourceRef(CatalogStrictModel):
+    """Exact source evidence reference for a catalog entity."""
+
+    document_id: StrictStr | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_SHORT_STRING_LENGTH,
+    )
+    page: StrictInt = Field(..., gt=0)
+    raw_text: StrictStr = Field(..., max_length=MAX_EVIDENCE_LENGTH)
+
+
 class CatalogEntityItem(CatalogStrictModel):
     """Single typed catalog entity for upsert/resolve."""
 
@@ -51,7 +66,7 @@ class CatalogEntityItem(CatalogStrictModel):
     database_qualified_name: str = Field(..., min_length=1, max_length=MAX_GRAPH_KEY_LENGTH)
     summary: str = Field(..., min_length=1, max_length=MAX_SUMMARY_LENGTH)
     attributes: dict[str, Any] | None = None
-    source_refs: list[Any] | None = None
+    source_refs: list[CatalogSourceRef] | None = Field(default=None, max_length=MAX_SOURCE_REFS)
     content_sha256: str | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
@@ -87,16 +102,6 @@ class CatalogEntityItem(CatalogStrictModel):
         if protected:
             raise ValueError(f'attributes contain protected keys: {sorted(protected)}')
         validate_nested_json(v, 'attributes')
-        return v
-
-    @field_validator('source_refs')
-    @classmethod
-    def _validate_source_refs(cls, v: list[Any] | None) -> list[Any] | None:
-        if v is None:
-            return v
-        if len(v) > MAX_SOURCE_REFS:
-            raise ValueError(f'source_refs exceed max ({MAX_SOURCE_REFS})')
-        validate_nested_json(v, 'source_refs')
         return v
 
     @field_validator('confidence')
@@ -138,14 +143,14 @@ class UpsertTypedEntitiesRequest(CatalogStrictModel):
     """Request for upsert_typed_entities. No excluded_entity_types field."""
 
     identity_schema_version: Literal['catalog-v2']
-    system_key: Literal['FE', 'BO', 'COMMON']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     entities: list[CatalogEntityItem] = Field(
         ..., min_length=1, max_length=HARD_MAX_ENTITIES_PER_BATCH
     )
     dry_run: bool = False
-    atomic: Literal[True] = True
+    atomic: StrictTrue = True
 
     @field_validator('group_id')
     @classmethod
@@ -157,11 +162,13 @@ class UpsertTypedEntitiesRequest(CatalogStrictModel):
 
     @model_validator(mode='after')
     def _nested_graph_keys_match_shell_system(self) -> UpsertTypedEntitiesRequest:
-        for item in self.entities:
-            validate_entity_graph_key(
+        for index, item in enumerate(self.entities):
+            validate_entity_graph_key_at(
                 entity_type=item.entity_type,
                 graph_key=item.graph_key,
                 system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entities', index, 'graph_key'),
             )
         return self
 
@@ -170,10 +177,10 @@ class ResolveTypedEntitiesRequest(CatalogStrictModel):
     """Request for resolve_typed_entities (read-only)."""
 
     identity_schema_version: Literal['catalog-v2']
-    system_key: Literal['FE', 'BO', 'COMMON']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     entities: list[ResolveEntityRef] = Field(
-        default_factory=list, max_length=HARD_MAX_ENTITIES_PER_BATCH
+        ..., min_length=1, max_length=HARD_MAX_ENTITIES_PER_BATCH
     )
 
     @field_validator('group_id')
@@ -186,11 +193,13 @@ class ResolveTypedEntitiesRequest(CatalogStrictModel):
 
     @model_validator(mode='after')
     def _nested_graph_keys_match_shell_system(self) -> ResolveTypedEntitiesRequest:
-        for item in self.entities:
-            validate_entity_graph_key(
+        for index, item in enumerate(self.entities):
+            validate_entity_graph_key_at(
                 entity_type=item.entity_type,
                 graph_key=item.graph_key,
                 system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entities', index, 'graph_key'),
             )
         return self
 
@@ -246,7 +255,7 @@ class VerifyCatalogBatchRequest(CatalogStrictModel):
     """Request for verify_catalog_batch (read-only)."""
 
     identity_schema_version: Literal['catalog-v2']
-    system_key: Literal['FE', 'BO', 'COMMON']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     batch_id: str | None = Field(default=None, max_length=MAX_SHORT_STRING_LENGTH)
     entities: list[VerifyEntityRef] = Field(
@@ -267,10 +276,12 @@ class VerifyCatalogBatchRequest(CatalogStrictModel):
     def _require_scope_and_system(self) -> VerifyCatalogBatchRequest:
         if not self.batch_id and not self.entities and not self.edges:
             raise ValueError('verify requires batch_id and/or explicit entity/edge keys')
-        for item in self.entities:
-            validate_entity_graph_key(
+        for index, item in enumerate(self.entities):
+            validate_entity_graph_key_at(
                 entity_type=item.entity_type,
                 graph_key=item.graph_key,
                 system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entities', index, 'graph_key'),
             )
         return self

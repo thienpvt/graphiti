@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import re
 
-from models.catalog_common import ENTITY_TYPE_PREFIXES, MAX_GRAPH_KEY_LENGTH, SYSTEM_KEYS
+from pydantic_core import PydanticCustomError
+
+from models.catalog_common import (
+    ENTITY_TYPE_PREFIXES,
+    MAX_GRAPH_KEY_LENGTH,
+    SYSTEM_KEYS,
+    invalid_system_key_validation_error,
+)
 
 # Oracle-ish identifier segment (uppercase only; fail-closed, no rewrite/NFC).
 _ORACLE_IDENT = r'[A-Z][A-Z0-9_$#]*'
@@ -73,8 +80,32 @@ def _match_entity_graph_key(entity_type: str, graph_key: str) -> re.Match[str]:
 def validate_entity_graph_key(*, entity_type: str, graph_key: str, system_key: str) -> None:
     """Fullmatch registry; require PREFIX::{system_key}::...; no v1 rewrite."""
     if system_key not in SYSTEM_KEYS:
-        raise ValueError(f'invalid_system_key: {system_key}')
+        raise PydanticCustomError('invalid_system_key', 'Invalid system key')
     match = _match_entity_graph_key(entity_type, graph_key)
     key_system = match.group('system')
     if key_system != system_key:
-        raise ValueError(f'invalid_system_key: graph_key system {key_system} != shell {system_key}')
+        raise PydanticCustomError('invalid_system_key', 'Invalid system key')
+
+
+def validate_entity_graph_key_at(
+    *,
+    entity_type: str,
+    graph_key: str,
+    system_key: str,
+    title: str,
+    loc: tuple[str | int, ...],
+) -> None:
+    try:
+        validate_entity_graph_key(
+            entity_type=entity_type,
+            graph_key=graph_key,
+            system_key=system_key,
+        )
+    except PydanticCustomError as exc:
+        if exc.type != 'invalid_system_key':
+            raise
+        raise invalid_system_key_validation_error(
+            title=title,
+            loc=loc,
+            input_value=graph_key,
+        ) from exc

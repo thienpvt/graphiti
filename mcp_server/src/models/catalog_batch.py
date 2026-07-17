@@ -14,10 +14,12 @@ from models.catalog_common import (
     MAX_SHORT_STRING_LENGTH,
     SHA256_HEX_RE,
     CatalogStrictModel,
+    StrictTrue,
+    SystemKey,
 )
 from models.catalog_edges import CatalogEdgeItem
 from models.catalog_entities import CatalogEntityItem
-from models.catalog_graph_key import validate_entity_graph_key
+from models.catalog_graph_key import validate_entity_graph_key_at
 from models.catalog_provenance import (
     CatalogProvenanceEdgeTarget,
     CatalogProvenanceEntityTarget,
@@ -57,7 +59,7 @@ class UpsertCatalogBatchRequest(CatalogStrictModel):
     """Atomic nested catalog batch (BATC-01/02). atomic must be true."""
 
     identity_schema_version: Literal['catalog-v2']
-    system_key: Literal['FE', 'BO', 'COMMON']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     entities: list[CatalogEntityItem] = Field(
@@ -68,7 +70,7 @@ class UpsertCatalogBatchRequest(CatalogStrictModel):
     request_sha256: str | None = None
     catalog_sha256: str | None = None
     dry_run: bool = False
-    atomic: Literal[True] = True
+    atomic: StrictTrue = True
 
     @field_validator('group_id')
     @classmethod
@@ -87,13 +89,6 @@ class UpsertCatalogBatchRequest(CatalogStrictModel):
             raise ValueError('hash must be 64 lowercase hex characters')
         return v
 
-    @field_validator('atomic')
-    @classmethod
-    def _atomic_must_be_true(cls, v: bool) -> bool:
-        if v is not True:
-            raise ValueError('atomic must be true for upsert_catalog_batch')
-        return v
-
     @model_validator(mode='after')
     def _require_non_empty_work_and_system_scope(self) -> UpsertCatalogBatchRequest:
         has_entities = bool(self.entities)
@@ -103,29 +98,37 @@ class UpsertCatalogBatchRequest(CatalogStrictModel):
             raise ValueError(
                 'batch requires at least one of entities, edges, or provenance sources'
             )
-        for item in self.entities:
-            validate_entity_graph_key(
+        for index, item in enumerate(self.entities):
+            validate_entity_graph_key_at(
                 entity_type=item.entity_type,
                 graph_key=item.graph_key,
                 system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entities', index, 'graph_key'),
             )
-        for edge in self.edges:
-            validate_entity_graph_key(
+        for index, edge in enumerate(self.edges):
+            validate_entity_graph_key_at(
                 entity_type=edge.source_entity_type,
                 graph_key=edge.source_graph_key,
                 system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('edges', index, 'source_graph_key'),
             )
-            validate_entity_graph_key(
+            validate_entity_graph_key_at(
                 entity_type=edge.target_entity_type,
                 graph_key=edge.target_graph_key,
                 system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('edges', index, 'target_graph_key'),
             )
         if self.provenance is not None:
-            for target in self.provenance.entity_targets:
-                validate_entity_graph_key(
+            for index, target in enumerate(self.provenance.entity_targets):
+                validate_entity_graph_key_at(
                     entity_type=target.entity_type,
                     graph_key=target.graph_key,
                     system_key=self.system_key,
+                    title=type(self).__name__,
+                    loc=('provenance', 'entity_targets', index, 'graph_key'),
                 )
         return self
 

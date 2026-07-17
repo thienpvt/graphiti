@@ -131,7 +131,11 @@ class CatalogService:
             'database_qualified_name': item.database_qualified_name,
             'summary': item.summary,
             'attributes': item.attributes,
-            'source_refs': item.source_refs,
+            'source_refs': (
+                [ref.model_dump(mode='json') for ref in item.source_refs]
+                if item.source_refs is not None
+                else None
+            ),
             'confidence': item.confidence,
         }
 
@@ -886,7 +890,11 @@ class CatalogService:
             updated_at=request_ts,
             name_embedding=embedding,
             attributes=item.attributes,
-            source_refs=item.source_refs,
+            source_refs=(
+                [ref.model_dump(mode='json') for ref in item.source_refs]
+                if item.source_refs is not None
+                else None
+            ),
             confidence=item.confidence,
         )
 
