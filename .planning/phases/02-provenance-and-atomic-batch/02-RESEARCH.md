@@ -501,30 +501,36 @@ async def transaction(self) -> AsyncIterator[Transaction]:
 
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
-| A1 | Persist only terminal `committed`/`failed` status rows; treat intermediate lifecycle values as response/log-level unless tests require stored non-terminal | Pitfall 4 / STAT-03 | If product requires durable intermediate states, need crash-recovery rules |
+| A1 | **RESOLVED:** Persist only terminal `committed`/`failed` status rows; six lifecycle literals remain valid response/model states; intermediates are never durable Neo4j rows (restart-safe, no sticky mid-flight status) | Pitfall 4 / STAT-03 / Open Questions | Locked for v1; changing later requires crash-recovery rules |
 | A2 | `EpisodeType` value for catalog sources should be `json` (structured metadata) unless sample docs specify `text` | Provenance | Wrong source enum may confuse semantic tools reading episodes |
 | A3 | Mentions identity formula `group_id\|Mentions\|source_uuid\|entity_uuid` is acceptable (not externally mandated beyond determinism) | Code examples | Formula change re-keys MENTIONS; pick once and document |
 | A4 | Bounded `Episodic.content` stores canonical allowlisted source metadata JSON, not raw PDF/DDL text | PROV-02 | If operators expect full text retrieval from episodes, need separate object store (out of scope) |
 | A5 | `entity_edges` on Episodic should list documented edge UUIDs for Graphiti compatibility; empty list acceptable when only entity targets | Provenance | Minor interop difference with stock episodes |
 
-**If wrong:** Planner should gate A1–A3 behind first implementation plan defaults matching locked CONTEXT; user can override formulas only before first write to a durable group (tests only for now).
+**A1 locked** via Open Questions (RESOLVED). A2–A3 remain plan defaults matching CONTEXT; override formulas only before first write to a durable group (tests only for now).
 
-## Open Questions
+## Planning note: `depends_on` ID form
 
-1. **Must non-terminal statuses be durable?**
-   - What we know: STAT-03 lists six statuses; locked decision emphasizes terminal restart-safety.
-   - What's unclear: Whether `planned`/`validating`/`embedding`/`writing` must appear in Neo4j mid-flight.
-   - Recommendation: Persist terminals only; expose lifecycle in response fields; if a gate requires stored intermediates, add them without making them crash-sticky without recovery.
+Repository convention (Phase 1 evidence: `plan: 02` with `depends_on: [01-01]`): frontmatter `plan` is the local two-digit number; `depends_on` uses full phase-plan IDs (`02-01`, `02-02`, …). Phase 2 plans follow the same form. Do not normalize `depends_on` to bare two-digit locals.
 
-2. **Edge provenance verify semantics**
-   - What we know: Phase 1 presence query is entity-MENTIONS-centric.
-   - What's unclear: Whether "has provenance" for edges means non-empty `episodes` or membership of a specific source.
-   - Recommendation: For `require_provenance`, treat edge as present if `size(coalesce(e.episodes,[])) > 0` after attach; for source-specific checks use membership.
+## Open Questions (RESOLVED)
 
-3. **ACCEPT_TAB fixture location**
-   - What we know: Requirements mention ACCEPT_TAB; sample_catalog / catalog/ may exist as untracked worktree files.
-   - What's unclear: Canonical sanitized fixture path for docs vs tests.
-   - Recommendation: Put minimal sanitized fixture under `mcp_server/tests/fixtures/` and reference in README; do not commit secrets.
+1. **Must non-terminal statuses be durable? — RESOLVED (A1 terminals-only)**
+   - **Decision:** Persist only terminal Neo4j rows `committed` and `failed` for v1.
+   - **Model/response:** All six STAT-03 lifecycle literals remain valid response/model states: `planned`, `validating`, `embedding`, `writing`, `committed`, `failed`. Intermediate values may appear in in-memory responses/logs only; writers do not MERGE non-terminal status into Neo4j mid-flight.
+   - **Restart-safety:** Neo4j is authoritative for terminal outcomes only. After process kill or service reinit, `get_catalog_ingest_status` returns a committed/failed row if one was written, otherwise not-found — never a sticky `writing`/`embedding`/`validating`/`planned` node left by a crashed mid-flight write.
+   - **No sticky intermediates:** Dry-run writes no status. Embed failure writes no status. Domain success writes `committed` inside the domain transaction. Domain failure rolls back domain objects, then best-effort persists `failed` in a separate transaction. Matches CONTEXT locked batch-status decisions and plans 02-01/02-03/02-04 A1 notes.
+
+2. **Edge provenance verify semantics — RESOLVED**
+   - **Decision:** Two layers.
+     - Generic `require_provenance` edge presence: non-empty `episodes` — `size(coalesce(e.episodes, [])) > 0`.
+     - Source-specific verification: UUID membership — source episode uuid `IN coalesce(e.episodes, [])`.
+   - Entity presence remains MENTIONS-based. Extend Phase 1 `match_provenance_presence` accordingly (plan 02-02).
+
+3. **ACCEPT_TAB fixture location — RESOLVED**
+   - **Canonical path:** `mcp_server/tests/fixtures/accept_tab_sanitized.json`.
+   - **Contents:** Created only from synthetic sanitized data (minimal multi-entity/edge/provenance batch for `oracle-catalog-tool-test`). Never copy blindly from untracked worktree inputs, live catalogs, `catalog/`, or `sample_catalog.json`.
+   - **Docs:** README may reference the same sanitized shape; no secrets. Plan 02-05 owns fixture creation when inline builders are insufficient.
 
 ## Environment Availability
 
