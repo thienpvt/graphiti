@@ -30,19 +30,19 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 
 ### Strict Request Contracts and Errors
 
-- [ ] **CONT-01**: Every deterministic catalog request and nested item inherits a common strict Pydantic base using `extra='forbid'` or an equivalent fail-closed configuration.
-- [ ] **CONT-02**: Unknown fields are rejected at every nesting depth, including request shells, entities, edges, provenance sources, evidence links, evidence targets, locators, manifests, and prepare/commit models.
-- [ ] **CONT-03**: Misspelled optional fields produce field-addressed validation errors instead of being ignored.
-- [ ] **CONT-04**: Source strings and other hash-bearing text retain their submitted bytes; validators do not invisibly strip or normalize content before canonical hashing.
-- [ ] **CONT-05**: `UpsertTypedEdgesRequest.strict_endpoints` accepts only literal `true`, or is removed through an explicit documented migration; `false` is always rejected.
-- [ ] **CONT-06**: `UpsertCatalogBatchRequest.atomic` remains literal `true`; non-atomic combined catalog writes are rejected.
+- [x] **CONT-01**: Every deterministic catalog request and nested item inherits a common strict Pydantic base using `extra='forbid'` or an equivalent fail-closed configuration.
+- [x] **CONT-02**: Unknown fields are rejected at every nesting depth, including request shells, entities, edges, provenance sources, evidence links, evidence targets, locators, manifests, and prepare/commit models.
+- [x] **CONT-03**: Misspelled optional fields produce field-addressed validation errors instead of being ignored.
+- [x] **CONT-04**: Source strings and other hash-bearing text retain their submitted bytes; validators do not invisibly strip or normalize content before canonical hashing.
+- [x] **CONT-05**: `UpsertTypedEdgesRequest.strict_endpoints` accepts only literal `true`, or is removed through an explicit documented migration; `false` is always rejected.
+- [x] **CONT-06**: `UpsertCatalogBatchRequest.atomic` remains literal `true`; non-atomic combined catalog writes are rejected.
 - [ ] **CONT-07**: Complete model, collection, string, hash, prefix, nested-reference, confidence, finite-number, and protected-property validation occurs before side effects.
-- [ ] **CONT-08**: The structured error registry includes `unsupported_identity_schema`, `invalid_system_key`, `edge_endpoint_pair_not_allowed`, `prepared_plan_not_found`, `prepared_plan_expired`, `prepared_plan_conflict`, `prepared_plan_already_consumed`, `manifest_mismatch`, and `provenance_link_conflict` without removing existing catalog codes.
+- [x] **CONT-08**: The structured error registry includes `unsupported_identity_schema`, `invalid_system_key`, `edge_endpoint_pair_not_allowed`, `prepared_plan_not_found`, `prepared_plan_expired`, `prepared_plan_conflict`, `prepared_plan_already_consumed`, `manifest_mismatch`, and `provenance_link_conflict` without removing existing catalog codes.
 
 ### Catalog-v2 Identity
 
-- [ ] **IDEN-01**: Every catalog-v2 domain request declares `identity_schema_version='catalog-v2'`; any other value fails closed with `unsupported_identity_schema`.
-- [ ] **IDEN-02**: Catalog domain identity includes a required bounded canonical `system_key` from the closed server-owned set `FE`, `BO`, or `COMMON`.
+- [x] **IDEN-01**: Every catalog-v2 domain request declares `identity_schema_version='catalog-v2'`; any other value fails closed with `unsupported_identity_schema`.
+- [x] **IDEN-02**: Catalog domain identity includes a required bounded canonical `system_key` from the closed server-owned set `FE`, `BO`, or `COMMON`.
 - [ ] **IDEN-03**: Invalid, empty, overlong, non-canonical, mismatched, or unknown-ownership system keys fail with `invalid_system_key` before database reads, embeddings, schema initialization, transactions, or status writes; unknown ownership never defaults to `COMMON`.
 - [ ] **IDEN-04**: Every entity graph key includes its visible system scope and passes a complete server-owned grammar for its exact entity type, not merely a prefix check.
 - [ ] **IDEN-05**: The graph-key registry defines complete catalog-v2 grammar for all allowed types, including System, Database, DictionaryDocument, Schema, Table, View, MaterializedView, Column, Constraint, Index, Package, Procedure, Function, Trigger, Sequence, Synonym, DatabaseLink, and SourceArtifact.
@@ -159,7 +159,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 
 ### Verification, Regression, and Documentation
 
-- [ ] **TEST-01**: Automated unit coverage proves strict unknown-field rejection at every nested level, misspelled optional-field rejection, `strict_endpoints=false` rejection, and `atomic=false` rejection.
+- [x] **TEST-01**: Automated unit coverage proves strict unknown-field rejection at every nested level, misspelled optional-field rejection, `strict_endpoints=false` rejection, and `atomic=false` rejection.
 - [ ] **TEST-02**: Exhaustive table-driven tests cover every allowed and rejected endpoint pair for all 16 edge types.
 - [ ] **TEST-03**: Identity tests prove FE/BO separation, overload separation, graph-key grammar, unsupported-version rejection, and UUID/hash changes when identity schema version changes.
 - [ ] **TEST-04**: Hash tests prove `catalog_sha256` changes `request_sha256`, every included domain field is covered, excluded transport fields are stable, and dry-run returns authoritative hashes with zero writes.
@@ -232,16 +232,16 @@ Deferred until the deterministic substrate is implemented and verified.
 | SAFE-11 | Phase 3A | Pending |
 | SAFE-12 | Phase 0 | Pending |
 | SAFE-13 | Phase 0 | Pending |
-| CONT-01 | Phase 1 | Pending |
-| CONT-02 | Phase 1 | Pending |
-| CONT-03 | Phase 1 | Pending |
-| CONT-04 | Phase 1 | Pending |
-| CONT-05 | Phase 1 | Pending |
-| CONT-06 | Phase 1 | Pending |
+| CONT-01 | Phase 1 | Complete |
+| CONT-02 | Phase 1 | Complete |
+| CONT-03 | Phase 1 | Complete |
+| CONT-04 | Phase 1 | Complete |
+| CONT-05 | Phase 1 | Complete |
+| CONT-06 | Phase 1 | Complete |
 | CONT-07 | Phase 1 | Pending |
-| CONT-08 | Phase 1 | Pending |
-| IDEN-01 | Phase 1 | Pending |
-| IDEN-02 | Phase 1 | Pending |
+| CONT-08 | Phase 1 | Complete |
+| IDEN-01 | Phase 1 | Complete |
+| IDEN-02 | Phase 1 | Complete |
 | IDEN-03 | Phase 1 | Pending |
 | IDEN-04 | Phase 1 | Pending |
 | IDEN-05 | Phase 1 | Pending |
@@ -334,7 +334,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | GATE-04 | Phase 4 | Pending |
 | GATE-05 | Phase 4 | Pending |
 | GATE-06 | Phase 4 | Pending |
-| TEST-01 | Phase 1 | Pending |
+| TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 2 | Pending |
 | TEST-03 | Phase 1 | Pending |
 | TEST-04 | Phase 2 | Pending |
@@ -355,6 +355,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | REPT-01 | Phase 5 | Pending |
 
 **Coverage:**
+
 - v1.1 requirements: 138 total
 - Mapped to phases: 138
 - Unmapped: 0

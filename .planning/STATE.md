@@ -5,16 +5,16 @@ milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 1
 current_phase_name: Strict Contracts and Catalog-v2 Identity
 status: planning
-stopped_at: ROADMAP/REQUIREMENTS/STATE reconciled to canonical Phase 0/1/2/3A/3B/4/5
-last_updated: "2026-07-17T17:58:25.926Z"
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-07-17T19:00:42.654Z"
 last_activity: 2026-07-18
 last_activity_desc: Phase 0 complete, transitioned to Phase 1
 progress:
-  total_phases: 7
+  total_phases: 2
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 14
+  total_plans: 7
+  completed_plans: 3
+  percent: 43
 ---
 
 # Project State
@@ -33,7 +33,7 @@ Plan: Not started
 Status: Ready to plan
 Last activity: 2026-07-18 — Phase 0 complete, transitioned to Phase 1
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [████░░░░░░] 43%
 
 ## Performance Metrics
 
@@ -58,6 +58,12 @@ Progress: [█░░░░░░░░░] 14%
 - v1.0 Phase 2: 5/5 truths, 31/31 requirements
 - v1.0 audit: 6/6 flows, 86/86 requirements
 
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 4min | 2 tasks | 6 files |
+
 ## Accumulated Context
 
 ### Decisions
@@ -78,6 +84,9 @@ Recent decisions affecting current work:
 - Approved edge vocabulary remains the existing 16 types; `LikelyReferencesTo`, `MapsTo`, and `SynchronizesTo` are deferred
 - Phase 6 canary is separate/out of scope and carries no requirement IDs
 - Phase 3A/3B and Phase 4 require phase-specific research during planning
+- [Phase ?]: Shared CatalogStrictModel base; required catalog-v2/system_key shells; Literal True write flags
+- [Phase ?]: Response models remain non-strict BaseModel; status request omits version/system_key
+- [Phase ?]: REFACTOR no-op for 01-01; no dual-version compatibility helpers
 
 ### Pending Todos
 
@@ -108,7 +117,7 @@ None. Next: discuss and plan Phase 1; enforce the Phase 0 compatibility and isol
 
 ## Session Continuity
 
-Last session: 2026-07-18
-Stopped at: Phase 0 complete; ready to discuss and plan Phase 1
+Last session: 2026-07-17T19:00:42.648Z
+Stopped at: Completed 01-01-PLAN.md
 Resume file: None
 Next: Phase 1 — Strict Contracts and Catalog-v2 Identity
