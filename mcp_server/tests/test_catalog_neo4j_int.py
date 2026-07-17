@@ -127,6 +127,22 @@ class RecordingQueue:
         self.add = AsyncMock()
 
 
+class CommunityLLM:
+    """Deterministic test-only summarizer for an explicit community build."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate_response(
+        self, *args: Any, response_model: Any = None, **kwargs: Any
+    ) -> dict[str, str]:
+        _ = args, kwargs
+        self.calls += 1
+        if getattr(response_model, '__name__', '') == 'SummaryDescription':
+            return {'description': 'Synthetic catalog community'}
+        return {'summary': 'Synthetic catalog entities'}
+
+
 def _enabled_config() -> CatalogConfig:
     return CatalogConfig(enabled=True, uuid_namespace=str(FIXED_NS))
 
@@ -1091,28 +1107,29 @@ async def test_provenance_presence_isolated_by_episode_and_target_group(catalog_
     target_uuid = response.results[0].uuid
     assert target_uuid
 
+    episode_uuid = str(uuid.uuid4())
+    await ctx.driver.execute_query(
+        """
+        MATCH (target:Entity {uuid: $u, group_id: $g})
+        CREATE (ep:Episodic {uuid: $ep_uuid, group_id: $canary_group})
+        CREATE (ep)-[:MENTIONS]->(target)
+        """,
+        params={
+            'u': target_uuid,
+            'g': GROUP,
+            'ep_uuid': episode_uuid,
+            'canary_group': CANARY_GROUP,
+        },
+    )
     try:
-        await ctx.driver.execute_query(
-            """
-            MATCH (target:Entity {uuid: $u, group_id: $g})
-            CREATE (ep:Episodic {uuid: $ep_uuid, group_id: $canary_group})
-            CREATE (ep)-[:MENTIONS]->(target)
-            """,
-            params={
-                'u': target_uuid,
-                'g': GROUP,
-                'ep_uuid': str(uuid.uuid4()),
-                'canary_group': CANARY_GROUP,
-            },
-        )
         rows = await ctx.service._store.match_provenance_presence(
             ctx.driver, group_id=GROUP, target_uuids=[target_uuid]
         )
         assert rows == [{'uuid': target_uuid, 'has_provenance': False}]
     finally:
         await ctx.driver.execute_query(
-            'MATCH (n) WHERE n.group_id = $g DETACH DELETE n',
-            params={'g': CANARY_GROUP},
+            'MATCH (n:Episodic {uuid: $u, group_id: $g}) DETACH DELETE n',
+            params={'u': episode_uuid, 'g': CANARY_GROUP},
         )
 
 
@@ -1151,9 +1168,10 @@ async def test_verify_edge_endpoint_and_type_mismatch_live(catalog_client):
 
 
 async def test_search_nodes_and_memory_facts_interop(catalog_client):
-    """ENTY-13 / EDGE-12 via existing graphiti search APIs (not new search engine)."""
+    """BATC-11 via existing graphiti search APIs (not a new search engine)."""
     ctx = catalog_client
-    await _seed_happy_graph(ctx)
+    request, committed = await _upsert_accept_tab(ctx)
+    assert committed.status == 'committed'
 
     from graphiti_core.cross_encoder.client import CrossEncoderClient
     from graphiti_core.embedder.client import EmbedderClient
@@ -1217,35 +1235,54 @@ async def test_search_nodes_and_memory_facts_interop(catalog_client):
             tracer=NoOpTracer(),
         )
 
-    node_filter = SearchFilters(node_labels=['Table'])
     node_results = await search(
         clients,
-        'EMPLOYEES',
+        'ACCEPT_TAB',
         [GROUP],
         NODE_HYBRID_SEARCH_RRF,
-        node_filter,
+        SearchFilters(node_labels=['Table']),
     )
     node_names = {
         getattr(n, 'name', None) or getattr(n, 'uuid', None) for n in (node_results.nodes or [])
     }
-    # No raw-Cypher fallback: graphiti search APIs must surface catalog entities.
-    assert any(n and 'EMPLOYEES' in str(n) for n in node_names), (
-        f'ENTY-13: search_nodes path returned no EMPLOYEES; got {node_names!r}'
+    assert any(n and 'ACCEPT_TAB' in str(n) for n in node_names), (
+        f'BATC-11: search_nodes path returned no ACCEPT_TAB; got {node_names!r}'
     )
 
-    edge_filter = SearchFilters(edge_types=None)
+    expected_batch_uuid = catalog_batch_uuid(FIXED_NS, GROUP, request.batch_id)
+    assert all(getattr(n, 'uuid', None) != expected_batch_uuid for n in node_results.nodes or [])
+    batch_labels = await ctx.driver.execute_query(
+        'MATCH (b:CatalogIngestBatch {uuid: $u, group_id: $g}) RETURN labels(b) AS labels',
+        params={'u': expected_batch_uuid, 'g': GROUP},
+    )
+    assert batch_labels[0][0]['labels'] == ['CatalogIngestBatch']
+
     edge_results = await search(
         clients,
-        'employees.dept_id references departments.dept_id',
+        'ACCEPT_TAB contains ACCEPT_ID',
         [GROUP],
         EDGE_HYBRID_SEARCH_RRF,
-        edge_filter,
+        SearchFilters(edge_types=None),
     )
     facts = [getattr(e, 'fact', None) for e in (edge_results.edges or [])]
-    # No raw-Cypher fallback: graphiti search APIs must surface catalog edges.
-    assert any(f and 'dept_id' in f for f in facts), (
-        f'EDGE-12: search_memory_facts path returned no dept_id fact; got {facts!r}'
+    assert any(f and 'ACCEPT_ID' in f for f in facts), (
+        f'BATC-11: search_memory_facts path returned no ACCEPT_ID fact; got {facts!r}'
     )
+    assert request.provenance is not None
+    expected_source = catalog_source_uuid(FIXED_NS, GROUP, request.provenance.sources[0].source_key)
+    matching_edges = [
+        edge
+        for edge in edge_results.edges or []
+        if getattr(edge, 'uuid', None)
+        == catalog_edge_uuid(
+            FIXED_NS,
+            GROUP,
+            request.edges[0].edge_type,
+            request.edges[0].edge_key,
+        )
+    ]
+    assert matching_edges
+    assert expected_source in matching_edges[0].episodes
 
 
 # ---------------------------------------------------------------------------
@@ -1666,14 +1703,36 @@ async def test_atomic_edge_rollback(catalog_client):
     assert await _count_edge_uuid(ctx.driver, ok_uuid) == 0
 
 
-async def test_no_llm_no_queue_calls(catalog_client):
+async def test_batch_no_llm_queue_or_implicit_community_calls(catalog_client):
     ctx = catalog_client
-    await _seed_happy_graph(ctx)
+    _, response = await _upsert_accept_tab(ctx)
+    assert response.status == 'committed'
     ctx.llm.generate_response.assert_not_called()
     ctx.queue.add_episode.assert_not_called()
     ctx.queue.enqueue.assert_not_called()
     ctx.queue.add.assert_not_called()
     assert ctx.llm.calls == 0
+    assert not hasattr(ctx.service, 'build_communities')
+
+
+async def test_explicit_community_build_accepts_batch_entities(catalog_client):
+    ctx = catalog_client
+    _, response = await _upsert_accept_tab(ctx)
+    assert response.status == 'committed'
+
+    from graphiti_core.utils.maintenance.community_operations import build_communities
+
+    llm = CommunityLLM()
+    community_nodes, community_edges = await build_communities(
+        ctx.driver,
+        llm,  # type: ignore[arg-type]
+        [GROUP],
+    )
+    assert community_nodes
+    assert community_edges
+    assert llm.calls > 0
+    assert all(node.group_id == GROUP for node in community_nodes)
+    assert all(edge.group_id == GROUP for edge in community_edges)
 
 
 async def test_teardown_scoped_and_fixture_never_calls_clear_graph(catalog_client):
@@ -1698,8 +1757,8 @@ async def test_teardown_scoped_and_fixture_never_calls_clear_graph(catalog_clien
         )
     ]
     assert clear_calls == []
-    source = Path(__file__).read_text(encoding='utf-8')
-    assert 'MATCH (n) WHERE n.group_id = $g DETACH DELETE n' not in source
+    broad_delete = 'MATCH (n) WHERE n.group_id = $g DETACH ' + 'DELETE n'
+    assert broad_delete not in Path(__file__).read_text(encoding='utf-8')
     assert FORBIDDEN_GROUP == 'oracle-catalog-v2'
 
 
