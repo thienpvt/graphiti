@@ -1,19 +1,18 @@
 ---
 phase: 1
 slug: strict-contracts-and-catalog-v2-identity
-status: complete
+status: in_progress
 nyquist_compliant: false
 wave_0_complete: true
 created: 2026-07-18
+updated: 2026-07-18
 ---
 
 # Phase 1 — Validation Strategy
 
-> Strict-contract and identity feedback contract. Statuses refreshed by Plan 01-05 from real pytest/ruff/pyright results only — never invent green; no manual waiver for Phase 2 entry.
+> Current-HEAD commands are serialized argv contracts. Each command is decoded with `json.loads` and executed from repository root using `subprocess.run(argv, shell=False)`. Historical TDD failures are ancestry evidence only.
 >
-> **Gap closure:** Plans 01-06 through 01-08 must re-earn Nyquist compliance before Phase 2 readiness can be restored.
-
----
+> `nyquist_compliant` remains false until Plan 01-08 captures every mandatory outcome and derives the final gate in memory.
 
 ## Test Infrastructure
 
@@ -21,114 +20,62 @@ created: 2026-07-18
 |----------|-------|
 | **Framework** | pytest + pytest-asyncio |
 | **Config file** | `mcp_server/pytest.ini` |
-| **Quick run command** | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_models.py mcp_server/tests/test_catalog_identity.py -q --tb=line` |
-| **Full suite command** | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_models.py mcp_server/tests/test_catalog_identity.py mcp_server/tests/test_catalog_service.py mcp_server/tests/test_catalog_store_unit.py -q --tb=line` |
-| **Estimated runtime** | ~120 seconds quick; ~240 seconds focused gate |
-| **Gate recorded** | 414 passed in 1.99s; ruff pass; pyright 0 errors (2026-07-18) |
+| **Execution authority** | JSON `argv` arrays below; never display strings or shell parsing |
+| **Expected exit** | Exactly integer `0` for every current-HEAD row |
+| **Neo4j integration** | `skip` — Phase 1 unit policy; availability not probed |
 
----
+## Per-Task Current-HEAD Verification Map
 
-## Sampling Rate
+| Task ID | Plan | Wave | Requirement | Test Type | Automated Command | Expected Files | Status |
+|---------|------|------|-------------|-----------|-------------------|----------------|--------|
+| 01-01-T1 | 01-01 | 1 | CONT-01..06, CONT-08, IDEN-01, IDEN-02, TEST-01 | focused behavior | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","-k","strict or extra or misspel or strict_endpoints or atomic or identity_schema or system_key or preserve or trailing or error_code or order_preserv","-q","--tb=line"],"expected_exit":0}` | `mcp_server/tests/test_catalog_models.py` | pending |
+| 01-01-T2 | 01-01 | 1 | CONT-01..06, CONT-08, IDEN-01, IDEN-02, TEST-01 | unit | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","-q","--tb=line"],"expected_exit":0}` | catalog model source + tests | pending |
+| 01-02-T1 | 01-02 | 2 | IDEN-03..06, IDEN-08, IDEN-09, IDEN-12 | focused behavior | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","-k","grammar or overload or system_mismatch or v1_key or catalog_v1 or graph_key_echo","-q","--tb=line"],"expected_exit":0}` | `mcp_server/tests/test_catalog_models.py` | pending |
+| 01-02-T2 | 01-02 | 2 | IDEN-03..06, IDEN-08, IDEN-09, IDEN-12 | unit | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","-q","--tb=line"],"expected_exit":0}` | graph-key model source + tests | pending |
+| 01-03-T1 | 01-03 | 3 | IDEN-07, IDEN-08, IDEN-10, IDEN-11, IDEN-13, SAFE-05, TEST-03 | focused behavior | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_identity.py","mcp_server/tests/test_catalog_service.py","-k","uuid or catalog_v2 or graph_key_echo or overload or fe_bo or accept_tab","-q","--tb=line"],"expected_exit":0}` | identity + service tests | pending |
+| 01-03-T2 | 01-03 | 3 | IDEN-07, IDEN-08, IDEN-10, IDEN-11, IDEN-13, SAFE-05, TEST-03 | unit | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_identity.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","-q","--tb=line"],"expected_exit":0}` | identity source + tests | pending |
+| 01-04-T1 | 01-04 | 4 | CONT-07, SAFE-08 | focused behavior | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_service.py","-k","structured_error or no_side_effect or never_call or typed_pydantic or production_boundary","-q","--tb=line"],"expected_exit":0}` | model + service tests | pending |
+| 01-04-T2 | 01-04 | 4 | CONT-07, SAFE-08 | unit | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_identity.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","-q","--tb=line"],"expected_exit":0}` | converter, MCP boundary, tests | pending |
+| 01-05-T1 | 01-05 | 5 | TEST-01, TEST-03 | gate structure | `{"argv":["uv","run","--project","mcp_server","python","-c","from pathlib import Path; import re; t=Path('.planning/phases/01-strict-contracts-and-catalog-v2-identity/01-PHASE1-GATE.md').read_text(encoding='utf-8'); required=('focused_pytest','scoped_ruff','scoped_pyright','catalog_neo4j_int','safety_invariants','edge_probe','ready_for_phase_2','canary_executed','oracle_catalog_v2_queried','no_new_store_or_control_plane_write_path'); pairs=re.findall(r'(?m)^([a-z0-9_]+)=(pass|fail|skip|true|false|\\d+)$',t); keys=[k for k,_ in pairs]; assert all(keys.count(k)==1 for k in required); vals=dict(pairs); assert vals['catalog_neo4j_int']=='skip' and vals['canary_executed']=='false' and vals['oracle_catalog_v2_queried']=='false' and vals['ready_for_phase_2'] in ('true','false')"],"expected_exit":0}` | `01-PHASE1-GATE.md` | pending |
+| 01-05-T2 | 01-05 | 5 | all Phase 1 edge probes | edge structure | `{"argv":["uv","run","--project","mcp_server","python","-c","import json; from pathlib import Path; d=json.loads(Path('.planning/phases/01-strict-contracts-and-catalog-v2-identity/01-EDGE-PROBE.json').read_text(encoding='utf-8')); items=d['items']; c=d['coverage']; assert len(items)==53 and all(i['status']=='resolved' and i['verification']=='explicit' and i.get('resolution') for i in items); assert c['applicable']==c['resolved']==53 and c['unresolved']==0 and c['byVerification']=={'explicit':53,'backstop':0} and c['no_silent_drop']=={'source_count':53,'resolved_count':53,'key_equality':True,'null_dispositions':0}"],"expected_exit":0}` | `01-EDGE-PROBE.json` | pending |
 
-- **After each strict-model/grammar task commit:** Run quick models + identity tests.
-- **After identity call-site updates:** Run full focused Phase 1 suite.
-- **After each wave:** Run focused suite, scoped Ruff, scoped Pyright.
-- **Before Phase 2:** `01-PHASE1-GATE.md` must report focused tests, Ruff, and Pyright green; canary/live-group flags false; edge-probe unresolved=0.
-- **Max feedback latency:** 240 seconds.
+## Gap-Closure Verification Map
 
----
+| Task ID | Plan | Wave | Requirement | Test Type | Automated Command | Expected Files | Status |
+|---------|------|------|-------------|-----------|-------------------|----------------|--------|
+| 01-06-T1 | 01-06 | 6 | strict contract audit gaps | focused behavior | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","-k","source_ref or strict_true or empty_resolve or invalid_system_key or graph_key_mismatch","-q","--tb=line"],"expected_exit":0}` | model, service, store tests | pending |
+| 01-06-T2 | 01-06 | 6 | CONT-01/02/04/05/06/07, IDEN-01..05, SAFE-08 | regression | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","-q","--tb=line"],"expected_exit":0}` | Plan 01-06 source + tests | pending |
+| 01-07-T1 | 01-07 | 7 | SAFE-08 logging + nine probes | focused behavior | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_edge_probe.py","-k","catalog_logger or catalog_resolve_logs or catalog_status_logs or catalog_wrapper_failure_logs or edge_probe","-q","--tb=line"],"expected_exit":0}` | service + edge-probe tests | pending |
+| 01-07-T2 | 01-07 | 7 | CONT-01/02/07, IDEN-01/02/04/05, SAFE-08 | regression | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_edge_probe.py","-q","--tb=line"],"expected_exit":0}` | logging source + tests | pending |
+| 01-08-T1 | 01-08 | 8 | exact 138-ID ownership | structural | `{"argv":["uv","run","--project","mcp_server","python","-c","import re; from collections import Counter; from pathlib import Path; req=Path('.planning/REQUIREMENTS.md').read_text(encoding='utf-8'); road=Path('.planning/ROADMAP.md').read_text(encoding='utf-8'); defs=re.findall(r'^\\s*-\\s*\\[[ x]\\]\\s*\\*\\*([A-Z]{4}-\\d{2})\\*\\*:',req,re.M); rows=re.findall(r'^\\|\\s*([A-Z]{4}-\\d{2})\\s*\\|\\s*(Phase\\s+(?:0|1|2|3A|3B|4|5))\\s*\\|',req,re.M); ids=[i for i,_ in rows]; expected={'Phase 0':8,'Phase 1':23,'Phase 2':34,'Phase 3A':18,'Phase 3B':17,'Phase 4':21,'Phase 5':17}; assert len(defs)==len(set(defs))==len(rows)==len(set(ids))==138 and set(defs)==set(ids); assert Counter(p for _,p in rows)==Counter(expected); mapping=dict(rows); assert mapping['IDEN-08']=='Phase 4' and mapping['IDEN-13']=='Phase 5'; sections=list(re.finditer(r'(?m)^### (Phase (?:0|1|2|3A|3B|4|5)):',road)); road_by={m.group(1):set(re.findall(r'\\b([A-Z]{4}-\\d{2})\\b',re.search(r'(?m)^\\*\\*Requirements\\*\\*:\\s*(.+)$',road[m.end():sections[j+1].start() if j+1<len(sections) else len(road)]).group(1))) for j,m in enumerate(sections)}; req_by={p:{i for i,q in rows if q==p} for p in expected}; assert road_by==req_by and sum(map(len,road_by.values()))==138; assert re.search(r'Mapped:\\s*138/138',road) and re.search(r'Orphans:\\s*0',road) and re.search(r'Duplicates:\\s*0',road)"],"expected_exit":0}` | REQUIREMENTS + ROADMAP | pending |
+| 01-08-T2 | 01-08 | 8 | validation, probes, ASVS ledger | structural | `{"argv":["uv","run","--project","mcp_server","python","-c","import json,re; from pathlib import Path; base=Path('.planning/phases/01-strict-contracts-and-catalog-v2-identity'); v=(base/'01-VALIDATION.md').read_text(encoding='utf-8'); tick=chr(96); pattern=r'^\\| (01-0[1-8]-T\\d+) \\|.*?\\| '+tick+r'([^'+tick+r']+)'+tick+r' \\|'; rows=re.findall(pattern,v,re.M); ids=[i for i,_ in rows]; assert len(rows)==17 and len(ids)==len(set(ids)); specs=[json.loads(raw) for _,raw in rows]; assert all(set(s)=={'argv','expected_exit'} and type(s['expected_exit']) is int and s['expected_exit']==0 and isinstance(s['argv'],list) and s['argv'] and all(isinstance(a,str) and a for a in s['argv']) for s in specs); d=json.loads((base/'01-EDGE-PROBE.json').read_text(encoding='utf-8')); assert len(d['items'])==53 and all(i['status']=='resolved' and i['verification']=='explicit' and i.get('resolution') for i in d['items']); sec=(base/'01-SECURITY.md').read_text(encoding='utf-8'); assert re.search(r'(?m)^threats_open:\\s*0\\s*$',sec) and 'T-01-14' in sec and 'T-01-18' in sec and 'T-01-SC' in sec; assert not re.search(r'user (?:approved|accepted|acceptance)',sec,re.I)"],"expected_exit":0}` | VALIDATION + EDGE-PROBE + SECURITY | pending |
+| 01-08-T3 | 01-08 | 8 | fail-closed runner propagation | harness | `{"argv":["uv","run","--project","mcp_server","python","-c","import subprocess,sys; argv=[sys.executable,'-c','assert False']; result=subprocess.run(argv,shell=False); assert argv[2]=='assert False' and result.returncode!=0"],"expected_exit":0}` | in-memory runner contract | pending |
 
-## Wave Structure (revised)
+## Historical RED Evidence
 
-| Wave | Plans | depends_on | Notes |
-|------|-------|------------|-------|
-| 1 | 01-01 | [] | Strict shells |
-| 2 | 01-02 | [01-01] | Grammar registry |
-| 3 | 01-03 | [01-01, 01-02] | Versioned identity (serial after grammar) |
-| 4 | 01-04 | [01-01, 01-02, 01-03] | SAFE-08 + CONT-07 production boundary |
-| 5 | 01-05 | [01-04] | Hard gate + VALIDATION refresh + edge-probe assert |
+These ancestry commits prove the historical RED gates. They are not current-HEAD commands and never invert a current return code:
 
-No same-wave file overlap.
+| Plan | Historical RED commit | Purpose |
+|------|-----------------------|---------|
+| 01-01 | `2ce9697` | Strict request contracts RED |
+| 01-02 | `7ed00e5` | Graph-key grammar RED |
+| 01-03 | `af1eadf` | Versioned identity RED |
+| 01-04 | `bd84cc3` | Structured errors and typed boundary RED |
+| 01-05 | `f66d5a3` | Hard-gate RED evidence |
 
----
+## Execution Rules
 
-## Per-Task Verification Map
-
-| Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | Expected Files | File Exists | Status |
-|---------|------|------|-------------|-----------------|-----------------|-----------|-------------------|----------------|-------------|--------|
-| 01-01-T1 | 01-01 | 1 | CONT-01..06, CONT-08, IDEN-01, IDEN-02, TEST-01 | T-01-01..05 | Unknown fields and false immutable flags fail before service dispatch | unit RED | `uv run --project mcp_server python -c "import subprocess, sys; result = subprocess.run([sys.executable, '-m', 'pytest', '-c', 'mcp_server/pytest.ini', 'mcp_server/tests/test_catalog_models.py', '-k', 'strict or extra or misspel or strict_endpoints or atomic or identity_schema or system_key or preserve or trailing or error_code or order_preserv', '-q', '--tb=line']); raise SystemExit(0 if result.returncode == 1 else 1)"` | `mcp_server/tests/test_catalog_models.py` | present | green |
-| 01-01-T2 | 01-01 | 1 | CONT-01..06, CONT-08, IDEN-01, IDEN-02, TEST-01 | T-01-01..05 | CatalogStrictModel shells + Literal flags + CONT-08 codes | unit GREEN | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_models.py -q --tb=line` | `mcp_server/src/models/catalog_common.py`, `catalog_entities.py`, `catalog_edges.py`, `catalog_provenance.py`, `catalog_batch.py`, `catalog_responses.py`, `tests/test_catalog_models.py` | present | green |
-| 01-02-T1 | 01-02 | 2 | IDEN-03..06, IDEN-08, IDEN-09, IDEN-12 | T-01-06..10 | Grammar matrix + IDEN-08 echo RED | unit RED | `uv run --project mcp_server python -c "import subprocess, sys; result = subprocess.run([sys.executable, '-m', 'pytest', '-c', 'mcp_server/pytest.ini', 'mcp_server/tests/test_catalog_models.py', '-k', 'grammar or overload or system_mismatch or v1_key or catalog_v1 or graph_key_echo', '-q', '--tb=line']); raise SystemExit(0 if result.returncode == 1 else 1)"` | `mcp_server/tests/test_catalog_models.py` | present | green |
-| 01-02-T2 | 01-02 | 2 | IDEN-03..06, IDEN-08, IDEN-09, IDEN-12 | T-01-06..10 | Fullmatch registry + v1 reject + exact graph_key | unit GREEN | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_models.py -q --tb=line` | `mcp_server/src/models/catalog_graph_key.py`, `catalog_common.py`, `catalog_entities.py`, `catalog_edges.py`, `catalog_provenance.py`, `catalog_batch.py`, `tests/test_catalog_models.py` | present | green |
-| 01-03-T1 | 01-03 | 3 | IDEN-07, IDEN-08, IDEN-10, IDEN-11, IDEN-13, SAFE-05, TEST-03 | T-01-11..14 | Versioned goldens + FE/BO/overload + graph_key echo RED | unit RED | `uv run --project mcp_server python -c "import subprocess, sys; result = subprocess.run([sys.executable, '-m', 'pytest', '-c', 'mcp_server/pytest.ini', 'mcp_server/tests/test_catalog_identity.py', 'mcp_server/tests/test_catalog_service.py', '-k', 'uuid or catalog_v2 or graph_key_echo or overload or fe_bo or accept_tab', '-q', '--tb=line']); raise SystemExit(0 if result.returncode == 1 else 1)"` | `mcp_server/tests/test_catalog_identity.py`, `tests/test_catalog_service.py` | present | green |
-| 01-03-T2 | 01-03 | 3 | IDEN-07, IDEN-08, IDEN-10, IDEN-11, IDEN-13, SAFE-05, TEST-03 | T-01-11..14 | Versioned UUID helpers + pure future kinds + echo | unit GREEN | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_identity.py mcp_server/tests/test_catalog_service.py mcp_server/tests/test_catalog_store_unit.py -q --tb=line` | `mcp_server/src/services/catalog_identity.py`, `tests/test_catalog_identity.py`, `tests/test_catalog_service.py`, `tests/test_catalog_store_unit.py` | present | green |
-| 01-04-T1 | 01-04 | 4 | CONT-07, SAFE-08 | T-01-15..18 | Structured error + FastMCP typed boundary + spies RED | unit RED | `uv run --project mcp_server python -c "import subprocess, sys; result = subprocess.run([sys.executable, '-m', 'pytest', '-c', 'mcp_server/pytest.ini', 'mcp_server/tests/test_catalog_models.py', 'mcp_server/tests/test_catalog_service.py', '-k', 'structured_error or no_side_effect or never_call or typed_pydantic or production_boundary', '-q', '--tb=line']); raise SystemExit(0 if result.returncode == 1 else 1)"` | `mcp_server/tests/test_catalog_models.py`, `tests/test_catalog_service.py` | present | green |
-| 01-04-T2 | 01-04 | 4 | CONT-07, SAFE-08 | T-01-15..18 | Converter + production FastMCP model_validate boundary | unit GREEN | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_models.py mcp_server/tests/test_catalog_identity.py mcp_server/tests/test_catalog_service.py mcp_server/tests/test_catalog_store_unit.py -q --tb=line` | `mcp_server/src/models/catalog_common.py`, `catalog_responses.py`, `graphiti_mcp_server.py`, `tests/test_catalog_models.py`, `tests/test_catalog_service.py` | present | green |
-| 01-05-T1 | 01-05 | 5 | TEST-01, TEST-03 (gate) | T-01-19..22 | Truthful focused pytest+ruff+pyright gate ledger | gate | `uv run --project mcp_server python -c "from pathlib import Path; import re; p=Path('.planning/phases/01-strict-contracts-and-catalog-v2-identity/01-PHASE1-GATE.md'); assert p.is_file(), 'gate missing'; t=p.read_text(encoding='utf-8'); required={'focused_pytest':{'pass','fail'},'scoped_ruff':{'pass','fail'},'scoped_pyright':{'pass','fail'},'catalog_neo4j_int':{'pass','fail','skip'},'safety_invariants':{'pass','fail'},'edge_probe':{'pass','fail'},'ready_for_phase_2':{'true','false'},'canary_executed':{'false'},'oracle_catalog_v2_queried':{'false'},'no_new_store_or_control_plane_write_path':{'true','false'},'resolved':{'53'},'unresolved':{'0'}}; pairs=[m.groups() for line in t.splitlines() if (m:=re.fullmatch(r'([A-Za-z0-9_]+)=(pass|fail|skip|true|false|\d+)', line.strip())) and m.group(1) in required]; keys=[k for k,_ in pairs]; assert len(keys)==len(set(keys)), 'duplicate gate keys '+str(keys); vals=dict(pairs); missing=[k for k in required if k not in vals]; assert not missing, 'missing keys '+str(missing); bad=[k for k,allowed in required.items() if vals[k] not in allowed]; assert not bad, 'invalid values '+str({k:vals[k] for k in bad}); reqs=['CONT-01','CONT-02','CONT-03','CONT-04','CONT-05','CONT-06','CONT-07','CONT-08','IDEN-01','IDEN-02','IDEN-03','IDEN-04','IDEN-05','IDEN-06','IDEN-07','IDEN-08','IDEN-09','IDEN-10','IDEN-11','IDEN-12','IDEN-13','SAFE-05','SAFE-08','TEST-01','TEST-03']; missing_reqs=[r for r in reqs if r not in t]; assert not missing_reqs, 'missing reqs '+str(missing_reqs); expected_ready=(vals['focused_pytest']=='pass' and vals['scoped_ruff']=='pass' and vals['scoped_pyright']=='pass' and vals['safety_invariants']=='pass' and vals['edge_probe']=='pass' and vals['no_new_store_or_control_plane_write_path']=='true' and vals['resolved']=='53' and vals['unresolved']=='0' and vals['canary_executed']=='false' and vals['oracle_catalog_v2_queried']=='false'); declared=vals['ready_for_phase_2']=='true'; assert declared==expected_ready, f'ready declared={declared} expected={expected_ready} vals={vals}'; print('01-05-T1 gate OK ready=', declared)"` | `.planning/phases/01-strict-contracts-and-catalog-v2-identity/01-PHASE1-GATE.md` | present | green |
-| 01-05-T2 | 01-05 | 5 | all Phase 1 edge probes | T-01-23 | VALIDATION statuses from real results; edge-probe 53/53 | gate assert | `uv run --project mcp_server python -c "import json, re; from pathlib import Path; d=json.load(open('.planning/phases/01-strict-contracts-and-catalog-v2-identity/01-EDGE-PROBE.json', encoding='utf-8')); c=d['coverage']; assert c['applicable']==53 and c['resolved']==53 and c['unresolved']==0; assert all(i['status']=='resolved' and i['verification'] in ('explicit','backstop') and i.get('resolution') for i in d['items']); assert c['no_silent_drop']['null_dispositions']==0 and c['no_silent_drop']['key_equality'] is True and c['no_silent_drop']['source_count']==53 and c['no_silent_drop']['resolved_count']==53; t=Path('.planning/phases/01-strict-contracts-and-catalog-v2-identity/01-VALIDATION.md').read_text(encoding='utf-8'); rows=re.findall(r'^\| (01-0[1-5]-T[12]) \|', t, re.M); expected_rows=['01-01-T1','01-01-T2','01-02-T1','01-02-T2','01-03-T1','01-03-T2','01-04-T1','01-04-T2','01-05-T1','01-05-T2']; assert rows==expected_rows, rows; assert len(rows)==len(set(rows))==10; assert ('T'+'BD') not in t; assert 'wave_0_complete' in t and 'nyquist_compliant' in t and 'Approval' in t; g=Path('.planning/phases/01-strict-contracts-and-catalog-v2-identity/01-PHASE1-GATE.md').read_text(encoding='utf-8'); ready=bool(re.search(r'(?m)^ready_for_phase_2=true$', g)); assert (not ready) or (('pen'+'ding') not in t.lower()); print('01-05-T2 probe+validation OK')"` | `01-VALIDATION.md`, `01-EDGE-PROBE.json` | present | green |
-
-*Status legend: green · red · flaky · incomplete — Plan 01-05 Task 2 updates from real results only.*
-
-**Map counts:** 10 task rows · plans 01-01..01-05 · waves 1..5 · zero placeholder plan IDs.
-
----
-
-## Wave 0 Requirements
-
-- [x] Strict/recursive-extra/misspelling matrix covering every request and nested model. (01-01-T1/T2)
-- [x] Literal `strict_endpoints` and `atomic` rejection tests. (01-01-T1/T2)
-- [x] Raw-byte preservation tests for hash-bearing text. (01-01-T1/T2)
-- [x] Positive/negative grammar table for all 18 entity types. (01-02-T1/T2)
-- [x] FE/BO, package/standalone overload, catalog-v1 rejection, versioned UUID tests. (01-02, 01-03)
-- [x] Safe structured error shape and validation-before-side-effect spies + FastMCP typed boundary. (01-04-T1/T2)
-- [x] Shared fixture helpers migrated to catalog-v2 keys and required shell fields. (01-01..01-03)
-- [x] IDEN-08 exact complete graph_key echo (model + service). (01-02, 01-03)
-- [x] `01-PHASE1-GATE.md` truthful gate ledger. (01-05-T1)
-- [x] Edge-probe 53/53 resolved zero null dispositions. (01-05-T2)
-- [x] No new framework or dependency.
-
----
-
-## Manual-Only Verifications
-
-All Phase 1 behaviors have automated unit/source/git verification. No manual-only waiver permits Phase 2 entry.
-
----
-
-## Baseline Comparison
-
-- Phase 0 canary-script failures remain separately recorded; Phase 1 does not repair or relabel them.
-- Focused model/identity/service/store tests end green (414 passed at gate).
-- Scoped Ruff and Pyright green at gate.
-- No test or command ran the canary or accessed `oracle-catalog-v2`.
-
----
-
-## Edge-Probe Coverage (asserted)
-
-| Metric | Value |
-|--------|-------|
-| applicable | 53 |
-| resolved | 53 |
-| unresolved | 0 |
-| explicit | 44 |
-| backstop | 9 |
-| null dispositions | 0 |
-| no_silent_drop key_equality | true |
-
-Plan 01-05 Task 2 re-asserted these counts from `01-EDGE-PROBE.json` after execution.
-
----
+- Decode each backtick payload with `json.loads`; require exactly `argv` and `expected_exit`.
+- Pass `argv` directly to `subprocess.run(..., shell=False, cwd=repo_root)`.
+- Reject shell executables, standalone shell-control/redirection elements, malformed argv, nonzero real results, and historical return-code inversion programs.
+- Do not infer row success from a broader suite.
+- The deliberate runner propagation sentinel expects nonzero internally, but its enclosing row exits zero only after proving propagation.
 
 ## Validation Sign-Off
 
-- [x] Every task has automated verification.
-- [x] No 3 consecutive tasks lack focused feedback.
-- [x] Wave 0 covers every missing reference.
-- [x] No watch-mode flags.
-- [x] Feedback latency < 240 seconds.
-- [x] Edge-probe unresolved=0 and null_dispositions=0.
-- [x] `nyquist_compliant: true` set only after all Phase 1 gates pass (Plan 01-05 from real results).
-- [x] `wave_0_complete: true` set only when Wave 0 checklist is actually green.
+- [ ] Every current-HEAD row executed successfully with `shell=False`.
+- [ ] Nine exact edge-probe nodes collected once and passed.
+- [ ] All mandatory final checks captured and passed.
+- [ ] `nyquist_compliant: true` derived in memory only after complete green evidence.
 
-**Approval:** approved — Plan 01-05 signed off from real gate output (`ready_for_phase_2=true` in `01-PHASE1-GATE.md`).
+**Approval:** pending final Plan 01-08 gate derivation.
