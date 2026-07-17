@@ -1334,8 +1334,7 @@ class CatalogNeo4jStore:
         zero property mutation on matched unchanged; vector only on created/updated.
         Identity fields set only ON CREATE.
         """
-        # Never SET e.episodes on content update — provenance append owns the list.
-        # Create path still seeds episodes=[] for EntityEdge hydration.
+        # Preserve appended provenance; heal only legacy null for EntityEdge hydration.
         updated_set = """
                 e.fact = $fact,
                 e.evidence = $evidence,
@@ -1343,7 +1342,8 @@ class CatalogNeo4jStore:
                 e.confidence = $confidence,
                 e.batch_id = $batch_id,
                 e.content_sha256 = $content_sha256,
-                e.updated_at = $updated_at
+                e.updated_at = $updated_at,
+                e.episodes = coalesce(e.episodes, $episodes)
         """.strip()
 
         return f"""
