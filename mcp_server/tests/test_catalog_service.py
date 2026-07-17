@@ -3174,6 +3174,93 @@ async def test_batch_transaction_claim_rejects_different_hash_before_domain_writ
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['entity', 'edge'])
+async def test_batch_unchanged_domain_drift_aborts_before_commit_status(kind):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    events = _install_batch_write_mocks(service, client)
+    employee = _entity()
+    employee_uuid = catalog_entity_uuid(FIXED_NS, GROUP, employee.entity_type, employee.graph_key)
+    employee_hash = canonical_sha256(service.entity_canonical_payload(employee))
+    entities = [employee]
+    edges = []
+
+    if kind == 'entity':
+        entity_calls = {'count': 0}
+
+        async def _entity_by_uuid(executor, *, uuid, group_id, tx=None):
+            _ = executor, uuid, group_id
+            entity_calls['count'] += 1
+            return {
+                'uuid': employee_uuid,
+                'content_sha256': employee_hash if tx is None else 'f' * 64,
+                'labels': ['Entity', 'Table'],
+                'name': employee.graph_key,
+                'graph_key': employee.graph_key,
+                'name_raw': employee.name_raw,
+                'name_canonical': employee.name_canonical,
+            }
+
+        service._store.get_entity_by_uuid = AsyncMock(side_effect=_entity_by_uuid)
+    else:
+        department = _entity(
+            graph_key='TABLE::HR.DEPARTMENTS',
+            name_raw='DEPARTMENTS',
+            name_canonical='departments',
+            database_qualified_name='HR.DEPARTMENTS',
+        )
+        entities = [employee, department]
+        edge = _edge()
+        edges = [edge]
+        edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
+        edge_hash = canonical_sha256(service.edge_canonical_payload(edge))
+
+        async def _entity_by_uuid(executor, *, uuid, group_id, tx=None):
+            _ = executor, group_id, tx
+            item = employee if uuid == employee_uuid else department
+            return {
+                'uuid': uuid,
+                'content_sha256': canonical_sha256(service.entity_canonical_payload(item)),
+                'labels': ['Entity', item.entity_type],
+                'name': item.graph_key,
+                'graph_key': item.graph_key,
+                'name_raw': item.name_raw,
+                'name_canonical': item.name_canonical,
+            }
+
+        async def _edge_by_uuid(executor, *, uuid, group_id, tx=None):
+            _ = executor, group_id
+            return {
+                'uuid': edge_uuid,
+                'content_sha256': edge_hash if tx is None else 'f' * 64,
+                'name': edge.edge_type,
+                'edge_key': edge.edge_key,
+                'source_uuid': catalog_entity_uuid(
+                    FIXED_NS, GROUP, edge.source_entity_type, edge.source_graph_key
+                ),
+                'target_uuid': catalog_entity_uuid(
+                    FIXED_NS, GROUP, edge.target_entity_type, edge.target_graph_key
+                ),
+            }
+
+        service._store.get_entity_by_uuid = AsyncMock(side_effect=_entity_by_uuid)
+        service._store.get_edge_by_uuid = AsyncMock(side_effect=_edge_by_uuid)
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(entities=entities, edges=edges),
+    )
+
+    assert resp.status == 'failed'
+    assert resp.error_code in (
+        CatalogErrorCode.batch_conflict,
+        CatalogErrorCode.neo4j_transaction_failed,
+    )
+    assert 'status_committed' not in events
+
+
+@pytest.mark.asyncio
 async def test_batch_domain_failure_rolls_back_then_writes_failed_status_separately():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())

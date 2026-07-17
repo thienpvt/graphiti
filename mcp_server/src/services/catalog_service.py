@@ -4272,28 +4272,27 @@ class CatalogService:
                 written_request_entities: set[str] = set()
                 for prep in entity_prepared:
                     status = prep.projected_status
+                    existing = await self._store.get_entity_by_uuid(
+                        None,
+                        uuid=prep.entity_uuid,
+                        group_id=request.group_id,
+                        tx=tx,
+                    )
+                    if existing is None and status == 'unchanged':
+                        raise self._EntityInvariantRace(CatalogErrorCode.missing_endpoint)
+                    if existing is not None:
+                        if self._entity_label_conflict(existing, prep.item.entity_type) is not None:
+                            raise self._EntityInvariantRace(CatalogErrorCode.entity_type_conflict)
+                        if self._entity_identity_property_conflict(existing, prep.item) is not None:
+                            raise self._EntityInvariantRace(
+                                CatalogErrorCode.deterministic_uuid_conflict
+                            )
+                        if (
+                            status == 'unchanged'
+                            and existing.get('content_sha256') != prep.content_sha256
+                        ):
+                            raise self._EntityInvariantRace(CatalogErrorCode.batch_conflict)
                     if status != 'unchanged':
-                        existing = await self._store.get_entity_by_uuid(
-                            None,
-                            uuid=prep.entity_uuid,
-                            group_id=request.group_id,
-                            tx=tx,
-                        )
-                        if existing is not None:
-                            if (
-                                self._entity_label_conflict(existing, prep.item.entity_type)
-                                is not None
-                            ):
-                                raise self._EntityInvariantRace(
-                                    CatalogErrorCode.entity_type_conflict
-                                )
-                            if (
-                                self._entity_identity_property_conflict(existing, prep.item)
-                                is not None
-                            ):
-                                raise self._EntityInvariantRace(
-                                    CatalogErrorCode.deterministic_uuid_conflict
-                                )
                         row = await self._store.upsert_entity_item(
                             tx,
                             entity_type=prep.item.entity_type,
@@ -4326,14 +4325,19 @@ class CatalogService:
 
                 for prep in edge_prepared:
                     status = prep.projected_status
-                    if status != 'unchanged':
-                        await self._batch_recheck_edge_in_tx(
-                            tx,
-                            prep,
-                            request,
-                            request_entity_uuids,
-                            written_request_entities,
-                        )
+                    existing = await self._batch_recheck_edge_in_tx(
+                        tx,
+                        prep,
+                        request,
+                        request_entity_uuids,
+                        written_request_entities,
+                    )
+                    if status == 'unchanged':
+                        if existing is None:
+                            raise self._EdgeEndpointRace(CatalogErrorCode.missing_endpoint)
+                        if existing.get('content_sha256') != prep.content_sha256:
+                            raise self._EdgeEndpointRace(CatalogErrorCode.batch_conflict)
+                    else:
                         row = await self._store.upsert_edge_item(
                             tx,
                             params=self._store.prepare_edge_params(
@@ -4549,8 +4553,8 @@ class CatalogService:
         request: UpsertCatalogBatchRequest,
         request_entity_uuids: dict[tuple[str, str], str],
         written_request_entities: set[str],
-    ) -> None:
-        """Recheck persisted endpoints; same-request endpoints exist after entity writes."""
+    ) -> dict[str, Any] | None:
+        """Recheck persisted endpoints and return the transaction-local edge row."""
         for entity_type, graph_key, expected_uuid in (
             (prep.item.source_entity_type, prep.item.source_graph_key, prep.source_uuid),
             (prep.item.target_entity_type, prep.item.target_graph_key, prep.target_uuid),
@@ -4591,3 +4595,4 @@ class CatalogService:
             target_uuid=prep.target_uuid or '',
         ):
             raise self._EdgeEndpointRace(CatalogErrorCode.edge_identity_conflict)
+        return existing
