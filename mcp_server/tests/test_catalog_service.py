@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -146,6 +146,22 @@ def test_catalog_logger_templates_omit_group_id():
     assert all(
         all('group_id' not in argument for argument in arguments)
         for _, _, _, arguments in catalog_calls
+    )
+
+
+def _catalog_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.getMessage().startswith('catalog ')]
+
+
+def _assert_group_id_absent(records: list[logging.LogRecord], group_id: str = GROUP) -> None:
+    assert records
+    assert all(group_id not in record.getMessage() for record in records)
+    assert all(group_id not in record.msg for record in records)
+    assert all(
+        group_id not in argument
+        for record in records
+        for argument in (record.args if isinstance(record.args, tuple) else ())
+        if isinstance(argument, str)
     )
 
 
@@ -835,6 +851,18 @@ async def test_resolve_non_neo4j_backend_unavailable():
     )
     service._store.match_entities_for_resolve.assert_not_awaited()
     assert 'embed' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_catalog_resolve_logs_omit_group_id_runtime(caplog: pytest.LogCaptureFixture):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(return_value=[])
+
+    with caplog.at_level(logging.INFO):
+        await service.resolve_typed_entities(client=client, request=_resolve_request())
+
+    _assert_group_id_absent(_catalog_records(caplog))
 
 
 @pytest.mark.asyncio
@@ -3054,6 +3082,18 @@ async def test_status_missing_returns_structured_not_found_no_write():
 
 
 @pytest.mark.asyncio
+async def test_catalog_status_logs_omit_group_id_runtime(caplog: pytest.LogCaptureFixture):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_batch_status = AsyncMock(return_value=None)
+
+    with caplog.at_level(logging.INFO):
+        await service.get_catalog_ingest_status(client=client, request=_status_request())
+
+    _assert_group_id_absent(_catalog_records(caplog))
+
+
+@pytest.mark.asyncio
 async def test_status_reinit_new_service_reads_from_store():
     """Restart simulation: new CatalogService + same store still reads Neo4j state."""
     client = _make_client()
@@ -4391,6 +4431,38 @@ def test_no_side_effect_on_false_immutable_flags_and_unknown_nested_fields():
     service.upsert_typed_entities.assert_not_called()
     service.upsert_typed_edges.assert_not_called()
     service.upsert_catalog_batch.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('function_name', 'request_factory'),
+    [
+        ('resolve_typed_entities', _resolve_request),
+        ('verify_catalog_batch', _verify_request),
+        ('get_catalog_ingest_status', _status_request),
+    ],
+)
+async def test_catalog_wrapper_failure_logs_omit_group_id_runtime(
+    caplog: pytest.LogCaptureFixture,
+    function_name: str,
+    request_factory,
+):
+    server = _mcp_server()
+    request = request_factory()
+    failing_graphiti = SimpleNamespace(
+        config=SimpleNamespace(catalog_upsert=_enabled_config()),
+        get_client=AsyncMock(side_effect=RuntimeError('forced wrapper failure')),
+    )
+
+    with (
+        patch.object(server, 'graphiti_service', failing_graphiti),
+        patch.object(server, 'catalog_service', None),
+        caplog.at_level(logging.ERROR),
+    ):
+        await getattr(server, function_name)(request)
+
+    records = [record for record in caplog.records if function_name in record.getMessage()]
+    _assert_group_id_absent(records)
 
 
 @pytest.mark.asyncio

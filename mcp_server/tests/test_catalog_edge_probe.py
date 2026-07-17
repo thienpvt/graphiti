@@ -7,7 +7,7 @@ import json
 import sys
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -59,7 +59,7 @@ async def _validate(payload: dict[str, Any]) -> UpsertTypedEntitiesRequest:
     return UpsertTypedEntitiesRequest.model_validate(payload)
 
 
-async def _errors(payload: dict[str, Any]) -> list[dict[str, Any]]:
+async def _errors(payload: dict[str, Any]) -> list[Any]:
     await asyncio.sleep(0)
     try:
         UpsertTypedEntitiesRequest.model_validate(payload)
@@ -168,8 +168,10 @@ async def test_edge_probe_iden01_validation_concurrency():
         ValidationError,
         UpsertTypedEntitiesRequest,
     ]
-    assert results[0].batch_id == 'valid-a'
-    assert results[2].batch_id == 'valid-b'
+    valid_a = cast(UpsertTypedEntitiesRequest, results[0])
+    valid_b = cast(UpsertTypedEntitiesRequest, results[2])
+    assert valid_a.batch_id == 'valid-a'
+    assert valid_b.batch_id == 'valid-b'
     invalid = results[1]
     assert isinstance(invalid, ValidationError)
     assert invalid.errors()[0]['loc'] == ('identity_schema_version',)

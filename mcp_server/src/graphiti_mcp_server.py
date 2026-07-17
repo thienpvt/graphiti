@@ -1338,8 +1338,7 @@ async def resolve_typed_entities(
         return await catalog_service.resolve_typed_entities(client=client, request=request)
     except Exception as e:
         logger.error(
-            'resolve_typed_entities failed group_id=%s count=%s reason=%s',
-            getattr(request, 'group_id', None),
+            'resolve_typed_entities failed count=%s reason=%s',
             len(getattr(request, 'entities', []) or []),
             type(e).__name__,
         )
@@ -1363,8 +1362,7 @@ async def verify_catalog_batch(
         return await catalog_service.verify_catalog_batch(client=client, request=request)
     except Exception as e:
         logger.error(
-            'verify_catalog_batch failed group_id=%s batch_id=%s reason=%s',
-            getattr(request, 'group_id', None),
+            'verify_catalog_batch failed batch_id=%s reason=%s',
             getattr(request, 'batch_id', None),
             type(e).__name__,
         )
@@ -1451,8 +1449,7 @@ async def get_catalog_ingest_status(
         return await catalog_service.get_catalog_ingest_status(client=client, request=request)
     except Exception as e:
         logger.error(
-            'get_catalog_ingest_status failed group_id=%s batch_id=%s reason=%s',
-            getattr(request, 'group_id', None),
+            'get_catalog_ingest_status failed batch_id=%s reason=%s',
             getattr(request, 'batch_id', None),
             type(e).__name__,
         )

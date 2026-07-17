@@ -1102,8 +1102,7 @@ class CatalogService:
                 for i, ref in enumerate(refs)
             ]
             logger.info(
-                'catalog resolve_typed_entities gated group_id=%s count=%s code=%s',
-                request.group_id,
+                'catalog resolve_typed_entities gated count=%s code=%s',
                 len(refs),
                 code,
             )
@@ -1122,8 +1121,7 @@ class CatalogService:
             )
         except Exception as exc:
             logger.error(
-                'catalog resolve_typed_entities read_failed group_id=%s count=%s reason=%s',
-                request.group_id,
+                'catalog resolve_typed_entities read_failed count=%s reason=%s',
                 len(refs),
                 type(exc).__name__,
             )
@@ -1166,8 +1164,7 @@ class CatalogService:
             results.append(result)
 
         logger.info(
-            'catalog resolve_typed_entities group_id=%s count=%s found=%s',
-            request.group_id,
+            'catalog resolve_typed_entities count=%s found=%s',
             len(refs),
             sum(1 for r in results if r.found),
         )
@@ -1341,8 +1338,7 @@ class CatalogService:
         if gate is not None:
             code, message = gate
             logger.info(
-                'catalog verify_catalog_batch gated group_id=%s batch_id=%s code=%s',
-                request.group_id,
+                'catalog verify_catalog_batch gated batch_id=%s code=%s',
                 request.batch_id,
                 code,
             )
@@ -1386,8 +1382,7 @@ class CatalogService:
             )
         except Exception as exc:
             logger.error(
-                'catalog verify_catalog_batch read_failed group_id=%s batch_id=%s reason=%s',
-                request.group_id,
+                'catalog verify_catalog_batch read_failed batch_id=%s reason=%s',
                 request.batch_id,
                 type(exc).__name__,
             )
@@ -1470,9 +1465,7 @@ class CatalogService:
                 )
             except Exception as exc:
                 logger.error(
-                    'catalog verify_catalog_batch provenance_read_failed group_id=%s '
-                    'batch_id=%s reason=%s',
-                    request.group_id,
+                    'catalog verify_catalog_batch provenance_read_failed batch_id=%s reason=%s',
                     request.batch_id,
                     type(exc).__name__,
                 )
@@ -1493,8 +1486,7 @@ class CatalogService:
                     missing_provenance.append(u)
 
         logger.info(
-            'catalog verify_catalog_batch group_id=%s batch_id=%s entities=%s edges=%s',
-            request.group_id,
+            'catalog verify_catalog_batch batch_id=%s entities=%s edges=%s',
             request.batch_id,
             entity_section.found,
             edge_section.found,
@@ -3404,8 +3396,7 @@ class CatalogService:
         if gate is not None:
             code, message = gate
             logger.info(
-                'catalog get_catalog_ingest_status gated group_id=%s batch_id=%s code=%s',
-                group_id,
+                'catalog get_catalog_ingest_status gated batch_id=%s code=%s',
                 batch_id,
                 code,
             )
@@ -3429,8 +3420,7 @@ class CatalogService:
             )
         except Exception as exc:
             logger.error(
-                'catalog get_catalog_ingest_status read_failed group_id=%s batch_id=%s reason=%s',
-                group_id,
+                'catalog get_catalog_ingest_status read_failed batch_id=%s reason=%s',
                 batch_id,
                 type(exc).__name__,
             )
@@ -3445,8 +3435,7 @@ class CatalogService:
 
         if row is None:
             logger.info(
-                'catalog get_catalog_ingest_status missing group_id=%s batch_id=%s',
-                group_id,
+                'catalog get_catalog_ingest_status missing batch_id=%s',
                 batch_id,
             )
             return CatalogIngestStatusResponse(
@@ -3477,8 +3466,7 @@ class CatalogService:
             err_summary = err_summary[:512]
 
         logger.info(
-            'catalog get_catalog_ingest_status group_id=%s batch_id=%s status=%s',
-            group_id,
+            'catalog get_catalog_ingest_status batch_id=%s status=%s',
             batch_id,
             status,
         )
