@@ -1103,7 +1103,7 @@ def test_batch_status_claim_and_terminal_write_are_conflict_guarded():
     assert 'MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})' in claim
     assert "b.status = 'writing'" in claim
     assert 'b.request_sha256 = $request_sha256' in claim
-    assert "b.status = 'committed' AS already_committed" in terminal
+    assert "coalesce(b.status, '') = 'committed' AS already_committed" in terminal
     assert 'b.request_sha256 <> $request_sha256 AS hash_conflict' in terminal
     assert 'NOT already_committed AND NOT hash_conflict' in terminal
 

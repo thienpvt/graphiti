@@ -1114,7 +1114,7 @@ class CatalogNeo4jStore:
                 b.batch_id = $batch_id,
                 b.created_at = $created_at
             WITH b,
-                 b.status = 'committed' AS already_committed,
+                 coalesce(b.status, '') = 'committed' AS already_committed,
                  b.request_sha256 IS NOT NULL
                    AND b.request_sha256 <> $request_sha256 AS hash_conflict
             FOREACH (_ IN CASE
