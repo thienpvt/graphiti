@@ -9,7 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -96,7 +96,7 @@ def _request(
     entities: list[CatalogEntityItem] | None = None,
     *,
     dry_run: bool = False,
-    atomic: bool = True,
+    atomic: Literal[True] = True,
     batch_id: str = BATCH,
 ) -> UpsertTypedEntitiesRequest:
     return UpsertTypedEntitiesRequest(
@@ -435,8 +435,12 @@ async def test_entity_changed_update_passes_request_batch_id():
 
 @pytest.mark.asyncio
 async def test_entity_atomic_rollback_on_store_failure():
-    e1 = _entity(graph_key='TABLE::FE::ORCL.A.T1', database_qualified_name='ORCL.A.T1', name_raw='T1')
-    e2 = _entity(graph_key='TABLE::FE::ORCL.A.T2', database_qualified_name='ORCL.A.T2', name_raw='T2')
+    e1 = _entity(
+        graph_key='TABLE::FE::ORCL.A.T1', database_qualified_name='ORCL.A.T1', name_raw='T1'
+    )
+    e2 = _entity(
+        graph_key='TABLE::FE::ORCL.A.T2', database_qualified_name='ORCL.A.T2', name_raw='T2'
+    )
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
@@ -549,8 +553,12 @@ async def test_entity_logs_batch_id_and_counts_only(caplog):
 
 @pytest.mark.asyncio
 async def test_entity_preserves_input_order_and_deterministic_uuid():
-    e1 = _entity(graph_key='TABLE::FE::ORCL.A.T1', database_qualified_name='ORCL.A.T1', name_raw='T1')
-    e2 = _entity(graph_key='TABLE::FE::ORCL.A.T2', database_qualified_name='ORCL.A.T2', name_raw='T2')
+    e1 = _entity(
+        graph_key='TABLE::FE::ORCL.A.T1', database_qualified_name='ORCL.A.T1', name_raw='T1'
+    )
+    e2 = _entity(
+        graph_key='TABLE::FE::ORCL.A.T2', database_qualified_name='ORCL.A.T2', name_raw='T2'
+    )
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
@@ -570,7 +578,9 @@ async def test_entity_preserves_input_order_and_deterministic_uuid():
     assert [r.index for r in resp.results] == [0, 1]
     assert resp.results[0].graph_key == 'TABLE::FE::ORCL.A.T1'
     assert resp.results[1].graph_key == 'TABLE::FE::ORCL.A.T2'
-    assert resp.results[0].uuid == catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.A.T1')
+    assert resp.results[0].uuid == catalog_entity_uuid(
+        FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.A.T1'
+    )
     assert resp.results[0].content_sha256 is not None
     assert len(resp.results[0].content_sha256) == 64
 
@@ -1505,9 +1515,9 @@ def _edge_request(
     edges: list[CatalogEdgeItem] | None = None,
     *,
     dry_run: bool = False,
-    atomic: bool = True,
+    atomic: Literal[True] = True,
     batch_id: str = EDGE_BATCH,
-    strict_endpoints: bool = True,
+    strict_endpoints: Literal[True] = True,
 ) -> UpsertTypedEdgesRequest:
     return UpsertTypedEdgesRequest(
         identity_schema_version='catalog-v2',
@@ -2382,7 +2392,7 @@ def _prov_request(
     entity_targets: list[CatalogProvenanceEntityTarget] | None = None,
     edge_targets: list[CatalogProvenanceEdgeTarget] | None = None,
     dry_run: bool = False,
-    atomic: bool = True,
+    atomic: Literal[True] = True,
     batch_id: str = 'batch-prov-001',
 ) -> UpsertProvenanceRequest:
     return UpsertProvenanceRequest(
@@ -2392,7 +2402,11 @@ def _prov_request(
         batch_id=batch_id,
         sources=sources or [_source()],
         entity_targets=entity_targets
-        or [CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES')],
+        or [
+            CatalogProvenanceEntityTarget(
+                entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'
+            )
+        ],
         edge_targets=edge_targets or [],
         dry_run=dry_run,
         atomic=atomic,
@@ -2654,7 +2668,9 @@ async def test_provenance_unchanged_source_new_link_reports_updated(target_kind)
             return_value={'uuid': edge_uuid, 'name': edge.edge_type, 'episodes': []}
         )
         entity_targets = [
-            CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES')
+            CatalogProvenanceEntityTarget(
+                entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'
+            )
         ]
         service._store.get_mentions_link = AsyncMock(
             return_value={'uuid': catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, ent_uuid)}
@@ -2738,29 +2754,30 @@ async def test_provenance_atomic_cas_or_locked_link_drift_aborts_before_link_mut
     cast(AsyncMock, service._store.upsert_mentions_link).assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_provenance_non_atomic_transaction_failure_marks_prior_result_rolled_back():
-    client = _make_client()
-    service = CatalogService(catalog_config=_enabled_config())
+def test_provenance_request_rejects_non_atomic_false():
+    """catalog-v2 locks atomic=True; non-atomic path is not a valid request."""
+    from pydantic import ValidationError
+
     first = _source()
     second = _source(source_key='SRC::ddl.sql#departments')
-    _wire_provenance_store(service)
-    service._store.upsert_source_episode = AsyncMock(  # type: ignore[method-assign]
-        side_effect=[
-            {'uuid': 'first', 'status': 'created'},
-            RuntimeError('second source failed'),
-        ]
-    )
-
-    resp = await service.upsert_provenance(
-        client=client,
-        request=_prov_request(sources=[first, second], atomic=False),
-    )
-
-    assert resp.created == 0
-    assert resp.rolled_back == 1
-    assert resp.failed == 1
-    assert [result.status for result in resp.results] == ['rolled_back', 'error']
+    with pytest.raises(ValidationError) as exc:
+        UpsertProvenanceRequest.model_validate(
+            {
+                'identity_schema_version': 'catalog-v2',
+                'system_key': 'FE',
+                'group_id': GROUP,
+                'batch_id': 'batch-prov-001',
+                'sources': [first.model_dump(), second.model_dump()],
+                'entity_targets': [
+                    {
+                        'entity_type': 'Table',
+                        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                    }
+                ],
+                'atomic': False,
+            }
+        )
+    assert any('atomic' in str(err.get('loc')) for err in exc.value.errors())
 
 
 @pytest.mark.asyncio
@@ -3126,7 +3143,9 @@ async def test_batch_dry_run_resolves_missing_provenance_target_before_side_effe
     provenance = NestedProvenancePayload(
         sources=[_source()],
         entity_targets=[
-            CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.MISSING')
+            CatalogProvenanceEntityTarget(
+                entity_type='Table', graph_key='TABLE::FE::ORCL.HR.MISSING'
+            )
         ],
     )
 

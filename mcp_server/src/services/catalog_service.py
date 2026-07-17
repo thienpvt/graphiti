@@ -1076,24 +1076,6 @@ class CatalogService:
         Never opens a write transaction or calls the embedder.
         """
         refs = list(request.entities)
-        # Allow graph_keys-only convenience when entities empty (optional).
-        if not refs and request.graph_keys:
-            # Without entity_type we cannot fully resolve; treat as validation.
-            return ResolveTypedEntitiesResponse(
-                group_id=request.group_id,
-                results=[
-                    ResolveEntityResult(
-                        index=0,
-                        entity_type='',
-                        graph_key='',
-                        status='error',
-                        found=False,
-                        error_code=CatalogErrorCode.validation_error,
-                        error_message='entities with entity_type required for resolve',
-                        anomalies=['validation_error'],
-                    )
-                ],
-            )
 
         gate = self._read_gate(client, group_id=request.group_id, item_count=len(refs))
         if gate is not None:
@@ -1637,8 +1619,6 @@ class CatalogService:
                         for expected, actual_field in (
                             (edge.expected_source_uuid, 'source_uuid'),
                             (edge.expected_target_uuid, 'target_uuid'),
-                            (edge.expected_source_graph_key, 'source_graph_key'),
-                            (edge.expected_target_graph_key, 'target_graph_key'),
                         )
                     )
                     for row in matches
