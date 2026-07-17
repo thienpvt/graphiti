@@ -595,23 +595,22 @@ async def test_invalid_identity_schema_never_touches_store(mock_store, mock_embe
 
 **Conservative defaults:** A3 shell-level `system_key`; A2 `#overload`; no per-item system override in Phase 1.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Per-item vs request-level `system_key`**
-   - What we know: CONTEXT requires system scope in every graph key and request declares system_key.
-   - Unclear: mixed FE+BO entities in one batch.
-   - Recommendation: **request-level only** for Phase 1; mixed batches rejected (`invalid_system_key` / validation_error). Mixed FE/BO later via separate batches same `group_id`.
+   - **Resolved:** request-level only for Phase 1. Every nested domain key must match the shell scope. Mixed FE+BO content uses separate requests in the same `group_id`; no per-item override.
 
 2. **Where `system_key` attaches on resolve/verify read paths**
-   - Recommendation: require `identity_schema_version` + `system_key` on resolve/verify when graph keys are supplied, so grammar can check system segment consistency.
+   - **Resolved:** require `identity_schema_version` and `system_key` on resolve/verify requests whenever graph keys are supplied, enabling one grammar/scope check.
 
 3. **Edge key grammar**
-   - Live edge keys are free-form with prefix checks only on endpoint graph keys.
-   - Recommendation: Phase 1 validates **endpoint graph keys** fully; edge_key remains non-empty bounded string (edge topology authority is Phase 2). Do not invent edge_key grammar now.
+   - **Resolved:** Phase 1 fully validates endpoint graph keys; `edge_key` remains a bounded non-empty string. Phase 2 owns endpoint topology and any authoritative edge-key refinement.
 
 4. **SourceArtifact vs provenance `source_key`**
-   - Provenance sources today use free `source_key`; entity type `SourceArtifact` is new.
-   - Recommendation: entity graph_key for SourceArtifact uses `SOURCE::...` grammar; provenance `source_key` remains separate until Phase 2 evidence redesign — do not force them identical in Phase 1.
+   - **Resolved:** `SourceArtifact` entity keys use `SOURCE::...`; the current provenance `source_key` remains a separate catalog-v2 identity input until Phase 2 freezes the evidence contract.
+
+5. **Procedure/Function overload token**
+   - **Resolved:** require a final `#<OVERLOAD>` discriminator for both package and standalone Procedure/Function keys. Empty or missing discriminators fail grammar validation.
 
 ## Environment Availability
 
