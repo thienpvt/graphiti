@@ -22,7 +22,7 @@ from models.catalog_common import (
     CatalogStrictModel,
     validate_nested_json,
 )
-from models.catalog_graph_key import validate_entity_graph_key
+from models.catalog_graph_key import _match_entity_graph_key, validate_entity_graph_key
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -105,25 +105,11 @@ class CatalogEdgeItem(CatalogStrictModel):
     def _enforced_by_requires_evidence(self) -> CatalogEdgeItem:
         if self.edge_type == 'EnforcedBy' and (not self.evidence or not self.evidence.strip()):
             raise ValueError('EnforcedBy requires non-empty evidence')
-        for entity_type, graph_key, role in (
-            (self.source_entity_type, self.source_graph_key, 'source'),
-            (self.target_entity_type, self.target_graph_key, 'target'),
+        for entity_type, graph_key in (
+            (self.source_entity_type, self.source_graph_key),
+            (self.target_entity_type, self.target_graph_key),
         ):
-            prefix = ENTITY_TYPE_PREFIXES[entity_type]
-            if not graph_key.startswith(prefix):
-                raise ValueError(
-                    f'graph_key_prefix_mismatch: {role} {entity_type} requires prefix {prefix}'
-                )
-            remainder = graph_key[len(prefix) :]
-            system_part = remainder.split('::', 1)[0] if '::' in remainder else ''
-            if system_part not in {'FE', 'BO', 'COMMON'}:
-                validate_entity_graph_key(
-                    entity_type=entity_type, graph_key=graph_key, system_key='FE'
-                )
-            else:
-                validate_entity_graph_key(
-                    entity_type=entity_type, graph_key=graph_key, system_key=system_part
-                )
+            _match_entity_graph_key(entity_type, graph_key)
         return self
 
 

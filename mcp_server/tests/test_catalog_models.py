@@ -327,9 +327,7 @@ def test_upsert_entities_rejects_invalid_group_id():
         (
             ResolveTypedEntitiesRequest,
             lambda: {
-                'entities': [
-                    {'entity_type': 'Table', 'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES'}
-                ]
+                'entities': [{'entity_type': 'Table', 'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES'}]
             },
         ),
         (VerifyCatalogBatchRequest, lambda: {'batch_id': 'batch-1'}),
@@ -429,7 +427,9 @@ def test_entity_item_accepts_valid_content_sha256():
 
 def test_entity_collection_above_default_constructs_within_hard_max():
     entities = [
-        _entity_kwargs(graph_key=f'TABLE::FE::ORCL.HR.T{i}', name_raw=f'T{i}', name_canonical=f't{i}')
+        _entity_kwargs(
+            graph_key=f'TABLE::FE::ORCL.HR.T{i}', name_raw=f'T{i}', name_canonical=f't{i}'
+        )
         for i in range(501)
     ]
     request = UpsertTypedEntitiesRequest.model_validate(
@@ -446,7 +446,9 @@ def test_entity_collection_above_default_constructs_within_hard_max():
 
 def test_entity_collection_above_hard_max_rejected():
     entities = [
-        _entity_kwargs(graph_key=f'TABLE::FE::ORCL.HR.T{i}', name_raw=f'T{i}', name_canonical=f't{i}')
+        _entity_kwargs(
+            graph_key=f'TABLE::FE::ORCL.HR.T{i}', name_raw=f'T{i}', name_canonical=f't{i}'
+        )
         for i in range(HARD_MAX_ENTITIES_PER_BATCH + 1)
     ]
     with pytest.raises(ValidationError):
@@ -1303,9 +1305,9 @@ def test_catalog_strict_model_rejects_unknown_shell_and_nested_fields(
     with pytest.raises(ValidationError) as exc:
         model.model_validate(payload)
     locs = _loc_paths(exc.value)
-    assert any(
-        loc[-len(expected_loc_fragment) :] == expected_loc_fragment for loc in locs
-    ), f'expected loc fragment {expected_loc_fragment!r} in {locs!r}'
+    assert any(loc[-len(expected_loc_fragment) :] == expected_loc_fragment for loc in locs), (
+        f'expected loc fragment {expected_loc_fragment!r} in {locs!r}'
+    )
 
 
 def test_misspelled_optional_fields_rejected():
@@ -1375,7 +1377,11 @@ def test_atomic_false_rejected_on_entity_edge_provenance_batch_writes(model, pay
     [
         (
             UpsertTypedEntitiesRequest,
-            lambda: {'group_id': 'oracle-catalog-tool-test', 'batch_id': 'b', 'entities': [_entity_kwargs()]},
+            lambda: {
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'b',
+                'entities': [_entity_kwargs()],
+            },
         ),
         (
             ResolveTypedEntitiesRequest,
@@ -1430,9 +1436,7 @@ def test_identity_schema_version_required_and_rejects_non_v2(model_payload):
     ) or any('identity_schema_version' in str(err.get('loc')) for err in exc.value.errors())
 
     with pytest.raises(ValidationError) as exc:
-        model.model_validate(
-            {**base, 'identity_schema_version': 'catalog-v1', 'system_key': 'FE'}
-        )
+        model.model_validate({**base, 'identity_schema_version': 'catalog-v1', 'system_key': 'FE'})
     msg = str(exc.value).lower()
     assert 'identity_schema_version' in msg or 'catalog-v' in msg
 
@@ -1442,9 +1446,7 @@ def test_identity_schema_version_required_and_rejects_non_v2(model_payload):
     with pytest.raises(ValidationError):
         model.model_validate({**base, 'identity_schema_version': None, 'system_key': 'FE'})
 
-    ok = model.model_validate(
-        {**base, 'identity_schema_version': 'catalog-v2', 'system_key': 'FE'}
-    )
+    ok = model.model_validate({**base, 'identity_schema_version': 'catalog-v2', 'system_key': 'FE'})
     assert ok.identity_schema_version == 'catalog-v2'
 
 
@@ -1663,7 +1665,9 @@ def test_grammar_positive_key_per_entity_type(entity_type: str, graph_key: str):
 
     req = UpsertTypedEntitiesRequest.model_validate(
         {
-            **_v2_shell(batch_id='grammar-pos', entities=[_entity_for_type(entity_type, graph_key)]),
+            **_v2_shell(
+                batch_id='grammar-pos', entities=[_entity_for_type(entity_type, graph_key)]
+            ),
         }
     )
     assert req.entities[0].graph_key == graph_key
@@ -1797,8 +1801,7 @@ def test_source_artifact_graph_key_distinct_from_provenance_source_key_concept()
 
 def test_graph_key_echo_exact_equality_iden08_long_multi_segment():
     long_key = (
-        'COLUMN::FE::ORCL.HR.EMPLOYEES.'
-        'VERY_LONG_COLUMN_NAME_WITH_MANY_SEGMENTS_AND_DETAILS_001'
+        'COLUMN::FE::ORCL.HR.EMPLOYEES.VERY_LONG_COLUMN_NAME_WITH_MANY_SEGMENTS_AND_DETAILS_001'
     )
     submitted = _entity_for_type('Column', long_key)
     item = CatalogEntityItem.model_validate(submitted)
@@ -1853,7 +1856,9 @@ def test_resolve_typed_entities_forbids_raw_graph_keys_field():
         ResolveTypedEntitiesRequest.model_validate(
             {
                 **_v2_shell(
-                    entities=[{'entity_type': 'Table', 'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES'}],
+                    entities=[
+                        {'entity_type': 'Table', 'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES'}
+                    ],
                 ),
                 'graph_keys': ['TABLE::FE::ORCL.HR.EMPLOYEES', 'not-a-valid-key'],
             }
@@ -1883,12 +1888,7 @@ def test_verify_edge_ref_forbids_expected_raw_graph_key_fields(field: str):
 
 def _assert_shell_system_mismatch(exc: ValidationError) -> None:
     msg = str(exc).lower()
-    assert (
-        'invalid_system_key' in msg
-        or 'grammar' in msg
-        or 'system' in msg
-        or 'graph_key' in msg
-    )
+    assert 'invalid_system_key' in msg or 'grammar' in msg or 'system' in msg or 'graph_key' in msg
 
 
 def test_shell_mismatch_entity_upsert_path():

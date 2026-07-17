@@ -23,7 +23,7 @@ from models.catalog_common import (
     CatalogStrictModel,
     validate_nested_json,
 )
-from models.catalog_graph_key import validate_entity_graph_key
+from models.catalog_graph_key import _match_entity_graph_key, validate_entity_graph_key
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -110,29 +110,8 @@ class CatalogEntityItem(CatalogStrictModel):
 
     @model_validator(mode='after')
     def _graph_key_grammar(self) -> CatalogEntityItem:
-        # Shell-less item validation: accept any closed system segment; parent
-        # request re-validates against shell system_key (sole system authority).
-        prefix = ENTITY_TYPE_PREFIXES[self.entity_type]
-        if not self.graph_key.startswith(prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: {self.entity_type} requires prefix {prefix}'
-            )
-        # Extract system from PREFIX::{SYSTEM}::... for standalone item checks.
-        remainder = self.graph_key[len(prefix) :]
-        system_part = remainder.split('::', 1)[0] if '::' in remainder else ''
-        if system_part not in {'FE', 'BO', 'COMMON'}:
-            # Fail closed for missing/non-canonical system; parent may recheck.
-            validate_entity_graph_key(
-                entity_type=self.entity_type,
-                graph_key=self.graph_key,
-                system_key='FE',  # probe; mismatch still fails fullmatch if system bad
-            )
-            return self
-        validate_entity_graph_key(
-            entity_type=self.entity_type,
-            graph_key=self.graph_key,
-            system_key=system_part,
-        )
+        # Shell-less: fullmatch only; parent re-validates against shell system_key.
+        _match_entity_graph_key(self.entity_type, self.graph_key)
         return self
 
 
@@ -151,25 +130,7 @@ class ResolveEntityRef(CatalogStrictModel):
 
     @model_validator(mode='after')
     def _graph_key_grammar(self) -> ResolveEntityRef:
-        prefix = ENTITY_TYPE_PREFIXES[self.entity_type]
-        if not self.graph_key.startswith(prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: {self.entity_type} requires prefix {prefix}'
-            )
-        remainder = self.graph_key[len(prefix) :]
-        system_part = remainder.split('::', 1)[0] if '::' in remainder else ''
-        if system_part not in {'FE', 'BO', 'COMMON'}:
-            validate_entity_graph_key(
-                entity_type=self.entity_type,
-                graph_key=self.graph_key,
-                system_key='FE',
-            )
-            return self
-        validate_entity_graph_key(
-            entity_type=self.entity_type,
-            graph_key=self.graph_key,
-            system_key=system_part,
-        )
+        _match_entity_graph_key(self.entity_type, self.graph_key)
         return self
 
 
@@ -214,7 +175,6 @@ class ResolveTypedEntitiesRequest(CatalogStrictModel):
     entities: list[ResolveEntityRef] = Field(
         default_factory=list, max_length=HARD_MAX_ENTITIES_PER_BATCH
     )
-    graph_keys: list[str] | None = Field(default=None, max_length=HARD_MAX_ENTITIES_PER_BATCH)
 
     @field_validator('group_id')
     @classmethod
@@ -250,39 +210,15 @@ class VerifyEntityRef(CatalogStrictModel):
 
     @model_validator(mode='after')
     def _graph_key_grammar(self) -> VerifyEntityRef:
-        prefix = ENTITY_TYPE_PREFIXES[self.entity_type]
-        if not self.graph_key.startswith(prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: {self.entity_type} requires prefix {prefix}'
-            )
-        remainder = self.graph_key[len(prefix) :]
-        system_part = remainder.split('::', 1)[0] if '::' in remainder else ''
-        if system_part not in {'FE', 'BO', 'COMMON'}:
-            validate_entity_graph_key(
-                entity_type=self.entity_type,
-                graph_key=self.graph_key,
-                system_key='FE',
-            )
-            return self
-        validate_entity_graph_key(
-            entity_type=self.entity_type,
-            graph_key=self.graph_key,
-            system_key=system_part,
-        )
+        _match_entity_graph_key(self.entity_type, self.graph_key)
         return self
 
 
 class VerifyEdgeRef(CatalogStrictModel):
-    """Optional explicit edge key and expected endpoints for verify_catalog_batch."""
+    """Optional explicit edge key and expected endpoint UUIDs for verify_catalog_batch."""
 
     edge_type: str
     edge_key: str = Field(..., min_length=1, max_length=MAX_GRAPH_KEY_LENGTH)
-    expected_source_graph_key: str | None = Field(
-        default=None, min_length=1, max_length=MAX_GRAPH_KEY_LENGTH
-    )
-    expected_target_graph_key: str | None = Field(
-        default=None, min_length=1, max_length=MAX_GRAPH_KEY_LENGTH
-    )
     expected_source_uuid: str | None = Field(default=None, min_length=1)
     expected_target_uuid: str | None = Field(default=None, min_length=1)
 
