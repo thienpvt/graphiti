@@ -82,7 +82,7 @@ Plans:
   4. Caller UUIDs never control identity; structured errors expose safe diagnostics only
   5. Unit coverage for recursive forbid, immutable flags, full entity grammar, FE/BO/overload separation, and UUID material versioning passes before Phase 2 write-adjacent work
 
-**Plans**: 3/5 plans executed
+**Plans**: 4/5 plans executed
 
 Plans:
 **Wave 1**
@@ -99,7 +99,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 01-04-PLAN.md — Structured safe errors + mandatory FastMCP typed CONT-07 production boundary + spies
+- [x] 01-04-PLAN.md — Structured safe errors + mandatory FastMCP typed CONT-07 production boundary + spies
 
 **Wave 5** *(blocked on Wave 4)*
 

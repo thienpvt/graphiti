@@ -21,7 +21,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **SAFE-05**: Caller-supplied UUIDs never control entity, edge, source, evidence-link, batch, manifest, or prepared-plan identity.
 - [ ] **SAFE-06**: Identity, type, endpoint, provenance, manifest, uniqueness, and hash conflicts fail closed; no graph data or constraints are silently repaired, merged, deleted, or rewritten.
 - [ ] **SAFE-07**: Catalog logs contain only safe identifiers, counts, and structured codes; they never contain payloads, source text, credentials, authorization headers, raw plan tokens, or full exception messages that may contain catalog content.
-- [ ] **SAFE-08**: Every new failure returns a documented structured code, bounded non-sensitive message, retryability, field path when applicable, and safe correlation identifier without leaking stack traces or internals.
+- [x] **SAFE-08**: Every new failure returns a documented structured code, bounded non-sensitive message, retryability, field path when applicable, and safe correlation identifier without leaking stack traces or internals.
 - [ ] **SAFE-09**: Existing 14 legacy MCP tools retain their names and public contracts; existing seven catalog tool names remain registered while catalog-v2 request contracts may break explicitly as documented.
 - [ ] **SAFE-10**: Every catalog read and write remains constrained by `group_id`; catalog writes remain Neo4j 5.26+ only with no unsupported backend-portability claim.
 - [ ] **SAFE-11**: Prepare computes required embeddings before persisting the immutable artifact; commit performs no external embedding, LLM, queue, or network call and embedding failure cannot leave a prepared artifact or any domain, provenance, manifest, status, or plan-terminal partial write.
@@ -36,7 +36,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **CONT-04**: Source strings and other hash-bearing text retain their submitted bytes; validators do not invisibly strip or normalize content before canonical hashing.
 - [x] **CONT-05**: `UpsertTypedEdgesRequest.strict_endpoints` accepts only literal `true`, or is removed through an explicit documented migration; `false` is always rejected.
 - [x] **CONT-06**: `UpsertCatalogBatchRequest.atomic` remains literal `true`; non-atomic combined catalog writes are rejected.
-- [ ] **CONT-07**: Complete model, collection, string, hash, prefix, nested-reference, confidence, finite-number, and protected-property validation occurs before side effects.
+- [x] **CONT-07**: Complete model, collection, string, hash, prefix, nested-reference, confidence, finite-number, and protected-property validation occurs before side effects.
 - [x] **CONT-08**: The structured error registry includes `unsupported_identity_schema`, `invalid_system_key`, `edge_endpoint_pair_not_allowed`, `prepared_plan_not_found`, `prepared_plan_expired`, `prepared_plan_conflict`, `prepared_plan_already_consumed`, `manifest_mismatch`, and `provenance_link_conflict` without removing existing catalog codes.
 
 ### Catalog-v2 Identity
@@ -226,7 +226,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | SAFE-05 | Phase 1 | Complete |
 | SAFE-06 | Phase 5 | Pending |
 | SAFE-07 | Phase 5 | Pending |
-| SAFE-08 | Phase 1 | Pending |
+| SAFE-08 | Phase 1 | Complete |
 | SAFE-09 | Phase 5 | Pending |
 | SAFE-10 | Phase 5 | Pending |
 | SAFE-11 | Phase 3A | Pending |
@@ -238,7 +238,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | CONT-04 | Phase 1 | Complete |
 | CONT-05 | Phase 1 | Complete |
 | CONT-06 | Phase 1 | Complete |
-| CONT-07 | Phase 1 | Pending |
+| CONT-07 | Phase 1 | Complete |
 | CONT-08 | Phase 1 | Complete |
 | IDEN-01 | Phase 1 | Complete |
 | IDEN-02 | Phase 1 | Complete |

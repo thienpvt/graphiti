@@ -5,15 +5,15 @@ milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 1
 current_phase_name: Strict Contracts and Catalog-v2 Identity
 status: in_progress
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-07-17T19:33:28.054Z"
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-07-18T00:00:00.000Z"
 last_activity: 2026-07-18
-last_activity_desc: Completed 01-03-PLAN.md (versioned catalog-v2 UUID materials)
+last_activity_desc: Completed 01-04-PLAN.md (structured errors + CONT-07 boundary)
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 14
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 1 — Strict Contracts and Catalog-v2 Identity
-Plan: 03 complete; next 04
-Status: In progress — executing Phase 1 plans
-Last activity: 2026-07-18 — Completed 01-03-PLAN.md (versioned catalog-v2 UUID materials)
+Plan: 04 complete; next 05
+Status: In progress — Phase 1 incomplete; Phase 2 blocked until Phase 1 gate
+Last activity: 2026-07-18 — Completed 01-04-PLAN.md (structured errors + CONT-07 boundary)
 
 Progress: [█░░░░░░░░░] 14%
 
@@ -65,6 +65,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 01 P01 | 4min | 2 tasks | 6 files |
 | Phase 01 P02 | 25min | 2 tasks | 7 files |
 | Phase 01 P03 | 3min | 2 tasks | 3 files |
+| Phase 01 P04 | 25min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -95,10 +96,13 @@ Recent decisions affecting current work:
 - [Phase 1]: catalog-v2 UUID materials via IDENTITY_SCHEMA_VERSION; signatures stable
 - [Phase 1]: Pure EvidenceLink/Manifest/PreparedPlan helpers only; no persistence
 - [Phase 1]: REFACTOR no-op for 01-03; no dual-version identity shim
+- [Phase 1]: Converter pure in catalog_common; FastMCP pre-body validation not rewritten to SAFE-08 ToolError shape
+- [Phase 1]: CONT-07 proven via FastMCP call_tool + typed request annotations on all seven catalog tools
+- [Phase 1]: REFACTOR no-op for 01-04; no dual-version helpers
 
 ### Pending Todos
 
-Next: execute 01-04. Phase 1 incomplete; Phase 2 blocked until Phase 1 gate.
+Next: execute 01-05 Phase 1 gate. Phase 1 incomplete; Phase 2 blocked until Phase 1 gate.
 
 ### Blockers/Concerns
 
@@ -125,7 +129,7 @@ Next: execute 01-04. Phase 1 incomplete; Phase 2 blocked until Phase 1 gate.
 
 ## Session Continuity
 
-Last session: 2026-07-17T19:33:28.048Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-07-17T19:42:23.698Z
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None
 Next: Phase 1 — Strict Contracts and Catalog-v2 Identity
