@@ -82,7 +82,26 @@ Plans:
   4. Caller UUIDs never control identity; structured errors expose safe diagnostics only
   5. Unit coverage for recursive forbid, immutable flags, full entity grammar, FE/BO/overload separation, and UUID material versioning passes before Phase 2 write-adjacent work
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 01-01-PLAN.md — Strict CatalogStrictModel shells, Literal flags, version/system_key, CONT-08 codes, models suite
+
+**Wave 2** *(01-02 and 01-03 parallel after 01-01)*
+
+- [ ] 01-02-PLAN.md — Graph-key grammar registry (18 types), FE/BO scope, overload, v1 reject
+- [ ] 01-03-PLAN.md — Versioned UUIDv5 materials + pure future-kind helpers; identity goldens
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 01-04-PLAN.md — Structured safe errors + validation-before-side-effect spies
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 01-05-PLAN.md — Truthful 01-PHASE1-GATE.md hard gate for Phase 2
+
 **Gate**: Strict-model and identity unit gates must pass before Phase 2 store/control-plane write work
 
 ### Phase 2: Topology Authority, Evidence Contract, Hashes, and Capabilities
@@ -178,7 +197,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | v1.0 Phase 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
 | v1.0 Phase 2. Provenance and Atomic Batch | 6/6 | Complete | 2026-07-17 |
 | Phase 0. Baseline, Inventory, and Compatibility Policy | 0/2 | Planned | - |
-| Phase 1. Strict Contracts and Catalog-v2 Identity | 0/TBD | Not started | - |
+| Phase 1. Strict Contracts and Catalog-v2 Identity | 0/5 | Planned | - |
 | Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 0/TBD | Not started | - |
 | Phase 3A. Immutable Prepare/Commit Control Plane | 0/TBD | Not started | - |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 0/TBD | Not started | - |
