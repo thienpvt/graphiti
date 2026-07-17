@@ -96,12 +96,12 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Persistent Ingest Status
 
-- [ ] **STAT-01**: Server persists restart-safe ingest state in Neo4j under a non-`Entity` `CatalogIngestBatch` label
+- [x] **STAT-01**: Server persists restart-safe ingest state in Neo4j under a non-`Entity` `CatalogIngestBatch` label
 - [ ] **STAT-02**: Batch status stores deterministic batch UUID, IDs, hashes, lifecycle timestamps, status, item counts, and bounded error summary
 - [ ] **STAT-03**: Batch status supports `planned`, `validating`, `embedding`, `writing`, `committed`, and `failed`
-- [ ] **STAT-04**: Batch status never stores API keys, raw documents, complete source text, or full request payloads
-- [ ] **STAT-05**: MCP client can call read-only `get_catalog_ingest_status` after server reinitialization and receive persisted state and counts
-- [ ] **STAT-06**: Batch status nodes do not appear in Graphiti entity search or community inputs
+- [x] **STAT-04**: Batch status never stores API keys, raw documents, complete source text, or full request payloads
+- [x] **STAT-05**: MCP client can call read-only `get_catalog_ingest_status` after server reinitialization and receive persisted state and counts
+- [x] **STAT-06**: Batch status nodes do not appear in Graphiti entity search or community inputs
 
 ### Atomic Catalog Batch
 
@@ -228,12 +228,12 @@ Every v1 requirement maps to exactly one phase.
 | PROV-04 | Phase 2 | Complete |
 | PROV-05 | Phase 2 | Complete |
 | PROV-06 | Phase 2 | Complete |
-| STAT-01 | Phase 2 | Pending |
+| STAT-01 | Phase 2 | Complete |
 | STAT-02 | Phase 2 | Pending |
 | STAT-03 | Phase 2 | Pending |
-| STAT-04 | Phase 2 | Pending |
-| STAT-05 | Phase 2 | Pending |
-| STAT-06 | Phase 2 | Pending |
+| STAT-04 | Phase 2 | Complete |
+| STAT-05 | Phase 2 | Complete |
+| STAT-06 | Phase 2 | Complete |
 | BATC-01 | Phase 2 | Pending |
 | BATC-02 | Phase 2 | Pending |
 | BATC-03 | Phase 2 | Pending |
