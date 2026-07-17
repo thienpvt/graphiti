@@ -14,7 +14,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from models.catalog_common import ENTITY_TYPE_PREFIXES  # noqa: E402
 from services.catalog_store import (  # noqa: E402
+    CATALOG_BATCH_IDENTITY_CONSTRAINT,
     CATALOG_ENTITY_IDENTITY_CONSTRAINT,
+    CATALOG_EPISODIC_IDENTITY_CONSTRAINT,
+    CATALOG_MENTIONS_IDENTITY_CONSTRAINT,
     CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
     CatalogNeo4jStore,
     CatalogStoreError,
@@ -671,8 +674,8 @@ async def test_verify_entity_overlap_dedup_uses_element_id_and_preserves_twins()
 
 def test_identity_uniqueness_constraint_statements_are_fixed_create_only():
     stmts = CatalogNeo4jStore.identity_uniqueness_constraint_statements()
-    assert len(stmts) == 2
-    entity_stmt, rel_stmt = stmts
+    assert len(stmts) == 5
+    entity_stmt, rel_stmt, episodic_stmt, mentions_stmt, batch_stmt = stmts
     assert CATALOG_ENTITY_IDENTITY_CONSTRAINT in entity_stmt
     assert CATALOG_RELATES_TO_IDENTITY_CONSTRAINT in rel_stmt
     assert 'CREATE CONSTRAINT' in entity_stmt
@@ -681,6 +684,12 @@ def test_identity_uniqueness_constraint_statements_are_fixed_create_only():
     assert 'IF NOT EXISTS' in rel_stmt
     assert '(n.uuid, n.group_id)' in entity_stmt
     assert '(e.uuid, e.group_id)' in rel_stmt
+    assert CATALOG_EPISODIC_IDENTITY_CONSTRAINT in episodic_stmt
+    assert '(n.uuid, n.group_id)' in episodic_stmt
+    assert CATALOG_MENTIONS_IDENTITY_CONSTRAINT in mentions_stmt
+    assert '(e.uuid, e.group_id)' in mentions_stmt
+    assert CATALOG_BATCH_IDENTITY_CONSTRAINT in batch_stmt
+    assert '(n.uuid, n.group_id)' in batch_stmt
     for stmt in stmts:
         assert 'DROP' not in stmt.upper()
         assert 'DELETE' not in stmt.upper()
@@ -702,6 +711,27 @@ def _valid_catalog_constraint_rows() -> list[dict]:
             'labelsOrTypes': ['RELATES_TO'],
             'properties': ['uuid', 'group_id'],
         },
+        {
+            'name': CATALOG_EPISODIC_IDENTITY_CONSTRAINT,
+            'type': 'NODE_PROPERTY_UNIQUENESS',
+            'entityType': 'NODE',
+            'labelsOrTypes': ['Episodic'],
+            'properties': ['uuid', 'group_id'],
+        },
+        {
+            'name': CATALOG_MENTIONS_IDENTITY_CONSTRAINT,
+            'type': 'RELATIONSHIP_PROPERTY_UNIQUENESS',
+            'entityType': 'RELATIONSHIP',
+            'labelsOrTypes': ['MENTIONS'],
+            'properties': ['uuid', 'group_id'],
+        },
+        {
+            'name': CATALOG_BATCH_IDENTITY_CONSTRAINT,
+            'type': 'NODE_PROPERTY_UNIQUENESS',
+            'entityType': 'NODE',
+            'labelsOrTypes': ['CatalogIngestBatch'],
+            'properties': ['uuid', 'group_id'],
+        },
     ]
 
 
@@ -718,7 +748,7 @@ async def test_ensure_uuid_uniqueness_constraints_idempotent_and_no_drop():
             calls.append(cypher.strip())
             if 'SHOW CONSTRAINTS' in cypher:
                 # Empty until both CREATE attempts complete; final SHOW verifies shape.
-                if created['n'] < 2:
+                if created['n'] < 5:
                     return ([], None, [])
                 return (_valid_catalog_constraint_rows(), None, [])
             if 'CREATE CONSTRAINT' in cypher:
@@ -731,7 +761,7 @@ async def test_ensure_uuid_uniqueness_constraints_idempotent_and_no_drop():
     assert any('CREATE CONSTRAINT' in c for c in calls)
     assert all('DROP' not in c.upper() for c in calls)
     create_count = sum(1 for c in calls if 'CREATE CONSTRAINT' in c)
-    assert create_count == 2
+    assert create_count == 5
     # Final SHOW after CREATE must run (fail-closed verification).
     assert sum(1 for c in calls if 'SHOW CONSTRAINTS' in c) >= 2
 
@@ -833,7 +863,7 @@ async def test_ensure_schema_rejects_already_exists_without_verified_shape():
     with pytest.raises(CatalogStoreError) as ei:
         await store.ensure_uuid_uniqueness_constraints(_Exec())
     assert ei.value.code == 'neo4j_schema_failed'
-    assert creates['n'] == 2
+    assert creates['n'] == 5
     assert store._schema_ready is False
 
 

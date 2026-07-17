@@ -36,6 +36,9 @@ _ENTITY_LABELS: dict[str, str] = {t: t for t in ENTITY_TYPE_PREFIXES if _SAFE_LA
 # CREATE only — never DROP INDEX / DROP CONSTRAINT / data repair.
 CATALOG_ENTITY_IDENTITY_CONSTRAINT = 'catalog_entity_identity_unique'
 CATALOG_RELATES_TO_IDENTITY_CONSTRAINT = 'catalog_relates_to_identity_unique'
+CATALOG_EPISODIC_IDENTITY_CONSTRAINT = 'catalog_episodic_identity_unique'
+CATALOG_MENTIONS_IDENTITY_CONSTRAINT = 'catalog_mentions_identity_unique'
+CATALOG_BATCH_IDENTITY_CONSTRAINT = 'catalog_batch_identity_unique'
 
 _CREATE_ENTITY_IDENTITY_UNIQUE = (
     f'CREATE CONSTRAINT {CATALOG_ENTITY_IDENTITY_CONSTRAINT} IF NOT EXISTS '
@@ -44,6 +47,18 @@ _CREATE_ENTITY_IDENTITY_UNIQUE = (
 _CREATE_RELATES_TO_IDENTITY_UNIQUE = (
     f'CREATE CONSTRAINT {CATALOG_RELATES_TO_IDENTITY_CONSTRAINT} IF NOT EXISTS '
     'FOR ()-[e:RELATES_TO]-() REQUIRE (e.uuid, e.group_id) IS UNIQUE'
+)
+_CREATE_EPISODIC_IDENTITY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_EPISODIC_IDENTITY_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:Episodic) REQUIRE (n.uuid, n.group_id) IS UNIQUE'
+)
+_CREATE_MENTIONS_IDENTITY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_MENTIONS_IDENTITY_CONSTRAINT} IF NOT EXISTS '
+    'FOR ()-[e:MENTIONS]-() REQUIRE (e.uuid, e.group_id) IS UNIQUE'
+)
+_CREATE_BATCH_IDENTITY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_BATCH_IDENTITY_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:CatalogIngestBatch) REQUIRE (n.uuid, n.group_id) IS UNIQUE'
 )
 
 
@@ -82,7 +97,13 @@ class CatalogNeo4jStore:
     @staticmethod
     def identity_uniqueness_constraint_statements() -> tuple[str, ...]:
         """Fixed server Cypher for catalog composite identity UNIQUE (CREATE only)."""
-        return (_CREATE_ENTITY_IDENTITY_UNIQUE, _CREATE_RELATES_TO_IDENTITY_UNIQUE)
+        return (
+            _CREATE_ENTITY_IDENTITY_UNIQUE,
+            _CREATE_RELATES_TO_IDENTITY_UNIQUE,
+            _CREATE_EPISODIC_IDENTITY_UNIQUE,
+            _CREATE_MENTIONS_IDENTITY_UNIQUE,
+            _CREATE_BATCH_IDENTITY_UNIQUE,
+        )
 
     # Back-compat alias for callers/tests that used the earlier name.
     @staticmethod
@@ -160,9 +181,12 @@ class CatalogNeo4jStore:
                 code='neo4j_schema_failed',
             )
         logger.info(
-            'catalog schema ready constraints=%s,%s',
+            'catalog schema ready constraints=%s,%s,%s,%s,%s',
             CATALOG_ENTITY_IDENTITY_CONSTRAINT,
             CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
+            CATALOG_EPISODIC_IDENTITY_CONSTRAINT,
+            CATALOG_MENTIONS_IDENTITY_CONSTRAINT,
+            CATALOG_BATCH_IDENTITY_CONSTRAINT,
         )
 
     @staticmethod
@@ -225,7 +249,34 @@ class CatalogNeo4jStore:
             )
             for row in rows
         )
-        return entity_ok and rel_ok
+        episodic_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_EPISODIC_IDENTITY_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='Episodic',
+            )
+            for row in rows
+        )
+        mentions_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_MENTIONS_IDENTITY_CONSTRAINT,
+                expected_entity_type='RELATIONSHIP',
+                expected_label='MENTIONS',
+            )
+            for row in rows
+        )
+        batch_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_BATCH_IDENTITY_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='CatalogIngestBatch',
+            )
+            for row in rows
+        )
+        return entity_ok and rel_ok and episodic_ok and mentions_ok and batch_ok
 
     def resolve_entity_label(self, entity_type: str) -> str:
         """Map allowlisted entity_type to a fixed Neo4j label (re-validate at builder)."""

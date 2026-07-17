@@ -860,18 +860,22 @@ async def test_happy_path_six_entities_and_six_edges(catalog_client):
     )
     rows = list(show[0] or [])
     by_name = {str(r['name']): r for r in rows}
-    ent = by_name.get('catalog_entity_identity_unique')
-    rel = by_name.get('catalog_relates_to_identity_unique')
-    assert ent is not None, 'product entity composite UNIQUE missing after first write'
-    assert rel is not None, 'product RELATES_TO composite UNIQUE missing after first write'
-    assert 'UNIQUENESS' in str(ent['type']).upper() or 'UNIQUE' in str(ent['type']).upper()
-    assert 'UNIQUENESS' in str(rel['type']).upper() or 'UNIQUE' in str(rel['type']).upper()
-    assert str(ent['entityType']).upper() == 'NODE'
-    assert str(rel['entityType']).upper() == 'RELATIONSHIP'
-    assert 'Entity' in list(ent['labelsOrTypes'] or [])
-    assert 'RELATES_TO' in list(rel['labelsOrTypes'] or [])
-    assert set(ent['properties'] or []) == {'uuid', 'group_id'}
-    assert set(rel['properties'] or []) == {'uuid', 'group_id'}
+    expected_constraints = {
+        'catalog_entity_identity_unique': ('NODE', 'Entity'),
+        'catalog_relates_to_identity_unique': ('RELATIONSHIP', 'RELATES_TO'),
+        'catalog_episodic_identity_unique': ('NODE', 'Episodic'),
+        'catalog_mentions_identity_unique': ('RELATIONSHIP', 'MENTIONS'),
+        'catalog_batch_identity_unique': ('NODE', 'CatalogIngestBatch'),
+    }
+    for name, (entity_type, label) in expected_constraints.items():
+        constraint = by_name.get(name)
+        assert constraint is not None, f'product composite UNIQUE missing: {name}'
+        assert 'UNIQUENESS' in str(constraint['type']).upper() or 'UNIQUE' in str(
+            constraint['type']
+        ).upper()
+        assert str(constraint['entityType']).upper() == entity_type
+        assert label in list(constraint['labelsOrTypes'] or [])
+        assert set(constraint['properties'] or []) == {'uuid', 'group_id'}
 
     # Exact labels Entity + custom type for each of six core types
     for item, result in zip(
