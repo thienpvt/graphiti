@@ -2955,7 +2955,7 @@ async def test_mcp_registers_exactly_seven_catalog_tools_and_preserves_legacy_to
     registered_catalog = {name for name in names if name in CATALOG_TOOL_NAMES}
 
     assert registered_catalog == CATALOG_TOOL_NAMES
-    assert LEGACY_TOOL_NAMES <= names
+    assert LEGACY_TOOL_NAMES.issubset(names)
     assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 21
 
     schemas = {tool.name: tool.inputSchema for tool in tools if tool.name in CATALOG_TOOL_NAMES}
