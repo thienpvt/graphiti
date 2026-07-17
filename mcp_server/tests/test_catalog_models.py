@@ -663,18 +663,19 @@ def test_write_response_preserves_results():
     assert len(resp.results) == 1
 
 
-def test_verify_edge_ref_is_backward_compatible_and_accepts_expected_endpoints():
+def test_verify_edge_ref_accepts_expected_endpoint_uuids_only():
+    """VerifyEdgeRef keeps UUID expectations; raw expected graph-key fields forbidden."""
     minimal = VerifyEdgeRef(edge_type='Contains', edge_key='CONTAINS::K')
-    assert minimal.expected_source_graph_key is None
+    assert minimal.expected_source_uuid is None
+    assert minimal.expected_target_uuid is None
     ref = VerifyEdgeRef(
         edge_type='Contains',
         edge_key='CONTAINS::K',
-        expected_source_graph_key='SCHEMA::FE::ORCL.HR',
-        expected_target_graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
         expected_source_uuid=FIXED_NS,
         expected_target_uuid=FIXED_NS,
     )
-    assert ref.expected_source_graph_key == 'SCHEMA::FE::ORCL.HR'
+    assert ref.expected_source_uuid == FIXED_NS
+    assert ref.expected_target_uuid == FIXED_NS
     uppercase = FIXED_NS.upper()
     assert (
         VerifyEdgeRef(
@@ -1458,8 +1459,6 @@ def _retarget_graph_keys_for_system(payload: dict[str, Any], system_key: str) ->
                     'graph_key',
                     'source_graph_key',
                     'target_graph_key',
-                    'expected_source_graph_key',
-                    'expected_target_graph_key',
                 } and isinstance(child, str):
                     out[key] = child.replace('::FE::', f'::{system_key}::', 1)
                 else:
@@ -1840,3 +1839,176 @@ def test_graph_key_echo_exact_equality_iden08_long_multi_segment():
         }
     )
     assert prov.entity_targets[0].graph_key == long_key
+
+
+# ---------------------------------------------------------------------------
+# IDEN-03/04 correction: no untyped graph-key input paths
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_typed_entities_forbids_raw_graph_keys_field():
+    """Untyped ResolveTypedEntitiesRequest.graph_keys bypass is removed (extra=forbid)."""
+    assert 'graph_keys' not in ResolveTypedEntitiesRequest.model_fields
+    with pytest.raises(ValidationError) as exc:
+        ResolveTypedEntitiesRequest.model_validate(
+            {
+                **_v2_shell(
+                    entities=[{'entity_type': 'Table', 'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES'}],
+                ),
+                'graph_keys': ['TABLE::FE::ORCL.HR.EMPLOYEES', 'not-a-valid-key'],
+            }
+        )
+    msg = str(exc.value).lower()
+    assert 'graph_keys' in msg or 'extra' in msg
+
+
+@pytest.mark.parametrize(
+    'field',
+    ['expected_source_graph_key', 'expected_target_graph_key'],
+)
+def test_verify_edge_ref_forbids_expected_raw_graph_key_fields(field: str):
+    """VerifyEdgeRef must not accept unvalidated expected graph-key strings."""
+    assert field not in VerifyEdgeRef.model_fields
+    with pytest.raises(ValidationError) as exc:
+        VerifyEdgeRef.model_validate(
+            {
+                'edge_type': 'Contains',
+                'edge_key': 'CONTAINS::K',
+                field: 'SCHEMA::FE::ORCL.HR',
+            }
+        )
+    msg = str(exc.value).lower()
+    assert field in msg or 'extra' in msg
+
+
+def _assert_shell_system_mismatch(exc: ValidationError) -> None:
+    msg = str(exc).lower()
+    assert (
+        'invalid_system_key' in msg
+        or 'grammar' in msg
+        or 'system' in msg
+        or 'graph_key' in msg
+    )
+
+
+def test_shell_mismatch_entity_upsert_path():
+    with pytest.raises(ValidationError) as exc:
+        UpsertTypedEntitiesRequest.model_validate(
+            {
+                **_v2_shell(
+                    batch_id='shell-entity',
+                    entities=[_entity_kwargs(graph_key='TABLE::BO::ORCL.HR.EMPLOYEES')],
+                ),
+            }
+        )
+    _assert_shell_system_mismatch(exc.value)
+
+
+def test_shell_mismatch_edge_source_path():
+    with pytest.raises(ValidationError) as exc:
+        UpsertTypedEdgesRequest.model_validate(
+            {
+                **_v2_shell(
+                    batch_id='shell-edge-src',
+                    edges=[
+                        _edge_kwargs(
+                            source_graph_key='SCHEMA::BO::ORCL.HR',
+                            source_entity_type='Schema',
+                        )
+                    ],
+                ),
+            }
+        )
+    _assert_shell_system_mismatch(exc.value)
+
+
+def test_shell_mismatch_edge_target_path():
+    with pytest.raises(ValidationError) as exc:
+        UpsertTypedEdgesRequest.model_validate(
+            {
+                **_v2_shell(
+                    batch_id='shell-edge-tgt',
+                    edges=[
+                        _edge_kwargs(
+                            target_graph_key='TABLE::BO::ORCL.HR.EMPLOYEES',
+                            target_entity_type='Table',
+                        )
+                    ],
+                ),
+            }
+        )
+    _assert_shell_system_mismatch(exc.value)
+
+
+def test_shell_mismatch_provenance_entity_target_path():
+    with pytest.raises(ValidationError) as exc:
+        UpsertProvenanceRequest.model_validate(
+            {
+                **_v2_shell(
+                    batch_id='shell-prov',
+                    sources=[_source_kwargs()],
+                    entity_targets=[
+                        {'entity_type': 'Table', 'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES'}
+                    ],
+                ),
+            }
+        )
+    _assert_shell_system_mismatch(exc.value)
+
+
+def test_shell_mismatch_batch_nested_entity_path():
+    with pytest.raises(ValidationError) as exc:
+        UpsertCatalogBatchRequest.model_validate(
+            {
+                **_v2_shell(
+                    batch_id='shell-batch',
+                    entities=[_entity_kwargs(graph_key='TABLE::BO::ORCL.HR.EMPLOYEES')],
+                ),
+            }
+        )
+    _assert_shell_system_mismatch(exc.value)
+
+
+def test_shell_mismatch_resolve_ref_path():
+    with pytest.raises(ValidationError) as exc:
+        ResolveTypedEntitiesRequest.model_validate(
+            {
+                **_v2_shell(
+                    entities=[
+                        {'entity_type': 'Table', 'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES'}
+                    ],
+                ),
+            }
+        )
+    _assert_shell_system_mismatch(exc.value)
+
+
+def test_shell_mismatch_verify_entity_ref_path():
+    with pytest.raises(ValidationError) as exc:
+        VerifyCatalogBatchRequest.model_validate(
+            {
+                **_v2_shell(
+                    batch_id='shell-verify',
+                    entities=[
+                        {'entity_type': 'Table', 'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES'}
+                    ],
+                ),
+            }
+        )
+    _assert_shell_system_mismatch(exc.value)
+
+
+def test_standalone_item_and_refs_hit_validate_entity_graph_key():
+    """Standalone items/refs reject v1 and non-canonical keys via registry."""
+    from models.catalog_entities import VerifyEntityRef
+
+    with pytest.raises(ValidationError):
+        CatalogEntityItem.model_validate(_entity_kwargs(graph_key='TABLE::ORCL.HR.EMPLOYEES'))
+    with pytest.raises(ValidationError):
+        ResolveEntityRef.model_validate(
+            {'entity_type': 'Table', 'graph_key': 'TABLE::ORCL.HR.EMPLOYEES'}
+        )
+    with pytest.raises(ValidationError):
+        VerifyEntityRef.model_validate(
+            {'entity_type': 'Table', 'graph_key': 'table::fe::orcl.hr.employees'}
+        )
