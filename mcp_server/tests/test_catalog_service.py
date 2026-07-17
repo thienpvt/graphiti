@@ -2564,6 +2564,9 @@ def _wire_batch_preflight(service: CatalogService) -> None:
     service._store.upsert_batch_status = AsyncMock()  # type: ignore[method-assign]
     service._store.upsert_entity_item = AsyncMock()  # type: ignore[method-assign]
     service._store.upsert_edge_item = AsyncMock()  # type: ignore[method-assign]
+    service._store.upsert_source_episode = AsyncMock()  # type: ignore[method-assign]
+    service._store.upsert_mentions_link = AsyncMock()  # type: ignore[method-assign]
+    service._store.append_edge_episode = AsyncMock()  # type: ignore[method-assign]
 
 
 @pytest.mark.asyncio
@@ -2704,3 +2707,205 @@ async def test_batch_collects_all_known_conflicts_before_embed():
     assert cast(AsyncMock, service._store.resolve_endpoint_typed).await_count == 4
     client.embedder.create.assert_not_awaited()
     assert 'transaction' not in client.call_order
+
+
+# ------------------------------------------------------------------
+# upsert_catalog_batch atomic write (BATC-06..08)
+# ------------------------------------------------------------------
+
+
+def _install_batch_write_mocks(service: CatalogService, client) -> list[str]:
+    events: list[str] = []
+
+    async def _entity_write(tx, *, entity_type, params):
+        _ = tx, entity_type
+        events.append('entity_write')
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'status': 'created',
+        }
+
+    async def _edge_write(tx, *, params):
+        _ = tx
+        events.append('edge_write')
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'status': 'created',
+        }
+
+    async def _status_write(tx, *, params):
+        _ = tx
+        events.append(f"status_{params['status']}")
+        return {'uuid': params['uuid'], 'status': params['status']}
+
+    service._store.upsert_entity_item = AsyncMock(side_effect=_entity_write)  # type: ignore[method-assign]
+    service._store.upsert_edge_item = AsyncMock(side_effect=_edge_write)  # type: ignore[method-assign]
+    service._store.upsert_batch_status = AsyncMock(side_effect=_status_write)  # type: ignore[method-assign]
+    original_create = client.embedder.create
+
+    async def _embed(*args, **kwargs):
+        events.append('embed')
+        return await original_create(*args, **kwargs)
+
+    client.embedder.create = AsyncMock(side_effect=_embed)
+    return events
+
+
+@pytest.mark.asyncio
+async def test_batch_embedding_completes_before_single_domain_transaction():
+    employee = _entity()
+    department = _entity(
+        graph_key='TABLE::HR.DEPARTMENTS',
+        name_raw='DEPARTMENTS',
+        name_canonical='departments',
+        database_qualified_name='HR.DEPARTMENTS',
+        summary='Department master table',
+    )
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    events = _install_batch_write_mocks(service, client)
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(entities=[employee, department], edges=[_edge()]),
+    )
+
+    assert resp.status == 'committed'
+    assert client.call_order.count('transaction') == 1
+    assert events[:3] == ['embed', 'embed', 'embed']
+    assert events[3:] == ['entity_write', 'entity_write', 'edge_write', 'status_committed']
+    cast(AsyncMock, service._store.upsert_batch_status).assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_batch_embedding_failure_opens_no_transaction_or_status():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    client.embedder.create = AsyncMock(side_effect=RuntimeError('embed unavailable'))
+
+    resp = await service.upsert_catalog_batch(client=client, request=_batch_request())
+
+    assert resp.status == 'failed'
+    assert resp.error_code == CatalogErrorCode.embedding_failed
+    assert 'transaction' not in client.call_order
+    cast(AsyncMock, service._store.upsert_batch_status).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_entity_item).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_batch_domain_failure_rolls_back_then_writes_failed_status_separately():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    events = _install_batch_write_mocks(service, client)
+    domain_calls = {'count': 0}
+
+    @asynccontextmanager
+    async def _transaction():
+        domain_calls['count'] += 1
+        client.call_order.append('transaction')
+        try:
+            yield client.tx
+        except Exception:
+            events.append('rollback')
+            raise
+
+    client.driver.transaction = _transaction
+    service._store.upsert_entity_item = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError('secret payload must never escape')
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=_batch_request())
+
+    assert resp.status == 'failed'
+    assert resp.error_code == CatalogErrorCode.neo4j_transaction_failed
+    assert domain_calls['count'] == 2
+    assert events.index('rollback') < events.index('status_failed')
+    failed_params = cast(AsyncMock, service._store.upsert_batch_status).await_args.kwargs['params']
+    assert failed_params['status'] == 'failed'
+    assert failed_params['error_summary'] == 'RuntimeError'
+    assert 'secret payload' not in failed_params['error_summary']
+
+
+@pytest.mark.asyncio
+async def test_batch_failed_status_write_failure_preserves_original_error():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    _install_batch_write_mocks(service, client)
+    service._store.upsert_entity_item = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError('domain failed')
+    )
+    service._store.upsert_batch_status = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError('status failed')
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=_batch_request())
+
+    assert resp.status == 'failed'
+    assert resp.error_code == CatalogErrorCode.neo4j_transaction_failed
+    assert resp.error_message == 'neo4j transaction failed'
+    assert client.call_order.count('transaction') == 2
+
+
+@pytest.mark.asyncio
+async def test_batch_writes_edges_before_provenance_append_in_same_transaction():
+    employee = _entity()
+    department = _entity(
+        graph_key='TABLE::HR.DEPARTMENTS',
+        name_raw='DEPARTMENTS',
+        name_canonical='departments',
+        database_qualified_name='HR.DEPARTMENTS',
+        summary='Department master table',
+    )
+    provenance = NestedProvenancePayload(
+        sources=[_source()],
+        edge_targets=[
+            CatalogProvenanceEdgeTarget(
+                edge_type='ForeignKeyTo',
+                edge_key='FK::HR.EMPLOYEES->HR.DEPARTMENTS',
+            )
+        ],
+    )
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    events = _install_batch_write_mocks(service, client)
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    async def _source_write(tx, *, params):
+        _ = tx, params
+        events.append('source_write')
+        return {'uuid': params['uuid'], 'status': 'created'}
+
+    async def _append(tx, *, edge_uuid, episode_uuid, group_id):
+        _ = tx, group_id
+        events.append('provenance_append')
+        return {'uuid': edge_uuid, 'episodes': [episode_uuid]}
+
+    service._store.upsert_source_episode = AsyncMock(side_effect=_source_write)  # type: ignore[method-assign]
+    service._store.append_edge_episode = AsyncMock(side_effect=_append)  # type: ignore[method-assign]
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(
+            entities=[employee, department],
+            edges=[_edge()],
+            provenance=provenance,
+        ),
+    )
+
+    assert resp.status == 'committed'
+    assert events.index('edge_write') < events.index('provenance_append')
+    assert client.call_order.count('transaction') == 1
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_upsert_catalog_batch_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'upsert_catalog_batch')
+    assert callable(server.upsert_catalog_batch)
