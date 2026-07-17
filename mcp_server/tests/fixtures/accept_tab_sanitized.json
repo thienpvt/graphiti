@@ -1,0 +1,84 @@
+{
+  "batch_id": "accept-tab-batch-001",
+  "entities": [
+    {
+      "entity_type": "Table",
+      "graph_key": "TABLE::APP.ACCEPT_TAB",
+      "name_raw": "ACCEPT_TAB",
+      "name_canonical": "accept_tab",
+      "database_qualified_name": "APP.ACCEPT_TAB",
+      "summary": "Synthetic acceptance table",
+      "attributes": {"fixture": "sanitized"},
+      "confidence": 1.0
+    },
+    {
+      "entity_type": "Column",
+      "graph_key": "COLUMN::APP.ACCEPT_TAB.ACCEPT_ID",
+      "name_raw": "ACCEPT_ID",
+      "name_canonical": "accept_id",
+      "database_qualified_name": "APP.ACCEPT_TAB.ACCEPT_ID",
+      "summary": "Synthetic acceptance identifier column",
+      "attributes": {"fixture": "sanitized", "ordinal": 1},
+      "confidence": 1.0
+    },
+    {
+      "entity_type": "Table",
+      "graph_key": "TABLE::APP.ACCEPT_PARENT",
+      "name_raw": "ACCEPT_PARENT",
+      "name_canonical": "accept_parent",
+      "database_qualified_name": "APP.ACCEPT_PARENT",
+      "summary": "Synthetic referenced parent table",
+      "attributes": {"fixture": "sanitized"},
+      "confidence": 1.0
+    }
+  ],
+  "edges": [
+    {
+      "edge_type": "Contains",
+      "edge_key": "CONTAINS::TABLE::APP.ACCEPT_TAB->COLUMN::APP.ACCEPT_TAB.ACCEPT_ID",
+      "source_graph_key": "TABLE::APP.ACCEPT_TAB",
+      "source_entity_type": "Table",
+      "target_graph_key": "COLUMN::APP.ACCEPT_TAB.ACCEPT_ID",
+      "target_entity_type": "Column",
+      "fact": "ACCEPT_TAB contains ACCEPT_ID",
+      "attributes": {"fixture": "sanitized"},
+      "confidence": 1.0
+    },
+    {
+      "edge_type": "ForeignKeyTo",
+      "edge_key": "FK::APP.ACCEPT_TAB.ACCEPT_ID->APP.ACCEPT_PARENT.ACCEPT_ID",
+      "source_graph_key": "TABLE::APP.ACCEPT_TAB",
+      "source_entity_type": "Table",
+      "target_graph_key": "TABLE::APP.ACCEPT_PARENT",
+      "target_entity_type": "Table",
+      "fact": "ACCEPT_TAB.ACCEPT_ID references ACCEPT_PARENT.ACCEPT_ID",
+      "attributes": {"fixture": "sanitized"},
+      "confidence": 1.0
+    }
+  ],
+  "provenance": {
+    "sources": [
+      {
+        "source_key": "SOURCE::SYNTHETIC.ACCEPT_TAB.DDL#1",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "attributes": {"fixture": "sanitized"},
+        "metadata": {"format": "synthetic-ddl"}
+      }
+    ],
+    "entity_targets": [
+      {"entity_type": "Table", "graph_key": "TABLE::APP.ACCEPT_TAB"},
+      {"entity_type": "Column", "graph_key": "COLUMN::APP.ACCEPT_TAB.ACCEPT_ID"},
+      {"entity_type": "Table", "graph_key": "TABLE::APP.ACCEPT_PARENT"}
+    ],
+    "edge_targets": [
+      {
+        "edge_type": "Contains",
+        "edge_key": "CONTAINS::TABLE::APP.ACCEPT_TAB->COLUMN::APP.ACCEPT_TAB.ACCEPT_ID"
+      },
+      {
+        "edge_type": "ForeignKeyTo",
+        "edge_key": "FK::APP.ACCEPT_TAB.ACCEPT_ID->APP.ACCEPT_PARENT.ACCEPT_ID"
+      }
+    ]
+  }
+}
