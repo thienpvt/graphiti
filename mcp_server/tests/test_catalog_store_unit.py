@@ -438,9 +438,12 @@ def test_edge_on_create_and_changed_match_include_batch_id():
     assert 'CASE' in cypher.upper()
     assert 'content_sha256' in cypher
     assert 'ON MATCH SET' not in cypher
-    # create + updated paths both set episodes (unchanged FOREACH is empty → zero mutation)
-    assert cypher.count('e.episodes = $episodes') == 2
+    # create sets episodes; content update must NOT wipe provenance (Phase 2)
+    assert 'e.episodes = $episodes' in cypher
     assert "status = 'updated'" in cypher
+    # updated SET block must not assign episodes (append-only provenance path owns that)
+    updated_block = cypher.split("status = 'updated'")[1] if "status = 'updated'" in cypher else ''
+    assert 'e.episodes = $episodes' not in updated_block
 
 
 def test_edge_identical_hash_noop_preserves_batch_id():
@@ -832,3 +835,188 @@ async def test_ensure_schema_rejects_already_exists_without_verified_shape():
     assert ei.value.code == 'neo4j_schema_failed'
     assert creates['n'] == 2
     assert store._schema_ready is False
+
+
+# ---------------------------------------------------------------------------
+# Provenance store primitives (Phase 2 PROV-03/04)
+# ---------------------------------------------------------------------------
+
+
+def test_build_source_episode_upsert_cypher_episodic_no_entity_label():
+    store = CatalogNeo4jStore()
+    cypher = store.build_source_episode_upsert_cypher()
+    assert 'MERGE (n:Episodic {uuid: $uuid, group_id: $group_id})' in cypher
+    assert 'n:Entity' not in cypher
+    assert 'SET n = $' not in cypher
+    assert 'ON CREATE SET' in cypher
+    assert 'ON MATCH SET' not in cypher
+    assert 'n.content_sha256 = $content_sha256' in cypher
+    assert 'n.created_at = $created_at' in cypher
+    assert 'n.source_key = $source_key' in cypher
+    assert 'n.source = $source' in cypher
+    assert 'n.content = $content' in cypher
+    assert 'n.entity_edges = $entity_edges' in cypher
+    assert 'n.valid_at = $valid_at' in cypher
+    # preserve created_at / identity on update (SET block only)
+    assert "status = 'updated'" in cypher
+    set_block = cypher.split('FOREACH')[1].split('REMOVE')[0]
+    assert 'n.created_at' not in set_block
+    assert 'n.uuid =' not in set_block
+    assert 'n.group_id =' not in set_block
+    assert 'n.source_key =' not in set_block
+    assert '_catalog_create_token' in cypher
+    assert 'REMOVE n._catalog_create_token' in cypher
+
+
+def test_build_mentions_merge_cypher_group_scoped_deterministic_uuid():
+    store = CatalogNeo4jStore()
+    cypher = store.build_mentions_merge_cypher()
+    assert 'MATCH (episode:Episodic {uuid: $episode_uuid, group_id: $group_id})' in cypher
+    assert 'MATCH (node:Entity {uuid: $entity_uuid, group_id: $group_id})' in cypher
+    assert 'MERGE (episode)-[e:MENTIONS {uuid: $mentions_uuid}]->(node)' in cypher
+    assert 'ON CREATE SET' in cypher
+    assert 'e.group_id = $group_id' in cypher
+    assert 'e.created_at = $created_at' in cypher
+    assert 'apoc.' not in cypher.lower()
+    # fixed labels only
+    assert ':MENTIONS' in cypher
+    assert 'Episodic' in cypher
+    assert 'Entity' in cypher
+
+
+def test_build_append_edge_episode_cypher_apoc_free_dedup():
+    store = CatalogNeo4jStore()
+    cypher = store.build_append_edge_episode_cypher()
+    assert 'RELATES_TO' in cypher
+    assert '$edge_uuid' in cypher
+    assert '$group_id' in cypher
+    assert '$episode_uuid' in cypher
+    assert 'coalesce(e.episodes' in cypher or 'coalesce(e.episodes,' in cypher
+    assert 'apoc.' not in cypher.lower()
+    assert 'IN' in cypher
+    assert 'SET e.episodes' in cypher
+    assert 'MATCH ()-[e:RELATES_TO {uuid: $edge_uuid, group_id: $group_id}]->()' in cypher
+
+
+def test_match_provenance_presence_covers_entity_mentions_and_edge_episodes():
+    store = CatalogNeo4jStore()
+    cypher = store.build_match_provenance_presence_cypher()
+    assert 'UNWIND $target_uuids AS target_uuid' in cypher
+    assert 'ep.group_id = $group_id' in cypher
+    assert 'n.group_id = $group_id' in cypher
+    assert 'MENTIONS' in cypher
+    assert 'Episodic' in cypher
+    # edges: non-empty coalesce(e.episodes,[]) membership path
+    assert 'RELATES_TO' in cypher
+    assert 'e.episodes' in cypher
+    assert 'has_provenance' in cypher
+    assert 'coalesce(e.episodes' in cypher
+
+
+def test_prepare_source_episode_params_shape():
+    store = CatalogNeo4jStore()
+    params = store.prepare_source_episode_params(
+        uuid=UUID,
+        group_id=GROUP,
+        batch_id=BATCH,
+        source_key='SRC::ddl.sql#1',
+        content_sha256=HASH,
+        content='{"source_key":"SRC::ddl.sql#1"}',
+        source='json',
+        source_description='catalog source',
+        valid_at=FIXED_TS,
+        created_at=FIXED_TS,
+        updated_at=FIXED_TS,
+        entity_edges=[],
+        name='SRC::ddl.sql#1',
+    )
+    assert params['uuid'] == UUID
+    assert params['group_id'] == GROUP
+    assert params['source_key'] == 'SRC::ddl.sql#1'
+    assert params['content_sha256'] == HASH
+    assert params['source'] == 'json'
+    assert params['entity_edges'] == []
+    assert isinstance(params.get('create_token'), str)
+    assert len(params['create_token']) >= 16
+
+
+class _Rows:
+    def __init__(self, rows: list[dict]):
+        self._rows = rows
+
+    async def data(self):
+        return self._rows
+
+
+@pytest.mark.asyncio
+async def test_upsert_source_episode_uses_tx_run():
+    store = CatalogNeo4jStore()
+    calls: list[tuple] = []
+
+    class _Tx:
+        async def run(self, cypher, **params):
+            calls.append((cypher, params))
+            return _Rows(
+                [
+                    {
+                        'uuid': UUID,
+                        'content_sha256': HASH,
+                        'status': 'created',
+                    }
+                ]
+            )
+
+    params = store.prepare_source_episode_params(
+        uuid=UUID,
+        group_id=GROUP,
+        batch_id=BATCH,
+        source_key='SRC::k',
+        content_sha256=HASH,
+        content='{}',
+        source='json',
+        source_description='catalog source',
+        valid_at=FIXED_TS,
+        created_at=FIXED_TS,
+        updated_at=FIXED_TS,
+        entity_edges=[],
+        name='SRC::k',
+    )
+    row = await store.upsert_source_episode(_Tx(), params=params)
+    assert row['uuid'] == UUID
+    assert row['status'] == 'created'
+    assert len(calls) == 1
+    assert 'Episodic' in calls[0][0]
+    assert 'n:Entity' not in calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_upsert_mentions_and_append_edge_episode_helpers():
+    store = CatalogNeo4jStore()
+    runs: list[str] = []
+
+    class _Tx:
+        async def run(self, cypher, **params):
+            runs.append(cypher)
+            if 'MENTIONS' in cypher:
+                return _Rows([{'uuid': 'm1', 'status': 'created'}])
+            return _Rows([{'uuid': 'e1', 'episodes': [UUID]}])
+
+    m = await store.upsert_mentions_link(
+        _Tx(),
+        episode_uuid=UUID,
+        entity_uuid='ent-1',
+        mentions_uuid='men-1',
+        group_id=GROUP,
+        created_at=FIXED_TS,
+    )
+    assert m['uuid'] == 'm1'
+    a = await store.append_edge_episode(
+        _Tx(),
+        edge_uuid='edge-1',
+        episode_uuid=UUID,
+        group_id=GROUP,
+    )
+    assert a['uuid'] == 'e1'
+    assert any('MENTIONS' in c for c in runs)
+    assert any('RELATES_TO' in c for c in runs)
+    assert not any('apoc.' in c.lower() for c in runs)
