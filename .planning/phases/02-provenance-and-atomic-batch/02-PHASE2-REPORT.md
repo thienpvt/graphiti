@@ -2,13 +2,13 @@
 
 **Date:** 2026-07-17
 **Executor branch:** `gsd/phase-1-typed-catalog-primitives`
-**Final implementation base:** `d7c56f7`
+**Final implementation base:** `c5a8b00`
 **Neo4j:** local test container on `bolt://localhost:17687` (credentials supplied through the command environment; not recorded)
 **Required test group:** `oracle-catalog-tool-test`
 
 ## Overall: PASS
 
-All required Phase 2 gates passed. The 34-test live suite ran with `CATALOG_INT_REQUIRED=1` and zero skips. No image was pushed, no workload was deployed, no production canary or full ingest ran, and no existing data was cleared or deleted.
+All required Phase 2 gates passed. The 35-test live suite ran with `CATALOG_INT_REQUIRED=1` and zero skips. No image was pushed, no workload was deployed, no production canary or full ingest ran, and no existing data was cleared or deleted.
 
 ## Commands Run
 
@@ -40,7 +40,7 @@ uv run pytest \
   -q --tb=short
 ```
 
-Observed on final implementation base: exit 0 — `301 passed in 2.10s`.
+Observed on final implementation base: exit 0 — `303 passed in 3.22s`.
 
 ### Required live Neo4j integration
 
@@ -54,7 +54,7 @@ CATALOG_INT_REQUIRED=1 \
 uv run pytest tests/test_catalog_neo4j_int.py -q --tb=short --timeout=120
 ```
 
-Observed on final implementation base: exit 0 — `34 passed in 24.21s`; zero skipped. Required mode was active.
+Observed on final implementation base: exit 0 — `35 passed in 23.93s`; zero skipped. Required mode was active.
 
 ### Combined catalog suite
 
@@ -74,7 +74,7 @@ uv run pytest \
   -q --tb=line --timeout=120
 ```
 
-Observed on final implementation base: exit 0 — `335 passed in 24.94s`.
+Observed on final implementation base: exit 0 — `338 passed in 25.11s`.
 
 ### Catalog-scoped Ruff and Pyright
 
@@ -157,7 +157,7 @@ uv run pytest \
   -q --tb=short
 ```
 
-Observed on final implementation base: exit 0 — `86 passed in 1.33s`.
+Observed on final implementation base: exit 0 — `86 passed in 1.36s`.
 
 ### No-LLM, no-queue, and registration spies
 
@@ -210,11 +210,13 @@ A final deep review then found two blockers and one warning. Final remediation c
 - BLOCKER-02: full-string `group_id` validation rejects trailing newlines and hidden group variants.
 - WARNING-01: divergent A/B/A entity and edge identities report every occurrence and write none.
 
-Evidence: `02-REVIEW-FIX-3.md`. Current-head totals are 301 unit, 34 required live, and 335 combined. Independent final review, Nyquist, and security delta verdicts follow in the final artifacts.
+Evidence: `02-REVIEW-FIX-3.md`.
+
+A final TOCTOU audit correctly noted that transaction-local reads alone did not retain locks until mutation. The final atomic fix now uses one source MERGE/self-SET compare-and-set query and deterministic, group-scoped retained target write locks. A real concurrent conflicting-source live regression produced exactly one update and one `batch_conflict`; the stored hash matched one contender only. Evidence: `02-REVIEW-FIX-4.md`. Current-head totals are 303 unit, 35 required live, and 338 combined.
 
 ### Local Ollama end-to-end
 
-A real local end-to-end check used Ollama at `http://127.0.0.1:11434` with `qwen3-embedding:latest` and an explicit no-op cross-encoder. It generated a 1024-dimension embedding, created one synthetic typed entity, returned `unchanged` on identical retry, resolved it as `found`, and verified one entity. Cleanup targeted only exact synthetic IDs.
+A real local end-to-end check used Ollama at `http://127.0.0.1:11435` with `qwen3-embedding:latest` and an explicit no-op cross-encoder. It generated a 1024-dimension embedding, created one synthetic typed entity, returned `unchanged` on identical retry, resolved it as `found`, and verified one entity. Cleanup targeted only exact synthetic IDs.
 
 ```text
 OLLAMA_E2E_RESIDUAL_NODES 0
@@ -251,7 +253,7 @@ docker build -f mcp_server/docker/Dockerfile.standalone -t graphiti-mcp:phase2-l
 Observed: exit 0. Build completed locally without push or deploy. Resulting image metadata:
 
 ```text
-id=sha256:975bf905f82454359c80f156a583c23b7d1d73c72456b07b9e93346c3dab9c7d
+id=sha256:975bf905f82454359c80f156a583c23b7d1d73c72456b07b9e93386c3dab9c7d
 size=126540417
 ```
 
@@ -275,9 +277,9 @@ Registration preserved all 14 legacy tools: `add_memory`, `search_nodes`, `searc
 
 | Gate | Result | Evidence |
 |---|---|---|
-| Catalog units | PASS | 301 passed |
-| Required live Neo4j | PASS | 34 passed, zero skipped, Neo4j 5.26.0 |
-| Combined catalog suite | PASS | 335 passed |
+| Catalog units | PASS | 303 passed |
+| Required live Neo4j | PASS | 35 passed, zero skipped, Neo4j 5.26.0 |
+| Combined catalog suite | PASS | 338 passed |
 | Ruff format/check | PASS | 16 formatted; all lint checks passed |
 | Scoped Pyright | PASS | 0 errors, 0 warnings, 0 informations |
 | Seven catalog schemas | PASS | 7/7; 21 total tools; 14 legacy retained |
@@ -289,6 +291,7 @@ Registration preserved all 14 legacy tools: `add_memory`, `search_nodes`, `searc
 | Local image build | PASS | Standalone image built locally; no push/deploy |
 | Second-pass remediation | PASS | BL-01..04 and WR-02 closed; focused regressions green |
 | Final remediation | PASS | BLOCKER-01/02 and WARNING-01 closed; `02-REVIEW-FIX-3.md` |
+| Atomic provenance TOCTOU | PASS | Source CAS + retained target locks; concurrent live regression; `02-REVIEW-FIX-4.md` |
 | Nyquist re-audit | PASS | 31/31 Phase 2 requirements covered |
 | Security re-audit | PASS | 29/29 threat entries closed; 0 open |
 | Local Ollama E2E | PASS | Real 1024-dimensional embedding; create/retry/resolve/verify; zero residual IDs |
@@ -337,6 +340,6 @@ This is recommendation text only. No canary was executed in this plan.
 
 ## Final Verdict
 
-All required observed checks are green: 301 unit tests, the unskipped 34-test live Neo4j suite, 335 combined catalog tests, 86 existing MCP regressions, seven-tool schema listing, legacy compatibility, search, explicit community maintenance, no-LLM/no-queue isolation, forbidden-group protection, local standalone image build, real local Ollama E2E, 31/31 Nyquist coverage, and 29/29 closed security threat entries.
+All required observed checks are green: 303 unit tests, the unskipped 35-test live Neo4j suite, 338 combined catalog tests, 86 existing MCP regressions, seven-tool schema listing, legacy compatibility, search, explicit community maintenance, no-LLM/no-queue isolation, forbidden-group protection, local standalone image build, real local Ollama E2E, final deep review APPROVED, 31/31 Nyquist coverage, and 29/29 closed security threat entries (`threats_open: 0`).
 
 **Overall: PASS**

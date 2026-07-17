@@ -1,7 +1,7 @@
 ---
 phase: 02-provenance-and-atomic-batch
 audited: 2026-07-17
-head: d7c56f7
+head: c5a8b00
 asvs_level: 1
 block_on: high
 verdict: SECURED
@@ -37,21 +37,25 @@ threats_open: 0
 
 ## Final Remediation
 
-- BLOCKER-01: transaction-local source identity/hash and MENTIONS/edge-link state checks close provenance TOCTOU drift in standalone and nested batches.
 - BLOCKER-02: full-string group validation rejects trailing-newline hidden partitions and log delimiter injection.
 - WARNING-01: divergent A/B/A entity and edge duplicates quarantine every occurrence before embedding or writes.
-- Evidence: `02-REVIEW-FIX-3.md`.
+- TOCTOU closure: source validation/mutation is one fixed Neo4j MERGE/self-SET compare-and-set operation; entity and RELATES_TO targets receive retained write locks while link state is checked and mutated.
+- Lock order: Cypher executes `ORDER BY target.uuid, target.kind` before the lock-producing subquery.
+- Nested race handling: rollback and separate failed-status persistence preserve structured `batch_conflict` / `deterministic_uuid_conflict` codes.
+- Real concurrent conflicting-source test: exactly one update committed; the loser returned `batch_conflict`; stored hash matched one contender only.
+- Evidence: `02-REVIEW-FIX-3.md`, `02-REVIEW-FIX-4.md`.
 
 ## Verification
 
-- Catalog units: **301 passed**.
-- Required live Neo4j: **34 passed**, zero skipped.
-- Combined catalog: **335 passed**.
+- Catalog units: **303 passed**.
+- Required live Neo4j: **35 passed**, zero skipped.
+- Combined catalog: **338 passed**.
 - Existing MCP regressions: **86 passed**.
 - Ruff: clean.
 - Pyright: 0 errors, 0 warnings.
 - Second-pass remediation: `02-REVIEW-FIX-2.md`.
 - Final remediation: `02-REVIEW-FIX-3.md`.
+- Atomic provenance remediation: `02-REVIEW-FIX-4.md`.
 
 ## Operations Boundary
 
