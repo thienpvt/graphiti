@@ -23,23 +23,19 @@ A catalog item can be retried safely and commits as exactly one deterministic, c
 
 ### Active
 
-- [ ] Add validated catalog-upsert configuration with an explicitly supplied immutable UUID namespace and conservative batch limits
-- [ ] Implement strict allowlisted entity, edge, source, and batch request models with protected-property, hash, size, prefix, confidence, and finite-number validation
-- [ ] Implement `upsert_typed_entities` as a synchronous deterministic UUIDv5, SHA-256-audited, embedding-backed, typed Neo4j transaction
-- [ ] Implement `resolve_typed_entities` as a read-only detector for missing, generic, duplicate, mistyped, UUID-mismatched, and unembedded entities
-- [ ] Implement `upsert_typed_edges` with pre-existing typed endpoint enforcement, deterministic UUIDv5 identity, embeddings, and no implicit endpoint creation
-- [ ] Implement `verify_catalog_batch` as read-only batch/key verification for identities, types, endpoints, duplicates, embeddings, and optional provenance
-- [ ] Pass every Phase 1 unit, Neo4j integration, formatting, type-checking, MCP schema-registration, and regression gate before beginning Phase 2
-- [ ] Implement `upsert_provenance` using the installed Graphiti episodic/provenance schema without `add_episode`, LLM extraction, queueing, or generic domain nodes
-- [ ] Implement persisted internal `CatalogIngestBatch` status nodes and `get_catalog_ingest_status` without polluting Graphiti entity search
-- [ ] Implement `upsert_catalog_batch` with complete validation, same-request endpoint resolution, pre-transaction embeddings, one atomic domain transaction, safe failed-status persistence, retry idempotency, and batch conflicts
-- [ ] Preserve existing `created_at`, add `updated_at`, persist canonical payload SHA-256, preserve exact raw/canonical names, labels, endpoint UUIDs, and source reference data safely
-- [ ] Keep all new write tools synchronous from the MCP caller perspective and return only after commit or rollback
-- [ ] Ensure all new tools make no LLM calls, use no ingestion queue, accept no caller-supplied database UUID authority, and never create generic endpoints
-- [ ] Enforce `group_id` isolation and item-level structured errors across all catalog tools
-- [ ] Add focused unit and Neo4j integration coverage using only `oracle-catalog-tool-test`
-- [ ] Verify existing MCP tests and search interoperability, including `search_nodes`, `search_memory_facts`, and safe `build_communities` execution
-- [ ] Document tool purpose, configuration, immutable namespace, allowlists, idempotency, atomicity, limits, ACCEPT_TAB examples, rollout/rollback, build command, and semantic-versus-deterministic ingestion guidance
+None for v1.0.
+
+### Delivered in v1.0
+
+- ✓ Validated catalog-upsert configuration with an explicitly supplied immutable UUID namespace and conservative limits
+- ✓ Strict allowlisted entity, edge, source, and batch models with protected-property, hash, size, prefix, confidence, finite-number, and full-string group validation
+- ✓ Synchronous deterministic entity/edge upsert, read-only resolve/verify, installed-schema provenance, restart-safe status, and atomic nested batch tools
+- ✓ UUIDv5 identities, canonical SHA-256 audit, embeddings before transactions, atomic source compare-and-set, and explicitly ordered retained provenance locks
+- ✓ Exact endpoint enforcement, no caller UUID authority, no generic endpoint creation, no LLM extraction, no queueing, no implicit communities
+- ✓ Data preservation for creation time, raw/canonical names, labels, endpoints, source references, provenance, and update time
+- ✓ Unit/live/concurrency/isolation/search/community/regression coverage using only `oracle-catalog-tool-test`
+- ✓ Operator documentation for all seven tools, configuration, limits, errors, sanitized ACCEPT_TAB, rollout/rollback, build, and semantic-versus-deterministic guidance
+- ✓ Independent Phase 1 and Phase 2 verification; 86/86 v1 requirements satisfied
 
 ### Out of Scope
 
@@ -111,14 +107,15 @@ Existing unrelated working-tree changes in `mcp_server/k8s/graphiti-neo4j.yaml`,
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Add dedicated deterministic administrative MCP tools | Semantic ingestion cannot guarantee exact catalog identities or relationships | — Pending |
-| Use Neo4j-specific persistence where Graphiti save paths lose labels, attributes, or embeddings | Correct typed persistence outranks premature backend abstraction | — Pending |
-| Use fixed allowlists for entity labels, edge types, and graph-key prefixes | Prevent schema drift and Cypher injection | — Pending |
-| Use canonical SHA-256 plus deterministic UUIDv5 | Enables safe retry, change detection, and auditable identity | — Pending |
-| Require existing typed endpoints for standalone edge upserts | Prevent generic endpoint creation and accidental graph expansion | — Pending |
-| Store ingest status under non-`Entity` label `CatalogIngestBatch` | Persist restart-safe status without polluting Graphiti search | — Pending |
-| Gate Phase 2 on Phase 1 integration quality | Provenance and orchestration depend on trusted typed primitives | — Pending |
-| Keep normal upserts community-neutral | Community construction is maintenance behavior, not ingestion behavior | — Pending |
+| Add dedicated deterministic administrative MCP tools | Semantic ingestion cannot guarantee exact catalog identities or relationships | ✓ Delivered |
+| Use Neo4j-specific persistence where Graphiti save paths lose labels, attributes, or embeddings | Correct typed persistence outranks premature backend abstraction | ✓ Delivered |
+| Use fixed allowlists for entity labels, edge types, and graph-key prefixes | Prevent schema drift and Cypher injection | ✓ Delivered |
+| Use canonical SHA-256 plus deterministic UUIDv5 | Enables safe retry, change detection, and auditable identity | ✓ Delivered |
+| Require existing typed endpoints for standalone edge upserts | Prevent generic endpoint creation and accidental graph expansion | ✓ Delivered |
+| Store ingest status under non-`Entity` label `CatalogIngestBatch` | Persist restart-safe status without polluting Graphiti search | ✓ Delivered |
+| Gate Phase 2 on Phase 1 integration quality | Provenance and orchestration depend on trusted typed primitives | ✓ Gate passed before Phase 2 |
+| Keep normal upserts community-neutral | Community construction is maintenance behavior, not ingestion behavior | ✓ Delivered |
+| Use source CAS and ordered retained target locks | Close provenance validation/mutation TOCTOU under concurrent writes | ✓ Delivered |
 
 ## Evolution
 
@@ -138,4 +135,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-16 after initialization*
+*Last updated: 2026-07-17 after v1.0 verification*
