@@ -9,7 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -86,7 +86,7 @@ def _entity(**overrides) -> CatalogEntityItem:
         'database_qualified_name': 'ORCL.HR.EMPLOYEES',
         'summary': 'Employee master table',
         'attributes': {'owner': 'HR'},
-        'source_refs': [{'doc': 'ddl.sql', 'line': 12}],
+        'source_refs': [{'document_id': 'ddl.sql', 'page': 12, 'raw_text': 'CREATE TABLE'}],
         'confidence': 0.95,
     }
     data.update(overrides)
@@ -709,29 +709,26 @@ def _resolve_request(entities=None, **kwargs):
     )
 
 
-@pytest.mark.asyncio
-async def test_resolve_empty_entities_no_attribute_error_and_no_side_effects():
-    """Valid empty typed resolve must not touch removed request.graph_keys."""
+def test_empty_resolve_rejected_before_service_no_side_effects():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
-    service._store.match_entities_for_resolve = AsyncMock(return_value=[])
-    req = ResolveTypedEntitiesRequest.model_validate(
-        {
+    service.resolve_typed_entities = AsyncMock()  # type: ignore[method-assign]
+
+    for entities in ([], None):
+        payload: dict[str, Any] = {
             'identity_schema_version': 'catalog-v2',
             'system_key': 'FE',
             'group_id': GROUP,
-            'entities': [],
         }
-    )
-    assert not hasattr(req, 'graph_keys')
-    resp = await service.resolve_typed_entities(client=client, request=req)
-    assert resp.group_id == GROUP
-    assert resp.results == []
+        if entities is not None:
+            payload['entities'] = entities
+        with pytest.raises(ValidationError):
+            ResolveTypedEntitiesRequest.model_validate(payload)
+
+    service.resolve_typed_entities.assert_not_called()
+    client.embedder.create.assert_not_called()
+    client.embedder.create_batch.assert_not_called()
     assert 'transaction' not in client.call_order
-    assert 'embed' not in client.call_order
-    client.embedder.create.assert_not_awaited()
-    client.embedder.create_batch.assert_not_awaited()
-    service._store.match_entities_for_resolve.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -4531,3 +4528,180 @@ async def test_fastmcp_all_seven_catalog_tools_emit_structured_on_invalid():
             spies['graphiti_service'].get_client.reset_mock()
             spies['embedder'].create.reset_mock()
             spies['embedder'].create_batch.reset_mock()
+
+
+# ---------------------------------------------------------------------------
+# Plan 01-06 contract gap coverage
+# ---------------------------------------------------------------------------
+
+
+def test_source_ref_canonical_payload_contains_plain_json_dicts():
+    from models import catalog_entities
+
+    source_ref_model = getattr(catalog_entities, 'CatalogSourceRef', None)
+    assert source_ref_model is not None, 'CatalogSourceRef missing'
+    raw_text = 'DDL  \n'
+    item = _entity(
+        source_refs=[
+            source_ref_model(document_id='ddl.sql', page=12, raw_text=raw_text),
+            source_ref_model(page=1, raw_text=''),
+        ]
+    )
+
+    payload = CatalogService.entity_canonical_payload(item)
+
+    assert payload['source_refs'] == [
+        {'document_id': 'ddl.sql', 'page': 12, 'raw_text': raw_text},
+        {'document_id': None, 'page': 1, 'raw_text': ''},
+    ]
+    assert all(isinstance(ref, dict) for ref in payload['source_refs'])
+    import json
+
+    assert json.loads(json.dumps(payload))['source_refs'][0]['raw_text'] == raw_text
+    assert canonical_sha256(payload) == canonical_sha256(payload)
+
+
+def _fastmcp_graph_key_mismatch_cases():
+    entity_bo = {**_minimal_entity_dict(), 'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES'}
+    edge_source_bo = {**_minimal_edge_dict(), 'source_graph_key': 'SCHEMA::BO::ORCL.HR'}
+    edge_target_bo = {
+        **_minimal_edge_dict(),
+        'target_graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES',
+    }
+    provenance_target_bo = {
+        'entity_type': 'Table',
+        'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES',
+    }
+    return [
+        ('upsert_typed_entities', {'entities': [entity_bo]}, 'entities.0.graph_key'),
+        (
+            'resolve_typed_entities',
+            {
+                'entities': [
+                    {
+                        'entity_type': 'Table',
+                        'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES',
+                    }
+                ]
+            },
+            'entities.0.graph_key',
+        ),
+        (
+            'verify_catalog_batch',
+            {'entities': [provenance_target_bo]},
+            'entities.0.graph_key',
+        ),
+        (
+            'upsert_typed_edges',
+            {'edges': [edge_source_bo]},
+            'edges.0.source_graph_key',
+        ),
+        (
+            'upsert_typed_edges',
+            {'edges': [edge_target_bo]},
+            'edges.0.target_graph_key',
+        ),
+        (
+            'upsert_provenance',
+            {'entity_targets': [provenance_target_bo]},
+            'entity_targets.0.graph_key',
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [entity_bo]},
+            'entities.0.graph_key',
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [], 'edges': [edge_source_bo]},
+            'edges.0.source_graph_key',
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [], 'edges': [edge_target_bo]},
+            'edges.0.target_graph_key',
+        ),
+        (
+            'upsert_catalog_batch',
+            {
+                'entities': [],
+                'provenance': {
+                    'sources': [_minimal_source_dict()],
+                    'entity_targets': [provenance_target_bo],
+                },
+            },
+            'provenance.entity_targets.0.graph_key',
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('tool_name', 'overrides', 'expected_path'), _fastmcp_graph_key_mismatch_cases()
+)
+async def test_fastmcp_graph_key_mismatch_reports_exact_path_before_side_effects(
+    tool_name, overrides, expected_path
+):
+    import json
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool(tool_name)
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool(
+                tool_name,
+                {'request': _v2_request_payload(tool_name, **overrides)},
+            )
+        raw = str(exc.value)
+        structured = json.loads(raw[raw.find('{') :])
+        assert structured['code'] == 'invalid_system_key'
+        assert structured['field_path'] == expected_path
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entities_override', [[], pytest.param(None, id='missing')])
+async def test_fastmcp_empty_resolve_rejected_before_service(entities_override):
+    import json
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool('resolve_typed_entities')
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    payload = _v2_request_payload('resolve_typed_entities')
+    if entities_override is None:
+        payload.pop('entities')
+    else:
+        payload['entities'] = entities_override
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool('resolve_typed_entities', {'request': payload})
+        raw = str(exc.value)
+        structured = json.loads(raw[raw.find('{') :])
+        assert structured['code'] == 'validation_error'
+        assert structured['field_path'] == 'entities'
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn

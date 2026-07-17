@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from models.catalog_common import ENTITY_TYPE_PREFIXES  # noqa: E402
+from models.catalog_entities import CatalogEntityItem  # noqa: E402
 from services.catalog_store import (  # noqa: E402
     CATALOG_BATCH_IDENTITY_CONSTRAINT,
     CATALOG_ENTITY_IDENTITY_CONSTRAINT,
@@ -46,7 +47,7 @@ def _base_params(**overrides):
         'updated_at': FIXED_TS,
         'name_embedding': [0.1, 0.2, 0.3],
         'attributes': {'owner': 'HR'},
-        'source_refs': [{'doc': 'ddl', 'line': 10}],
+        'source_refs': [{'document_id': 'ddl', 'page': 10, 'raw_text': 'CREATE TABLE'}],
         'confidence': 0.9,
     }
     params.update(overrides)
@@ -148,11 +149,60 @@ def test_cypher_parameterizes_values_not_client_identifiers():
 
 
 def test_serialize_nested_json_source_refs():
-    refs = [{'page': 1, 'span': [2, 3]}, 'plain']
+    refs = [{'document_id': None, 'page': 1, 'raw_text': 'DDL  \n'}]
     out = serialize_nested_json(refs)
     assert isinstance(out, str)
     parsed = json.loads(out)
     assert parsed == refs
+
+
+def test_serialize_nested_json_source_ref_models_dump_plain_json():
+    item = CatalogEntityItem.model_validate(
+        {
+            'entity_type': 'Table',
+            'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+            'name_raw': 'EMPLOYEES',
+            'name_canonical': 'employees',
+            'database_qualified_name': 'ORCL.HR.EMPLOYEES',
+            'summary': 'Employee table',
+            'source_refs': [
+                {'document_id': None, 'page': 1, 'raw_text': 'DDL  \n'},
+            ],
+        }
+    )
+    assert item.source_refs is not None
+    assert not isinstance(item.source_refs[0], dict)
+
+    out = serialize_nested_json(item.source_refs)
+
+    assert isinstance(out, str)
+    assert json.loads(out) == [
+        {'document_id': None, 'page': 1, 'raw_text': 'DDL  \n'},
+    ]
+
+
+def test_prepare_entity_params_source_ref_models_serialize_plain_json():
+    item = CatalogEntityItem.model_validate(
+        {
+            'entity_type': 'Table',
+            'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+            'name_raw': 'EMPLOYEES',
+            'name_canonical': 'employees',
+            'database_qualified_name': 'ORCL.HR.EMPLOYEES',
+            'summary': 'Employee table',
+            'source_refs': [{'page': 1, 'raw_text': 'DDL  \n'}],
+        }
+    )
+    store = CatalogNeo4jStore()
+
+    params = store.prepare_entity_params(
+        entity_type='Table',
+        **_base_params(source_refs=item.source_refs),
+    )
+
+    assert json.loads(params['source_refs']) == [
+        {'document_id': None, 'page': 1, 'raw_text': 'DDL  \n'},
+    ]
 
 
 def test_serialize_nested_json_none():

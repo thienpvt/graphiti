@@ -29,6 +29,7 @@ from models.catalog_common import (  # noqa: E402
     MAX_NESTED_DEPTH,
     MAX_NESTED_NODES,
     MAX_SHORT_STRING_LENGTH,
+    MAX_SOURCE_REFS,
     MAX_SUMMARY_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     CatalogErrorCode,
@@ -469,9 +470,17 @@ def test_entity_rejects_oversized_nested_attribute_string():
 
 def test_entity_rejects_oversized_nested_source_ref_key_and_value():
     with pytest.raises(ValidationError):
-        _entity(source_refs=[{'x' * (MAX_SHORT_STRING_LENGTH + 1): 'value'}])
+        _entity(
+            source_refs=[
+                {
+                    'document_id': 'x' * (MAX_SHORT_STRING_LENGTH + 1),
+                    'page': 1,
+                    'raw_text': '',
+                }
+            ]
+        )
     with pytest.raises(ValidationError):
-        _entity(source_refs=[{'raw': 'x' * (MAX_EVIDENCE_LENGTH + 1)}])
+        _entity(source_refs=[{'page': 1, 'raw_text': 'x' * (MAX_EVIDENCE_LENGTH + 1)}])
 
 
 @pytest.mark.parametrize(
@@ -482,7 +491,7 @@ def test_entity_rejects_non_json_nested_values(value: object):
     with pytest.raises(ValidationError):
         _entity(attributes={'value': value})
     with pytest.raises(ValidationError):
-        _entity(source_refs=[{'value': value}])
+        _entity(source_refs=[{'page': 1, 'raw_text': value}])
 
 
 def test_entity_rejects_nested_cycles_depth_and_total_nodes():
@@ -2142,3 +2151,272 @@ def test_structured_error_message_bounded_and_non_leaking():
     assert len(huge_out['message']) <= 512
     assert huge not in huge_out['message']
     assert 'x' * 64 not in huge_out['message']
+
+
+# ---------------------------------------------------------------------------
+# Plan 01-06 contract gap coverage
+# ---------------------------------------------------------------------------
+
+
+def _catalog_source_ref_model():
+    from models import catalog_entities
+
+    model = getattr(catalog_entities, 'CatalogSourceRef', None)
+    assert model is not None, 'CatalogSourceRef missing'
+    return model
+
+
+def _identity_shell_cases():
+    return [
+        (
+            UpsertTypedEntitiesRequest,
+            _v2_shell(batch_id='strict-system', entities=[_entity_kwargs()]),
+        ),
+        (
+            ResolveTypedEntitiesRequest,
+            _v2_shell(
+                entities=[{'entity_type': 'Table', 'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES'}]
+            ),
+        ),
+        (VerifyCatalogBatchRequest, _v2_shell(batch_id='strict-system')),
+        (
+            UpsertTypedEdgesRequest,
+            _v2_shell(batch_id='strict-system', edges=[_edge_kwargs()]),
+        ),
+        (
+            UpsertProvenanceRequest,
+            _v2_shell(batch_id='strict-system', sources=[_source_kwargs()]),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            _v2_shell(batch_id='strict-system', entities=[_entity_kwargs()]),
+        ),
+    ]
+
+
+def _strict_true_cases():
+    return [
+        (
+            UpsertTypedEntitiesRequest,
+            _v2_shell(batch_id='strict-true', entities=[_entity_kwargs()]),
+            'atomic',
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            _v2_shell(batch_id='strict-true', edges=[_edge_kwargs()]),
+            'atomic',
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            _v2_shell(batch_id='strict-true', edges=[_edge_kwargs()]),
+            'strict_endpoints',
+        ),
+        (
+            UpsertProvenanceRequest,
+            _v2_shell(batch_id='strict-true', sources=[_source_kwargs()]),
+            'atomic',
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            _v2_shell(batch_id='strict-true', entities=[_entity_kwargs()]),
+            'atomic',
+        ),
+    ]
+
+
+def test_source_ref_valid_strict_shape_preserves_raw_text_exactly():
+    source_ref_model = _catalog_source_ref_model()
+    cases = [
+        ({'page': 1, 'raw_text': ''}, None, ''),
+        ({'document_id': None, 'page': 1, 'raw_text': 'DDL  \n'}, None, 'DDL  \n'),
+        ({'document_id': 'ddl.sql', 'page': 7, 'raw_text': 'ALTER'}, 'ddl.sql', 'ALTER'),
+    ]
+    for payload, document_id, raw_text in cases:
+        ref = source_ref_model.model_validate(payload)
+        assert ref.document_id == document_id
+        assert ref.page == payload['page']
+        assert ref.raw_text == raw_text
+        item = _entity(source_refs=[payload])
+        assert item.source_refs is not None
+        assert isinstance(item.source_refs[0], source_ref_model)
+        assert item.source_refs[0].raw_text == raw_text
+
+
+@pytest.mark.parametrize('document_id', ['', 1, True, b'ddl'])
+def test_source_ref_rejects_invalid_document_id(document_id: object):
+    source_ref_model = _catalog_source_ref_model()
+    with pytest.raises(ValidationError):
+        source_ref_model.model_validate({'document_id': document_id, 'page': 1, 'raw_text': ''})
+
+
+@pytest.mark.parametrize('page', [True, False, 0, -1, 1.0, '1'])
+def test_source_ref_rejects_non_strict_positive_page(page: object):
+    source_ref_model = _catalog_source_ref_model()
+    with pytest.raises(ValidationError):
+        source_ref_model.model_validate({'page': page, 'raw_text': ''})
+
+
+@pytest.mark.parametrize('raw_text', [None, 1, True, b'DDL'])
+def test_source_ref_rejects_non_string_raw_text(raw_text: object):
+    source_ref_model = _catalog_source_ref_model()
+    with pytest.raises(ValidationError):
+        source_ref_model.model_validate({'page': 1, 'raw_text': raw_text})
+
+
+def test_source_ref_requires_page_and_raw_text():
+    source_ref_model = _catalog_source_ref_model()
+    for payload, field in (({'raw_text': ''}, 'page'), ({'page': 1}, 'raw_text')):
+        with pytest.raises(ValidationError) as exc:
+            source_ref_model.model_validate(payload)
+        assert exc.value.errors()[0]['type'] == 'missing'
+        assert tuple(exc.value.errors()[0]['loc']) == (field,)
+
+
+def test_source_ref_rejects_oversize_unknown_legacy_and_collection_overflow():
+    source_ref_model = _catalog_source_ref_model()
+    with pytest.raises(ValidationError):
+        source_ref_model.model_validate({'page': 1, 'raw_text': 'x' * (MAX_EVIDENCE_LENGTH + 1)})
+    for payload in (
+        {'page': 1, 'raw_text': '', 'unknown': 'x'},
+        {'doc': 'ddl.sql', 'page': 1, 'raw_text': ''},
+        {'line': 1, 'page': 1, 'raw_text': ''},
+        {'doc': 'ddl.sql', 'line': 1},
+    ):
+        with pytest.raises(ValidationError):
+            _entity(source_refs=[payload])
+    with pytest.raises(ValidationError):
+        _entity(source_refs=[{'page': 1, 'raw_text': ''}] * (MAX_SOURCE_REFS + 1))
+
+
+@pytest.mark.parametrize(('model', 'payload', 'field'), _strict_true_cases())
+def test_strict_true_accepts_only_true_and_publishes_boolean_const_schema(model, payload, field):
+    accepted = model.model_validate({**payload, field: True})
+    assert getattr(accepted, field) is True
+    schema = model.model_json_schema()['properties'][field]
+    assert schema['type'] == 'boolean'
+    assert schema['const'] is True
+    for invalid in (1, 0, 'true', '1', False, None):
+        with pytest.raises(ValidationError) as exc:
+            model.model_validate({**payload, field: invalid})
+        assert any(tuple(error['loc']) == (field,) for error in exc.value.errors())
+
+
+@pytest.mark.parametrize(('model', 'payload'), _identity_shell_cases())
+def test_system_key_present_invalid_values_use_custom_error_type(model, payload):
+    for invalid in ('', 'fe', 7, True, None, 'UNKNOWN', 'x' * (MAX_SHORT_STRING_LENGTH + 1)):
+        with pytest.raises(ValidationError) as exc:
+            model.model_validate({**payload, 'system_key': invalid})
+        errors = exc.value.errors()
+        assert errors[0]['type'] == 'invalid_system_key'
+        assert tuple(errors[0]['loc']) == ('system_key',)
+
+
+@pytest.mark.parametrize(('model', 'payload'), _identity_shell_cases())
+def test_system_key_missing_stays_missing_and_structured_validation_error(model, payload):
+    without_system = {key: value for key, value in payload.items() if key != 'system_key'}
+    with pytest.raises(ValidationError) as exc:
+        model.model_validate(without_system)
+    errors = exc.value.errors()
+    assert errors[0]['type'] == 'missing'
+    assert tuple(errors[0]['loc']) == ('system_key',)
+    structured = _get_catalog_validation_error_to_structured()(exc.value)
+    assert structured['code'] == CatalogErrorCode.validation_error
+    assert structured['field_path'] == 'system_key'
+
+
+def _graph_key_mismatch_cases():
+    bo_entity = _entity_kwargs(graph_key='TABLE::BO::ORCL.HR.EMPLOYEES')
+    bo_edge_source = _edge_kwargs(source_graph_key='SCHEMA::BO::ORCL.HR')
+    bo_edge_target = _edge_kwargs(target_graph_key='TABLE::BO::ORCL.HR.EMPLOYEES')
+    bo_target = _entity_target(graph_key='TABLE::BO::ORCL.HR.EMPLOYEES')
+    return [
+        (
+            UpsertTypedEntitiesRequest,
+            _v2_shell(batch_id='mismatch', entities=[bo_entity]),
+            ('entities', 0, 'graph_key'),
+        ),
+        (
+            ResolveTypedEntitiesRequest,
+            _v2_shell(
+                entities=[{'entity_type': 'Table', 'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES'}]
+            ),
+            ('entities', 0, 'graph_key'),
+        ),
+        (
+            VerifyCatalogBatchRequest,
+            _v2_shell(
+                entities=[{'entity_type': 'Table', 'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES'}]
+            ),
+            ('entities', 0, 'graph_key'),
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            _v2_shell(batch_id='mismatch', edges=[bo_edge_source]),
+            ('edges', 0, 'source_graph_key'),
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            _v2_shell(batch_id='mismatch', edges=[bo_edge_target]),
+            ('edges', 0, 'target_graph_key'),
+        ),
+        (
+            UpsertProvenanceRequest,
+            _v2_shell(
+                batch_id='mismatch',
+                sources=[_source_kwargs()],
+                entity_targets=[bo_target],
+            ),
+            ('entity_targets', 0, 'graph_key'),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            _v2_shell(batch_id='mismatch', entities=[bo_entity]),
+            ('entities', 0, 'graph_key'),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            _v2_shell(batch_id='mismatch', edges=[bo_edge_source]),
+            ('edges', 0, 'source_graph_key'),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            _v2_shell(batch_id='mismatch', edges=[bo_edge_target]),
+            ('edges', 0, 'target_graph_key'),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            _v2_shell(
+                batch_id='mismatch',
+                provenance={
+                    'sources': [_source_kwargs()],
+                    'entity_targets': [bo_target],
+                },
+            ),
+            ('provenance', 'entity_targets', 0, 'graph_key'),
+        ),
+    ]
+
+
+@pytest.mark.parametrize(('model', 'payload', 'expected_loc'), _graph_key_mismatch_cases())
+def test_graph_key_mismatch_has_exact_nested_invalid_system_key_location(
+    model, payload, expected_loc
+):
+    with pytest.raises(ValidationError) as exc:
+        model.model_validate(payload)
+    matching = [error for error in exc.value.errors() if error['type'] == 'invalid_system_key']
+    assert len(matching) == 1, exc.value.errors()
+    assert tuple(matching[0]['loc']) == expected_loc
+    structured = _get_catalog_validation_error_to_structured()(exc.value)
+    assert structured['code'] == CatalogErrorCode.invalid_system_key
+    assert structured['field_path'] == '.'.join(str(part) for part in expected_loc)
+
+
+def test_empty_resolve_and_missing_entities_are_rejected_distinctly():
+    payload = _v2_shell()
+    with pytest.raises(ValidationError) as empty_exc:
+        ResolveTypedEntitiesRequest.model_validate({**payload, 'entities': []})
+    assert tuple(empty_exc.value.errors()[0]['loc']) == ('entities',)
+    with pytest.raises(ValidationError) as missing_exc:
+        ResolveTypedEntitiesRequest.model_validate(payload)
+    assert missing_exc.value.errors()[0]['type'] == 'missing'
+    assert tuple(missing_exc.value.errors()[0]['loc']) == ('entities',)
