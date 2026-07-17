@@ -2012,3 +2012,131 @@ def test_standalone_item_and_refs_hit_validate_entity_graph_key():
         VerifyEntityRef.model_validate(
             {'entity_type': 'Table', 'graph_key': 'table::fe::orcl.hr.employees'}
         )
+
+
+# ---------------------------------------------------------------------------
+# SAFE-08 structured validation error converter (01-04)
+# ---------------------------------------------------------------------------
+
+
+def _get_catalog_validation_error_to_structured():
+    """Load converter; fail clearly when product symbol is missing (RED gate)."""
+    import models.catalog_common as catalog_common
+
+    fn = getattr(catalog_common, 'catalog_validation_error_to_structured', None)
+    assert fn is not None, 'catalog_validation_error_to_structured missing from catalog_common'
+    return fn
+
+
+def test_structured_error_shape_has_safe_fields():
+    """SAFE-08: converter returns exactly code/message/field_path/retryable/correlation_id."""
+    convert = _get_catalog_validation_error_to_structured()
+    correlation_id = '11111111-2222-4333-8444-555555555555'
+    with pytest.raises(ValidationError) as exc:
+        UpsertTypedEntitiesRequest.model_validate(
+            {
+                **_v2_shell(
+                    batch_id='struct-shape',
+                    entities=[_entity_kwargs()],
+                    identity_schema_version='catalog-v1',
+                ),
+            }
+        )
+    out = convert(exc.value, correlation_id=correlation_id)
+    assert set(out.keys()) == {
+        'code',
+        'message',
+        'field_path',
+        'retryable',
+        'correlation_id',
+    }
+    assert out['code'] == CatalogErrorCode.unsupported_identity_schema
+    assert out['retryable'] is False
+    assert out['correlation_id'] == correlation_id
+    assert out['field_path'] == 'identity_schema_version'
+    assert isinstance(out['message'], str) and out['message']
+    assert len(out['message']) <= 512
+
+
+def test_structured_error_message_bounded_and_non_leaking():
+    """SAFE-08: message bounded, never copies payload/input/stack/secrets."""
+    convert = _get_catalog_validation_error_to_structured()
+    secret = 'super-secret-token-xyz-DO-NOT-LEAK'
+    payload = {
+        **_v2_shell(
+            batch_id='struct-leak',
+            entities=[{**_entity_kwargs(), 'leak_nested': secret}],
+        ),
+        'password': secret,
+        'authorization': f'Bearer {secret}',
+    }
+    with pytest.raises(ValidationError) as exc:
+        UpsertTypedEntitiesRequest.model_validate(payload)
+    out = convert(exc.value, correlation_id='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+    assert set(out.keys()) == {
+        'code',
+        'message',
+        'field_path',
+        'retryable',
+        'correlation_id',
+    }
+    assert out['code'] == CatalogErrorCode.validation_error
+    assert out['retryable'] is False
+    assert out['field_path'] is not None
+    msg = out['message']
+    assert len(msg) <= 512
+    # Unicode character bound, not byte bound
+    assert len(msg) == len(msg.encode('utf-8').decode('utf-8'))
+    forbidden = (
+        secret,
+        'password',
+        'authorization',
+        'Bearer',
+        'leak_nested',
+        'Traceback',
+        'pydantic_core',
+        str(exc.value),
+    )
+    for token in forbidden:
+        assert token not in msg
+    # system_key mapping
+    with pytest.raises(ValidationError) as sk_exc:
+        UpsertTypedEntitiesRequest.model_validate(
+            {
+                **_v2_shell(
+                    batch_id='struct-sys',
+                    entities=[_entity_kwargs()],
+                    system_key='fe',
+                ),
+            }
+        )
+    sk_out = convert(sk_exc.value, correlation_id='bbbbbbbb-cccc-4ddd-8eee-ffffffffffff')
+    assert sk_out['code'] == CatalogErrorCode.invalid_system_key
+    assert sk_out['field_path'] == 'system_key'
+    assert sk_out['retryable'] is False
+    # first error loc drives field_path (nested extra)
+    with pytest.raises(ValidationError) as nested_exc:
+        UpsertTypedEntitiesRequest.model_validate(
+            {
+                **_v2_shell(
+                    batch_id='struct-nested',
+                    entities=[{**_entity_kwargs(), 'typo_nested': 1}],
+                ),
+            }
+        )
+    nested_out = convert(nested_exc.value, correlation_id='cccccccc-dddd-4eee-8fff-000000000001')
+    assert nested_out['field_path'] == 'entities.0.typo_nested'
+    # oversize message truncation contract (synthetic multi-error still bounded)
+    huge = 'x' * 2000
+    with pytest.raises(ValidationError) as huge_exc:
+        UpsertTypedEntitiesRequest.model_validate(
+            {
+                **_v2_shell(
+                    batch_id='struct-huge',
+                    entities=[{**_entity_kwargs(), 'summary': huge}],
+                ),
+            }
+        )
+    huge_out = convert(huge_exc.value, correlation_id='dddddddd-eeee-4fff-8000-111111111111')
+    assert len(huge_out['message']) <= 512
+    assert huge not in huge_out['message']

@@ -3908,3 +3908,401 @@ async def test_mcp_registers_exactly_seven_catalog_tools_and_preserves_legacy_to
     schemas = {tool.name: tool.inputSchema for tool in tools if tool.name in CATALOG_TOOL_NAMES}
     assert schemas.keys() == CATALOG_TOOL_NAMES
     assert all(schema['type'] == 'object' for schema in schemas.values())
+
+
+# ---------------------------------------------------------------------------
+# CONT-07 / SAFE-08 production boundary + no-side-effect spies (01-04)
+# ---------------------------------------------------------------------------
+
+from pydantic import ValidationError  # noqa: E402
+
+
+_FROZEN_CATALOG_TOOL_REQUEST_MODELS = {
+    'upsert_typed_entities': UpsertTypedEntitiesRequest,
+    'resolve_typed_entities': ResolveTypedEntitiesRequest,
+    'verify_catalog_batch': VerifyCatalogBatchRequest,
+    'upsert_typed_edges': UpsertTypedEdgesRequest,
+    'upsert_provenance': None,  # filled at runtime
+    'get_catalog_ingest_status': GetCatalogIngestStatusRequest,
+    'upsert_catalog_batch': UpsertCatalogBatchRequest,
+}
+
+
+def _catalog_request_models():
+    from models.catalog_provenance import UpsertProvenanceRequest
+
+    mapping = dict(_FROZEN_CATALOG_TOOL_REQUEST_MODELS)
+    mapping['upsert_provenance'] = UpsertProvenanceRequest
+    return mapping
+
+
+def _minimal_entity_dict():
+    return {
+        'entity_type': 'Table',
+        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+        'name_raw': 'EMPLOYEES',
+        'name_canonical': 'employees',
+        'database_qualified_name': 'ORCL.HR.EMPLOYEES',
+        'summary': 'Employee master table',
+    }
+
+
+def _minimal_edge_dict():
+    return {
+        'edge_type': 'Contains',
+        'edge_key': 'CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
+        'source_graph_key': 'SCHEMA::FE::ORCL.HR',
+        'source_entity_type': 'Schema',
+        'target_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+        'target_entity_type': 'Table',
+        'fact': 'Schema HR contains table EMPLOYEES',
+    }
+
+
+def _minimal_source_dict():
+    return {
+        'source_key': 'DOC::HR.PDF#p12',
+        'reference_time': '2024-01-15T10:30:00+00:00',
+    }
+
+
+def _v2_request_payload(tool_name: str, **overrides):
+    """Build a minimal valid nested payload for each frozen catalog tool."""
+    base = {
+        'identity_schema_version': 'catalog-v2',
+        'system_key': 'FE',
+        'group_id': GROUP,
+        'batch_id': 'cont07-batch',
+    }
+    if tool_name == 'upsert_typed_entities':
+        payload = {**base, 'entities': [_minimal_entity_dict()]}
+    elif tool_name == 'resolve_typed_entities':
+        payload = {
+            **base,
+            'entities': [
+                {
+                    'entity_type': 'Table',
+                    'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                }
+            ],
+        }
+        payload.pop('batch_id', None)
+    elif tool_name == 'verify_catalog_batch':
+        payload = {
+            **base,
+            'entities': [
+                {
+                    'entity_type': 'Table',
+                    'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                }
+            ],
+        }
+    elif tool_name == 'upsert_typed_edges':
+        payload = {**base, 'edges': [_minimal_edge_dict()]}
+    elif tool_name == 'upsert_provenance':
+        payload = {**base, 'sources': [_minimal_source_dict()]}
+    elif tool_name == 'get_catalog_ingest_status':
+        payload = {'group_id': GROUP, 'batch_id': 'cont07-status'}
+    elif tool_name == 'upsert_catalog_batch':
+        payload = {**base, 'entities': [_minimal_entity_dict()]}
+    else:
+        raise AssertionError(f'unknown tool {tool_name}')
+    payload.update(overrides)
+    return payload
+
+
+def _side_effect_spies(server):
+    """Install spies on wrapper body globals and CatalogService methods."""
+    store = MagicMock()
+    store.upsert_entity_item = AsyncMock()
+    store.ensure_schema = AsyncMock()
+    embedder = MagicMock()
+    embedder.create = AsyncMock(return_value=[0.1, 0.2])
+    embedder.create_batch = AsyncMock(return_value=[[0.1]])
+    client = MagicMock()
+    client.embedder = embedder
+    client.driver = MagicMock()
+    client.driver.execute_query = AsyncMock()
+
+    catalog_svc = MagicMock()
+    for name in (
+        'upsert_typed_entities',
+        'resolve_typed_entities',
+        'verify_catalog_batch',
+        'upsert_typed_edges',
+        'upsert_provenance',
+        'get_catalog_ingest_status',
+        'upsert_catalog_batch',
+    ):
+        setattr(catalog_svc, name, AsyncMock(return_value={'status': 'spy-should-not-run'}))
+
+    graphiti_svc = MagicMock()
+    graphiti_svc.get_client = AsyncMock(return_value=client)
+    graphiti_svc.config = MagicMock()
+    graphiti_svc.config.catalog_upsert = _enabled_config()
+
+    server.graphiti_service = graphiti_svc
+    server.catalog_service = catalog_svc
+    if hasattr(server, 'queue_service'):
+        server.queue_service = MagicMock()
+        if hasattr(server.queue_service, 'add_episode'):
+            server.queue_service.add_episode = AsyncMock()
+    return {
+        'catalog_service': catalog_svc,
+        'graphiti_service': graphiti_svc,
+        'client': client,
+        'embedder': embedder,
+        'store': store,
+    }
+
+
+def _assert_no_backend_side_effects(spies, body_entered: list):
+    assert body_entered == [], f'tool body entered: {body_entered}'
+    cs = spies['catalog_service']
+    for name in (
+        'upsert_typed_entities',
+        'resolve_typed_entities',
+        'verify_catalog_batch',
+        'upsert_typed_edges',
+        'upsert_provenance',
+        'get_catalog_ingest_status',
+        'upsert_catalog_batch',
+    ):
+        getattr(cs, name).assert_not_called()
+    spies['graphiti_service'].get_client.assert_not_called()
+    spies['embedder'].create.assert_not_called()
+    spies['embedder'].create_batch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_catalog_tools_bind_typed_pydantic_request_models():
+    """Production CONT-07: all seven tools bind typed Pydantic request models."""
+    import typing
+
+    server = _mcp_server()
+    tools = await server.mcp.list_tools()
+    by_name = {t.name: t for t in tools}
+    models = _catalog_request_models()
+    assert set(models) == CATALOG_TOOL_NAMES
+
+    for name, expected_model in models.items():
+        assert name in by_name, f'missing registered tool {name}'
+        tool = server.mcp._tool_manager.get_tool(name)
+        assert tool is not None
+        field = tool.fn_metadata.arg_model.model_fields.get('request')
+        assert field is not None, f'{name} missing request parameter'
+        ann = field.annotation
+        origin = typing.get_origin(ann)
+        assert origin is None, f'{name} request annotation must not be bare container {ann}'
+        assert ann is expected_model, f'{name} bound {ann}, expected {expected_model}'
+        hints = typing.get_type_hints(tool.fn)
+        assert hints.get('request') is expected_model
+        schema = by_name[name].inputSchema
+        assert schema.get('type') == 'object'
+        props = schema.get('properties') or {}
+        assert 'request' in props
+        req_schema = props['request']
+        assert '$ref' in req_schema or req_schema.get('additionalProperties') is False
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_call_tool_rejects_invalid_nested_payloads_before_body_no_side_effect():
+    """Production CONT-07: FastMCP call_tool validates before wrapper/service/backends."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+
+    cases = [
+        (
+            'upsert_typed_entities',
+            {'identity_schema_version': 'catalog-v1'},
+            'identity_schema_version',
+        ),
+        (
+            'upsert_typed_entities',
+            {'system_key': 'fe'},
+            'system_key',
+        ),
+        (
+            'upsert_typed_entities',
+            {
+                'entities': [
+                    {
+                        **_minimal_entity_dict(),
+                        'graph_key': 'TABLE::ORCL.HR.EMPLOYEES',
+                    }
+                ]
+            },
+            'graph_key',
+        ),
+        (
+            'upsert_typed_entities',
+            {'atomic': False},
+            'atomic',
+        ),
+        (
+            'upsert_typed_entities',
+            {'unknown_shell_field': True},
+            'unknown_shell_field',
+        ),
+        (
+            'resolve_typed_entities',
+            {'identity_schema_version': 'catalog-v0'},
+            'identity_schema_version',
+        ),
+        (
+            'verify_catalog_batch',
+            {'system_key': 'UNKNOWN'},
+            'system_key',
+        ),
+        (
+            'upsert_typed_edges',
+            {'strict_endpoints': False},
+            'strict_endpoints',
+        ),
+        (
+            'upsert_provenance',
+            {'sources': [{**_minimal_source_dict(), 'extra_bad': 1}]},
+            'extra_bad',
+        ),
+        (
+            'get_catalog_ingest_status',
+            {'extra_status_field': 'nope'},
+            'extra_status_field',
+        ),
+        (
+            'upsert_catalog_batch',
+            {'identity_schema_version': 'catalog-v1'},
+            'identity_schema_version',
+        ),
+    ]
+
+    for tool_name, overrides, _hint in cases:
+        body_entered: list = []
+        tool = server.mcp._tool_manager.get_tool(tool_name)
+        original_fn = tool.fn
+
+        async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+            _entered.append(request)
+            return await _orig(request)
+
+        tool.fn = wrapped_fn
+        payload = _v2_request_payload(tool_name, **overrides)
+        try:
+            with pytest.raises((ToolError, ValidationError)) as exc:
+                await server.mcp.call_tool(tool_name, {'request': payload})
+            err = exc.value
+            chain = err
+            saw_validation = isinstance(err, ValidationError)
+            while chain is not None and not saw_validation:
+                chain = getattr(chain, '__cause__', None) or getattr(chain, '__context__', None)
+                if isinstance(chain, ValidationError):
+                    saw_validation = True
+            assert saw_validation or isinstance(err, ToolError), f'{tool_name}: {type(err)}'
+            _assert_no_backend_side_effects(spies, body_entered)
+        finally:
+            tool.fn = original_fn
+            for name in (
+                'upsert_typed_entities',
+                'resolve_typed_entities',
+                'verify_catalog_batch',
+                'upsert_typed_edges',
+                'upsert_provenance',
+                'get_catalog_ingest_status',
+                'upsert_catalog_batch',
+            ):
+                getattr(spies['catalog_service'], name).reset_mock()
+            spies['graphiti_service'].get_client.reset_mock()
+            spies['embedder'].create.reset_mock()
+            spies['embedder'].create_batch.reset_mock()
+
+
+def test_invalid_identity_schema_never_calls_service_store_or_embedder():
+    """CONT-07: invalid identity_schema_version fails at model_validate; zero service entry."""
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store = MagicMock()
+    service._store.upsert_entity_item = AsyncMock()
+    service._ensure_schema = AsyncMock()  # type: ignore[method-assign]
+    client = MagicMock()
+    client.embedder = MagicMock()
+    client.embedder.create = AsyncMock()
+    client.embedder.create_batch = AsyncMock()
+
+    with pytest.raises(ValidationError):
+        UpsertTypedEntitiesRequest.model_validate(
+            _v2_request_payload(
+                'upsert_typed_entities',
+                identity_schema_version='catalog-v1',
+            )
+        )
+
+    service._store.upsert_entity_item.assert_not_called()
+    service._ensure_schema.assert_not_called()
+    client.embedder.create.assert_not_called()
+    client.embedder.create_batch.assert_not_called()
+
+
+def test_invalid_system_key_never_calls_service():
+    """CONT-07: invalid/unknown/lowercase system_key never reaches CatalogService."""
+    service = CatalogService(catalog_config=_enabled_config())
+    service.upsert_typed_entities = AsyncMock()  # type: ignore[method-assign]
+    for bad in ('fe', 'Fe', 'UNKNOWN', '', None):
+        with pytest.raises(ValidationError):
+            UpsertTypedEntitiesRequest.model_validate(
+                _v2_request_payload('upsert_typed_entities', system_key=bad)
+            )
+    service.upsert_typed_entities.assert_not_called()
+
+
+def test_invalid_grammar_never_calls_service():
+    """CONT-07: malformed/v1 graph keys fail validation before service."""
+    service = CatalogService(catalog_config=_enabled_config())
+    service.upsert_typed_entities = AsyncMock()  # type: ignore[method-assign]
+    bad_keys = (
+        'TABLE::ORCL.HR.EMPLOYEES',
+        'table::fe::orcl.hr.employees',
+        'TABLE::FE::',
+        'NOTAPREFIX::FE::ORCL.HR.EMPLOYEES',
+    )
+    for key in bad_keys:
+        with pytest.raises(ValidationError):
+            UpsertTypedEntitiesRequest.model_validate(
+                _v2_request_payload(
+                    'upsert_typed_entities',
+                    entities=[{**_minimal_entity_dict(), 'graph_key': key}],
+                )
+            )
+    service.upsert_typed_entities.assert_not_called()
+
+
+def test_no_side_effect_on_false_immutable_flags_and_unknown_nested_fields():
+    """CONT-07 matrix: atomic/strict_endpoints false + unknown nested fields."""
+    service = CatalogService(catalog_config=_enabled_config())
+    service.upsert_typed_entities = AsyncMock()  # type: ignore[method-assign]
+    service.upsert_typed_edges = AsyncMock()  # type: ignore[method-assign]
+    service.upsert_catalog_batch = AsyncMock()  # type: ignore[method-assign]
+
+    with pytest.raises(ValidationError):
+        UpsertTypedEntitiesRequest.model_validate(
+            _v2_request_payload('upsert_typed_entities', atomic=False)
+        )
+    with pytest.raises(ValidationError):
+        UpsertTypedEdgesRequest.model_validate(
+            _v2_request_payload('upsert_typed_edges', strict_endpoints=False)
+        )
+    with pytest.raises(ValidationError):
+        UpsertTypedEntitiesRequest.model_validate(
+            _v2_request_payload(
+                'upsert_typed_entities',
+                entities=[{**_minimal_entity_dict(), 'unknown_nested': 1}],
+            )
+        )
+    with pytest.raises(ValidationError):
+        UpsertTypedEntitiesRequest.model_validate(
+            _v2_request_payload('upsert_typed_entities', entities=[])
+        )
+
+    service.upsert_typed_entities.assert_not_called()
+    service.upsert_typed_edges.assert_not_called()
+    service.upsert_catalog_batch.assert_not_called()
