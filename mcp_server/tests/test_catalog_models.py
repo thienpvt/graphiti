@@ -38,6 +38,7 @@ from models.catalog_entities import (  # noqa: E402
     ResolveEntityRef,
     ResolveTypedEntitiesRequest,
     UpsertTypedEntitiesRequest,
+    VerifyCatalogBatchRequest,
     VerifyEdgeRef,
 )
 from models.catalog_provenance import (  # noqa: E402
@@ -310,6 +311,42 @@ def test_upsert_entities_rejects_invalid_group_id():
                 'batch_id': 'batch-1',
                 'entities': [_entity_kwargs()],
             }
+        )
+
+
+@pytest.mark.parametrize(
+    ('model', 'payload_factory'),
+    [
+        (
+            UpsertTypedEntitiesRequest,
+            lambda: {'batch_id': 'batch-1', 'entities': [_entity_kwargs()]},
+        ),
+        (
+            ResolveTypedEntitiesRequest,
+            lambda: {
+                'entities': [{'entity_type': 'Table', 'graph_key': 'TABLE::HR.EMPLOYEES'}]
+            },
+        ),
+        (VerifyCatalogBatchRequest, lambda: {'batch_id': 'batch-1'}),
+        (
+            UpsertTypedEdgesRequest,
+            lambda: {'batch_id': 'batch-1', 'edges': [_edge_kwargs()]},
+        ),
+        (
+            UpsertProvenanceRequest,
+            lambda: {'batch_id': 'batch-1', 'sources': [_source_kwargs()]},
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            lambda: {'batch_id': 'batch-1', 'entities': [_entity_kwargs()]},
+        ),
+        (GetCatalogIngestStatusRequest, lambda: {'batch_id': 'batch-1'}),
+    ],
+)
+def test_phase2_requests_reject_group_id_trailing_newline(model, payload_factory):
+    with pytest.raises(ValidationError):
+        model.model_validate(
+            {'group_id': 'oracle-catalog-tool-test\n', **payload_factory()}
         )
 
 

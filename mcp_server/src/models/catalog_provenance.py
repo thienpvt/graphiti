@@ -24,7 +24,7 @@ def _validate_group_id(group_id: str | None) -> bool:
     """Mirror graphiti_core.helpers.validate_group_id (ASCII alnum/dash/underscore)."""
     if not group_id:
         return True
-    if not re.match(r'^[a-zA-Z0-9_-]+$', group_id):
+    if not re.fullmatch(r'[a-zA-Z0-9_-]+', group_id):
         raise ValueError(f'group_id contains invalid characters: {group_id}')
     return True
 
