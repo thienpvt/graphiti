@@ -2,7 +2,7 @@
 phase: 1
 slug: strict-contracts-and-catalog-v2-identity
 status: complete
-nyquist_compliant: true
+nyquist_compliant: false
 wave_0_complete: true
 created: 2026-07-18
 ---
@@ -10,6 +10,8 @@ created: 2026-07-18
 # Phase 1 — Validation Strategy
 
 > Strict-contract and identity feedback contract. Statuses refreshed by Plan 01-05 from real pytest/ruff/pyright results only — never invent green; no manual waiver for Phase 2 entry.
+>
+> **Gap closure:** Plans 01-06 through 01-08 must re-earn Nyquist compliance before Phase 2 readiness can be restored.
 
 ---
 

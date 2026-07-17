@@ -118,7 +118,9 @@ Derived only from real outcomes (authoritative machine lines live solely under *
 - oracle-catalog-v2 queried: false
 - catalog neo4j int: skip (nonblocking)
 
-Declared readiness: true (see Gate Contract).
+Declared readiness: false (see Gate Contract).
+
+**Gap closure:** Plans 01-06 through 01-08 must re-earn Phase 2 readiness.
 
 ## 8. Explicit non-goals
 
@@ -154,7 +156,7 @@ scoped_pyright=pass
 catalog_neo4j_int=skip
 safety_invariants=pass
 edge_probe=pass
-ready_for_phase_2=true
+ready_for_phase_2=false
 canary_executed=false
 oracle_catalog_v2_queried=false
 no_new_store_or_control_plane_write_path=true
