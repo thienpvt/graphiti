@@ -82,7 +82,7 @@ Plans:
   4. Caller UUIDs never control identity; structured errors expose safe diagnostics only
   5. Unit coverage for recursive forbid, immutable flags, full entity grammar, FE/BO/overload separation, and UUID material versioning passes before Phase 2 write-adjacent work
 
-**Plans**: 1/5 plans executed
+**Plans**: 2/5 plans executed
 
 Plans:
 **Wave 1**
@@ -91,7 +91,7 @@ Plans:
 
 **Wave 2** *(after 01-01)*
 
-- [ ] 01-02-PLAN.md — Graph-key grammar registry (18 types), FE/BO scope, overload, v1 reject, IDEN-08 echo
+- [x] 01-02-PLAN.md — Graph-key grammar registry (18 types), FE/BO scope, overload, v1 reject, IDEN-08 echo
 
 **Wave 3** *(serial after 01-02; depends_on [01-01, 01-02] — no parallel with grammar)*
 
@@ -199,8 +199,8 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 |-------|----------------|--------|-----------|
 | v1.0 Phase 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
 | v1.0 Phase 2. Provenance and Atomic Batch | 6/6 | Complete | 2026-07-17 |
-| Phase 0. Baseline, Inventory, and Compatibility Policy | 0/2 | Planned | - |
-| Phase 1. Strict Contracts and Catalog-v2 Identity | 0/5 | Planned | - |
+| Phase 0. Baseline, Inventory, and Compatibility Policy | 2/2 | Complete | 2026-07-17 |
+| Phase 1. Strict Contracts and Catalog-v2 Identity | 2/5 | In Progress | - |
 | Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 0/TBD | Not started | - |
 | Phase 3A. Immutable Prepare/Commit Control Plane | 0/TBD | Not started | - |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 0/TBD | Not started | - |

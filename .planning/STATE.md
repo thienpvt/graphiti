@@ -4,16 +4,16 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 1
 current_phase_name: Strict Contracts and Catalog-v2 Identity
-status: planning
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-07-18T00:00:00.000Z"
+status: in_progress
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-07-18T00:30:00.000Z"
 last_activity: 2026-07-18
-last_activity_desc: Completed 01-01-PLAN.md (CatalogStrictModel shells)
+last_activity_desc: Completed 01-02-PLAN.md (catalog-v2 graph-key grammar registry)
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 7
-  completed_plans: 3
+  completed_plans: 4
   percent: 14
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 1 — Strict Contracts and Catalog-v2 Identity
-Plan: 01 complete; next 02
+Plan: 02 complete; next 03
 Status: In progress — executing Phase 1 plans
-Last activity: 2026-07-18 — Completed 01-01-PLAN.md (CatalogStrictModel shells)
+Last activity: 2026-07-18 — Completed 01-02-PLAN.md (catalog-v2 graph-key grammar registry)
 
 Progress: [█░░░░░░░░░] 14%
 
@@ -63,6 +63,7 @@ Progress: [█░░░░░░░░░] 14%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01 P01 | 4min | 2 tasks | 6 files |
+| Phase 01 P02 | 25min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -87,10 +88,13 @@ Recent decisions affecting current work:
 - [Phase 1]: Shared CatalogStrictModel base; required catalog-v2/system_key shells; Literal True write flags
 - [Phase 1]: Response models remain non-strict BaseModel; status request omits version/system_key
 - [Phase 1]: REFACTOR no-op for 01-01; no dual-version compatibility helpers
+- [Phase 1]: Pure catalog_graph_key fullmatch registry; shell system_key authority; no v1 rewrite
+- [Phase 1]: Procedure/Function require nonempty #OVERLOAD; package optional; SourceArtifact distinct from provenance source_key
+- [Phase 1]: REFACTOR no-op for 01-02; no dual-version rewrite helpers
 
 ### Pending Todos
 
-Next: execute 01-02 (graph-key grammar). Phase 1 not complete; Phase 2 blocked until Phase 1 gate.
+Next: execute 01-03 (versioned UUID material). Phase 1 not complete; Phase 2 blocked until Phase 1 gate.
 
 ### Blockers/Concerns
 
@@ -117,7 +121,7 @@ Next: execute 01-02 (graph-key grammar). Phase 1 not complete; Phase 2 blocked u
 
 ## Session Continuity
 
-Last session: 2026-07-17T19:00:42.648Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-07-17T19:14:21.373Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None
 Next: Phase 1 — Strict Contracts and Catalog-v2 Identity

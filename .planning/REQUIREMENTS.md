@@ -43,16 +43,16 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 
 - [x] **IDEN-01**: Every catalog-v2 domain request declares `identity_schema_version='catalog-v2'`; any other value fails closed with `unsupported_identity_schema`.
 - [x] **IDEN-02**: Catalog domain identity includes a required bounded canonical `system_key` from the closed server-owned set `FE`, `BO`, or `COMMON`.
-- [ ] **IDEN-03**: Invalid, empty, overlong, non-canonical, mismatched, or unknown-ownership system keys fail with `invalid_system_key` before database reads, embeddings, schema initialization, transactions, or status writes; unknown ownership never defaults to `COMMON`.
-- [ ] **IDEN-04**: Every entity graph key includes its visible system scope and passes a complete server-owned grammar for its exact entity type, not merely a prefix check.
-- [ ] **IDEN-05**: The graph-key registry defines complete catalog-v2 grammar for all allowed types, including System, Database, DictionaryDocument, Schema, Table, View, MaterializedView, Column, Constraint, Index, Package, Procedure, Function, Trigger, Sequence, Synonym, DatabaseLink, and SourceArtifact.
-- [ ] **IDEN-06**: Procedure and Function identities include a deterministic overload discriminator so package and standalone overloads cannot collapse.
+- [x] **IDEN-03**: Invalid, empty, overlong, non-canonical, mismatched, or unknown-ownership system keys fail with `invalid_system_key` before database reads, embeddings, schema initialization, transactions, or status writes; unknown ownership never defaults to `COMMON`.
+- [x] **IDEN-04**: Every entity graph key includes its visible system scope and passes a complete server-owned grammar for its exact entity type, not merely a prefix check.
+- [x] **IDEN-05**: The graph-key registry defines complete catalog-v2 grammar for all allowed types, including System, Database, DictionaryDocument, Schema, Table, View, MaterializedView, Column, Constraint, Index, Package, Procedure, Function, Trigger, Sequence, Synonym, DatabaseLink, and SourceArtifact.
+- [x] **IDEN-06**: Procedure and Function identities include a deterministic overload discriminator so package and standalone overloads cannot collapse.
 - [ ] **IDEN-07**: FE and BO objects with identical Oracle database, schema, object, and leaf names have different graph keys and server-derived UUIDs while remaining in one `group_id` graph.
-- [ ] **IDEN-08**: Catalog entities expose their complete system-scoped graph keys through resolve, manifest, evidence, and verification responses used by agents.
-- [ ] **IDEN-09**: `System`, `DatabaseLink`, and `SourceArtifact` are added to the fixed entity allowlist with fixed server-owned prefixes and grammars; no business-level entity types are added.
+- [x] **IDEN-08**: Catalog entities expose their complete system-scoped graph keys through resolve, manifest, evidence, and verification responses used by agents.
+- [x] **IDEN-09**: `System`, `DatabaseLink`, and `SourceArtifact` are added to the fixed entity allowlist with fixed server-owned prefixes and grammars; no business-level entity types are added.
 - [ ] **IDEN-10**: Entity UUIDs derive from an explicitly versioned canonical name equivalent to `group_id|catalog-v2|entity_type|graph_key` under the configured immutable namespace.
 - [ ] **IDEN-11**: Edge, provenance source, evidence-link, batch, manifest, and prepared-plan identities use equivalent explicit catalog-v2 versioning and deterministic server derivation.
-- [ ] **IDEN-12**: Catalog-v1 graph keys, UUID material, or payloads are never silently accepted, normalized, re-keyed, or rewritten as catalog-v2 objects.
+- [x] **IDEN-12**: Catalog-v1 graph keys, UUID material, or payloads are never silently accepted, normalized, re-keyed, or rewritten as catalog-v2 objects.
 - [ ] **IDEN-13**: The pre-hardening ACCEPT_TAB hash, 10-entity/16-edge/1-source commit receipt, and prior 38/85 plan remain historical evidence but are explicitly invalid for hardened catalog-v2; builders regenerate new artifacts without executing them or rewriting existing graph data.
 
 ### Server-Owned Edge Endpoint Map
@@ -242,16 +242,16 @@ Deferred until the deterministic substrate is implemented and verified.
 | CONT-08 | Phase 1 | Complete |
 | IDEN-01 | Phase 1 | Complete |
 | IDEN-02 | Phase 1 | Complete |
-| IDEN-03 | Phase 1 | Pending |
-| IDEN-04 | Phase 1 | Pending |
-| IDEN-05 | Phase 1 | Pending |
-| IDEN-06 | Phase 1 | Pending |
+| IDEN-03 | Phase 1 | Complete |
+| IDEN-04 | Phase 1 | Complete |
+| IDEN-05 | Phase 1 | Complete |
+| IDEN-06 | Phase 1 | Complete |
 | IDEN-07 | Phase 1 | Pending |
-| IDEN-08 | Phase 1 | Pending |
-| IDEN-09 | Phase 1 | Pending |
+| IDEN-08 | Phase 1 | Complete |
+| IDEN-09 | Phase 1 | Complete |
 | IDEN-10 | Phase 1 | Pending |
 | IDEN-11 | Phase 1 | Pending |
-| IDEN-12 | Phase 1 | Pending |
+| IDEN-12 | Phase 1 | Complete |
 | IDEN-13 | Phase 1 | Pending |
 | EDGE-01 | Phase 2 | Pending |
 | EDGE-02 | Phase 2 | Pending |
