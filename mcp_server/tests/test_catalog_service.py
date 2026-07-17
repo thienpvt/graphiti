@@ -137,6 +137,27 @@ def _schema_execute_query(cypher: str, params=None, **kwargs):
                     'labelsOrTypes': ['RELATES_TO'],
                     'properties': ['uuid', 'group_id'],
                 },
+                {
+                    'name': 'catalog_episodic_identity_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['Episodic'],
+                    'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_mentions_identity_unique',
+                    'type': 'RELATIONSHIP_PROPERTY_UNIQUENESS',
+                    'entityType': 'RELATIONSHIP',
+                    'labelsOrTypes': ['MENTIONS'],
+                    'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_batch_identity_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogIngestBatch'],
+                    'properties': ['uuid', 'group_id'],
+                },
             ],
             None,
             None,
@@ -2690,10 +2711,8 @@ async def test_batch_committed_different_hash_returns_batch_conflict_before_embe
         return_value={'status': 'committed', 'request_sha256': 'a' * 64}
     )
 
-    resp = await service.upsert_catalog_batch(
-        client=client,
-        request=_batch_request(request_sha256='b' * 64),
-    )
+    request = _batch_request()
+    resp = await service.upsert_catalog_batch(client=client, request=request)
 
     assert resp.error_code == CatalogErrorCode.batch_conflict
     assert resp.failed >= 1
@@ -2752,9 +2771,7 @@ async def test_batch_dry_run_resolves_missing_provenance_target_before_side_effe
     provenance = NestedProvenancePayload(
         sources=[_source()],
         entity_targets=[
-            CatalogProvenanceEntityTarget(
-                entity_type='Table', graph_key='TABLE::HR.MISSING'
-            )
+            CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::HR.MISSING')
         ],
     )
 

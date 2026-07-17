@@ -870,9 +870,10 @@ async def test_happy_path_six_entities_and_six_edges(catalog_client):
     for name, (entity_type, label) in expected_constraints.items():
         constraint = by_name.get(name)
         assert constraint is not None, f'product composite UNIQUE missing: {name}'
-        assert 'UNIQUENESS' in str(constraint['type']).upper() or 'UNIQUE' in str(
-            constraint['type']
-        ).upper()
+        assert (
+            'UNIQUENESS' in str(constraint['type']).upper()
+            or 'UNIQUE' in str(constraint['type']).upper()
+        )
         assert str(constraint['entityType']).upper() == entity_type
         assert label in list(constraint['labelsOrTypes'] or [])
         assert set(constraint['properties'] or []) == {'uuid', 'group_id'}
