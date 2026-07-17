@@ -2553,7 +2553,16 @@ def _batch_request(
 
 def _wire_batch_preflight(service: CatalogService) -> None:
     service._store.get_batch_status = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    service._store.get_entity_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    async def _entity_by_uuid(executor, *, uuid, group_id, tx=None):
+        _ = executor, group_id
+        if tx is None:
+            return None
+        return None
+
+    service._store.get_entity_by_uuid = AsyncMock(  # type: ignore[method-assign]
+        side_effect=_entity_by_uuid
+    )
     service._store.get_edge_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
     service._store.resolve_endpoint_typed = AsyncMock(  # type: ignore[method-assign]
         return_value=('missing_endpoint', None)
@@ -2737,7 +2746,7 @@ def _install_batch_write_mocks(service: CatalogService, client) -> list[str]:
 
     async def _status_write(tx, *, params):
         _ = tx
-        events.append(f"status_{params['status']}")
+        events.append(f'status_{params["status"]}')
         return {'uuid': params['uuid'], 'status': params['status']}
 
     service._store.upsert_entity_item = AsyncMock(side_effect=_entity_write)  # type: ignore[method-assign]

@@ -30,7 +30,7 @@ from starlette.responses import JSONResponse
 from typing_extensions import LiteralString
 
 from config.schema import GraphitiConfig, ServerConfig
-from models.catalog_batch import GetCatalogIngestStatusRequest
+from models.catalog_batch import GetCatalogIngestStatusRequest, UpsertCatalogBatchRequest
 from models.catalog_edges import UpsertTypedEdgesRequest
 from models.catalog_entities import (
     ResolveTypedEntitiesRequest,
@@ -39,6 +39,7 @@ from models.catalog_entities import (
 )
 from models.catalog_provenance import UpsertProvenanceRequest
 from models.catalog_responses import (
+    CatalogBatchWriteResponse,
     CatalogIngestStatusResponse,
     CatalogWriteResponse,
     ResolveTypedEntitiesResponse,
@@ -1400,6 +1401,37 @@ async def get_catalog_ingest_status(
             type(e).__name__,
         )
         return ErrorResponse(error='catalog get_catalog_ingest_status failed')
+
+
+@mcp.tool()
+async def upsert_catalog_batch(
+    request: UpsertCatalogBatchRequest,
+) -> CatalogBatchWriteResponse | ErrorResponse:
+    """Atomic deterministic catalog batch upsert (synchronous, Neo4j-only).
+
+    Preflights nested entities, edges, and provenance; embeds before one domain
+    transaction; writes failed status separately only after domain rollback.
+    """
+    global graphiti_service, catalog_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+
+    try:
+        client = await graphiti_service.get_client()
+        return await catalog_service.upsert_catalog_batch(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'upsert_catalog_batch failed batch_id=%s entities=%s edges=%s provenance=%s reason=%s',
+            getattr(request, 'batch_id', None),
+            len(getattr(request, 'entities', []) or []),
+            len(getattr(request, 'edges', []) or []),
+            len(getattr(getattr(request, 'provenance', None), 'sources', []) or []),
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog upsert_catalog_batch failed')
 
 
 @mcp.custom_route('/health', methods=['GET'])

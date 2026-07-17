@@ -80,6 +80,7 @@ class _PreparedEdge:
     projected_status: str = 'created'
     error_code: CatalogErrorCode | None = None
     error_message: str | None = None
+    batch_result_index: int | None = None
 
 
 @dataclass
@@ -3677,6 +3678,7 @@ class CatalogService:
                 item=item,
                 edge_uuid=edge_uuid,
                 content_sha256=digest,
+                batch_result_index=result_index,
             )
             edge_by_uuid[edge_uuid] = prep
             edge_prepared.append(prep)
@@ -3807,12 +3809,419 @@ class CatalogService:
                 edge_unchanged=sum(result.status == 'unchanged' for result in edge_results),
             )
 
-        # Task 2 completes embed-before-tx and atomic write orchestration.
-        return CatalogBatchWriteResponse(
+        entity_to_write = [prep for prep in entity_prepared if prep.projected_status != 'unchanged']
+        edge_to_write = [prep for prep in edge_prepared if prep.projected_status != 'unchanged']
+        try:
+            for prep in entity_to_write:
+                text = ' '.join(
+                    [prep.item.graph_key, prep.item.database_qualified_name, prep.item.summary]
+                ).replace('\n', ' ')
+                prep.name_embedding = await client.embedder.create(input_data=[text])
+            for prep in edge_to_write:
+                prep.fact_embedding = await client.embedder.create(
+                    input_data=[prep.item.fact.replace('\n', ' ')]
+                )
+        except Exception as exc:
+            logger.error(
+                'catalog upsert_catalog_batch embedding_failed batch_id=%s entities=%s edges=%s reason=%s',
+                request.batch_id,
+                len(entity_to_write),
+                len(edge_to_write),
+                type(exc).__name__,
+            )
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges), 1),
+                error_code=CatalogErrorCode.embedding_failed,
+                error_message='embedding generation failed',
+            )
+
+        try:
+            await self._ensure_schema(client)
+        except Exception as exc:
+            logger.error(
+                'catalog schema_init_failed kind=batch batch_id=%s reason=%s',
+                request.batch_id,
+                type(exc).__name__,
+            )
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges), 1),
+                error_code=CatalogErrorCode.neo4j_transaction_failed,
+                error_message='catalog schema initialization failed',
+            )
+
+        request_ts = datetime.now(timezone.utc)
+        provenance_sources: list[_PreparedSource] = []
+        provenance_entity_uuids: list[str] = []
+        provenance_edge_uuids: list[str] = []
+        provenance = request.provenance
+        if provenance is not None:
+            for target in provenance.entity_targets:
+                identity = (target.entity_type, target.graph_key)
+                target_uuid = request_entity_uuids.get(identity)
+                if target_uuid is None:
+                    target_uuid = catalog_entity_uuid(
+                        namespace,
+                        request.group_id,
+                        target.entity_type,
+                        target.graph_key,
+                    )
+                provenance_entity_uuids.append(target_uuid)
+            for target in provenance.edge_targets:
+                provenance_edge_uuids.append(
+                    catalog_edge_uuid(
+                        namespace,
+                        request.group_id,
+                        target.edge_type,
+                        target.edge_key,
+                    )
+                )
+            for index, source in enumerate(provenance.sources):
+                digest = canonical_sha256(self.source_canonical_payload(source))
+                source_uuid = catalog_source_uuid(namespace, request.group_id, source.source_key)
+                try:
+                    existing = await self._store.get_source_episode_by_uuid(
+                        client.driver,
+                        uuid=source_uuid,
+                        group_id=request.group_id,
+                    )
+                except Exception as exc:
+                    return CatalogBatchWriteResponse(
+                        group_id=request.group_id,
+                        batch_id=request.batch_id,
+                        batch_uuid=batch_uuid,
+                        status='failed',
+                        failed=1,
+                        error_code=CatalogErrorCode.internal_error,
+                        error_message=f'provenance source pre-read failed: {type(exc).__name__}',
+                    )
+                content_json = json.dumps(
+                    {
+                        'source_key': source.source_key,
+                        'reference_time': source.reference_time,
+                        'attributes': source.attributes,
+                        'metadata': source.metadata,
+                    },
+                    sort_keys=True,
+                    separators=(',', ':'),
+                    ensure_ascii=False,
+                )
+                prep = _PreparedSource(
+                    index=index,
+                    item=source,
+                    source_uuid=source_uuid,
+                    content_sha256=digest,
+                    content_json=content_json,
+                    valid_at=self._parse_source_valid_at(source.reference_time),
+                    existing=existing,
+                    projected_status=(
+                        'created'
+                        if existing is None
+                        else (
+                            'unchanged' if existing.get('content_sha256') == digest else 'updated'
+                        )
+                    ),
+                    entity_uuids=list(provenance_entity_uuids),
+                    edge_uuids=list(provenance_edge_uuids),
+                )
+                prep.mentions_uuids = [
+                    catalog_mentions_uuid(namespace, request.group_id, source_uuid, entity_uuid)
+                    for entity_uuid in prep.entity_uuids
+                ]
+                provenance_sources.append(prep)
+
+        entity_results: list[CatalogItemResult] = []
+        edge_results: list[CatalogItemResult] = []
+        provenance_results: list[CatalogItemResult] = []
+        try:
+            async with client.driver.transaction() as tx:
+                written_request_entities: set[str] = set()
+                for prep in entity_prepared:
+                    status = prep.projected_status
+                    if status != 'unchanged':
+                        existing = await self._store.get_entity_by_uuid(
+                            None,
+                            uuid=prep.entity_uuid,
+                            group_id=request.group_id,
+                            tx=tx,
+                        )
+                        if existing is not None:
+                            if (
+                                self._entity_label_conflict(existing, prep.item.entity_type)
+                                is not None
+                            ):
+                                raise self._EntityInvariantRace(
+                                    CatalogErrorCode.entity_type_conflict
+                                )
+                            if (
+                                self._entity_identity_property_conflict(existing, prep.item)
+                                is not None
+                            ):
+                                raise self._EntityInvariantRace(
+                                    CatalogErrorCode.deterministic_uuid_conflict
+                                )
+                        row = await self._store.upsert_entity_item(
+                            tx,
+                            entity_type=prep.item.entity_type,
+                            params=self._store.prepare_entity_params(
+                                entity_type=prep.item.entity_type,
+                                uuid=prep.entity_uuid,
+                                group_id=request.group_id,
+                                batch_id=request.batch_id,
+                                graph_key=prep.item.graph_key,
+                                name_raw=prep.item.name_raw,
+                                name_canonical=prep.item.name_canonical,
+                                database_qualified_name=prep.item.database_qualified_name,
+                                summary=prep.item.summary,
+                                content_sha256=prep.content_sha256,
+                                created_at=request_ts,
+                                updated_at=request_ts,
+                                name_embedding=prep.name_embedding or [],
+                                attributes=prep.item.attributes,
+                                source_refs=prep.item.source_refs,
+                                confidence=prep.item.confidence,
+                            ),
+                        )
+                        status = self._write_status_from_row(row, prep.projected_status)
+                        written_request_entities.add(prep.entity_uuid)
+                    entity_results.append(self._batch_result_for_entity(prep, status=status))
+                    for index in prep.coalesced_indices:
+                        duplicate = self._batch_result_for_entity(prep, status=status)
+                        duplicate.index = index
+                        entity_results.append(duplicate)
+
+                for prep in edge_prepared:
+                    status = prep.projected_status
+                    if status != 'unchanged':
+                        await self._batch_recheck_edge_in_tx(
+                            tx,
+                            prep,
+                            request,
+                            request_entity_uuids,
+                            written_request_entities,
+                        )
+                        row = await self._store.upsert_edge_item(
+                            tx,
+                            params=self._store.prepare_edge_params(
+                                edge_type=prep.item.edge_type,
+                                uuid=prep.edge_uuid,
+                                group_id=request.group_id,
+                                batch_id=request.batch_id,
+                                edge_key=prep.item.edge_key,
+                                source_uuid=prep.source_uuid or '',
+                                target_uuid=prep.target_uuid or '',
+                                fact=prep.item.fact,
+                                evidence=prep.item.evidence,
+                                content_sha256=prep.content_sha256,
+                                created_at=request_ts,
+                                updated_at=request_ts,
+                                fact_embedding=prep.fact_embedding or [],
+                                attributes=prep.item.attributes,
+                                confidence=prep.item.confidence,
+                            ),
+                        )
+                        status = self._write_status_from_row(row, prep.projected_status)
+                    result_index = prep.batch_result_index
+                    assert result_index is not None
+                    edge_results.append(
+                        self._batch_result_for_edge(prep, index=result_index, status=status)
+                    )
+                    for local_index in prep.coalesced_indices:
+                        edge_results.append(
+                            self._batch_result_for_edge(
+                                prep,
+                                index=len(request.entities) + local_index,
+                                status=status,
+                            )
+                        )
+
+                for prep in provenance_sources:
+                    params = self._store.prepare_source_episode_params(
+                        uuid=prep.source_uuid,
+                        group_id=request.group_id,
+                        batch_id=request.batch_id,
+                        source_key=prep.item.source_key,
+                        content_sha256=prep.content_sha256,
+                        content=prep.content_json,
+                        source='json',
+                        source_description='catalog provenance source',
+                        valid_at=prep.valid_at,
+                        created_at=request_ts,
+                        updated_at=request_ts,
+                        entity_edges=list(prep.edge_uuids),
+                        name=prep.item.source_key,
+                    )
+                    row = await self._store.upsert_source_episode(tx, params=params)
+                    source_status = str(row.get('status') or prep.projected_status)
+                    for entity_uuid, mentions_uuid in zip(
+                        prep.entity_uuids, prep.mentions_uuids, strict=True
+                    ):
+                        await self._store.upsert_mentions_link(
+                            tx,
+                            episode_uuid=prep.source_uuid,
+                            entity_uuid=entity_uuid,
+                            mentions_uuid=mentions_uuid,
+                            group_id=request.group_id,
+                            created_at=request_ts,
+                        )
+                    for edge_uuid in prep.edge_uuids:
+                        await self._store.append_edge_episode(
+                            tx,
+                            edge_uuid=edge_uuid,
+                            episode_uuid=prep.source_uuid,
+                            group_id=request.group_id,
+                        )
+                    provenance_results.append(
+                        CatalogItemResult(
+                            index=len(request.entities) + len(request.edges) + prep.index,
+                            status=source_status,  # type: ignore[arg-type]
+                            uuid=prep.source_uuid,
+                            content_sha256=prep.content_sha256,
+                            graph_key=prep.item.source_key,
+                            details={'kind': 'provenance'},
+                        )
+                    )
+
+                status_params = self._store.prepare_batch_status_params(
+                    uuid=batch_uuid,
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    status='committed',
+                    request_sha256=effective_hash,
+                    catalog_sha256=request.catalog_sha256,
+                    entity_count=len(request.entities),
+                    edge_count=len(request.edges),
+                    provenance_count=len(provenance_sources),
+                    created_at=request_ts,
+                    updated_at=request_ts,
+                    committed_at=request_ts,
+                )
+                await self._store.upsert_batch_status(tx, params=status_params)
+        except Exception as exc:
+            logger.error(
+                'catalog upsert_catalog_batch neo4j_transaction_failed batch_id=%s entities=%s edges=%s provenance=%s reason=%s',
+                request.batch_id,
+                len(request.entities),
+                len(request.edges),
+                len(provenance_sources),
+                type(exc).__name__,
+            )
+            failed_params = self._store.prepare_batch_status_params(
+                uuid=batch_uuid,
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                status='failed',
+                request_sha256=effective_hash,
+                catalog_sha256=request.catalog_sha256,
+                entity_count=len(request.entities),
+                edge_count=len(request.edges),
+                provenance_count=len(provenance_sources),
+                created_at=request_ts,
+                updated_at=datetime.now(timezone.utc),
+                error_summary=type(exc).__name__,
+            )
+            try:
+                async with client.driver.transaction() as status_tx:
+                    await self._store.upsert_batch_status(status_tx, params=failed_params)
+            except Exception as status_exc:
+                logger.error(
+                    'catalog upsert_catalog_batch failed_status_write_failed batch_id=%s reason=%s',
+                    request.batch_id,
+                    type(status_exc).__name__,
+                )
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges) + len(provenance_sources), 1),
+                rolled_back=len(entity_results) + len(edge_results) + len(provenance_results),
+                error_code=CatalogErrorCode.neo4j_transaction_failed,
+                error_message='neo4j transaction failed',
+            )
+
+        results = sorted(
+            entity_results + edge_results + provenance_results,
+            key=lambda result: result.index,
+        )
+        response = CatalogBatchWriteResponse(
             group_id=request.group_id,
             batch_id=request.batch_id,
             batch_uuid=batch_uuid,
-            status='embedding',
-            error_code=CatalogErrorCode.internal_error,
-            error_message='batch write orchestration pending',
+            status='committed',
+            results=results,
+            entity_created=sum(result.status == 'created' for result in entity_results),
+            entity_updated=sum(result.status == 'updated' for result in entity_results),
+            entity_unchanged=sum(result.status == 'unchanged' for result in entity_results),
+            edge_created=sum(result.status == 'created' for result in edge_results),
+            edge_updated=sum(result.status == 'updated' for result in edge_results),
+            edge_unchanged=sum(result.status == 'unchanged' for result in edge_results),
+            provenance_created=sum(result.status == 'created' for result in provenance_results),
+            provenance_updated=sum(result.status == 'updated' for result in provenance_results),
+            provenance_unchanged=sum(result.status == 'unchanged' for result in provenance_results),
         )
+        logger.info(
+            'catalog upsert_catalog_batch committed batch_id=%s entities=%s edges=%s provenance=%s',
+            request.batch_id,
+            len(request.entities),
+            len(request.edges),
+            len(provenance_sources),
+        )
+        return response
+
+    async def _batch_recheck_edge_in_tx(
+        self,
+        tx: Any,
+        prep: _PreparedEdge,
+        request: UpsertCatalogBatchRequest,
+        request_entity_uuids: dict[tuple[str, str], str],
+        written_request_entities: set[str],
+    ) -> None:
+        """Recheck persisted endpoints; same-request endpoints exist after entity writes."""
+        for entity_type, graph_key, expected_uuid in (
+            (prep.item.source_entity_type, prep.item.source_graph_key, prep.source_uuid),
+            (prep.item.target_entity_type, prep.item.target_graph_key, prep.target_uuid),
+        ):
+            if (entity_type, graph_key) in request_entity_uuids:
+                if expected_uuid in written_request_entities:
+                    continue
+                row = await self._store.get_entity_by_uuid(
+                    None,
+                    uuid=expected_uuid or '',
+                    group_id=request.group_id,
+                    tx=tx,
+                )
+                if row is None:
+                    raise self._EdgeEndpointRace(CatalogErrorCode.missing_endpoint)
+                continue
+            code, row = await self._store.resolve_endpoint_typed(
+                None,
+                group_id=request.group_id,
+                graph_key=graph_key,
+                entity_type=entity_type,
+                tx=tx,
+                expected_uuid=expected_uuid,
+            )
+            if code is not None or row is None or str(row.get('uuid')) != expected_uuid:
+                raise self._EdgeEndpointRace(self._endpoint_error_code(code or 'missing_endpoint'))
+        existing = await self._store.get_edge_by_uuid(
+            None,
+            uuid=prep.edge_uuid,
+            group_id=request.group_id,
+            tx=tx,
+        )
+        if existing is not None and self._store.detect_edge_identity_conflict(
+            existing,
+            edge_type=prep.item.edge_type,
+            edge_key=prep.item.edge_key,
+            source_uuid=prep.source_uuid or '',
+            target_uuid=prep.target_uuid or '',
+        ):
+            raise self._EdgeEndpointRace(CatalogErrorCode.edge_identity_conflict)
