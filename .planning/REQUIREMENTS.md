@@ -18,7 +18,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [ ] **SAFE-02**: No implementation, test, fixture, or documentation workflow executes the real catalog canary.
 - [ ] **SAFE-03**: Deterministic catalog workflows never invoke `add_memory`, `add_triplet`, `update_entity`, `delete_entity_edge`, `delete_episode`, `clear_graph`, or `build_communities`.
 - [ ] **SAFE-04**: Deterministic catalog workflows never invoke LLM extraction, asynchronous queue ingestion, implicit endpoint creation, or implicit community creation.
-- [ ] **SAFE-05**: Caller-supplied UUIDs never control entity, edge, source, evidence-link, batch, manifest, or prepared-plan identity.
+- [x] **SAFE-05**: Caller-supplied UUIDs never control entity, edge, source, evidence-link, batch, manifest, or prepared-plan identity.
 - [ ] **SAFE-06**: Identity, type, endpoint, provenance, manifest, uniqueness, and hash conflicts fail closed; no graph data or constraints are silently repaired, merged, deleted, or rewritten.
 - [ ] **SAFE-07**: Catalog logs contain only safe identifiers, counts, and structured codes; they never contain payloads, source text, credentials, authorization headers, raw plan tokens, or full exception messages that may contain catalog content.
 - [ ] **SAFE-08**: Every new failure returns a documented structured code, bounded non-sensitive message, retryability, field path when applicable, and safe correlation identifier without leaking stack traces or internals.
@@ -47,13 +47,13 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **IDEN-04**: Every entity graph key includes its visible system scope and passes a complete server-owned grammar for its exact entity type, not merely a prefix check.
 - [x] **IDEN-05**: The graph-key registry defines complete catalog-v2 grammar for all allowed types, including System, Database, DictionaryDocument, Schema, Table, View, MaterializedView, Column, Constraint, Index, Package, Procedure, Function, Trigger, Sequence, Synonym, DatabaseLink, and SourceArtifact.
 - [x] **IDEN-06**: Procedure and Function identities include a deterministic overload discriminator so package and standalone overloads cannot collapse.
-- [ ] **IDEN-07**: FE and BO objects with identical Oracle database, schema, object, and leaf names have different graph keys and server-derived UUIDs while remaining in one `group_id` graph.
+- [x] **IDEN-07**: FE and BO objects with identical Oracle database, schema, object, and leaf names have different graph keys and server-derived UUIDs while remaining in one `group_id` graph.
 - [x] **IDEN-08**: Catalog entities expose their complete system-scoped graph keys through resolve, manifest, evidence, and verification responses used by agents.
 - [x] **IDEN-09**: `System`, `DatabaseLink`, and `SourceArtifact` are added to the fixed entity allowlist with fixed server-owned prefixes and grammars; no business-level entity types are added.
-- [ ] **IDEN-10**: Entity UUIDs derive from an explicitly versioned canonical name equivalent to `group_id|catalog-v2|entity_type|graph_key` under the configured immutable namespace.
-- [ ] **IDEN-11**: Edge, provenance source, evidence-link, batch, manifest, and prepared-plan identities use equivalent explicit catalog-v2 versioning and deterministic server derivation.
+- [x] **IDEN-10**: Entity UUIDs derive from an explicitly versioned canonical name equivalent to `group_id|catalog-v2|entity_type|graph_key` under the configured immutable namespace.
+- [x] **IDEN-11**: Edge, provenance source, evidence-link, batch, manifest, and prepared-plan identities use equivalent explicit catalog-v2 versioning and deterministic server derivation.
 - [x] **IDEN-12**: Catalog-v1 graph keys, UUID material, or payloads are never silently accepted, normalized, re-keyed, or rewritten as catalog-v2 objects.
-- [ ] **IDEN-13**: The pre-hardening ACCEPT_TAB hash, 10-entity/16-edge/1-source commit receipt, and prior 38/85 plan remain historical evidence but are explicitly invalid for hardened catalog-v2; builders regenerate new artifacts without executing them or rewriting existing graph data.
+- [x] **IDEN-13**: The pre-hardening ACCEPT_TAB hash, 10-entity/16-edge/1-source commit receipt, and prior 38/85 plan remain historical evidence but are explicitly invalid for hardened catalog-v2; builders regenerate new artifacts without executing them or rewriting existing graph data.
 
 ### Server-Owned Edge Endpoint Map
 
@@ -161,7 +161,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 
 - [x] **TEST-01**: Automated unit coverage proves strict unknown-field rejection at every nested level, misspelled optional-field rejection, `strict_endpoints=false` rejection, and `atomic=false` rejection.
 - [ ] **TEST-02**: Exhaustive table-driven tests cover every allowed and rejected endpoint pair for all 16 edge types.
-- [ ] **TEST-03**: Identity tests prove FE/BO separation, overload separation, graph-key grammar, unsupported-version rejection, and UUID/hash changes when identity schema version changes.
+- [x] **TEST-03**: Identity tests prove FE/BO separation, overload separation, graph-key grammar, unsupported-version rejection, and UUID/hash changes when identity schema version changes.
 - [ ] **TEST-04**: Hash tests prove `catalog_sha256` changes `request_sha256`, every included domain field is covered, excluded transport fields are stable, and dry-run returns authoritative hashes with zero writes.
 - [ ] **TEST-05**: Prepare tests prove no domain/status mutation, immutable persisted payloads, token-only commit, restart safety, TTL/size/cardinality limits, and missing/expired/discarded/consumed/conflicting behavior.
 - [ ] **TEST-06**: Concurrency tests prove one logical result for identical concurrent commit, token scope cannot change, expired plans cannot revive, and no duplicate manifest/evidence/domain records appear.
@@ -223,7 +223,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | SAFE-02 | Phase 0 | Pending |
 | SAFE-03 | Phase 5 | Pending |
 | SAFE-04 | Phase 5 | Pending |
-| SAFE-05 | Phase 1 | Pending |
+| SAFE-05 | Phase 1 | Complete |
 | SAFE-06 | Phase 5 | Pending |
 | SAFE-07 | Phase 5 | Pending |
 | SAFE-08 | Phase 1 | Pending |
@@ -246,13 +246,13 @@ Deferred until the deterministic substrate is implemented and verified.
 | IDEN-04 | Phase 1 | Complete |
 | IDEN-05 | Phase 1 | Complete |
 | IDEN-06 | Phase 1 | Complete |
-| IDEN-07 | Phase 1 | Pending |
+| IDEN-07 | Phase 1 | Complete |
 | IDEN-08 | Phase 1 | Complete |
 | IDEN-09 | Phase 1 | Complete |
-| IDEN-10 | Phase 1 | Pending |
-| IDEN-11 | Phase 1 | Pending |
+| IDEN-10 | Phase 1 | Complete |
+| IDEN-11 | Phase 1 | Complete |
 | IDEN-12 | Phase 1 | Complete |
-| IDEN-13 | Phase 1 | Pending |
+| IDEN-13 | Phase 1 | Complete |
 | EDGE-01 | Phase 2 | Pending |
 | EDGE-02 | Phase 2 | Pending |
 | EDGE-03 | Phase 2 | Pending |
@@ -336,7 +336,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | GATE-06 | Phase 4 | Pending |
 | TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 2 | Pending |
-| TEST-03 | Phase 1 | Pending |
+| TEST-03 | Phase 1 | Complete |
 | TEST-04 | Phase 2 | Pending |
 | TEST-05 | Phase 3A | Pending |
 | TEST-06 | Phase 3B | Pending |
