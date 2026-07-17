@@ -100,6 +100,7 @@ class _PreparedSource:
     edge_uuids: list[str] = field(default_factory=list)
     mentions_uuids: list[str] = field(default_factory=list)
     missing_links: bool = False  # True when any MENTIONS/episode attach still needed
+    coalesced_indices: list[int] = field(default_factory=list)
 
 
 class CatalogService:
@@ -2699,6 +2700,44 @@ class CatalogService:
             return parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
 
+    @staticmethod
+    def _source_conflict_result(
+        index: int,
+        item: CatalogSourceItem,
+        source_uuid: str,
+        content_sha256: str,
+        *,
+        batch: bool = False,
+    ) -> CatalogItemResult:
+        return CatalogItemResult(
+            index=index,
+            status='error',
+            uuid=source_uuid,
+            content_sha256=content_sha256,
+            graph_key=item.source_key,
+            error_code=CatalogErrorCode.deterministic_uuid_conflict,
+            error_message='same identity different canonical payload in request',
+            details={'kind': 'provenance'} if batch else None,
+        )
+
+    @staticmethod
+    def _source_result(
+        prep: _PreparedSource,
+        index: int,
+        status: str | None = None,
+        *,
+        batch: bool = False,
+        offset: int = 0,
+    ) -> CatalogItemResult:
+        return CatalogItemResult(
+            index=offset + index,
+            status=(status or prep.projected_status),  # type: ignore[arg-type]
+            uuid=prep.source_uuid,
+            content_sha256=prep.content_sha256,
+            graph_key=prep.item.source_key,
+            details={'kind': 'provenance'} if batch else None,
+        )
+
     async def upsert_provenance(
         self,
         *,
@@ -2725,6 +2764,9 @@ class CatalogService:
         assert namespace is not None
         request_ts = datetime.now(timezone.utc)
         prepared: list[_PreparedSource] = []
+        prepared_by_uuid: dict[str, _PreparedSource] = {}
+        source_occurrences: dict[str, list[int]] = {}
+        conflicted_source_uuids: set[str] = set()
         early_errors: dict[int, CatalogItemResult] = {}
         driver = client.driver
 
@@ -2762,16 +2804,39 @@ class CatalogService:
                 separators=(',', ':'),
                 ensure_ascii=False,
             )
-            prepared.append(
-                _PreparedSource(
-                    index=idx,
-                    item=item,
-                    source_uuid=source_uuid,
-                    content_sha256=digest,
-                    content_json=content_json,
-                    valid_at=valid_at,
-                )
+            occurrences = source_occurrences.setdefault(source_uuid, [])
+            occurrences.append(idx)
+            prior = prepared_by_uuid.get(source_uuid)
+            if source_uuid in conflicted_source_uuids:
+                early_errors[idx] = self._source_conflict_result(idx, item, source_uuid, digest)
+                continue
+            if prior is not None:
+                if prior.content_sha256 == digest:
+                    prior.coalesced_indices.append(idx)
+                    continue
+                conflicted_source_uuids.add(source_uuid)
+                if prior in prepared:
+                    prepared.remove(prior)
+                prepared_by_uuid.pop(source_uuid, None)
+                for occurrence in occurrences:
+                    occurrence_item = request.sources[occurrence]
+                    occurrence_digest = canonical_sha256(
+                        self.source_canonical_payload(occurrence_item)
+                    )
+                    early_errors[occurrence] = self._source_conflict_result(
+                        occurrence, occurrence_item, source_uuid, occurrence_digest
+                    )
+                continue
+            prep = _PreparedSource(
+                index=idx,
+                item=item,
+                source_uuid=source_uuid,
+                content_sha256=digest,
+                content_json=content_json,
+                valid_at=valid_at,
             )
+            prepared.append(prep)
+            prepared_by_uuid[source_uuid] = prep
 
         if early_errors and request.atomic:
             return self._provenance_atomic_fail_response(
@@ -2975,32 +3040,12 @@ class CatalogService:
             )
 
         if request.dry_run:
-            results = []
-            for i, item in enumerate(request.sources):
-                if i in early_errors:
-                    results.append(early_errors[i])
-                    continue
-                prep = next((p for p in prepared if p.index == i), None)
-                if prep is None:
-                    results.append(
-                        CatalogItemResult(
-                            index=i,
-                            status='error',
-                            graph_key=item.source_key,
-                            error_code=CatalogErrorCode.internal_error,
-                            error_message='source not prepared',
-                        )
-                    )
-                    continue
-                results.append(
-                    CatalogItemResult(
-                        index=i,
-                        status=prep.projected_status,  # type: ignore[arg-type]
-                        uuid=prep.source_uuid,
-                        content_sha256=prep.content_sha256,
-                        graph_key=item.source_key,
-                    )
-                )
+            by_index = dict(early_errors)
+            for prep in prepared:
+                by_index[prep.index] = self._source_result(prep, prep.index)
+                for index in prep.coalesced_indices:
+                    by_index[index] = self._source_result(prep, index)
+            results = [by_index[index] for index in range(len(request.sources))]
             resp = self._count_provenance_response(request, results)
             logger.info(
                 'catalog upsert_provenance dry_run batch_id=%s count=%s created=%s updated=%s unchanged=%s failed=%s',
@@ -3049,13 +3094,9 @@ class CatalogService:
                     if prep.index in early_errors:
                         continue
                     if prep.projected_status == 'unchanged' and not prep.missing_links:
-                        written[prep.index] = CatalogItemResult(
-                            index=prep.index,
-                            status='unchanged',
-                            uuid=prep.source_uuid,
-                            content_sha256=prep.content_sha256,
-                            graph_key=prep.item.source_key,
-                        )
+                        written[prep.index] = self._source_result(prep, prep.index, 'unchanged')
+                        for index in prep.coalesced_indices:
+                            written[index] = self._source_result(prep, index, 'unchanged')
                         continue
                     params = self._store.prepare_source_episode_params(
                         uuid=prep.source_uuid,
@@ -3092,13 +3133,9 @@ class CatalogService:
                             episode_uuid=prep.source_uuid,
                             group_id=request.group_id,
                         )
-                    written[prep.index] = CatalogItemResult(
-                        index=prep.index,
-                        status=status,  # type: ignore[arg-type]
-                        uuid=prep.source_uuid,
-                        content_sha256=prep.content_sha256,
-                        graph_key=prep.item.source_key,
-                    )
+                    written[prep.index] = self._source_result(prep, prep.index, status)
+                    for index in prep.coalesced_indices:
+                        written[index] = self._source_result(prep, index, status)
         except Exception as exc:
             logger.error(
                 'catalog upsert_provenance neo4j_transaction_failed batch_id=%s reason=%s',
@@ -3767,6 +3804,9 @@ class CatalogService:
                 )
 
         provenance_sources: list[_PreparedSource] = []
+        provenance_by_uuid: dict[str, _PreparedSource] = {}
+        provenance_occurrences: dict[str, list[int]] = {}
+        conflicted_provenance_uuids: set[str] = set()
         provenance = request.provenance
         if provenance is not None:
             invalid_uuids = {result.uuid for result in errors if result.uuid}
@@ -3884,6 +3924,46 @@ class CatalogService:
                     )
                     continue
                 source_uuid = catalog_source_uuid(namespace, request.group_id, source.source_key)
+                occurrences = provenance_occurrences.setdefault(source_uuid, [])
+                occurrences.append(index)
+                prior_source = provenance_by_uuid.get(source_uuid)
+                if source_uuid in conflicted_provenance_uuids:
+                    errors.append(
+                        self._source_conflict_result(
+                            result_index, source, source_uuid, digest, batch=True
+                        )
+                    )
+                    continue
+                if prior_source is not None:
+                    if prior_source.content_sha256 == digest:
+                        prior_source.coalesced_indices.append(index)
+                        continue
+                    conflicted_provenance_uuids.add(source_uuid)
+                    if prior_source in provenance_sources:
+                        provenance_sources.remove(prior_source)
+                    provenance_by_uuid.pop(source_uuid, None)
+                    errors = [
+                        result
+                        for result in errors
+                        if not (
+                            result.details == {'kind': 'provenance'} and result.uuid == source_uuid
+                        )
+                    ]
+                    for occurrence in occurrences:
+                        occurrence_source = provenance.sources[occurrence]
+                        occurrence_digest = canonical_sha256(
+                            self.source_canonical_payload(occurrence_source)
+                        )
+                        errors.append(
+                            self._source_conflict_result(
+                                len(request.entities) + len(request.edges) + occurrence,
+                                occurrence_source,
+                                source_uuid,
+                                occurrence_digest,
+                                batch=True,
+                            )
+                        )
+                    continue
                 try:
                     existing = await self._store.get_source_episode_by_uuid(
                         client.driver, uuid=source_uuid, group_id=request.group_id
@@ -3969,6 +4049,7 @@ class CatalogService:
                                 prep.missing_links = True
                                 break
                 provenance_sources.append(prep)
+                provenance_by_uuid[source_uuid] = prep
 
         if errors:
             errors.sort(key=lambda item: item.index)
@@ -4021,7 +4102,20 @@ class CatalogService:
                             index=edge_offset + coalesced,
                         )
                     )
-            results = sorted(entity_results + edge_results, key=lambda item: item.index)
+            provenance_results: list[CatalogItemResult] = []
+            provenance_offset = len(request.entities) + len(request.edges)
+            for prep in provenance_sources:
+                provenance_results.append(
+                    self._source_result(prep, prep.index, batch=True, offset=provenance_offset)
+                )
+                for coalesced in prep.coalesced_indices:
+                    provenance_results.append(
+                        self._source_result(prep, coalesced, batch=True, offset=provenance_offset)
+                    )
+            results = sorted(
+                entity_results + edge_results + provenance_results,
+                key=lambda item: item.index,
+            )
             return CatalogBatchWriteResponse(
                 group_id=request.group_id,
                 batch_id=request.batch_id,
@@ -4035,6 +4129,11 @@ class CatalogService:
                 edge_created=sum(result.status == 'created' for result in edge_results),
                 edge_updated=sum(result.status == 'updated' for result in edge_results),
                 edge_unchanged=sum(result.status == 'unchanged' for result in edge_results),
+                provenance_created=sum(result.status == 'created' for result in provenance_results),
+                provenance_updated=sum(result.status == 'updated' for result in provenance_results),
+                provenance_unchanged=sum(
+                    result.status == 'unchanged' for result in provenance_results
+                ),
             )
 
         entity_to_write = [prep for prep in entity_prepared if prep.projected_status != 'unchanged']
@@ -4244,16 +4343,26 @@ class CatalogService:
                             episode_uuid=prep.source_uuid,
                             group_id=request.group_id,
                         )
+                    provenance_offset = len(request.entities) + len(request.edges)
                     provenance_results.append(
-                        CatalogItemResult(
-                            index=len(request.entities) + len(request.edges) + prep.index,
-                            status=source_status,  # type: ignore[arg-type]
-                            uuid=prep.source_uuid,
-                            content_sha256=prep.content_sha256,
-                            graph_key=prep.item.source_key,
-                            details={'kind': 'provenance'},
+                        self._source_result(
+                            prep,
+                            prep.index,
+                            source_status,
+                            batch=True,
+                            offset=provenance_offset,
                         )
                     )
+                    for index in prep.coalesced_indices:
+                        provenance_results.append(
+                            self._source_result(
+                                prep,
+                                index,
+                                source_status,
+                                batch=True,
+                                offset=provenance_offset,
+                            )
+                        )
 
                 status_params = self._store.prepare_batch_status_params(
                     uuid=batch_uuid,

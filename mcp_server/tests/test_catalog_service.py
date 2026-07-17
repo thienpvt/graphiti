@@ -2389,6 +2389,48 @@ async def test_provenance_idempotent_unchanged_skips_write():
 
 
 @pytest.mark.asyncio
+async def test_provenance_identical_duplicate_coalesces_with_stable_results():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_provenance_store(service)
+    source = _source()
+
+    resp = await service.upsert_provenance(
+        client=client,
+        request=_prov_request(sources=[source, source.model_copy(deep=True)]),
+    )
+
+    assert [(result.index, result.status) for result in resp.results] == [
+        (0, 'created'),
+        (1, 'created'),
+    ]
+    assert resp.results[0].uuid == resp.results[1].uuid
+    assert cast(AsyncMock, service._store.upsert_source_episode).await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('reverse', [False, True])
+async def test_provenance_divergent_duplicate_conflicts_are_order_independent(reverse):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_provenance_store(service)
+    sources = [_source(attributes={'version': 1}), _source(attributes={'version': 2})]
+    if reverse:
+        sources.reverse()
+
+    resp = await service.upsert_provenance(
+        client=client,
+        request=_prov_request(sources=sources),
+    )
+
+    assert [result.index for result in resp.results] == [0, 1]
+    assert all(
+        result.error_code == CatalogErrorCode.deterministic_uuid_conflict for result in resp.results
+    )
+    cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_provenance_non_atomic_transaction_failure_marks_prior_result_rolled_back():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -2784,6 +2826,55 @@ async def test_batch_dry_run_resolves_missing_provenance_target_before_side_effe
     client.embedder.create.assert_not_awaited()
     cast(AsyncMock, service._store.ensure_uuid_uniqueness_constraints).assert_not_awaited()
     assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_batch_dry_run_reports_provenance_projection_counts_and_duplicates():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    source = _source()
+    provenance = NestedProvenancePayload(sources=[source, source.model_copy(deep=True)])
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(entities=[], provenance=provenance, dry_run=True),
+    )
+
+    assert [(result.index, result.status) for result in resp.results] == [
+        (0, 'created'),
+        (1, 'created'),
+    ]
+    assert resp.results[0].uuid == resp.results[1].uuid
+    assert resp.provenance_created == 2
+    assert resp.provenance_updated == 0
+    assert resp.provenance_unchanged == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('reverse', [False, True])
+async def test_batch_divergent_provenance_duplicate_is_order_independent(reverse):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    sources = [_source(attributes={'version': 1}), _source(attributes={'version': 2})]
+    if reverse:
+        sources.reverse()
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(
+            entities=[], provenance=NestedProvenancePayload(sources=sources), dry_run=True
+        ),
+    )
+
+    assert [result.index for result in resp.results] == [0, 1]
+    assert all(
+        result.error_code == CatalogErrorCode.deterministic_uuid_conflict for result in resp.results
+    )
+    cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
 
 
 @pytest.mark.asyncio
