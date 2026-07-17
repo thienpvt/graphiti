@@ -65,7 +65,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 01 P01 | 4min | 2 tasks | 6 files |
 | Phase 01 P02 | 25min | 2 tasks | 7 files |
 | Phase 01 P03 | 3min | 2 tasks | 3 files |
-| Phase 01 P04 | 25min | 2 tasks | 4 files |
+| Phase 01 P04 | 40min | 2 tasks + hard-gate | 5 files |
 
 ## Accumulated Context
 
@@ -96,7 +96,8 @@ Recent decisions affecting current work:
 - [Phase 1]: catalog-v2 UUID materials via IDENTITY_SCHEMA_VERSION; signatures stable
 - [Phase 1]: Pure EvidenceLink/Manifest/PreparedPlan helpers only; no persistence
 - [Phase 1]: REFACTOR no-op for 01-03; no dual-version identity shim
-- [Phase 1]: Converter pure in catalog_common; FastMCP pre-body validation not rewritten to SAFE-08 ToolError shape
+- [Phase 1]: Converter pure in catalog_common; CatalogSafeFastMCP wires SAFE-08 structured ToolError for seven catalog tools only
+- [Phase 1]: Fresh ToolError(JSON) outside except; legacy/non-validation ToolErrors unchanged
 - [Phase 1]: CONT-07 proven via FastMCP call_tool + typed request annotations on all seven catalog tools
 - [Phase 1]: REFACTOR no-op for 01-04; no dual-version helpers
 
