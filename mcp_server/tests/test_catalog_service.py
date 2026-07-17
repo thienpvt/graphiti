@@ -79,10 +79,10 @@ def _mcp_server():
 def _entity(**overrides) -> CatalogEntityItem:
     data = {
         'entity_type': 'Table',
-        'graph_key': 'TABLE::HR.EMPLOYEES',
+        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
         'name_raw': 'EMPLOYEES',
         'name_canonical': 'employees',
-        'database_qualified_name': 'HR.EMPLOYEES',
+        'database_qualified_name': 'ORCL.HR.EMPLOYEES',
         'summary': 'Employee master table',
         'attributes': {'owner': 'HR'},
         'source_refs': [{'doc': 'ddl.sql', 'line': 12}],
@@ -100,6 +100,8 @@ def _request(
     batch_id: str = BATCH,
 ) -> UpsertTypedEntitiesRequest:
     return UpsertTypedEntitiesRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
         group_id=GROUP,
         batch_id=batch_id,
         entities=entities or [_entity()],
@@ -281,7 +283,7 @@ async def test_entity_service_enforces_configured_limit_below_hard_max():
         max_entities_per_batch=1,
     )
     service = CatalogService(catalog_config=cfg)
-    request = _request([_entity(), _entity(graph_key='TABLE::HR.DEPARTMENTS')])
+    request = _request([_entity(), _entity(graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS')])
     resp = await service.upsert_typed_entities(client=client, request=request)
     assert all(r.error_code == CatalogErrorCode.batch_limit_exceeded for r in resp.results)
     assert 'embed' not in client.call_order
@@ -433,8 +435,8 @@ async def test_entity_changed_update_passes_request_batch_id():
 
 @pytest.mark.asyncio
 async def test_entity_atomic_rollback_on_store_failure():
-    e1 = _entity(graph_key='TABLE::A.T1', database_qualified_name='A.T1', name_raw='T1')
-    e2 = _entity(graph_key='TABLE::A.T2', database_qualified_name='A.T2', name_raw='T2')
+    e1 = _entity(graph_key='TABLE::FE::ORCL.A.T1', database_qualified_name='ORCL.A.T1', name_raw='T1')
+    e2 = _entity(graph_key='TABLE::FE::ORCL.A.T2', database_qualified_name='ORCL.A.T2', name_raw='T2')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
@@ -442,7 +444,7 @@ async def test_entity_atomic_rollback_on_store_failure():
     async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
         _ = (tx, entity_type, kwargs)
         assert params is not None
-        if params['graph_key'] == 'TABLE::A.T2':
+        if params['graph_key'] == 'TABLE::FE::ORCL.A.T2':
             raise RuntimeError('neo4j boom')
         return {
             'uuid': params['uuid'],
@@ -547,8 +549,8 @@ async def test_entity_logs_batch_id_and_counts_only(caplog):
 
 @pytest.mark.asyncio
 async def test_entity_preserves_input_order_and_deterministic_uuid():
-    e1 = _entity(graph_key='TABLE::A.T1', database_qualified_name='A.T1', name_raw='T1')
-    e2 = _entity(graph_key='TABLE::A.T2', database_qualified_name='A.T2', name_raw='T2')
+    e1 = _entity(graph_key='TABLE::FE::ORCL.A.T1', database_qualified_name='ORCL.A.T1', name_raw='T1')
+    e2 = _entity(graph_key='TABLE::FE::ORCL.A.T2', database_qualified_name='ORCL.A.T2', name_raw='T2')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
@@ -566,9 +568,9 @@ async def test_entity_preserves_input_order_and_deterministic_uuid():
     service._store.upsert_entity_item = AsyncMock(side_effect=_upsert)
     resp = await service.upsert_typed_entities(client=client, request=_request([e1, e2]))
     assert [r.index for r in resp.results] == [0, 1]
-    assert resp.results[0].graph_key == 'TABLE::A.T1'
-    assert resp.results[1].graph_key == 'TABLE::A.T2'
-    assert resp.results[0].uuid == catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::A.T1')
+    assert resp.results[0].graph_key == 'TABLE::FE::ORCL.A.T1'
+    assert resp.results[1].graph_key == 'TABLE::FE::ORCL.A.T2'
+    assert resp.results[0].uuid == catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.A.T1')
     assert resp.results[0].content_sha256 is not None
     assert len(resp.results[0].content_sha256) == 64
 
@@ -652,9 +654,40 @@ async def test_mcp_tool_upsert_typed_entities_registered():
 def _resolve_request(entities=None, **kwargs):
     if entities is None:
         entities = [
-            ResolveEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
+            ResolveEntityRef(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'),
         ]
-    return ResolveTypedEntitiesRequest(group_id=GROUP, entities=entities, **kwargs)
+    return ResolveTypedEntitiesRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        entities=entities,
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_empty_entities_no_attribute_error_and_no_side_effects():
+    """Valid empty typed resolve must not touch removed request.graph_keys."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(return_value=[])
+    req = ResolveTypedEntitiesRequest.model_validate(
+        {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
+            'group_id': GROUP,
+            'entities': [],
+        }
+    )
+    assert not hasattr(req, 'graph_keys')
+    resp = await service.resolve_typed_entities(client=client, request=req)
+    assert resp.group_id == GROUP
+    assert resp.results == []
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+    client.embedder.create.assert_not_awaited()
+    client.embedder.create_batch.assert_not_awaited()
+    service._store.match_entities_for_resolve.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -696,7 +729,7 @@ async def test_resolve_missing_entity_reports_not_found():
     assert r0.found is False
     assert 'missing' in r0.anomalies or r0.status == 'missing'
     assert r0.uuid is None or r0.uuid == catalog_entity_uuid(
-        FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES'
+        FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'
     )
     client.embedder.create.assert_not_awaited()
     assert 'transaction' not in client.call_order
@@ -704,7 +737,7 @@ async def test_resolve_missing_entity_reports_not_found():
 
 @pytest.mark.asyncio
 async def test_resolve_found_entity_reports_fields_and_no_side_effects():
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     resolve_call: dict = {}
@@ -716,8 +749,8 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
         return [
             {
                 'uuid': ent_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'a' * 64,
@@ -743,12 +776,12 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
     # MATCH scoped to group_id + requested keys only (captured via side_effect, not optional mock)
     service._store.match_entities_for_resolve.assert_awaited()
     assert resolve_call.get('group_id') == GROUP
-    assert 'TABLE::HR.EMPLOYEES' in (resolve_call.get('graph_keys') or [])
+    assert 'TABLE::FE::ORCL.HR.EMPLOYEES' in (resolve_call.get('graph_keys') or [])
 
 
 @pytest.mark.asyncio
 async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch():
-    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_resolve = AsyncMock(
@@ -756,8 +789,8 @@ async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch()
             # bare generic Entity with name=graph_key, no Table label
             {
                 'uuid': 'generic-uuid-1',
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity'],
                 'neo4j_labels': ['Entity'],
                 'content_sha256': 'b' * 64,
@@ -767,8 +800,8 @@ async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch()
             # typed node with wrong uuid
             {
                 'uuid': 'wrong-uuid',
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'c' * 64,
@@ -778,8 +811,8 @@ async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch()
             # second typed duplicate
             {
                 'uuid': expected_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'd' * 64,
@@ -812,15 +845,15 @@ async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch()
 
 @pytest.mark.asyncio
 async def test_resolve_wrong_custom_label_and_absent_embedding():
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_resolve = AsyncMock(
         return_value=[
             {
                 'uuid': ent_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'View'],
                 'neo4j_labels': ['Entity', 'View'],
                 'content_sha256': 'e' * 64,
@@ -840,15 +873,15 @@ async def test_resolve_wrong_custom_label_and_absent_embedding():
 @pytest.mark.asyncio
 async def test_resolve_expected_plus_extra_label_is_wrong_type():
     """Entity+Table+View is not typed Table — exact custom label contract."""
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_resolve = AsyncMock(
         return_value=[
             {
                 'uuid': ent_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table', 'View'],
                 'neo4j_labels': ['Entity', 'Table', 'View'],
                 'content_sha256': 'f' * 64,
@@ -870,7 +903,7 @@ async def test_resolve_expected_plus_extra_label_is_wrong_type():
 async def test_verify_expected_plus_extra_label_is_wrong_type():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
-    key = 'TABLE::HR.EMPLOYEES'
+    key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
             {
@@ -897,15 +930,15 @@ async def test_verify_expected_plus_extra_label_is_wrong_type():
 @pytest.mark.asyncio
 async def test_resolve_mixed_twin_aggregates_all_row_anomalies():
     """Typed expected + rogue typed + wrong-type sibling: report every anomaly."""
-    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_resolve = AsyncMock(
         return_value=[
             {
                 'uuid': expected_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'a' * 64,
@@ -914,8 +947,8 @@ async def test_resolve_mixed_twin_aggregates_all_row_anomalies():
             },
             {
                 'uuid': 'rogue-typed-uuid',
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'b' * 64,
@@ -924,8 +957,8 @@ async def test_resolve_mixed_twin_aggregates_all_row_anomalies():
             },
             {
                 'uuid': 'wrong-type-uuid',
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'View'],
                 'neo4j_labels': ['Entity', 'View'],
                 'content_sha256': 'c' * 64,
@@ -976,10 +1009,12 @@ async def test_mcp_tool_resolve_typed_entities_registered():
 
 def _verify_request(**kwargs):
     data = {
+        'identity_schema_version': 'catalog-v2',
+        'system_key': 'FE',
         'group_id': GROUP,
         'batch_id': BATCH,
         'entities': [
-            VerifyEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
+            VerifyEntityRef(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'),
         ],
         'edges': [
             VerifyEdgeRef(edge_type='Contains', edge_key='CONTAINS::HR.SCHEMA->HR.EMPLOYEES'),
@@ -1048,15 +1083,15 @@ async def test_verify_batch_scoped_match_uses_group_and_batch_id():
 
 @pytest.mark.asyncio
 async def test_verify_entity_counts_and_anomaly_lists():
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
             {
                 'uuid': ent_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'a' * 64,
@@ -1065,8 +1100,8 @@ async def test_verify_entity_counts_and_anomaly_lists():
             },
             {
                 'uuid': 'generic-1',
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity'],
                 'neo4j_labels': ['Entity'],
                 'content_sha256': 'b' * 64,
@@ -1078,17 +1113,17 @@ async def test_verify_entity_counts_and_anomaly_lists():
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
     req = _verify_request(
         entities=[
-            VerifyEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
-            VerifyEntityRef(entity_type='View', graph_key='VIEW::HR.V1'),
+            VerifyEntityRef(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'),
+            VerifyEntityRef(entity_type='View', graph_key='VIEW::FE::ORCL.HR.V1'),
         ],
         edges=[],
     )
     resp = await service.verify_catalog_batch(client=client, request=req)
     assert resp.entities.expected == 2
     assert resp.entities.found == 1
-    assert 'VIEW::HR.V1' in resp.entities.missing
-    assert 'TABLE::HR.EMPLOYEES' in resp.entities.generic_duplicate
-    assert 'TABLE::HR.EMPLOYEES' in resp.entities.missing_embedding
+    assert 'VIEW::FE::ORCL.HR.V1' in resp.entities.missing
+    assert 'TABLE::FE::ORCL.HR.EMPLOYEES' in resp.entities.generic_duplicate
+    assert 'TABLE::FE::ORCL.HR.EMPLOYEES' in resp.entities.missing_embedding
     client.embedder.create.assert_not_awaited()
     assert 'transaction' not in client.call_order
 
@@ -1097,7 +1132,7 @@ async def test_verify_entity_counts_and_anomaly_lists():
 async def test_verify_entity_aggregates_anomalies_across_typed_twins():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
-    key = 'TABLE::HR.EMPLOYEES'
+    key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
     expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', key)
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
@@ -1137,7 +1172,7 @@ async def test_verify_entity_wrong_type_with_typed_present_is_reported():
     """Wrong-type sibling must surface even when exact typed rows exist."""
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
-    key = 'TABLE::HR.EMPLOYEES'
+    key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
     expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', key)
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
@@ -1211,11 +1246,53 @@ async def test_verify_edge_counts_and_anomaly_lists():
 
 
 @pytest.mark.asyncio
+async def test_verify_edge_uuid_only_expectations_no_graph_key_attribute_access():
+    """VerifyEdgeRef UUID expectations work; removed raw graph-key attrs absent."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    source_uuid = str(uuid.uuid4())
+    target_uuid = str(uuid.uuid4())
+    service._store.match_edges_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': catalog_edge_uuid(FIXED_NS, GROUP, 'Contains', edge_key),
+                'edge_key': edge_key,
+                'edge_type': 'Contains',
+                'source_uuid': source_uuid,
+                'target_uuid': target_uuid,
+                'source_graph_key': 'SCHEMA::FE::ORCL.HR',
+                'target_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'has_fact_embedding': True,
+            }
+        ]
+    )
+    edge_ref = VerifyEdgeRef(
+        edge_type='Contains',
+        edge_key=edge_key,
+        expected_source_uuid=source_uuid,
+        expected_target_uuid=target_uuid,
+    )
+    assert not hasattr(edge_ref, 'expected_source_graph_key')
+    assert not hasattr(edge_ref, 'expected_target_graph_key')
+    resp = await service.verify_catalog_batch(
+        client=client,
+        request=_verify_request(batch_id=None, entities=[], edges=[edge_ref]),
+    )
+    assert resp.edges.endpoint_mismatch == []
+    assert resp.edges.found == 1
+    assert 'transaction' not in client.call_order
+    client.embedder.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_verify_edge_true_endpoint_mismatch_is_distinct_from_type():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    expected_source_uuid = str(uuid.uuid4())
     service._store.match_edges_for_verify = AsyncMock(
         return_value=[
             {
@@ -1225,7 +1302,7 @@ async def test_verify_edge_true_endpoint_mismatch_is_distinct_from_type():
                 'source_uuid': str(uuid.uuid4()),
                 'target_uuid': str(uuid.uuid4()),
                 'source_graph_key': 'SCHEMA::WRONG',
-                'target_graph_key': 'TABLE::HR.EMPLOYEES',
+                'target_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'has_fact_embedding': True,
             }
         ]
@@ -1237,7 +1314,7 @@ async def test_verify_edge_true_endpoint_mismatch_is_distinct_from_type():
             VerifyEdgeRef(
                 edge_type='Contains',
                 edge_key=edge_key,
-                expected_source_graph_key='SCHEMA::HR',
+                expected_source_uuid=expected_source_uuid,
             )
         ],
     )
@@ -1259,8 +1336,8 @@ async def test_verify_edge_type_mismatch_never_becomes_endpoint_mismatch():
                 'uuid': 'stored-type-uuid',
                 'edge_key': edge_key,
                 'edge_type': 'DependsOn',
-                'source_graph_key': 'SCHEMA::HR',
-                'target_graph_key': 'TABLE::HR.EMPLOYEES',
+                'source_graph_key': 'SCHEMA::FE::ORCL.HR',
+                'target_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'has_fact_embedding': True,
             }
         ]
@@ -1283,19 +1360,22 @@ async def test_verify_edge_aggregates_anomalies_across_all_duplicate_rows_once()
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
     expected_uuid = catalog_edge_uuid(FIXED_NS, GROUP, 'Contains', edge_key)
+    expected_source_uuid = str(uuid.uuid4())
     service._store.match_edges_for_verify = AsyncMock(
         return_value=[
             {
                 'uuid': expected_uuid,
                 'edge_key': edge_key,
                 'edge_type': 'Contains',
-                'source_graph_key': 'SCHEMA::HR',
+                'source_uuid': expected_source_uuid,
+                'source_graph_key': 'SCHEMA::FE::ORCL.HR',
                 'has_fact_embedding': True,
             },
             {
                 'uuid': 'rogue',
                 'edge_key': edge_key,
                 'edge_type': '',
+                'source_uuid': str(uuid.uuid4()),
                 'source_graph_key': 'SCHEMA::WRONG',
                 'has_fact_embedding': False,
             },
@@ -1310,7 +1390,7 @@ async def test_verify_edge_aggregates_anomalies_across_all_duplicate_rows_once()
                 VerifyEdgeRef(
                     edge_type='Contains',
                     edge_key=edge_key,
-                    expected_source_graph_key='SCHEMA::HR',
+                    expected_source_uuid=expected_source_uuid,
                 )
             ],
         ),
@@ -1340,15 +1420,15 @@ async def test_verify_provenance_read_failure_is_internal_error_not_missing():
 
 @pytest.mark.asyncio
 async def test_verify_require_provenance_report_only_no_write():
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
             {
                 'uuid': ent_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'a' * 64,
@@ -1408,9 +1488,9 @@ def _edge(**overrides) -> CatalogEdgeItem:
     data = {
         'edge_type': 'ForeignKeyTo',
         'edge_key': 'FK::HR.EMPLOYEES->HR.DEPARTMENTS',
-        'source_graph_key': 'TABLE::HR.EMPLOYEES',
+        'source_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
         'source_entity_type': 'Table',
-        'target_graph_key': 'TABLE::HR.DEPARTMENTS',
+        'target_graph_key': 'TABLE::FE::ORCL.HR.DEPARTMENTS',
         'target_entity_type': 'Table',
         'fact': 'employees.dept_id references departments.dept_id',
         'evidence': None,
@@ -1430,6 +1510,8 @@ def _edge_request(
     strict_endpoints: bool = True,
 ) -> UpsertTypedEdgesRequest:
     return UpsertTypedEdgesRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
         group_id=GROUP,
         batch_id=batch_id,
         edges=edges or [_edge()],
@@ -1459,8 +1541,8 @@ def _wire_ok_endpoints(
     src_uuid: str | None = None,
     tgt_uuid: str | None = None,
 ):
-    src_uuid = src_uuid or _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES')
-    tgt_uuid = tgt_uuid or _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS')
+    src_uuid = src_uuid or _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
+    tgt_uuid = tgt_uuid or _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.DEPARTMENTS')
 
     async def _resolve(
         executor,
@@ -1473,9 +1555,9 @@ def _wire_ok_endpoints(
         **kwargs,
     ):
         _ = (executor, group_id, entity_type, tx, expected_uuid, kwargs)
-        if graph_key == 'TABLE::HR.EMPLOYEES':
+        if graph_key == 'TABLE::FE::ORCL.HR.EMPLOYEES':
             return None, _typed_endpoint(src_uuid, graph_key)
-        if graph_key == 'TABLE::HR.DEPARTMENTS':
+        if graph_key == 'TABLE::FE::ORCL.HR.DEPARTMENTS':
             return None, _typed_endpoint(tgt_uuid, graph_key)
         return 'missing_endpoint', None
 
@@ -1560,7 +1642,7 @@ async def test_edge_target_endpoint_read_failure_is_internal_error_not_missing()
     ):
         _ = (executor, group_id, entity_type, tx, expected_uuid, kwargs)
         assert graph_key is not None
-        if graph_key == 'TABLE::HR.EMPLOYEES':
+        if graph_key == 'TABLE::FE::ORCL.HR.EMPLOYEES':
             return None, _typed_endpoint(_expected_entity_uuid('Table', graph_key), graph_key)
         raise RuntimeError('db down')
 
@@ -1604,7 +1686,7 @@ async def test_edge_endpoint_type_mismatch_and_generic_conflict_no_create():
     ):
         _ = (executor, group_id, entity_type, tx, kwargs)
         assert graph_key is not None
-        if graph_key == 'TABLE::HR.EMPLOYEES':
+        if graph_key == 'TABLE::FE::ORCL.HR.EMPLOYEES':
             return 'endpoint_type_mismatch', {
                 'uuid': 'wrong',
                 'neo4j_labels': ['Entity', 'View'],
@@ -1696,8 +1778,8 @@ async def test_edge_identical_hash_unchanged_leaves_batch_id():
     payload = CatalogService.edge_canonical_payload(edge)
     digest = canonical_sha256(payload)
     src, tgt = (
-        _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
-        _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.DEPARTMENTS'),
     )
     existing = {
         'uuid': edge_uuid,
@@ -1727,8 +1809,8 @@ async def test_edge_changed_update_passes_request_batch_id():
     edge = _edge(fact='changed fact text about fk')
     edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
     src, tgt = (
-        _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
-        _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.DEPARTMENTS'),
     )
     existing = {
         'uuid': edge_uuid,
@@ -1773,8 +1855,8 @@ async def test_edge_identity_conflict_no_mutation():
         'batch_id': 'old',
         'name': 'Contains',  # wrong type for same uuid
         'edge_key': edge.edge_key,
-        'source_uuid': _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
-        'target_uuid': _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+        'source_uuid': _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'),
+        'target_uuid': _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.DEPARTMENTS'),
         'group_id': GROUP,
     }
     client = _make_client()
@@ -1979,8 +2061,8 @@ async def test_edge_prefers_db_status_when_present():
     edge = _edge(fact='changed fact text about fk')
     edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
     src, tgt = (
-        _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
-        _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.DEPARTMENTS'),
     )
     existing = {
         'uuid': edge_uuid,
@@ -2304,11 +2386,13 @@ def _prov_request(
     batch_id: str = 'batch-prov-001',
 ) -> UpsertProvenanceRequest:
     return UpsertProvenanceRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
         group_id=GROUP,
         batch_id=batch_id,
         sources=sources or [_source()],
         entity_targets=entity_targets
-        or [CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES')],
+        or [CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES')],
         edge_targets=edge_targets or [],
         dry_run=dry_run,
         atomic=atomic,
@@ -2316,7 +2400,7 @@ def _prov_request(
 
 
 def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = False):
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     src_uuid = catalog_source_uuid(FIXED_NS, GROUP, 'SRC::ddl.sql#employees')
 
     async def _resolve(executor, *, group_id, graph_key, entity_type, expected_uuid=None, tx=None):
@@ -2570,7 +2654,7 @@ async def test_provenance_unchanged_source_new_link_reports_updated(target_kind)
             return_value={'uuid': edge_uuid, 'name': edge.edge_type, 'episodes': []}
         )
         entity_targets = [
-            CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES')
+            CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES')
         ]
         service._store.get_mentions_link = AsyncMock(
             return_value={'uuid': catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, ent_uuid)}
@@ -2878,6 +2962,8 @@ def _batch_request(
     request_sha256: str | None = None,
 ) -> UpsertCatalogBatchRequest:
     return UpsertCatalogBatchRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
         group_id=GROUP,
         batch_id=BATCH_ATOMIC,
         entities=entities if entities is not None else [_entity()],
@@ -2925,7 +3011,7 @@ def _wire_batch_preflight(service: CatalogService) -> None:
 async def test_batch_dry_run_endpoint_union_no_writes_or_status():
     employee = _entity()
     department = _entity(
-        graph_key='TABLE::HR.DEPARTMENTS',
+        graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
         name_raw='DEPARTMENTS',
         name_canonical='departments',
         database_qualified_name='HR.DEPARTMENTS',
@@ -3040,7 +3126,7 @@ async def test_batch_dry_run_resolves_missing_provenance_target_before_side_effe
     provenance = NestedProvenancePayload(
         sources=[_source()],
         entity_targets=[
-            CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::HR.MISSING')
+            CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.MISSING')
         ],
     )
 
@@ -3146,7 +3232,7 @@ async def test_batch_unchanged_provenance_link_read_failure_is_structured(read_n
     if read_name == 'get_edge_by_uuid':
         entities.append(
             _entity(
-                graph_key='TABLE::HR.DEPARTMENTS',
+                graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
                 name_raw='DEPARTMENTS',
                 name_canonical='departments',
                 database_qualified_name='HR.DEPARTMENTS',
@@ -3323,7 +3409,7 @@ def _install_batch_write_mocks(service: CatalogService, client) -> list[str]:
 async def test_batch_embedding_completes_before_single_domain_transaction():
     employee = _entity()
     department = _entity(
-        graph_key='TABLE::HR.DEPARTMENTS',
+        graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
         name_raw='DEPARTMENTS',
         name_canonical='departments',
         database_qualified_name='HR.DEPARTMENTS',
@@ -3419,7 +3505,7 @@ async def test_batch_unchanged_domain_drift_aborts_before_commit_status(kind):
         service._store.get_entity_by_uuid = AsyncMock(side_effect=_entity_by_uuid)
     else:
         department = _entity(
-            graph_key='TABLE::HR.DEPARTMENTS',
+            graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
             name_raw='DEPARTMENTS',
             name_canonical='departments',
             database_qualified_name='HR.DEPARTMENTS',
@@ -3636,7 +3722,7 @@ async def test_batch_failed_status_write_failure_preserves_original_error():
 async def test_batch_writes_edges_before_provenance_append_in_same_transaction():
     employee = _entity()
     department = _entity(
-        graph_key='TABLE::HR.DEPARTMENTS',
+        graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
         name_raw='DEPARTMENTS',
         name_canonical='departments',
         database_qualified_name='HR.DEPARTMENTS',
