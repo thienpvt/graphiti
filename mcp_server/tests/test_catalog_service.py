@@ -4187,16 +4187,25 @@ async def test_fastmcp_call_tool_rejects_invalid_nested_payloads_before_body_no_
         tool.fn = wrapped_fn
         payload = _v2_request_payload(tool_name, **overrides)
         try:
-            with pytest.raises((ToolError, ValidationError)) as exc:
+            with pytest.raises(ToolError) as exc:
                 await server.mcp.call_tool(tool_name, {'request': payload})
             err = exc.value
+            # SAFE-08: structured ToolError, no ValidationError chain leak
             chain = err
-            saw_validation = isinstance(err, ValidationError)
-            while chain is not None and not saw_validation:
+            while chain is not None:
+                assert not isinstance(chain, ValidationError), f'{tool_name} leaked ValidationError'
                 chain = getattr(chain, '__cause__', None) or getattr(chain, '__context__', None)
-                if isinstance(chain, ValidationError):
-                    saw_validation = True
-            assert saw_validation or isinstance(err, ToolError), f'{tool_name}: {type(err)}'
+            raw = str(err)
+            assert 'Input should be' not in raw
+            assert 'pydantic' not in raw.lower()
+            js = raw.find('{')
+            assert js >= 0, f'{tool_name}: missing structured JSON: {raw!r}'
+            import json
+            structured = json.loads(raw[js:])
+            assert set(structured.keys()) == {
+                'code', 'message', 'field_path', 'retryable', 'correlation_id'
+            }
+            assert structured['retryable'] is False
             _assert_no_backend_side_effects(spies, body_entered)
         finally:
             tool.fn = original_fn
@@ -4303,3 +4312,218 @@ def test_no_side_effect_on_false_immutable_flags_and_unknown_nested_fields():
     service.upsert_typed_entities.assert_not_called()
     service.upsert_typed_edges.assert_not_called()
     service.upsert_catalog_batch.assert_not_called()
+
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_catalog_validation_returns_structured_safe_tool_error():
+    """Production SAFE-08: catalog validation ToolError carries structured JSON only."""
+    import json
+    import re
+    import uuid as uuid_mod
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    secret = 'super-secret-token-xyz-DO-NOT-LEAK'
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool('upsert_typed_entities')
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    payload = _v2_request_payload(
+        'upsert_typed_entities',
+        identity_schema_version='catalog-v1',
+        password=secret,
+        authorization=f'Bearer {secret}',
+    )
+    # also embed secret in a nested field that will be rejected as extra
+    payload['entities'] = [{**_minimal_entity_dict(), 'secret_nested': secret}]
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool('upsert_typed_entities', {'request': payload})
+        err = exc.value
+        # Fresh ToolError: no ValidationError in cause/context chain
+        chain = err
+        while chain is not None:
+            assert not isinstance(chain, ValidationError), f'ValidationError leaked: {chain!r}'
+            chain = getattr(chain, '__cause__', None) or getattr(chain, '__context__', None)
+        raw = str(err)
+        assert secret not in raw
+        assert 'password' not in raw.lower() or 'password' not in raw  # no field dump
+        assert 'Bearer' not in raw
+        assert 'validation error' not in raw.lower() or 'Request validation' in raw
+        assert 'pydantic' not in raw.lower()
+        assert 'Traceback' not in raw
+        assert 'Input should be' not in raw
+        # Message is JSON structured error
+        # ToolError may wrap as "Error executing..." or pure JSON; accept JSON object parse
+        json_start = raw.find('{')
+        assert json_start >= 0, f'no JSON in ToolError: {raw!r}'
+        structured = json.loads(raw[json_start:])
+        assert set(structured.keys()) == {
+            'code',
+            'message',
+            'field_path',
+            'retryable',
+            'correlation_id',
+        }
+        assert structured['retryable'] is False
+        assert isinstance(structured['message'], str)
+        assert 0 < len(structured['message']) <= 512
+        assert secret not in structured['message']
+        assert 'catalog-v1' not in structured['message']
+        # correlation_id is server UUID
+        uuid_mod.UUID(structured['correlation_id'])
+        # field_path sanitized dotted path or None
+        fp = structured['field_path']
+        if fp is not None:
+            assert isinstance(fp, str)
+            assert len(fp) <= 256
+            assert re.fullmatch(r'[A-Za-z0-9_.\[\]]+', fp), fp
+            assert secret not in fp
+        # code is a known catalog error code string/value
+        code = structured['code']
+        code_val = code.value if hasattr(code, 'value') else str(code)
+        assert code_val in {
+            'unsupported_identity_schema',
+            'invalid_system_key',
+            'validation_error',
+        }
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_unrelated_tool_error_not_rewritten_to_structured():
+    """Arbitrary ToolError outside catalog validation must not be rewritten."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    # Use a legacy tool path: force unknown tool → framework ToolError
+    with pytest.raises(ToolError) as exc:
+        await server.mcp.call_tool('definitely_not_a_real_tool', {'x': 1})
+    raw = str(exc.value)
+    assert 'Unknown tool' in raw or 'definitely_not_a_real_tool' in raw
+    assert 'correlation_id' not in raw
+    assert '"code"' not in raw
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_legacy_tool_validation_not_structured_catalog_shape():
+    """Legacy tools keep framework errors; no SAFE-08 catalog rewrite."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    # get_status takes no request model; invalid args still ToolError without catalog shape
+    # Prefer call_tool with bad args on a typed legacy path if any; else unknown is enough.
+    # add_memory typically has many params — force type failure via wrong structure if registered.
+    tools = await server.mcp.list_tools()
+    legacy = [t for t in tools if t.name == 'get_status']
+    assert legacy, 'get_status must remain registered'
+    # get_status has empty/no required request; calling with extra junk may be ignored or error.
+    # Inject a ToolError from tool body by temporarily replacing fn.
+    tool = server.mcp._tool_manager.get_tool('get_status')
+    original = tool.fn
+
+    async def boom():
+        raise RuntimeError('legacy-body-failure-secret-xyz')
+
+    tool.fn = boom
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool('get_status', {})
+        raw = str(exc.value)
+        # Must NOT be rewritten into catalog structured JSON
+        if '{' in raw:
+            import json
+
+            try:
+                obj = json.loads(raw[raw.find('{') :])
+            except Exception:
+                obj = None
+            if isinstance(obj, dict):
+                assert set(obj.keys()) != {
+                    'code',
+                    'message',
+                    'field_path',
+                    'retryable',
+                    'correlation_id',
+                }
+        # legacy error text path remains framework-owned
+        assert 'legacy-body-failure-secret-xyz' in raw or 'Error executing tool' in raw
+    finally:
+        tool.fn = original
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_all_seven_catalog_tools_emit_structured_on_invalid():
+    """All seven catalog tools surface SAFE-08 structured ToolError on invalid nested input."""
+    import json
+    import uuid as uuid_mod
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    cases = [
+        ('upsert_typed_entities', {'identity_schema_version': 'catalog-v1'}),
+        ('resolve_typed_entities', {'identity_schema_version': 'catalog-v0'}),
+        ('verify_catalog_batch', {'system_key': 'UNKNOWN'}),
+        ('upsert_typed_edges', {'strict_endpoints': False}),
+        ('upsert_provenance', {'sources': [{**_minimal_source_dict(), 'extra_bad': 1}]}),
+        ('get_catalog_ingest_status', {'extra_status_field': 'nope'}),
+        ('upsert_catalog_batch', {'identity_schema_version': 'catalog-v1'}),
+    ]
+    for tool_name, overrides in cases:
+        body_entered: list = []
+        tool = server.mcp._tool_manager.get_tool(tool_name)
+        original_fn = tool.fn
+
+        async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+            _entered.append(request)
+            return await _orig(request)
+
+        tool.fn = wrapped_fn
+        payload = _v2_request_payload(tool_name, **overrides)
+        try:
+            with pytest.raises(ToolError) as exc:
+                await server.mcp.call_tool(tool_name, {'request': payload})
+            raw = str(exc.value)
+            assert 'Input should be' not in raw
+            assert 'pydantic' not in raw.lower()
+            js = raw.find('{')
+            assert js >= 0, f'{tool_name}: {raw!r}'
+            structured = json.loads(raw[js:])
+            assert set(structured.keys()) == {
+                'code',
+                'message',
+                'field_path',
+                'retryable',
+                'correlation_id',
+            }
+            uuid_mod.UUID(structured['correlation_id'])
+            assert structured['retryable'] is False
+            assert len(structured['message']) <= 512
+            _assert_no_backend_side_effects(spies, body_entered)
+        finally:
+            tool.fn = original_fn
+            for name in (
+                'upsert_typed_entities',
+                'resolve_typed_entities',
+                'verify_catalog_batch',
+                'upsert_typed_edges',
+                'upsert_provenance',
+                'get_catalog_ingest_status',
+                'upsert_catalog_batch',
+            ):
+                getattr(spies['catalog_service'], name).reset_mock()
+            spies['graphiti_service'].get_client.reset_mock()
+            spies['embedder'].create.reset_mock()
+            spies['embedder'].create_batch.reset_mock()
