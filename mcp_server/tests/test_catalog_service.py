@@ -2834,7 +2834,9 @@ async def test_batch_domain_failure_rolls_back_then_writes_failed_status_separat
     assert resp.error_code == CatalogErrorCode.neo4j_transaction_failed
     assert domain_calls['count'] == 2
     assert events.index('rollback') < events.index('status_failed')
-    failed_params = cast(AsyncMock, service._store.upsert_batch_status).await_args.kwargs['params']
+    status_call = cast(AsyncMock, service._store.upsert_batch_status).await_args
+    assert status_call is not None
+    failed_params = status_call.kwargs['params']
     assert failed_params['status'] == 'failed'
     assert failed_params['error_summary'] == 'RuntimeError'
     assert 'secret payload' not in failed_params['error_summary']
