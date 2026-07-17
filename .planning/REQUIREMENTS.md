@@ -10,21 +10,21 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 
 ### Baseline and Safety
 
-- [ ] **BASE-01**: Maintainer can review a recorded baseline inventory containing all 14 legacy MCP tools and all 7 catalog tools present before hardening.
-- [ ] **BASE-02**: Maintainer can review baseline findings grounded in the live catalog server, models, identity service, catalog service, catalog store, and catalog tests rather than this specification alone.
-- [ ] **BASE-03**: Maintainer can distinguish pre-existing targeted catalog test failures from regressions introduced by v1.1.
-- [ ] **BASE-04**: Maintainer can distinguish pre-existing Ruff and Pyright failures from regressions introduced by v1.1; unavailable checks are reported as skipped rather than passed.
-- [ ] **SAFE-01**: Catalog tests and development writes use only `oracle-catalog-tool-test`; no production group or `oracle-catalog-v2` data is accessed or mutated.
+- [ ] **BASE-01**: Maintainer can review a recorded baseline inventory containing all 14 legacy MCP tools, all 7 catalog tools, catalog models/services/store/schema, and the cherry-picked canary builder, runner, fixtures, receipts, checkpoint, and offline tests present before hardening.
+- [ ] **BASE-02**: Maintainer can review baseline findings grounded in live source/tests and committed canary evidence rather than this specification alone, including the historical pre-hardening ACCEPT_TAB dry-run/commit record without querying Neo4j.
+- [ ] **BASE-03**: Maintainer can distinguish pre-existing targeted catalog, canary-workflow, and compatibility test failures from regressions introduced by v1.1.
+- [ ] **BASE-04**: Maintainer can distinguish pre-existing Ruff and Pyright failures from regressions introduced by v1.1; unavailable checks are reported as skipped rather than passed, and the catalog-v1 compatibility/deprecation boundary is recorded before contract changes.
+- [ ] **SAFE-01**: New catalog tests and development writes use only `oracle-catalog-tool-test`; the pre-existing `oracle-catalog-v2` ACCEPT_TAB commit is inventoried only from repository artifacts and that group is never queried or mutated during v1.1.
 - [ ] **SAFE-02**: No implementation, test, fixture, or documentation workflow executes the real catalog canary.
 - [ ] **SAFE-03**: Deterministic catalog workflows never invoke `add_memory`, `add_triplet`, `update_entity`, `delete_entity_edge`, `delete_episode`, `clear_graph`, or `build_communities`.
 - [ ] **SAFE-04**: Deterministic catalog workflows never invoke LLM extraction, asynchronous queue ingestion, implicit endpoint creation, or implicit community creation.
 - [ ] **SAFE-05**: Caller-supplied UUIDs never control entity, edge, source, evidence-link, batch, manifest, or prepared-plan identity.
 - [ ] **SAFE-06**: Identity, type, endpoint, provenance, manifest, uniqueness, and hash conflicts fail closed; no graph data or constraints are silently repaired, merged, deleted, or rewritten.
 - [ ] **SAFE-07**: Catalog logs contain only safe identifiers, counts, and structured codes; they never contain payloads, source text, credentials, authorization headers, raw plan tokens, or full exception messages that may contain catalog content.
-- [ ] **SAFE-08**: Every new failure is represented by a documented structured error code and a bounded non-sensitive message.
+- [ ] **SAFE-08**: Every new failure returns a documented structured code, bounded non-sensitive message, retryability, field path when applicable, and safe correlation identifier without leaking stack traces or internals.
 - [ ] **SAFE-09**: Existing 14 legacy MCP tools retain their names and public contracts; existing seven catalog tool names remain registered while catalog-v2 request contracts may break explicitly as documented.
 - [ ] **SAFE-10**: Every catalog read and write remains constrained by `group_id`; catalog writes remain Neo4j 5.26+ only with no unsupported backend-portability claim.
-- [ ] **SAFE-11**: Required embeddings finish before a Neo4j domain write transaction opens; embedding failure cannot leave domain, provenance, manifest, status, or plan-terminal partial writes.
+- [ ] **SAFE-11**: Prepare computes required embeddings before persisting the immutable artifact; commit performs no external embedding, LLM, queue, or network call and embedding failure cannot leave a prepared artifact or any domain, provenance, manifest, status, or plan-terminal partial write.
 - [ ] **SAFE-12**: Unrelated dirty-worktree files and user changes remain unmodified and excluded from task commits unless separately approved.
 - [ ] **SAFE-13**: No task action pushes, merges, deploys, tags, or otherwise modifies remote state.
 
@@ -42,8 +42,8 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 ### Catalog-v2 Identity
 
 - [ ] **IDEN-01**: Every catalog-v2 domain request declares `identity_schema_version='catalog-v2'`; any other value fails closed with `unsupported_identity_schema`.
-- [ ] **IDEN-02**: Catalog domain identity includes a required bounded canonical `system_key` validated by a strict server-owned uppercase identifier grammar suitable for `FE`, `BO`, and `COMMON`.
-- [ ] **IDEN-03**: Invalid, empty, overlong, non-canonical, or mismatched system keys fail with `invalid_system_key` before database reads, embeddings, schema initialization, transactions, or status writes.
+- [ ] **IDEN-02**: Catalog domain identity includes a required bounded canonical `system_key` from the closed server-owned set `FE`, `BO`, or `COMMON`.
+- [ ] **IDEN-03**: Invalid, empty, overlong, non-canonical, mismatched, or unknown-ownership system keys fail with `invalid_system_key` before database reads, embeddings, schema initialization, transactions, or status writes; unknown ownership never defaults to `COMMON`.
 - [ ] **IDEN-04**: Every entity graph key includes its visible system scope and passes a complete server-owned grammar for its exact entity type, not merely a prefix check.
 - [ ] **IDEN-05**: The graph-key registry defines complete catalog-v2 grammar for all allowed types, including System, Database, DictionaryDocument, Schema, Table, View, MaterializedView, Column, Constraint, Index, Package, Procedure, Function, Trigger, Sequence, Synonym, DatabaseLink, and SourceArtifact.
 - [ ] **IDEN-06**: Procedure and Function identities include a deterministic overload discriminator so package and standalone overloads cannot collapse.
@@ -53,7 +53,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [ ] **IDEN-10**: Entity UUIDs derive from an explicitly versioned canonical name equivalent to `group_id|catalog-v2|entity_type|graph_key` under the configured immutable namespace.
 - [ ] **IDEN-11**: Edge, provenance source, evidence-link, batch, manifest, and prepared-plan identities use equivalent explicit catalog-v2 versioning and deterministic server derivation.
 - [ ] **IDEN-12**: Catalog-v1 graph keys, UUID material, or payloads are never silently accepted, normalized, re-keyed, or rewritten as catalog-v2 objects.
-- [ ] **IDEN-13**: Existing catalog-v1 ACCEPT_TAB request hashes and the prior 38/85 plan are explicitly invalidated; sanitized builders recalculate catalog-v2 artifacts without executing them.
+- [ ] **IDEN-13**: The pre-hardening ACCEPT_TAB hash, 10-entity/16-edge/1-source commit receipt, and prior 38/85 plan remain historical evidence but are explicitly invalid for hardened catalog-v2; builders regenerate new artifacts without executing them or rewriting existing graph data.
 
 ### Server-Owned Edge Endpoint Map
 
@@ -65,7 +65,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [ ] **EDGE-06**: `JoinsWith` permits only documented Table, View, MaterializedView, and Column pair combinations; `DependsOn`, `ReferencesByCode`, and `DerivedFrom` remain broad only through documented finite maps.
 - [ ] **EDGE-07**: `EnforcedBy` accepts only documented endpoint pairs and retains its explicit DDL or Oracle-dictionary evidence requirement.
 - [ ] **EDGE-08**: Disallowed endpoint pairs fail with `edge_endpoint_pair_not_allowed` before endpoint database reads when possible and always before embeddings, schema initialization, transactions, or status writes.
-- [ ] **EDGE-09**: Standalone edge upsert, combined batch, dry-run, prepare, commit preflight, verification, and edge resolution share one endpoint-map authority and cannot disagree.
+- [ ] **EDGE-09**: Standalone edge upsert, combined batch, dry-run, prepare, commit preflight, verification, and edge resolution share one endpoint-map authority and cannot disagree; `LikelyReferencesTo`, `MapsTo`, and `SynchronizesTo` remain unregistered until later inference/schema approval.
 
 ### Authoritative Hash Contract
 
@@ -93,8 +93,8 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 
 - [ ] **PLAN-01**: `prepare_catalog_batch` accepts the complete canonical catalog-v2 domain batch without `dry_run`, plan-token, or caller hash authority.
 - [ ] **PLAN-02**: Prepare validates identity/version, graph-key grammar, allowlists, endpoint pairs, limits, duplicates/coalescing, canonical hashes, existing identity conflicts, existing and same-batch endpoints, and provenance targets before persisting a plan.
-- [ ] **PLAN-03**: Prepare computes projected created, updated, and unchanged counts without mutating Entity, RELATES_TO, Episodic provenance, evidence relationships, manifests, or CatalogIngestBatch status.
-- [ ] **PLAN-04**: Prepare persists only bounded non-Entity control-plane state containing the immutable canonical payload required for token-only commit; hashes and counts alone are insufficient.
+- [ ] **PLAN-03**: Prepare computes projected created, updated, and unchanged counts plus all required embeddings without mutating Entity, RELATES_TO, Episodic provenance, evidence relationships, manifests, or CatalogIngestBatch status.
+- [ ] **PLAN-04**: Prepare persists only bounded non-Entity control-plane state containing the immutable canonical payload, deterministic identities, resolved membership, and required embeddings for token-only, external-call-free commit; hashes and counts alone are insufficient.
 - [ ] **PLAN-05**: Prepared payload storage is restart-safe, group-isolated, size-bounded, immutable after creation, and chunked into bounded server-owned control records when required.
 - [ ] **PLAN-06**: Prepare returns an opaque one-time-visible `plan_token`, deterministic `plan_uuid`, request and catalog hashes, identity schema version, entity/edge/source/evidence-link counts, projected result counts, and `expires_at`.
 - [ ] **PLAN-07**: Raw plan tokens are never logged or stored; only a secure token digest is persisted and compared using a timing-safe mechanism.
@@ -102,9 +102,9 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [ ] **PLAN-09**: Prepared-plan and payload-chunk nodes never carry the Entity label, embeddings, or properties that place them in normal search or community clustering.
 - [ ] **PLAN-10**: `commit_prepared_catalog_batch` accepts only `plan_token` and optional `expected_request_sha256`; it cannot accept group, batch, entities, edges, sources, evidence links, or replacement payload content.
 - [ ] **PLAN-11**: Commit loads and revalidates the immutable prepared payload server-side and rejects missing, expired, changed, discarded, consumed, or conflicting plans with the specific prepared-plan error code.
-- [ ] **PLAN-12**: Commit computes all required embeddings from the stored prepared payload before opening the domain write transaction.
+- [ ] **PLAN-12**: Commit uses only embeddings frozen in the stored prepared artifact and makes no external embedding, LLM, queue, or network call before or during the domain write transaction.
 - [ ] **PLAN-13**: A successful commit writes all domain data, exact evidence, durable manifest, terminal batch status, and terminal prepared-plan state in one Neo4j transaction where supported.
-- [ ] **PLAN-14**: A commit failure rolls back the complete success transaction; an optional separate post-rollback status transaction may record only bounded failure metadata and never imply domain success.
+- [ ] **PLAN-14**: A commit failure rolls back the complete success transaction; an optional separate post-rollback status transaction may record only bounded failure metadata and never imply domain success; a process restart from `COMMITTING` follows a deterministic documented recovery rule.
 - [ ] **PLAN-15**: Identical replay after successful commit returns the committed logical result with unchanged outcomes rather than duplicating data or failing ambiguously.
 - [ ] **PLAN-16**: Concurrent commits using the same token yield one logical committed batch and one stable replay/conflict outcome without duplicate domain, evidence, manifest, or status records.
 - [ ] **PLAN-17**: A token is cryptographically and persistently bound to one immutable group, batch, identity schema, request hash, and payload; it cannot commit another scope.
@@ -176,7 +176,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [ ] **DOCS-03**: Documentation defines canonical hash coverage/exclusions, capability fields, prepare/commit/discard lifecycle, TTL and payload limits, explicit evidence examples, manifest semantics, and read/write gate behavior.
 - [ ] **DOCS-04**: Documentation lists every structured error code plus rollout configuration and environment variables without exposing secrets.
 - [ ] **DOCS-05**: Migration documentation states catalog-v1 keys and golden hashes are obsolete, automatic in-place identity migration does not exist, canary artifacts must be regenerated under catalog-v2, and the old ACCEPT_TAB SHA-256 must not be reused.
-- [ ] **DOCS-06**: Sanitized fixtures and builders demonstrate catalog-v2 requests without executing the real canary or embedding production catalog content.
+- [ ] **DOCS-06**: The cherry-picked builder, token-aware runner, sanitized fixtures, receipts, checkpoint, and offline tests are migrated to hardened catalog-v2 prepare/commit; generated artifacts are validated offline without executing the real canary or embedding production catalog content into logs/docs.
 - [ ] **REPT-01**: The final implementation report follows the requested structured JSON shape, reports baseline/tool/test/change/migration/risk facts, sets `canary_executed=false`, and sets `ready_to_regenerate_canary=true` only after every stated gate passes.
 
 ## Future Requirements
@@ -213,17 +213,162 @@ Deferred until the deterministic substrate is implemented and verified.
 
 ## Traceability
 
-Roadmap mapping is populated after phase approval.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| Pending roadmap generation | — | Pending |
+| BASE-01 | Phase 3 | Pending |
+| BASE-02 | Phase 3 | Pending |
+| BASE-03 | Phase 3 | Pending |
+| BASE-04 | Phase 3 | Pending |
+| SAFE-01 | Phase 3 | Pending |
+| SAFE-02 | Phase 3 | Pending |
+| SAFE-03 | Phase 7 | Pending |
+| SAFE-04 | Phase 7 | Pending |
+| SAFE-05 | Phase 3 | Pending |
+| SAFE-06 | Phase 7 | Pending |
+| SAFE-07 | Phase 7 | Pending |
+| SAFE-08 | Phase 3 | Pending |
+| SAFE-09 | Phase 7 | Pending |
+| SAFE-10 | Phase 7 | Pending |
+| SAFE-11 | Phase 5 | Pending |
+| SAFE-12 | Phase 3 | Pending |
+| SAFE-13 | Phase 3 | Pending |
+| CONT-01 | Phase 3 | Pending |
+| CONT-02 | Phase 3 | Pending |
+| CONT-03 | Phase 3 | Pending |
+| CONT-04 | Phase 3 | Pending |
+| CONT-05 | Phase 3 | Pending |
+| CONT-06 | Phase 3 | Pending |
+| CONT-07 | Phase 3 | Pending |
+| CONT-08 | Phase 3 | Pending |
+| IDEN-01 | Phase 3 | Pending |
+| IDEN-02 | Phase 3 | Pending |
+| IDEN-03 | Phase 3 | Pending |
+| IDEN-04 | Phase 3 | Pending |
+| IDEN-05 | Phase 3 | Pending |
+| IDEN-06 | Phase 3 | Pending |
+| IDEN-07 | Phase 3 | Pending |
+| IDEN-08 | Phase 3 | Pending |
+| IDEN-09 | Phase 3 | Pending |
+| IDEN-10 | Phase 3 | Pending |
+| IDEN-11 | Phase 3 | Pending |
+| IDEN-12 | Phase 3 | Pending |
+| IDEN-13 | Phase 3 | Pending |
+| EDGE-01 | Phase 4 | Pending |
+| EDGE-02 | Phase 4 | Pending |
+| EDGE-03 | Phase 4 | Pending |
+| EDGE-04 | Phase 4 | Pending |
+| EDGE-05 | Phase 4 | Pending |
+| EDGE-06 | Phase 4 | Pending |
+| EDGE-07 | Phase 4 | Pending |
+| EDGE-08 | Phase 4 | Pending |
+| EDGE-09 | Phase 4 | Pending |
+| HASH-01 | Phase 4 | Pending |
+| HASH-02 | Phase 4 | Pending |
+| HASH-03 | Phase 4 | Pending |
+| HASH-04 | Phase 4 | Pending |
+| HASH-05 | Phase 4 | Pending |
+| HASH-06 | Phase 4 | Pending |
+| HASH-07 | Phase 4 | Pending |
+| CAPA-01 | Phase 4 | Pending |
+| CAPA-02 | Phase 4 | Pending |
+| CAPA-03 | Phase 4 | Pending |
+| CAPA-04 | Phase 4 | Pending |
+| CAPA-05 | Phase 4 | Pending |
+| CAPA-06 | Phase 4 | Pending |
+| CAPA-07 | Phase 4 | Pending |
+| CAPA-08 | Phase 4 | Pending |
+| CAPA-09 | Phase 4 | Pending |
+| PLAN-01 | Phase 5 | Pending |
+| PLAN-02 | Phase 5 | Pending |
+| PLAN-03 | Phase 5 | Pending |
+| PLAN-04 | Phase 5 | Pending |
+| PLAN-05 | Phase 5 | Pending |
+| PLAN-06 | Phase 5 | Pending |
+| PLAN-07 | Phase 5 | Pending |
+| PLAN-08 | Phase 5 | Pending |
+| PLAN-09 | Phase 5 | Pending |
+| PLAN-10 | Phase 5 | Pending |
+| PLAN-11 | Phase 5 | Pending |
+| PLAN-12 | Phase 5 | Pending |
+| PLAN-13 | Phase 5 | Pending |
+| PLAN-14 | Phase 5 | Pending |
+| PLAN-15 | Phase 5 | Pending |
+| PLAN-16 | Phase 5 | Pending |
+| PLAN-17 | Phase 5 | Pending |
+| PLAN-18 | Phase 5 | Pending |
+| PLAN-19 | Phase 5 | Pending |
+| PLAN-20 | Phase 5 | Pending |
+| EVID-01 | Phase 5 | Pending |
+| EVID-02 | Phase 5 | Pending |
+| EVID-03 | Phase 5 | Pending |
+| EVID-04 | Phase 5 | Pending |
+| EVID-05 | Phase 5 | Pending |
+| EVID-06 | Phase 5 | Pending |
+| EVID-07 | Phase 5 | Pending |
+| EVID-08 | Phase 5 | Pending |
+| EVID-09 | Phase 5 | Pending |
+| EVID-10 | Phase 5 | Pending |
+| EVID-11 | Phase 5 | Pending |
+| EVID-12 | Phase 6 | Pending |
+| EVID-13 | Phase 6 | Pending |
+| EVID-14 | Phase 5 | Pending |
+| MANI-01 | Phase 5 | Pending |
+| MANI-02 | Phase 5 | Pending |
+| MANI-03 | Phase 5 | Pending |
+| MANI-04 | Phase 5 | Pending |
+| MANI-05 | Phase 6 | Pending |
+| MANI-06 | Phase 5 | Pending |
+| MANI-07 | Phase 5 | Pending |
+| VERI-01 | Phase 6 | Pending |
+| VERI-02 | Phase 6 | Pending |
+| VERI-03 | Phase 6 | Pending |
+| VERI-04 | Phase 6 | Pending |
+| VERI-05 | Phase 6 | Pending |
+| VERI-06 | Phase 6 | Pending |
+| RESE-01 | Phase 6 | Pending |
+| RESE-02 | Phase 6 | Pending |
+| RESE-03 | Phase 6 | Pending |
+| GATE-01 | Phase 6 | Pending |
+| GATE-02 | Phase 6 | Pending |
+| GATE-03 | Phase 6 | Pending |
+| GATE-04 | Phase 6 | Pending |
+| GATE-05 | Phase 6 | Pending |
+| GATE-06 | Phase 6 | Pending |
+| TEST-01 | Phase 3 | Pending |
+| TEST-02 | Phase 4 | Pending |
+| TEST-03 | Phase 3 | Pending |
+| TEST-04 | Phase 4 | Pending |
+| TEST-05 | Phase 5 | Pending |
+| TEST-06 | Phase 5 | Pending |
+| TEST-07 | Phase 5 | Pending |
+| TEST-08 | Phase 6 | Pending |
+| TEST-09 | Phase 6 | Pending |
+| TEST-10 | Phase 7 | Pending |
+| TEST-11 | Phase 7 | Pending |
+| TEST-12 | Phase 7 | Pending |
+| DOCS-01 | Phase 7 | Pending |
+| DOCS-02 | Phase 7 | Pending |
+| DOCS-03 | Phase 7 | Pending |
+| DOCS-04 | Phase 7 | Pending |
+| DOCS-05 | Phase 7 | Pending |
+| DOCS-06 | Phase 7 | Pending |
+| REPT-01 | Phase 7 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 138 total
-- Mapped to phases: 0
-- Unmapped: 138
+- Mapped to phases: 138
+- Unmapped: 0
+- Duplicates: 0
+
+| Phase | Count |
+|-------|------:|
+| Phase 3 | 33 |
+| Phase 4 | 27 |
+| Phase 5 | 42 |
+| Phase 6 | 20 |
+| Phase 7 | 16 |
+| **Total** | **138** |
 
 ---
 *Requirements defined: 2026-07-17*
-*Last updated: 2026-07-17 after v1.1 research synthesis*
+*Last updated: 2026-07-17 after v1.1 roadmap mapping*

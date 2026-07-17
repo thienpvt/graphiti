@@ -60,6 +60,7 @@ A catalog item can be retried safely and commits as exactly one deterministic, c
 ### Out of Scope
 
 - Kubernetes deployment — configuration may be documented, but this task must not deploy
+- `LikelyReferencesTo`, `MapsTo`, and `SynchronizesTo` — edge vocabulary additions require later inference/schema approval
 - Full catalog ingestion — only fixtures and a future canary procedure are prepared
 - Existing live graph groups — tests use only `oracle-catalog-tool-test`; `oracle-catalog-v2` is not mutated during implementation
 - Graph deletion or cleanup operations — never call `clear_graph` or delete existing graph data
@@ -78,6 +79,8 @@ A catalog item can be retried safely and commits as exactly one deterministic, c
 ## Context
 
 The intended catalog contains approximately 14,106 deterministic entities and more than 30,000 deterministic relationships. Existing ingestion paths are unsafe for this baseline: `add_memory` is asynchronous and invokes extraction; fresh caller episode UUIDs fail with the installed Graphiti behavior; semantic episodes can infer unwanted relationships; `excluded_entity_types` depends on the live registry; and `add_triplet` can create generic endpoints when named entities do not exist.
+
+A cherry-picked pre-hardening canary workflow now exists in `scripts/`, `catalog/canary-v2-requests/`, and `mcp_server/tests/test_catalog_canary_scripts.py`. Repository artifacts record an ACCEPT_TAB dry-run and commit against `oracle-catalog-v2` using the old identity/provenance/hash contract. v1.1 inventories that evidence offline only: it must not query, mutate, retry, or mechanically reuse the live group, old golden hash, 10/16/1 receipt, or 38/85 plan.
 
 Entity identity is UUIDv5 over `group_id|entity_type|graph_key`. Edge identity is UUIDv5 over `group_id|edge_type|edge_key`. Source identity is UUIDv5 over `group_id|Source|source_key`. Batch identity is UUIDv5 over `group_id|Batch|batch_id`. Every mutable domain payload is canonicalized and audited with exactly 64 lowercase hexadecimal SHA-256 characters; MD5 is forbidden.
 
