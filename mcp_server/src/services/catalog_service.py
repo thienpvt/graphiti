@@ -4432,6 +4432,32 @@ class CatalogService:
         entity_results: list[CatalogItemResult] = []
         edge_results: list[CatalogItemResult] = []
         provenance_results: list[CatalogItemResult] = []
+
+        async def _record_failed_status(error_summary: str) -> None:
+            failed_params = self._store.prepare_batch_status_params(
+                uuid=batch_uuid,
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                status='failed',
+                request_sha256=effective_hash,
+                catalog_sha256=request.catalog_sha256,
+                entity_count=len(request.entities),
+                edge_count=len(request.edges),
+                provenance_count=len(provenance_sources),
+                created_at=request_ts,
+                updated_at=datetime.now(timezone.utc),
+                error_summary=error_summary,
+            )
+            try:
+                async with client.driver.transaction() as status_tx:
+                    await self._store.upsert_batch_status(status_tx, params=failed_params)
+            except Exception as status_exc:
+                logger.error(
+                    'catalog upsert_catalog_batch failed_status_write_failed batch_id=%s reason=%s',
+                    request.batch_id,
+                    type(status_exc).__name__,
+                )
+
         try:
             async with client.driver.transaction() as tx:
                 claim = await self._store.claim_batch_status(
@@ -4674,6 +4700,23 @@ class CatalogService:
                 error_code=CatalogErrorCode.batch_conflict,
                 error_message='batch_id has different request_sha256',
             )
+        except self._ProvenanceInvariantRace as exc:
+            logger.error(
+                'catalog upsert_catalog_batch invariant_race batch_id=%s code=%s',
+                request.batch_id,
+                exc.code.value,
+            )
+            await _record_failed_status(exc.code.value)
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges) + len(provenance_sources), 1),
+                rolled_back=len(entity_results) + len(edge_results) + len(provenance_results),
+                error_code=exc.code,
+                error_message='provenance invariant changed in write transaction',
+            )
         except Exception as exc:
             logger.error(
                 'catalog upsert_catalog_batch neo4j_transaction_failed batch_id=%s entities=%s edges=%s provenance=%s reason=%s',
@@ -4683,29 +4726,7 @@ class CatalogService:
                 len(provenance_sources),
                 type(exc).__name__,
             )
-            failed_params = self._store.prepare_batch_status_params(
-                uuid=batch_uuid,
-                group_id=request.group_id,
-                batch_id=request.batch_id,
-                status='failed',
-                request_sha256=effective_hash,
-                catalog_sha256=request.catalog_sha256,
-                entity_count=len(request.entities),
-                edge_count=len(request.edges),
-                provenance_count=len(provenance_sources),
-                created_at=request_ts,
-                updated_at=datetime.now(timezone.utc),
-                error_summary=type(exc).__name__,
-            )
-            try:
-                async with client.driver.transaction() as status_tx:
-                    await self._store.upsert_batch_status(status_tx, params=failed_params)
-            except Exception as status_exc:
-                logger.error(
-                    'catalog upsert_catalog_batch failed_status_write_failed batch_id=%s reason=%s',
-                    request.batch_id,
-                    type(status_exc).__name__,
-                )
+            await _record_failed_status(type(exc).__name__)
             return CatalogBatchWriteResponse(
                 group_id=request.group_id,
                 batch_id=request.batch_id,

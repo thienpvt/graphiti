@@ -3475,12 +3475,33 @@ async def test_batch_unchanged_domain_drift_aborts_before_commit_status(kind):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('drift', ['source_key', 'content_sha256', 'mentions', 'updated_mentions'])
-async def test_batch_atomic_cas_or_locked_link_drift_aborts_before_link_mutation(drift):
+@pytest.mark.parametrize(
+    ('drift', 'expected_code'),
+    [
+        ('source_key', CatalogErrorCode.deterministic_uuid_conflict),
+        ('content_sha256', CatalogErrorCode.batch_conflict),
+        ('mentions', CatalogErrorCode.batch_conflict),
+        ('updated_mentions', CatalogErrorCode.batch_conflict),
+    ],
+)
+async def test_batch_atomic_cas_or_locked_link_drift_aborts_before_link_mutation(
+    drift, expected_code
+):
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     _wire_batch_preflight(service)
-    _install_batch_write_mocks(service, client)
+    events = _install_batch_write_mocks(service, client)
+
+    @asynccontextmanager
+    async def _transaction():
+        client.call_order.append('transaction')
+        try:
+            yield client.tx
+        except Exception:
+            events.append('rollback')
+            raise
+
+    client.driver.transaction = _transaction
     source = _source(attributes={'version': 2}) if drift == 'updated_mentions' else _source()
     src_uuid = catalog_source_uuid(FIXED_NS, GROUP, source.source_key)
     digest = canonical_sha256(service.source_canonical_payload(source))
@@ -3535,7 +3556,14 @@ async def test_batch_atomic_cas_or_locked_link_drift_aborts_before_link_mutation
     )
 
     assert resp.status == 'failed'
-    assert resp.error_code == CatalogErrorCode.neo4j_transaction_failed
+    assert resp.error_code == expected_code
+    assert resp.error_message == 'provenance invariant changed in write transaction'
+    assert client.call_order.count('transaction') == 2
+    assert events.index('rollback') < events.index('status_failed')
+    status_call = cast(AsyncMock, service._store.upsert_batch_status).await_args
+    assert status_call is not None
+    assert status_call.kwargs['params']['status'] == 'failed'
+    assert status_call.kwargs['params']['error_summary'] == expected_code.value
     source_write = cast(AsyncMock, service._store.upsert_source_episode)
     source_write.assert_awaited_once()
     if cas_error:
