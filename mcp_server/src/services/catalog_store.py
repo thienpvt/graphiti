@@ -985,6 +985,8 @@ class CatalogNeo4jStore:
         """Acquire retained write locks on fixed-label provenance targets in UUID order."""
         return """
             UNWIND $targets AS target
+            WITH target
+            ORDER BY target.uuid, target.kind
             CALL (target) {
               WITH target WHERE target.kind = 'entity'
               MATCH (n:Entity {uuid: target.uuid, group_id: $group_id})

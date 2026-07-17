@@ -908,6 +908,8 @@ def test_lock_provenance_targets_cypher_is_fixed_group_scoped_and_retained():
     store = CatalogNeo4jStore()
     cypher = store.build_lock_provenance_targets_cypher()
     assert 'UNWIND $targets AS target' in cypher
+    assert 'ORDER BY target.uuid, target.kind' in cypher
+    assert cypher.index('ORDER BY target.uuid, target.kind') < cypher.index('CALL (target)')
     assert 'MATCH (n:Entity {uuid: target.uuid, group_id: $group_id})' in cypher
     assert 'MATCH ()-[e:RELATES_TO {uuid: target.uuid, group_id: $group_id}]->()' in cypher
     assert 'SET n.uuid = n.uuid' in cypher
