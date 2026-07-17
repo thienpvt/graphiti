@@ -24,8 +24,8 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 - [x] **IDEN-01**: Server derives entity UUIDs with UUIDv5 over `group_id|entity_type|graph_key` using the configured namespace
 - [x] **IDEN-02**: Server derives edge UUIDs with UUIDv5 over `group_id|edge_type|edge_key` using the configured namespace
-- [ ] **IDEN-03**: Server derives source UUIDs with UUIDv5 over `group_id|Source|source_key` using the configured namespace
-- [ ] **IDEN-04**: Server derives batch UUIDs with UUIDv5 over `group_id|Batch|batch_id` using the configured namespace
+- [x] **IDEN-03**: Server derives source UUIDs with UUIDv5 over `group_id|Source|source_key` using the configured namespace
+- [x] **IDEN-04**: Server derives batch UUIDs with UUIDv5 over `group_id|Batch|batch_id` using the configured namespace
 - [x] **IDEN-05**: Caller-supplied database UUIDs are never accepted as identity authority
 - [x] **IDEN-06**: Server canonicalizes mutable payloads and persists a SHA-256 containing exactly 64 lowercase hexadecimal characters
 - [x] **IDEN-07**: Server compares an optional client `content_sha256` or `request_sha256` with its canonical hash and returns `content_hash_mismatch` on mismatch
@@ -88,7 +88,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 ### Provenance
 
 - [x] **PROV-01**: MCP client can call `upsert_provenance` with deterministic source metadata and existing entity/edge targets
-- [ ] **PROV-02**: Provenance write uses deterministic source UUID, canonical source hash, exact reference time, and safe source attributes
+- [x] **PROV-02**: Provenance write uses deterministic source UUID, canonical source hash, exact reference time, and safe source attributes
 - [x] **PROV-03**: Provenance reuses the installed Graphiti 0.29.2 Episodic/MENTIONS and fact-provenance representation without calling `add_episode`, LLM extraction, or the queue
 - [x] **PROV-04**: Provenance links sources to existing entities and attaches source identity to existing facts using the closest compatible installed Graphiti representation
 - [x] **PROV-05**: Provenance rejects missing entity or edge targets with `provenance_target_missing` and no partial write
@@ -97,8 +97,8 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 ### Persistent Ingest Status
 
 - [x] **STAT-01**: Server persists restart-safe ingest state in Neo4j under a non-`Entity` `CatalogIngestBatch` label
-- [ ] **STAT-02**: Batch status stores deterministic batch UUID, IDs, hashes, lifecycle timestamps, status, item counts, and bounded error summary
-- [ ] **STAT-03**: Batch status supports `planned`, `validating`, `embedding`, `writing`, `committed`, and `failed`
+- [x] **STAT-02**: Batch status stores deterministic batch UUID, IDs, hashes, lifecycle timestamps, status, item counts, and bounded error summary
+- [x] **STAT-03**: Batch status supports `planned`, `validating`, `embedding`, `writing`, `committed`, and `failed`
 - [x] **STAT-04**: Batch status never stores API keys, raw documents, complete source text, or full request payloads
 - [x] **STAT-05**: MCP client can call read-only `get_catalog_ingest_status` after server reinitialization and receive persisted state and counts
 - [x] **STAT-06**: Batch status nodes do not appear in Graphiti entity search or community inputs
@@ -106,7 +106,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 ### Atomic Catalog Batch
 
 - [x] **BATC-01**: MCP client can call `upsert_catalog_batch` with group, batch and catalog hashes, entities, edges, provenance, dry-run, and atomic controls
-- [ ] **BATC-02**: Server validates the complete nested request and all configured limits before any persistent side effect
+- [x] **BATC-02**: Server validates the complete nested request and all configured limits before any persistent side effect
 - [x] **BATC-03**: Server computes canonical request SHA-256 and returns `batch_conflict` for a committed batch ID reused with different content
 - [x] **BATC-04**: Batch endpoint resolution includes both entities already in Neo4j and entities included in the same request
 - [x] **BATC-05**: Server detects all known identity, type, endpoint, hash, and provenance conflicts before domain writes
@@ -115,8 +115,8 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 - [x] **BATC-08**: A domain write failure rolls back every domain mutation and persists failed status in a separate safe transaction
 - [x] **BATC-09**: An identical committed batch ID and request hash returns unchanged without duplicating domain objects
 - [x] **BATC-10**: Batch dry-run performs complete validation, identity resolution, endpoint planning, and conflict checks without graph writes or persistent status
-- [ ] **BATC-11**: Combined ACCEPT_TAB fixture batch, retry, conflict, missing-endpoint rollback, persisted failure/success status, search interop, and service reinitialization tests pass
-- [ ] **BATC-12**: `build_communities` executes against batch-created entities without schema errors, but normal upserts never invoke it
+- [x] **BATC-11**: Combined ACCEPT_TAB fixture batch, retry, conflict, missing-endpoint rollback, persisted failure/success status, search interop, and service reinitialization tests pass
+- [x] **BATC-12**: `build_communities` executes against batch-created entities without schema errors, but normal upserts never invoke it
 
 ### Documentation and Final Verification
 
@@ -220,22 +220,22 @@ Every v1 requirement maps to exactly one phase.
 | GATE-03 | Phase 1 | Complete |
 | GATE-04 | Phase 1 | Complete |
 | GATE-05 | Phase 1 | Complete |
-| IDEN-03 | Phase 2 | Pending |
-| IDEN-04 | Phase 2 | Pending |
+| IDEN-03 | Phase 2 | Complete |
+| IDEN-04 | Phase 2 | Complete |
 | PROV-01 | Phase 2 | Complete |
-| PROV-02 | Phase 2 | Pending |
+| PROV-02 | Phase 2 | Complete |
 | PROV-03 | Phase 2 | Complete |
 | PROV-04 | Phase 2 | Complete |
 | PROV-05 | Phase 2 | Complete |
 | PROV-06 | Phase 2 | Complete |
 | STAT-01 | Phase 2 | Complete |
-| STAT-02 | Phase 2 | Pending |
-| STAT-03 | Phase 2 | Pending |
+| STAT-02 | Phase 2 | Complete |
+| STAT-03 | Phase 2 | Complete |
 | STAT-04 | Phase 2 | Complete |
 | STAT-05 | Phase 2 | Complete |
 | STAT-06 | Phase 2 | Complete |
 | BATC-01 | Phase 2 | Complete |
-| BATC-02 | Phase 2 | Pending |
+| BATC-02 | Phase 2 | Complete |
 | BATC-03 | Phase 2 | Complete |
 | BATC-04 | Phase 2 | Complete |
 | BATC-05 | Phase 2 | Complete |
@@ -244,8 +244,8 @@ Every v1 requirement maps to exactly one phase.
 | BATC-08 | Phase 2 | Complete |
 | BATC-09 | Phase 2 | Complete |
 | BATC-10 | Phase 2 | Complete |
-| BATC-11 | Phase 2 | Pending |
-| BATC-12 | Phase 2 | Pending |
+| BATC-11 | Phase 2 | Complete |
+| BATC-12 | Phase 2 | Complete |
 | DOCS-01 | Phase 2 | Complete |
 | DOCS-02 | Phase 2 | Complete |
 | DOCS-03 | Phase 2 | Complete |

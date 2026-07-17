@@ -12,7 +12,7 @@ Add synchronous, typed, deterministic Neo4j catalog-upsert tools to the existing
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 1: Typed Catalog Primitives** - Config, identity, entity/edge upsert, resolve, verify, and Phase 1 quality gate
-- [ ] **Phase 2: Provenance and Atomic Batch** - Provenance, batch status, atomic catalog batch, docs, final verification
+- [x] **Phase 2: Provenance and Atomic Batch** - Provenance, batch status, atomic catalog batch, docs, final verification (completed 2026-07-17)
 
 ## Phase Details
 
@@ -94,7 +94,7 @@ Phases execute in numeric order: 1 → 2. Phase 2 must not start until Phase 1 g
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
-| 2. Provenance and Atomic Batch | 6/6 | In Progress|  |
+| 2. Provenance and Atomic Batch | 6/6 | Complete    | 2026-07-17 |
 
 ## Coverage
 

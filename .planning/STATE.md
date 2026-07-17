@@ -3,17 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 02
-current_phase_name: Provenance and Atomic Batch
-status: executing
-stopped_at: Completed 02-06-PLAN.md
-last_updated: "2026-07-17T02:46:17.386Z"
+status: milestone_audit
+stopped_at: Phase 02 verified and completed
+last_updated: "2026-07-17T06:31:47.262Z"
 last_activity: 2026-07-17
-last_activity_desc: Phase 02 execution started
+last_activity_desc: Phase 02 complete
 progress:
   total_phases: 2
   completed_phases: 2
   total_plans: 14
   completed_plans: 14
+  percent: 100
+current_phase_name: Provenance and Atomic Batch
 ---
 
 # Project State
@@ -23,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-16)
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 02 — Provenance and Atomic Batch
+**Current focus:** Milestone v1.0 audit
 
 ## Current Position
 
-Phase: 02 (Provenance and Atomic Batch) — EXECUTING
+Phase: 02 (Provenance and Atomic Batch) — COMPLETE
 Plan: 6 of 6
-Status: Ready to execute
-Last activity: 2026-07-17 — Phase 02 execution started
+Status: Verified; ready for milestone audit
+Last activity: 2026-07-17 — Phase 02 verified and completed
 
 Progress: [██████████] 100%
 
@@ -38,7 +39,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 8
+- Total plans completed: 14
 - Average duration: tracked in plan summaries
 - Total execution time: tracked in plan summaries
 
@@ -47,7 +48,7 @@ Progress: [██████████] 100%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Typed Catalog Primitives | 8 | 8 | see summaries |
-| 2. Provenance and Atomic Batch | 0 | TBD | - |
+| 2. Provenance and Atomic Batch | 6 | 6 | see summaries |
 
 **Recent Trend:**
 
@@ -79,38 +80,34 @@ Recent decisions affecting current work:
 - Catalog-scoped Ruff/Pyright only for GATE-04; global baseline out of scope
 - Windows PYTHONPATH must use semicolon so monorepo graphiti_core wins over site-packages
 - Twin diagnostics: all-row anomaly aggregation; entity/edge verify use elementId physical-row dedup
-- User directive 2026-07-17: **stop after Phase 1 done** — do not discuss/plan/execute Phase 2 this session
-- Earlier Phase 2 discussion defaults and local Ollama E2E-before-cleanup remain deferred for a later session
-- [Phase ?]: Edge content update no longer SETs e.episodes; append-only provenance owns list
-- [Phase ?]: upsert_provenance: target preflight fail-closed; sources skip embedder
-- [Phase ?]: Status writers accept only terminal committed/failed; intermediate lifecycle literals not persisted
-- [Phase ?]: Missing status uses error_summary (no error_message field on CatalogIngestStatusResponse)
-- [Phase ?]: Caller request_sha256 is the external batch-idempotency token when supplied; otherwise use the server canonical hash
-- [Phase ?]: Batch writes edges before append-only provenance attachment inside one domain transaction
-- [Phase ?]: Failed batch status stores only exception type, never exception text or payload
-- [Phase ?]: Document catalog tools as a Neo4j-only administrative surface, separate from semantic add_memory ingestion.
-- [Phase ?]: Count Phase 2 PASS only after the required unskipped live suite and all quality/operations gates pass.
+- Fresh Phase 2 authorization superseded the earlier Phase 1 stop for this session
+- Edge content updates preserve `e.episodes`; append-only provenance owns the list
+- Provenance target preflight fails closed; sources skip the embedder, LLM, and queue
+- Status persists terminal committed/failed; intermediate lifecycle literals remain response/model vocabulary
+- Caller hashes are assertions only; server canonical hash controls batch identity and conflict
+- Batch writes edges before provenance attachment inside one domain transaction
+- Failed status stores exception type only, never exception text or payload
+- Catalog tools are a Neo4j-only administrative surface, separate from semantic `add_memory`
+- Final provenance concurrency uses atomic source CAS and explicitly ordered retained target locks
+- Phase 2 final verification passed 5/5 truths and 31/31 requirements
+- Local Ollama E2E completed before milestone cleanup
 
 ### Pending Todos
 
-- Phase 2 discuss → plan → execute only when user re-authorizes
-- Before any future milestone cleanup: local Ollama E2E (deferred)
+- Complete milestone audit, archive, local tag if configured, then planning cleanup
 
 ### Blockers/Concerns
 
-- Phase 2 intentionally not started (user stop directive)
 - Tests and writes restricted to `oracle-catalog-tool-test`; never mutate `oracle-catalog-v2`
-- Preserve unrelated worktree dirt: `.planning/config.json`, docker/k8s configs, `.codegraph/`, `catalog/`, `mcp_server/sample_catalog.json`
+- Preserve unrelated working-tree dirt: `.planning/config.json`, docker/k8s configs, `.codegraph/`, `catalog/`, `mcp_server/sample_catalog.json`
+- Do not push branch or tag without separate approval
 
 ## Deferred Items
 
-| Category | Item | Status | Deferred At |
-|----------|------|--------|-------------|
-| Phase 2 | Provenance and atomic batch | Deferred — stop after Phase 1 | 2026-07-17 |
-| Ops | Local Ollama E2E before cleanup | Deferred with cleanup | 2026-07-17 |
+None within milestone scope. v2 backend expansion and production operations remain in `REQUIREMENTS.md`.
 
 ## Session Continuity
 
-Last session: 2026-07-17T02:46:17.380Z
-Stopped at: Completed 02-06-PLAN.md
+Last session: 2026-07-17
+Stopped at: Phase 02 verified and completed
 Resume file: None
