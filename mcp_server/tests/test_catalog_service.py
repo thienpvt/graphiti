@@ -2518,7 +2518,9 @@ async def test_provenance_unchanged_source_new_link_reports_updated(target_kind)
     )
 
     assert resp.results[0].status == 'updated'
-    params = cast(AsyncMock, service._store.upsert_source_episode).await_args.kwargs['params']
+    source_call = cast(AsyncMock, service._store.upsert_source_episode).await_args
+    assert source_call is not None
+    params = source_call.kwargs['params']
     if target_kind == 'edge':
         assert params['entity_edges'] == [edge_uuid]
 
@@ -3240,11 +3242,9 @@ async def test_batch_unchanged_domain_drift_aborts_before_commit_status(kind):
     edges = []
 
     if kind == 'entity':
-        entity_calls = {'count': 0}
 
         async def _entity_by_uuid(executor, *, uuid, group_id, tx=None):
             _ = executor, uuid, group_id
-            entity_calls['count'] += 1
             return {
                 'uuid': employee_uuid,
                 'content_sha256': employee_hash if tx is None else 'f' * 64,
