@@ -89,18 +89,21 @@ Plans:
 
 - [ ] 01-01-PLAN.md — Strict CatalogStrictModel shells, Literal flags, version/system_key, CONT-08 codes, models suite
 
-**Wave 2** *(01-02 and 01-03 parallel after 01-01)*
+**Wave 2** *(after 01-01)*
 
-- [ ] 01-02-PLAN.md — Graph-key grammar registry (18 types), FE/BO scope, overload, v1 reject
-- [ ] 01-03-PLAN.md — Versioned UUIDv5 materials + pure future-kind helpers; identity goldens
+- [ ] 01-02-PLAN.md — Graph-key grammar registry (18 types), FE/BO scope, overload, v1 reject, IDEN-08 echo
 
-**Wave 3** *(blocked on Wave 2)*
+**Wave 3** *(serial after 01-02; depends_on [01-01, 01-02] — no parallel with grammar)*
 
-- [ ] 01-04-PLAN.md — Structured safe errors + validation-before-side-effect spies
+- [ ] 01-03-PLAN.md — Versioned UUIDv5 materials + pure future-kind helpers; identity goldens; service graph_key echo
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 01-05-PLAN.md — Truthful 01-PHASE1-GATE.md hard gate for Phase 2
+- [ ] 01-04-PLAN.md — Structured safe errors + mandatory FastMCP typed CONT-07 production boundary + spies
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 01-05-PLAN.md — Truthful 01-PHASE1-GATE.md hard gate, VALIDATION refresh, edge-probe 53/53 assert
 
 **Gate**: Strict-model and identity unit gates must pass before Phase 2 store/control-plane write work
 

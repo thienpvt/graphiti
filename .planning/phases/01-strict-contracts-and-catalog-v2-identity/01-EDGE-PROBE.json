@@ -3,488 +3,494 @@
     {
       "requirement_id": "CONT-01",
       "category": "adjacency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Equal nested items stay separate list entries; unknown sibling fields fail independently without merging. Anchor: plan 01-01 Task1/2, test_catalog_models.py strict matrix + test_valid_entity_list_order_preserved; must_have truths on CatalogStrictModel.",
       "reason": null,
       "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
     },
     {
       "requirement_id": "CONT-01",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Empty/null shells fail required-field ValidationError; single-entity shell accepts when required fields present. Anchor: plan 01-01 Task1/2, test_catalog_models.py empty/null shell cases.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "CONT-01",
       "category": "ordering",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Accepted entity list order preserved after model_validate; no reorder-by-validation. Anchor: plan 01-01 Task1 test_valid_entity_list_order_preserved.",
       "reason": null,
       "probe": "When elements compare equal, is output order specified and stable?"
     },
     {
       "requirement_id": "CONT-01",
       "category": "concurrency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Pure model_validate is reentrant/stateless; no shared mutable registry during validation. Anchor: plan 01-01 feature concurrency note + must_have; no parallel-mutation product path in Phase 1.",
       "reason": null,
       "probe": "If interrupted or run in parallel, what is guaranteed?"
     },
     {
       "requirement_id": "CONT-02",
       "category": "adjacency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Unknown fields at shell and nested depths fail independently via extra=forbid; adjacent valid fields unaffected. Anchor: plan 01-01 Task1/2, test_catalog_strict_model_rejects_unknown_shell_and_nested_fields.",
       "reason": null,
       "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
     },
     {
       "requirement_id": "CONT-02",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Empty dict body fails required fields; null required nested item fails. Anchor: plan 01-01 Task1/2 strict matrix.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "CONT-02",
       "category": "ordering",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Nested loc paths ordered by ValidationError loc segments; accepted lists preserve order. Anchor: plan 01-01 Task1/2 + CONT-01 order test.",
       "reason": null,
       "probe": "When elements compare equal, is output order specified and stable?"
     },
     {
       "requirement_id": "CONT-02",
       "category": "concurrency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Recursive forbid is pure Pydantic config; concurrent model_validate of independent payloads has no shared mutation. Anchor: plan 01-01 CatalogStrictModel must_have.",
       "reason": null,
       "probe": "If interrupted or run in parallel, what is guaranteed?"
     },
     {
       "requirement_id": "CONT-03",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Misspelled optional fields (e.g. dry_run typo) fail forbid path, never silent ignore. Anchor: plan 01-01 Task1 test_misspelled_optional_fields_rejected.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "CONT-04",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Empty/whitespace-only source_key and reference_time fail emptiness check after strip; non-empty with trailing space accepted. Anchor: plan 01-01 Task1/2 trailing-space tests.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "CONT-04",
       "category": "encoding",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Length/equality = exact Python str (not NFC/bytes/grapheme); validators return original v after strip emptiness check. Anchor: plan 01-01 Task2 CONT-04 action + test_source_and_reference_time_preserve_trailing_space.",
       "reason": null,
-      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+      "probe": "Whose definition of length/equality applies \u2014 bytes, code points, grapheme clusters, or normalized form?"
     },
     {
       "requirement_id": "CONT-05",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "strict_endpoints must be Literal[True]; false rejected at model validation on UpsertTypedEdgesRequest. Anchor: plan 01-01 Task1/2 test_strict_endpoints_false_rejected.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "CONT-06",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "atomic must be Literal[True] on all write requests exposing atomic; false rejected. Anchor: plan 01-01 Task1/2 test_atomic_false_rejected_on_entity_edge_provenance_batch_writes.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "CONT-07",
       "category": "boundary",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Production boundary: FastMCP typed Pydantic params on all 7 catalog tools (framework model_validate before tool body). Mandatory proof: MCP registration/source assertion + invalid nested payload never reaches CatalogService/store/embed/schema/tx/status. Anchor: plan 01-04 Task1/2, test_catalog_service.py no_side_effect spies + FastMCP tool binding test.",
       "reason": null,
-      "probe": "What happens exactly at each min/max/threshold — and one step either side?"
+      "probe": "What happens exactly at each min/max/threshold \u2014 and one step either side?"
     },
     {
       "requirement_id": "CONT-07",
       "category": "adjacency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Single invalid nested field fails whole request at model_validate; no partial service entry. Anchor: plan 01-04 Task1/2 spy tests.",
       "reason": null,
       "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
     },
     {
       "requirement_id": "CONT-07",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Empty invalid payload produces ValidationError/structured error with zero side effects. Anchor: plan 01-04 Task1/2 empty invalid cases.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "CONT-07",
       "category": "encoding",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Validation messages use Pydantic loc/type mapping; no payload re-encoding side effects. Anchor: plan 01-04 converter SAFE-08 message bound; CONT-04 raw bytes owned by plan 01-01.",
       "reason": null,
-      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+      "probe": "Whose definition of length/equality applies \u2014 bytes, code points, grapheme clusters, or normalized form?"
     },
     {
       "requirement_id": "CONT-07",
       "category": "ordering",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Validation precedes any backend readiness/service call; first ValidationError drives structured field_path. Anchor: plan 01-04 Task2 converter + spy precedence.",
       "reason": null,
       "probe": "When elements compare equal, is output order specified and stable?"
     },
     {
       "requirement_id": "CONT-07",
       "category": "precision",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "reviewed-not-applicable: no new floating confidence precision path in Phase 1 validation gate; existing NaN/inf limits remain prior code. Phase fence: Phase 2+ for new numeric contracts. Anchor: plan 01-04 scope fence.",
       "reason": null,
-      "probe": "Where can precision loss, overflow, or rounding/tie-breaking occur — and what is the exact contract (e.g. half-up vs half-to-even, ceil/floor/truncate)?"
+      "probe": "Where can precision loss, overflow, or rounding/tie-breaking occur \u2014 and what is the exact contract (e.g. half-up vs half-to-even, ceil/floor/truncate)?"
     },
     {
       "requirement_id": "CONT-08",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "CatalogErrorCode appends nine CONT-08 codes without removing existing. Anchor: plan 01-01 Task1/2 test_catalog_error_code_includes_phase1_codes_without_removing_existing.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "IDEN-01",
       "category": "adjacency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "identity_schema_version must equal catalog-v2 exactly; wrong/adjacent values (catalog-v1) fail closed. Anchor: plan 01-01 Task1/2 test_identity_schema_version_required_and_rejects_non_v2.",
       "reason": null,
       "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
     },
     {
       "requirement_id": "IDEN-01",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Missing/empty identity_schema_version fails required/Literal validation. Anchor: plan 01-01 Task1/2.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "IDEN-01",
       "category": "ordering",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Version check is field-level Literal; independent of list order. Anchor: plan 01-01 shell fields.",
       "reason": null,
       "probe": "When elements compare equal, is output order specified and stable?"
     },
     {
       "requirement_id": "IDEN-01",
       "category": "concurrency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Required Literal field; pure validation, reentrant. Anchor: plan 01-01.",
       "reason": null,
       "probe": "If interrupted or run in parallel, what is guaranteed?"
     },
     {
       "requirement_id": "IDEN-02",
       "category": "adjacency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "system_key closed set FE|BO|COMMON; unknown/adjacent values fail; no COMMON default. Anchor: plan 01-01 Task1/2 test_system_key_required_closed_set.",
       "reason": null,
       "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
     },
     {
       "requirement_id": "IDEN-02",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Empty/null system_key fails; lowercase fe fails. Anchor: plan 01-01 Task1/2.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "IDEN-02",
       "category": "ordering",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "system_key shell field independent of nested item order. Anchor: plan 01-01.",
       "reason": null,
       "probe": "When elements compare equal, is output order specified and stable?"
     },
     {
       "requirement_id": "IDEN-03",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Nested entity/endpoint graph_key SYSTEM segment must equal shell system_key; mismatch fails before service. Anchor: plan 01-02 Task1/2 validate_entity_graph_key + system_mismatch tests.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "IDEN-04",
       "category": "adjacency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "FE vs BO same Oracle body remain distinct full graph_key strings; do not collapse. Anchor: plan 01-02 Task1/2 FE/BO adjacency tests.",
       "reason": null,
       "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
     },
     {
       "requirement_id": "IDEN-04",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Empty graph_key fails grammar fullmatch. Anchor: plan 01-02 Task1/2 empty key negatives.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "IDEN-04",
       "category": "ordering",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Grammar fullmatch pure; multi-entity validation order does not rewrite keys. Anchor: plan 01-02 must_have.",
       "reason": null,
       "probe": "When elements compare equal, is output order specified and stable?"
     },
     {
       "requirement_id": "IDEN-05",
       "category": "adjacency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Procedure/Function require terminal #OVERLOAD; adjacent missing/empty overload fail; #a vs #b distinct. Anchor: plan 01-02 Task1/2 overload matrix.",
       "reason": null,
       "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
     },
     {
       "requirement_id": "IDEN-05",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Missing empty overload discriminator fails. Anchor: plan 01-02 Task1/2.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "IDEN-05",
       "category": "ordering",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "backstop",
+      "resolution": "Overload is terminal segment of key string; order N/A beyond fullmatch. Anchor: plan 01-02 grammar registry.",
       "reason": null,
       "probe": "When elements compare equal, is output order specified and stable?"
     },
     {
       "requirement_id": "IDEN-06",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Allowlist expands only System/DatabaseLink/SourceArtifact (+15 existing)=18; no business-domain types. Anchor: plan 01-02 Task2 ENTITY_TYPE_PREFIXES + 18-type positive matrix.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "IDEN-07",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Empty graph_key if helper called directly still deterministic uuid5 of empty segment; production models reject empty before call. Anchor: plan 01-03 Task1/2 identity tests + model empty reject plan 01-02.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "IDEN-07",
       "category": "encoding",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "UUID material uses exact graph_key string bytes-as-Python-str in f-string; no NFC. Anchor: plan 01-03 catalog_entity_uuid material + goldens.",
       "reason": null,
-      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+      "probe": "Whose definition of length/equality applies \u2014 bytes, code points, grapheme clusters, or normalized form?"
     },
     {
       "requirement_id": "IDEN-08",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Any response/result that echoes graph_key returns complete untruncated system-scoped key with exact str equality to submitted key (no truncation/reformat/NFC). Anchor: plan 01-02 Task1/2 model echo tests; plan 01-03 Task2 service resolve/verify/result graph_key exact assertions.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "IDEN-09",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Server-owned per-type grammar fullmatch for all 18 types with visible PREFIX::{SYSTEM}:: body. Anchor: plan 01-02 Task1/2 catalog_graph_key.py + 18-type matrix.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "IDEN-10",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Entity UUID material group_id|catalog-v2|entity_type|graph_key; empty segments only if helper called with empty (models reject first). Anchor: plan 01-03 Task1/2 goldens.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "IDEN-10",
       "category": "encoding",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Material encoding exact f-string segments; signatures unchanged. Anchor: plan 01-03 catalog_entity_uuid.",
       "reason": null,
-      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+      "probe": "Whose definition of length/equality applies \u2014 bytes, code points, grapheme clusters, or normalized form?"
     },
     {
       "requirement_id": "IDEN-11",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Pure unpersisted helpers catalog_evidence_link_uuid/catalog_manifest_uuid/catalog_prepared_plan_uuid with catalog-v2 materials; no store/control-plane. Anchor: plan 01-03 Task1/2.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "IDEN-12",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Prefix-only catalog-v1 keys fail closed; no rewrite/normalize/migration path. Anchor: plan 01-02 Task1/2 v1 rejection tests.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "IDEN-13",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "ACCEPT_TAB historical digests never imported as v2 UUID goldens; v1 material UUID != v2 material UUID. Anchor: plan 01-03 Task1/2 ACCEPT_TAB guard + v1 inequality tests.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "SAFE-05",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Caller UUID never helper parameter/authority; inspect.signature has no caller uuid param. Anchor: plan 01-03 Task1/2 SAFE-05 signature tests.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     },
     {
       "requirement_id": "SAFE-08",
       "category": "adjacency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Structured validation errors expose code/message/field_path/retryable/correlation_id only; adjacent secrets never included. Anchor: plan 01-04 Task1/2 converter tests.",
       "reason": null,
       "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
     },
     {
       "requirement_id": "SAFE-08",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Empty invalid payload still yields structured error shape without payload dump. Anchor: plan 01-04 Task1/2.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "SAFE-08",
       "category": "encoding",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Message length bounded max 512 chars; unicode-safe truncation; no full str(exc) dump. Anchor: plan 01-04 Task2 converter.",
       "reason": null,
-      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+      "probe": "Whose definition of length/equality applies \u2014 bytes, code points, grapheme clusters, or normalized form?"
     },
     {
       "requirement_id": "SAFE-08",
       "category": "ordering",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "field_path from first ValidationError error loc by default. Anchor: plan 01-04 Task2.",
       "reason": null,
       "probe": "When elements compare equal, is output order specified and stable?"
     },
     {
       "requirement_id": "TEST-01",
       "category": "adjacency",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Table-driven strictness matrix covers adjacent unknown/valid field cases across request types. Anchor: plan 01-01 Task1/2 test_catalog_models.py.",
       "reason": null,
       "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
     },
     {
       "requirement_id": "TEST-01",
       "category": "empty",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Matrix includes empty/null shell failures. Anchor: plan 01-01 Task1/2.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
     {
       "requirement_id": "TEST-01",
       "category": "ordering",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Matrix includes list order preservation case. Anchor: plan 01-01 Task1 test_valid_entity_list_order_preserved.",
       "reason": null,
       "probe": "When elements compare equal, is output order specified and stable?"
     },
     {
       "requirement_id": "TEST-03",
       "category": "unclassified",
-      "status": "unresolved",
-      "verification": null,
-      "resolution": null,
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "Identity goldens FE/BO/overload/version/purity suite automated; focused identity tests in Phase 1 gate. Anchor: plan 01-03 Task1/2 + plan 01-05 gate coverage map.",
       "reason": null,
-      "probe": "unclassified — review manually"
+      "probe": "unclassified \u2014 review manually"
     }
   ],
   "coverage": {
     "applicable": 53,
-    "resolved": 0,
-    "unresolved": 53,
+    "resolved": 53,
+    "unresolved": 0,
     "byVerification": {
-      "explicit": 0,
-      "backstop": 0
+      "explicit": 44,
+      "backstop": 9
+    },
+    "no_silent_drop": {
+      "source_count": 53,
+      "resolved_count": 53,
+      "key_equality": true,
+      "null_dispositions": 0
     }
   }
 }

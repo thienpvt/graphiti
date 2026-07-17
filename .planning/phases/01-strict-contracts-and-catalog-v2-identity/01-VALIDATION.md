@@ -10,6 +10,7 @@ created: 2026-07-18
 # Phase 1 — Validation Strategy
 
 > Strict-contract and identity feedback contract. Phase 2 stays blocked until this strategy is green.
+> Statuses below are planning-time pending. Plan 01-05 refreshes them from real pytest/ruff/pyright results only — never invent green; no manual waiver for Phase 2 entry.
 
 ---
 
@@ -30,35 +31,58 @@ created: 2026-07-18
 - **After each strict-model/grammar task commit:** Run quick models + identity tests.
 - **After identity call-site updates:** Run full focused Phase 1 suite.
 - **After each wave:** Run focused suite, scoped Ruff, scoped Pyright.
-- **Before Phase 2:** `01-PHASE1-GATE.md` must report focused tests, Ruff, and Pyright green; canary/live-group flags false.
+- **Before Phase 2:** `01-PHASE1-GATE.md` must report focused tests, Ruff, and Pyright green; canary/live-group flags false; edge-probe unresolved=0.
 - **Max feedback latency:** 240 seconds.
+
+---
+
+## Wave Structure (revised)
+
+| Wave | Plans | depends_on | Notes |
+|------|-------|------------|-------|
+| 1 | 01-01 | [] | Strict shells |
+| 2 | 01-02 | [01-01] | Grammar registry |
+| 3 | 01-03 | [01-01, 01-02] | Versioned identity (serial after grammar) |
+| 4 | 01-04 | [01-01, 01-02, 01-03] | SAFE-08 + CONT-07 production boundary |
+| 5 | 01-05 | [01-04] | Hard gate + VALIDATION refresh + edge-probe assert |
+
+No same-wave file overlap.
 
 ---
 
 ## Per-Task Verification Map
 
-| Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
-|---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 1-01-01 | TBD | 1 | CONT-01..CONT-06, TEST-01 | T-1-01 | Unknown fields and false immutable flags fail before service dispatch | unit | models strictness matrix | ❌ W0 | ⬜ pending |
-| 1-01-02 | TBD | 1 | IDEN-01..IDEN-06, IDEN-09 | T-1-02 | Version/system/full grammar fail closed | unit | grammar positive/negative matrix | ❌ W0 | ⬜ pending |
-| 1-02-01 | TBD | 2 | IDEN-07, IDEN-10..IDEN-13, SAFE-05, TEST-03 | T-1-03 | FE/BO and overload identities never collide; caller UUID has no authority | unit | identity golden suite | ⚠ update | ⬜ pending |
-| 1-02-02 | TBD | 2 | CONT-07, CONT-08, SAFE-08 | T-1-04 | Invalid requests create zero side effects and bounded structured errors | unit spy | service/MCP boundary spies | ❌ W0 | ⬜ pending |
-| 1-03-01 | TBD | 3 | all Phase 1 | T-1-05 | Hard gate reports truthfully; no canary/live-group action | gate | focused pytest + Ruff + Pyright + scope assertions | ❌ W0 | ⬜ pending |
+| Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | Expected Files | File Exists | Status |
+|---------|------|------|-------------|-----------------|-----------------|-----------|-------------------|----------------|-------------|--------|
+| 01-01-T1 | 01-01 | 1 | CONT-01..06, CONT-08, IDEN-01, IDEN-02, TEST-01 | T-01-01..05 | Unknown fields and false immutable flags fail before service dispatch | unit RED | `cd mcp_server && uv run pytest tests/test_catalog_models.py -k "strict or extra or misspel or strict_endpoints or atomic or identity_schema or system_key or preserve or trailing or error_code or order_preserv" -q --tb=line` (expect fail) | `mcp_server/tests/test_catalog_models.py` | ⬜ plan | ⬜ pending |
+| 01-01-T2 | 01-01 | 1 | CONT-01..06, CONT-08, IDEN-01, IDEN-02, TEST-01 | T-01-01..05 | CatalogStrictModel shells + Literal flags + CONT-08 codes | unit GREEN | `cd mcp_server && uv run pytest tests/test_catalog_models.py -q --tb=line` | `mcp_server/src/models/catalog_common.py`, `catalog_entities.py`, `catalog_edges.py`, `catalog_provenance.py`, `catalog_batch.py`, `catalog_responses.py`, `tests/test_catalog_models.py` | ⬜ plan | ⬜ pending |
+| 01-02-T1 | 01-02 | 2 | IDEN-03..06, IDEN-08, IDEN-09, IDEN-12 | T-01-06..10 | Grammar matrix + IDEN-08 echo RED | unit RED | `cd mcp_server && uv run pytest tests/test_catalog_models.py -k "grammar or overload or system_mismatch or v1_key or catalog_v1 or graph_key_echo" -q --tb=line` (expect fail) | `mcp_server/tests/test_catalog_models.py` | ⬜ plan | ⬜ pending |
+| 01-02-T2 | 01-02 | 2 | IDEN-03..06, IDEN-08, IDEN-09, IDEN-12 | T-01-06..10 | Fullmatch registry + v1 reject + exact graph_key | unit GREEN | `cd mcp_server && uv run pytest tests/test_catalog_models.py -q --tb=line` | `mcp_server/src/models/catalog_graph_key.py`, `catalog_common.py`, `catalog_entities.py`, `catalog_edges.py`, `catalog_provenance.py`, `catalog_batch.py`, `tests/test_catalog_models.py` | ⬜ plan | ⬜ pending |
+| 01-03-T1 | 01-03 | 3 | IDEN-07, IDEN-10, IDEN-11, IDEN-13, SAFE-05, TEST-03, IDEN-08 service | T-01-11..14 | Versioned goldens + FE/BO/overload + graph_key echo RED | unit RED | `cd mcp_server && uv run pytest tests/test_catalog_identity.py tests/test_catalog_service.py -k "uuid or catalog_v2 or graph_key_echo or overload or fe_bo or accept_tab" -q --tb=line` (expect fail) | `mcp_server/tests/test_catalog_identity.py`, `tests/test_catalog_service.py` | ⬜ plan | ⬜ pending |
+| 01-03-T2 | 01-03 | 3 | IDEN-07, IDEN-10, IDEN-11, IDEN-13, SAFE-05, TEST-03, IDEN-08 service | T-01-11..14 | Versioned UUID helpers + pure future kinds + echo | unit GREEN | `cd mcp_server && uv run pytest tests/test_catalog_identity.py tests/test_catalog_service.py tests/test_catalog_store_unit.py -q --tb=line` | `mcp_server/src/services/catalog_identity.py`, `tests/test_catalog_identity.py`, `tests/test_catalog_service.py`, `tests/test_catalog_store_unit.py` | ⬜ plan | ⬜ pending |
+| 01-04-T1 | 01-04 | 4 | CONT-07, SAFE-08 | T-01-15..18 | Structured error + FastMCP typed boundary + spies RED | unit RED | `cd mcp_server && uv run pytest tests/test_catalog_models.py tests/test_catalog_service.py -k "structured_error or no_side_effect or never_call or typed_pydantic or production_boundary" -q --tb=line` (expect fail) | `mcp_server/tests/test_catalog_models.py`, `tests/test_catalog_service.py` | ⬜ plan | ⬜ pending |
+| 01-04-T2 | 01-04 | 4 | CONT-07, SAFE-08 | T-01-15..18 | Converter + production FastMCP model_validate boundary | unit GREEN | `cd mcp_server && uv run pytest tests/test_catalog_models.py tests/test_catalog_identity.py tests/test_catalog_service.py tests/test_catalog_store_unit.py -q --tb=line` | `mcp_server/src/models/catalog_common.py`, `catalog_responses.py`, `graphiti_mcp_server.py`, `tests/test_catalog_models.py`, `tests/test_catalog_service.py` | ⬜ plan | ⬜ pending |
+| 01-05-T1 | 01-05 | 5 | TEST-01, TEST-03 (gate) | T-01-19..22 | Truthful focused pytest+ruff+pyright gate ledger | gate | `cd mcp_server && uv run pytest tests/test_catalog_models.py tests/test_catalog_identity.py tests/test_catalog_service.py tests/test_catalog_store_unit.py -q --tb=line` + scoped ruff + pyright | `.planning/phases/01-strict-contracts-and-catalog-v2-identity/01-PHASE1-GATE.md` | ⬜ plan | ⬜ pending |
+| 01-05-T2 | 01-05 | 5 | all Phase 1 edge probes | T-01-23 | VALIDATION statuses from real results; edge-probe 53/53 | gate assert | `python -c` edge-probe coverage assert (resolved=53 unresolved=0 null=0) | `01-VALIDATION.md`, `01-EDGE-PROBE.json` | ✅ present | ⬜ pending |
 
-*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky — Plan 01-05 Task 2 updates from real results only.*
+
+**Map counts:** 10 task rows · plans 01-01..01-05 · waves 1..5 · zero placeholder plan IDs.
 
 ---
 
 ## Wave 0 Requirements
 
-- [ ] Strict/recursive-extra/misspelling matrix covering every request and nested model.
-- [ ] Literal `strict_endpoints` and `atomic` rejection tests.
-- [ ] Raw-byte preservation tests for hash-bearing text.
-- [ ] Positive/negative grammar table for all 18 entity types.
-- [ ] FE/BO, package/standalone overload, catalog-v1 rejection, versioned UUID tests.
-- [ ] Safe structured error shape and validation-before-side-effect spies.
-- [ ] Shared fixture helpers migrated to catalog-v2 keys and required shell fields.
-- [ ] `01-PHASE1-GATE.md` or equivalent truthful gate ledger.
+- [ ] Strict/recursive-extra/misspelling matrix covering every request and nested model. (01-01-T1/T2)
+- [ ] Literal `strict_endpoints` and `atomic` rejection tests. (01-01-T1/T2)
+- [ ] Raw-byte preservation tests for hash-bearing text. (01-01-T1/T2)
+- [ ] Positive/negative grammar table for all 18 entity types. (01-02-T1/T2)
+- [ ] FE/BO, package/standalone overload, catalog-v1 rejection, versioned UUID tests. (01-02, 01-03)
+- [ ] Safe structured error shape and validation-before-side-effect spies + FastMCP typed boundary. (01-04-T1/T2)
+- [ ] Shared fixture helpers migrated to catalog-v2 keys and required shell fields. (01-01..01-03)
+- [ ] IDEN-08 exact complete graph_key echo (model + service). (01-02, 01-03)
+- [ ] `01-PHASE1-GATE.md` truthful gate ledger. (01-05-T1)
+- [ ] Edge-probe 53/53 resolved zero null dispositions. (01-05-T2)
 - [ ] No new framework or dependency.
 
 ---
@@ -78,6 +102,22 @@ All Phase 1 behaviors must have automated unit/source/git verification. No manua
 
 ---
 
+## Edge-Probe Coverage (planning disposition)
+
+| Metric | Value |
+|--------|-------|
+| applicable | 53 |
+| resolved | 53 |
+| unresolved | 0 |
+| explicit | 44 |
+| backstop | 9 |
+| null dispositions | 0 |
+| no_silent_drop key_equality | true |
+
+Plan 01-05 Task 2 re-asserts these counts from `01-EDGE-PROBE.json` after execution.
+
+---
+
 ## Validation Sign-Off
 
 - [ ] Every task has automated verification.
@@ -85,6 +125,8 @@ All Phase 1 behaviors must have automated unit/source/git verification. No manua
 - [ ] Wave 0 covers every missing reference.
 - [ ] No watch-mode flags.
 - [ ] Feedback latency < 240 seconds.
-- [ ] `nyquist_compliant: true` set only after all Phase 1 gates pass.
+- [ ] Edge-probe unresolved=0 and null_dispositions=0.
+- [ ] `nyquist_compliant: true` set only after all Phase 1 gates pass (Plan 01-05 from real results).
+- [ ] `wave_0_complete: true` set only when Wave 0 checklist is actually green.
 
-**Approval:** pending
+**Approval:** pending — Plan 01-05 signs off from real gate output only.
