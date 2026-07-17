@@ -61,8 +61,8 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 **Plans**: 2 plans
 
 Plans:
-- [ ] 00-01-PLAN.md — Live inventory, offline ACCEPT_TAB evidence, truthful pass/fail/skip check ledger
-- [ ] 00-02-PLAN.md — Compatibility freeze, isolation/remote safety policy, Phase 0 gate report
+- [ ] 00-01-PLAN.md — Wave 1: live inventory, offline ACCEPT_TAB evidence, truthful pass/fail/skip check ledger
+- [ ] 00-02-PLAN.md — Wave 2 (depends on 01): compatibility freeze, isolation/remote safety policy, Phase 0 gate report
 
 ### Phase 1: Strict Contracts and Catalog-v2 Identity
 

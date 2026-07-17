@@ -63,7 +63,7 @@ Phase 0 is a **read-only baseline + policy** phase. No catalog-v2 contract, iden
 
 Live source already registers **exactly 14 legacy tools** and **exactly 7 catalog tools** on `FastMCP` in `mcp_server/src/graphiti_mcp_server.py`. Catalog domain code is modular under `mcp_server/src/models/catalog_*.py`, `services/catalog_{identity,service,store}.py`. Canary workflow is cherry-picked under `scripts/`, `catalog/canary-v2-requests/`, `catalog/catalog.json.graphiti-canary-v2-state.json`, offline tests in `mcp_server/tests/test_catalog_canary_scripts.py`. ACCEPT_TAB dry-run and commit receipts exist on disk; **do not re-run runner or query Neo4j**.
 
-**Primary recommendation:** Emit three small markdown artifacts (`00-BASELINE.md`, `00-COMPATIBILITY-POLICY.md`, `00-ISOLATION-POLICY.md`) plus optional machine-readable `00-baseline-checks.json`; run only the non-destructive mcp_server catalog/canary/Ruff/Pyright subset; commit only phase artifacts; never touch canary scripts against live MCP or `oracle-catalog-v2`.
+**Primary recommendation:** Emit three small markdown artifacts (`00-BASELINE.md`, `00-COMPATIBILITY-POLICY.md`, `00-ISOLATION-POLICY.md`) plus **required** machine-readable `00-baseline-checks.json`; run scoped Pyright first (record full Pyright only if available/needed, preserving truth); inventory only committed canary paths; commit only phase artifacts; never touch canary scripts against live MCP or `oracle-catalog-v2`.
 
 ## Architectural Responsibility Map
 
@@ -180,7 +180,7 @@ No external packages recommended for install in Phase 0.
 ├── 00-BASELINE.md                # inventory + check results (create in execute)
 ├── 00-COMPATIBILITY-POLICY.md    # catalog-v1 deprecation / tool-name freeze
 ├── 00-ISOLATION-POLICY.md        # group_id / canary ban / worktree / remote
-└── 00-baseline-checks.json       # optional machine-readable pass|fail|skip
+└── 00-baseline-checks.json       # required machine-readable pass|fail|skip
 ```
 
 ### Pattern 1: Live-source inventory with line anchors
@@ -429,21 +429,17 @@ Current model gaps vs Phase 1 contracts (document only, do not fix):
 | A3 | `test_catalog_neo4j_int.py` should default to skip unless Neo4j explicitly available | Checks | If always run and fails env, still record as fail/skip honestly |
 | A4 | Checkpoint status nuance (dry-run pass + commit verification failure) is the correct historical story, not a clean full success | ACCEPT_TAB evidence | Mis-stating success could mislead Phase 5 report — cite summary verbatim |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should baseline JSON be required or optional?**
-   - What we know: markdown satisfies human review (BASE-01–04).
-   - What's unclear: whether later automation wants machine-readable checks.
-   - Recommendation: optional `00-baseline-checks.json`; markdown is mandatory.
+1. **Should baseline JSON be required or optional?** — **RESOLVED: required.**
+   - Decision: `00-baseline-checks.json` is mandatory (not optional). Markdown remains mandatory human report; JSON is the machine-readable pass|fail|skip ledger Phase 1+ consumes.
+   - Plans: `00-01-PLAN.md` Task 2 creates the JSON; `00-02-PLAN.md` gate requires it for `ready_for_phase_1=true`.
 
-2. **Exact pyright include path for baseline**
-   - What we know: `[tool.pyright] include = ["src", "tests"]` in mcp_server.
-   - What's unclear: full-tree pyright may be slow/noisy.
-   - Recommendation: run full `uv run pyright` if cheap; else scoped modules + document scope.
+2. **Exact pyright include path for baseline** — **RESOLVED: scoped first, full only if available/needed.**
+   - Decision: Run scoped Pyright on catalog modules first (`src/models`, `src/services/catalog_identity.py`, `src/services/catalog_service.py`, `src/services/catalog_store.py`). Record full `uv run pyright` only if available and needed for additional signal. Always preserve truth (pass|fail|skip); document actual scope in notes. Do not invent pass when tool/scope unavailable.
 
-3. **Whether dirty canary artifacts under untracked `catalog/` differ from committed canary-v2-requests**
-   - What we know: committed canary artifacts exist; many untracked catalog dumps also present.
-   - Recommendation: inventory only committed/known canary paths listed above; ignore enrichment dumps.
+3. **Whether dirty canary artifacts under untracked `catalog/` differ from committed canary-v2-requests** — **RESOLVED: committed canary paths only.**
+   - Decision: Inventory only committed/known canary paths listed in Pattern 2 (CANARY_V2_SUMMARY, checkpoint, canary-v2-requests, offline tests, fixtures, scripts). Ignore unrelated untracked catalog enrichment dumps under `catalog/` for baseline inventory and commit allowlist.
 
 ## Environment Availability
 
@@ -501,7 +497,7 @@ Current model gaps vs Phase 1 contracts (document only, do not fix):
 - [ ] `00-BASELINE.md` — inventory + check results (execute phase creates)
 - [ ] `00-COMPATIBILITY-POLICY.md` — v1 deprecation / tool-name freeze
 - [ ] `00-ISOLATION-POLICY.md` — group_id / canary ban / worktree / remote
-- [ ] optional `00-baseline-checks.json` — machine-readable results
+- [ ] `00-baseline-checks.json` — required machine-readable results
 - [ ] No new product test files required for Phase 0
 
 *(Existing `test_catalog_*.py` cover product behavior; Phase 0 validates process/docs, not new unit tests.)*

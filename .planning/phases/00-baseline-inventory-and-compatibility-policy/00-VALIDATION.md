@@ -28,9 +28,10 @@ created: 2026-07-18
 ## Sampling Rate
 
 - **After every task commit:** Review `git status`; confirm only phase allowlist was committed.
-- **After every plan wave:** Run targeted catalog/canary pytest plus scoped Ruff; record pass/fail/skip without fixing baseline failures.
+- **Heavy targeted suite (~120s):** only Plan 01 Task 2 baseline capture (catalog unit + offline canary pytest, Ruff, scoped Pyright). Do not re-run the full heavy suite on later tasks unless baseline ledger is being rewritten.
+- **After Plan 02 / Wave 2:** lightweight artifact/source checks only (file presence, policy greps, fail-hard dirty-tree allowlist). No unnecessary full pytest re-run.
 - **Before `/gsd-verify-work`:** Baseline and policy artifacts must exist; every check must report pass/fail/skip.
-- **Max feedback latency:** 180 seconds for targeted checks.
+- **Max feedback latency:** 180 seconds for targeted checks; heavy suite once for baseline Task 2 only.
 
 ---
 
@@ -39,9 +40,9 @@ created: 2026-07-18
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
 | 0-01-01 | 01 | 1 | BASE-01, BASE-02 | T-0-04 | Inventory contains paths, counts, hashes only; no payloads | source/doc | Inventory assertions against MCP registrations and offline canary artifacts | ❌ W0 | ⬜ pending |
-| 0-01-02 | 01 | 1 | BASE-03, BASE-04 | T-0-05 | Checks retain pass/fail/skip truth | test/tool | Targeted pytest, Ruff, Pyright commands | ✅ tools | ⬜ pending |
-| 0-02-01 | 02 | 1 | SAFE-01, SAFE-02 | T-0-01, T-0-02 | No canary or `oracle-catalog-v2` access | source/doc | Assert policy and plans contain no live runner/query step | ❌ W0 | ⬜ pending |
-| 0-02-02 | 02 | 1 | SAFE-12, SAFE-13 | T-0-03, T-0-06 | Dirty files and remote state untouched | git | `git status --short`; task commit file allowlist | ✅ git | ⬜ pending |
+| 0-01-02 | 01 | 1 | BASE-03, BASE-04 | T-0-05 | Checks retain pass/fail/skip truth | test/tool | Heavy targeted pytest+Ruff+scoped Pyright once (~120s); record only | ✅ tools | ⬜ pending |
+| 0-02-01 | 02 | 2 | SAFE-01, SAFE-02 | T-0-01, T-0-02 | No canary or `oracle-catalog-v2` access | source/doc | Assert policy and plans contain no live runner/query step | ❌ W0 | ⬜ pending |
+| 0-02-02 | 02 | 2 | SAFE-12, SAFE-13 | T-0-03, T-0-06 | Dirty files and remote state untouched | git | Fail-hard allowlist `git status --short` (no always-success); commit allowlist | ✅ git | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
