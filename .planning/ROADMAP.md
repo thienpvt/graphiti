@@ -77,7 +77,14 @@ Plans:
   4. Identical committed batch retries leave one logical set of domain objects; ACCEPT_TAB fixture, search interop, and safe `build_communities` execution succeed on `oracle-catalog-tool-test` only without normal upserts invoking communities
   5. Documentation and final verification cover all seven catalog MCP tool schemas, immutable namespace, allowlists, limits, idempotency, atomicity, structured errors, semantic-versus-deterministic guidance, sanitized ACCEPT_TAB and ConfigMap examples, rollout/rollback notes without deploying, exact check results, and canary recommendation only
 
-**Plans**: TBD
+**Plans**: 1/6 plans executed
+
+- [x] 02-01-PLAN.md
+- [ ] 02-02-PLAN.md
+- [ ] 02-03-PLAN.md
+- [ ] 02-04-PLAN.md
+- [ ] 02-05-PLAN.md
+- [ ] 02-06-PLAN.md
 
 ## Progress
 
@@ -87,7 +94,7 @@ Phases execute in numeric order: 1 → 2. Phase 2 must not start until Phase 1 g
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
-| 2. Provenance and Atomic Batch | 0/TBD | Not started | - |
+| 2. Provenance and Atomic Batch | 1/6 | In Progress|  |
 
 ## Coverage
 
