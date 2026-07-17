@@ -3429,7 +3429,20 @@ class CatalogService:
         assert namespace is not None and batch_uuid is not None
 
         server_hash = self.batch_request_sha256(request)
-        effective_hash = request.request_sha256 or server_hash
+        try:
+            assert_optional_client_hash(request.request_sha256, server_hash)
+        except ValueError as exc:
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                dry_run=request.dry_run,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges), 1),
+                error_code=CatalogErrorCode.content_hash_mismatch,
+                error_message=str(exc),
+            )
+        effective_hash = server_hash
 
         try:
             prior_status = await self._store.get_batch_status(

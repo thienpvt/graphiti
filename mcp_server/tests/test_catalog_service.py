@@ -2637,6 +2637,23 @@ async def test_batch_dry_run_endpoint_union_no_writes_or_status():
 
 
 @pytest.mark.asyncio
+async def test_batch_rejects_caller_hash_mismatch_before_status_read_or_embed():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(request_sha256='b' * 64),
+    )
+
+    assert resp.error_code == CatalogErrorCode.content_hash_mismatch
+    cast(AsyncMock, service._store.get_batch_status).assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
 async def test_batch_committed_different_hash_returns_batch_conflict_before_embed():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
