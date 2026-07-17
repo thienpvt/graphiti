@@ -24,13 +24,15 @@ from graphiti_core.nodes import EntityNode, EpisodeType, SagaNode
 from graphiti_core.search.search_filters import SearchFilters
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from starlette.responses import JSONResponse
 from typing_extensions import LiteralString
 
 from config.schema import GraphitiConfig, ServerConfig
 from models.catalog_batch import GetCatalogIngestStatusRequest, UpsertCatalogBatchRequest
+from models.catalog_common import catalog_validation_error_to_structured
 from models.catalog_edges import UpsertTypedEdgesRequest
 from models.catalog_entities import (
     ResolveTypedEntitiesRequest,
@@ -200,7 +202,61 @@ allowed_hosts_raw = os.getenv(
 
 allowed_hosts = json.loads(allowed_hosts_raw)
 
-mcp = FastMCP(
+# Frozen catalog tool names (CONT-07 / SAFE-08 structured validation boundary)
+CATALOG_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        'upsert_typed_entities',
+        'resolve_typed_entities',
+        'verify_catalog_batch',
+        'upsert_typed_edges',
+        'upsert_provenance',
+        'get_catalog_ingest_status',
+        'upsert_catalog_batch',
+    }
+)
+
+
+class CatalogSafeFastMCP(FastMCP):
+    """FastMCP subclass: SAFE-08 structured ToolError for catalog tools only.
+
+    FastMCP Tool.run wraps ValidationError as ToolError(str(exc)) with cause.
+    For the seven catalog tools, rewrite that into a fresh ToolError whose message
+    is catalog_validation_error_to_structured JSON — no ValidationError in the
+    client-facing exception chain. Legacy tools keep framework ToolError behavior.
+    """
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        try:
+            return await super().call_tool(name, arguments)
+        except ToolError as tool_err:
+            if name not in CATALOG_TOOL_NAMES:
+                raise
+            validation_exc = _extract_validation_error(tool_err)
+            if validation_exc is None:
+                raise
+            correlation_id = str(uuid4())
+            structured = catalog_validation_error_to_structured(
+                validation_exc, correlation_id=correlation_id
+            )
+            # Serialize enums as values; raise fresh ToolError outside except context.
+            payload = json.dumps(structured, default=str, separators=(',', ':'))
+        # Re-raise outside the except block so __cause__/__context__ stay clean.
+        raise ToolError(payload)
+
+
+def _extract_validation_error(exc: BaseException) -> ValidationError | None:
+    """Walk cause/context for a ValidationError (catalog validation only)."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ValidationError):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
+
+
+mcp = CatalogSafeFastMCP(
     'Graphiti Agent Memory',
     instructions=GRAPHITI_MCP_INSTRUCTIONS,
     host=config.server.host or '0.0.0.0',

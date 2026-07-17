@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import re
+import uuid as _uuid
 from enum import Enum
 from typing import Any
 
@@ -189,23 +191,63 @@ class CatalogErrorCode(StrEnum):
 
 
 _MAX_STRUCTURED_ERROR_MESSAGE_LENGTH = 512
+_MAX_STRUCTURED_FIELD_PATH_LENGTH = 256
+_SAFE_FIELD_PATH_RE = re.compile(r'^[A-Za-z0-9_.\[\]]+$')
+_SAFE_LOC_PART_RE = re.compile(r'^[A-Za-z0-9_\[\]]{1,64}$')
+
+
+def _normalize_correlation_id(correlation_id: str | None) -> str:
+    """Accept UUID-like transport ids only; otherwise mint a fresh uuid4."""
+    if isinstance(correlation_id, str):
+        try:
+            return str(_uuid.UUID(correlation_id))
+        except (ValueError, AttributeError, TypeError):
+            pass
+    return str(_uuid.uuid4())
+
+
+def _sanitize_field_path(loc: tuple[Any, ...]) -> str | None:
+    """Build a bounded dotted path from loc; drop hostile/unknown segments."""
+    if not loc:
+        return None
+    parts: list[str] = []
+    for part in loc:
+        if isinstance(part, int):
+            parts.append(str(part))
+            continue
+        text = str(part)
+        if not _SAFE_LOC_PART_RE.fullmatch(text):
+            # Hostile or free-form loc segment — stop before leaking it.
+            break
+        parts.append(text)
+    if not parts:
+        return None
+    path = '.'.join(parts)
+    if len(path) > _MAX_STRUCTURED_FIELD_PATH_LENGTH:
+        path = path[:_MAX_STRUCTURED_FIELD_PATH_LENGTH]
+    if not _SAFE_FIELD_PATH_RE.fullmatch(path):
+        return None
+    return path
 
 
 def catalog_validation_error_to_structured(
     exc: ValidationError,
     *,
-    correlation_id: str,
+    correlation_id: str | None = None,
 ) -> dict[str, Any]:
     """Convert a Pydantic ValidationError into a SAFE-08 structured error dict.
 
-    Pure adapter for catch/log paths. FastMCP already rejects invalid typed tool
-    arguments via model_validate before tool bodies run; this helper does not
-    replace that boundary. Never copies input, payload, stack, or secrets.
+    Pure adapter for catch/log paths and the catalog FastMCP call_tool boundary.
+    Never copies input, payload, stack, or secrets. Correlation ids are
+    normalized to UUID strings (server-minted when missing/invalid).
     """
     errors = exc.errors()
     first = errors[0] if errors else {}
     loc = tuple(first.get('loc') or ())
-    field_path = '.'.join(str(part) for part in loc) if loc else None
+    # Strip FastMCP arg wrapper prefix so field_path is request-relative.
+    if loc and str(loc[0]) == 'request':
+        loc = loc[1:]
+    field_path = _sanitize_field_path(loc)
     loc_names = {str(part) for part in loc}
 
     if 'identity_schema_version' in loc_names:
@@ -226,5 +268,5 @@ def catalog_validation_error_to_structured(
         'message': message,
         'field_path': field_path,
         'retryable': False,
-        'correlation_id': correlation_id,
+        'correlation_id': _normalize_correlation_id(correlation_id),
     }

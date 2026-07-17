@@ -4201,9 +4201,14 @@ async def test_fastmcp_call_tool_rejects_invalid_nested_payloads_before_body_no_
             js = raw.find('{')
             assert js >= 0, f'{tool_name}: missing structured JSON: {raw!r}'
             import json
+
             structured = json.loads(raw[js:])
             assert set(structured.keys()) == {
-                'code', 'message', 'field_path', 'retryable', 'correlation_id'
+                'code',
+                'message',
+                'field_path',
+                'retryable',
+                'correlation_id',
             }
             assert structured['retryable'] is False
             _assert_no_backend_side_effects(spies, body_entered)
@@ -4314,7 +4319,6 @@ def test_no_side_effect_on_false_immutable_flags_and_unknown_nested_fields():
     service.upsert_catalog_batch.assert_not_called()
 
 
-
 @pytest.mark.asyncio
 async def test_fastmcp_catalog_validation_returns_structured_safe_tool_error():
     """Production SAFE-08: catalog validation ToolError carries structured JSON only."""
@@ -4336,7 +4340,7 @@ async def test_fastmcp_catalog_validation_returns_structured_safe_tool_error():
         return await _orig(request)
 
     tool.fn = wrapped_fn
-    payload = _v2_request_payload(
+    payload: dict = _v2_request_payload(
         'upsert_typed_entities',
         identity_schema_version='catalog-v1',
         password=secret,
