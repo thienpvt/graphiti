@@ -98,7 +98,7 @@ No deployment, registry push, production canary, `oracle-catalog-v2` write, full
 
 ## Informational Nuance
 
-Lifecycle literals `planned`, `validating`, `embedding`, `writing`, `committed`, and `failed` remain model/read vocabulary. Persistent status intentionally stores terminal `committed`/`failed`; `writing` exists transaction-locally during claim. This matches locked Phase 2 decisions.
+Lifecycle literals `planned`, `validating`, `embedding`, `writing`, `committed`, and `failed` remain model/read vocabulary. Persistent status intentionally stores terminal `committed`/`failed`; `writing` exists transaction-locally during claim. STAT-03 now states this distinction explicitly, matching `02-CONTEXT.md` and `02-03-PLAN.md` A1.
 
 ## Verdict
 
