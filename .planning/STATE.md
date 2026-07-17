@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: Provenance and Atomic Batch
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-07-17T00:34:47.454Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-07-17T00:41:56.873Z"
 last_activity: 2026-07-17
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 14
-  completed_plans: 10
+  completed_plans: 11
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-07-16)
 ## Current Position
 
 Phase: 02 (Provenance and Atomic Batch) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-07-17 — Phase 02 execution started
 
-Progress: [███████░░░] 71%
+Progress: [████████░░] 79%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [███████░░░] 71%
 | Phase 01 P07 | 13min | 3 tasks | 11 files |
 | Phase 01 P08 | 20min | 3 tasks | 7 files |
 | Phase 02 P02 | 8min | 2 tasks | 5 files |
+| Phase 02 P03 | 5min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,8 @@ Recent decisions affecting current work:
 - Earlier Phase 2 discussion defaults and local Ollama E2E-before-cleanup remain deferred for a later session
 - [Phase ?]: Edge content update no longer SETs e.episodes; append-only provenance owns list
 - [Phase ?]: upsert_provenance: target preflight fail-closed; sources skip embedder
+- [Phase ?]: Status writers accept only terminal committed/failed; intermediate lifecycle literals not persisted
+- [Phase ?]: Missing status uses error_summary (no error_message field on CatalogIngestStatusResponse)
 
 ### Pending Todos
 
@@ -101,6 +104,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-07-17T00:34:36.735Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-07-17T00:41:56.867Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None

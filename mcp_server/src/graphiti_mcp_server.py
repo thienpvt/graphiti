@@ -30,6 +30,7 @@ from starlette.responses import JSONResponse
 from typing_extensions import LiteralString
 
 from config.schema import GraphitiConfig, ServerConfig
+from models.catalog_batch import GetCatalogIngestStatusRequest
 from models.catalog_edges import UpsertTypedEdgesRequest
 from models.catalog_entities import (
     ResolveTypedEntitiesRequest,
@@ -38,6 +39,7 @@ from models.catalog_entities import (
 )
 from models.catalog_provenance import UpsertProvenanceRequest
 from models.catalog_responses import (
+    CatalogIngestStatusResponse,
     CatalogWriteResponse,
     ResolveTypedEntitiesResponse,
     VerifyCatalogBatchResponse,
@@ -1369,6 +1371,35 @@ async def upsert_provenance(
             type(e).__name__,
         )
         return ErrorResponse(error='catalog upsert_provenance failed')
+
+
+@mcp.tool()
+async def get_catalog_ingest_status(
+    request: GetCatalogIngestStatusRequest,
+) -> CatalogIngestStatusResponse | ErrorResponse:
+    """Read-only catalog batch ingest status (no writes, no embeddings, no queue).
+
+    Loads Neo4j CatalogIngestBatch by group_id + deterministic batch uuid.
+    Restart-safe; never mutates graph state.
+    """
+    global graphiti_service, catalog_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+
+    try:
+        client = await graphiti_service.get_client()
+        return await catalog_service.get_catalog_ingest_status(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'get_catalog_ingest_status failed group_id=%s batch_id=%s reason=%s',
+            getattr(request, 'group_id', None),
+            getattr(request, 'batch_id', None),
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog get_catalog_ingest_status failed')
 
 
 @mcp.custom_route('/health', methods=['GET'])

@@ -1020,3 +1020,212 @@ async def test_upsert_mentions_and_append_edge_episode_helpers():
     assert any('MENTIONS' in c for c in runs)
     assert any('RELATES_TO' in c for c in runs)
     assert not any('apoc.' in c.lower() for c in runs)
+
+
+# ------------------------------------------------------------------
+# CatalogIngestBatch status (STAT-01/04/06)
+# ------------------------------------------------------------------
+
+
+def test_build_batch_status_upsert_cypher_no_entity_label():
+    store = CatalogNeo4jStore()
+    cypher = store.build_batch_status_upsert_cypher()
+    assert 'MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})' in cypher
+    # Status node must never carry Entity (search/community exclusion by construction).
+    assert ':Entity' not in cypher
+    assert 'b:Entity' not in cypher
+    assert 'SET b = $' not in cypher
+    assert 'ON CREATE SET' in cypher
+    for prop in (
+        'b.batch_id = $batch_id',
+        'b.status = $status',
+        'b.request_sha256 = $request_sha256',
+        'b.catalog_sha256 = $catalog_sha256',
+        'b.entity_count = $entity_count',
+        'b.edge_count = $edge_count',
+        'b.provenance_count = $provenance_count',
+        'b.error_summary = $error_summary',
+        'b.updated_at = $updated_at',
+        'b.committed_at = $committed_at',
+    ):
+        assert prop in cypher
+    # No payload / secret property names
+    lowered = cypher.lower()
+    for banned in (
+        'payload',
+        'request_json',
+        'api_key',
+        'password',
+        'credential',
+        'source_text',
+        'raw_document',
+        'entities',
+        'edges',
+        'sources',
+    ):
+        assert banned not in lowered
+
+
+def test_build_get_batch_status_cypher_group_scoped():
+    store = CatalogNeo4jStore()
+    cypher = store.build_get_batch_status_cypher()
+    assert 'MATCH (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})' in cypher
+    assert ':Entity' not in cypher
+    assert 'b.status AS status' in cypher
+    assert 'b.batch_id AS batch_id' in cypher
+    assert 'b.error_summary AS error_summary' in cypher
+    assert 'b.group_id AS group_id' in cypher
+
+
+def test_prepare_batch_status_params_allowlist_and_terminal_only():
+    store = CatalogNeo4jStore()
+    params = store.prepare_batch_status_params(
+        uuid=UUID,
+        group_id=GROUP,
+        batch_id=BATCH,
+        status='committed',
+        request_sha256=HASH,
+        catalog_sha256=HASH,
+        entity_count=1,
+        edge_count=2,
+        provenance_count=3,
+        error_summary='',
+        created_at=FIXED_TS,
+        updated_at=FIXED_TS,
+        committed_at=FIXED_TS,
+    )
+    allowed = {
+        'uuid',
+        'group_id',
+        'batch_id',
+        'status',
+        'request_sha256',
+        'catalog_sha256',
+        'entity_count',
+        'edge_count',
+        'provenance_count',
+        'error_summary',
+        'created_at',
+        'updated_at',
+        'committed_at',
+    }
+    assert set(params.keys()) == allowed
+    assert params['status'] == 'committed'
+    assert params['error_summary'] == ''
+    # Truncate oversized error_summary
+    long_err = 'x' * 5000
+    params2 = store.prepare_batch_status_params(
+        uuid=UUID,
+        group_id=GROUP,
+        batch_id=BATCH,
+        status='failed',
+        entity_count=0,
+        edge_count=0,
+        provenance_count=0,
+        error_summary=long_err,
+        created_at=FIXED_TS,
+        updated_at=FIXED_TS,
+        committed_at=None,
+    )
+    assert len(params2['error_summary']) <= 512
+    # Non-terminal lifecycle literals rejected at store boundary
+    with pytest.raises(CatalogStoreError) as exc:
+        store.prepare_batch_status_params(
+            uuid=UUID,
+            group_id=GROUP,
+            batch_id=BATCH,
+            status='writing',
+            entity_count=0,
+            edge_count=0,
+            provenance_count=0,
+            created_at=FIXED_TS,
+            updated_at=FIXED_TS,
+        )
+    assert exc.value.code == 'validation_error'
+    # Required identity fields
+    with pytest.raises(CatalogStoreError):
+        store.prepare_batch_status_params(
+            uuid='',
+            group_id=GROUP,
+            batch_id=BATCH,
+            status='committed',
+            entity_count=0,
+            edge_count=0,
+            provenance_count=0,
+            created_at=FIXED_TS,
+            updated_at=FIXED_TS,
+        )
+
+
+@pytest.mark.asyncio
+async def test_upsert_batch_status_uses_tx_run_no_entity():
+    store = CatalogNeo4jStore()
+    calls: list[tuple] = []
+
+    class _Tx:
+        async def run(self, cypher, **params):
+            calls.append((cypher, params))
+            return _Rows(
+                [
+                    {
+                        'uuid': UUID,
+                        'status': 'committed',
+                        'batch_id': BATCH,
+                        'group_id': GROUP,
+                    }
+                ]
+            )
+
+    params = store.prepare_batch_status_params(
+        uuid=UUID,
+        group_id=GROUP,
+        batch_id=BATCH,
+        status='committed',
+        entity_count=1,
+        edge_count=0,
+        provenance_count=0,
+        error_summary='',
+        created_at=FIXED_TS,
+        updated_at=FIXED_TS,
+        committed_at=FIXED_TS,
+    )
+    row = await store.upsert_batch_status(_Tx(), params=params)
+    assert row['uuid'] == UUID
+    assert row['status'] == 'committed'
+    assert len(calls) == 1
+    assert 'CatalogIngestBatch' in calls[0][0]
+    assert ':Entity' not in calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_get_batch_status_returns_row_or_none():
+    store = CatalogNeo4jStore()
+    found = {
+        'uuid': UUID,
+        'group_id': GROUP,
+        'batch_id': BATCH,
+        'status': 'failed',
+        'error_summary': 'bounded',
+    }
+
+    class _Exec:
+        async def execute_query(self, cypher, params=None, **kwargs):
+            _ = kwargs
+            assert params is not None
+            assert params['uuid'] == UUID
+            assert params['group_id'] == GROUP
+            assert 'CatalogIngestBatch' in cypher
+            assert ':Entity' not in cypher
+            return ([found], None, None)
+
+    row = await store.get_batch_status(_Exec(), uuid=UUID, group_id=GROUP)
+    assert row is not None
+    assert row['status'] == 'failed'
+    assert row['batch_id'] == BATCH
+
+    class _Empty:
+        async def execute_query(self, cypher, params=None, **kwargs):
+            _ = cypher, params, kwargs
+            return ([], None, None)
+
+    assert await store.get_batch_status(_Empty(), uuid=UUID, group_id=GROUP) is None

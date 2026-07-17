@@ -1045,6 +1045,173 @@ class CatalogNeo4jStore:
         return await self._read_one(executor, cypher, params, tx=tx)
 
     # ------------------------------------------------------------------
+    # CatalogIngestBatch status (non-Entity; terminal committed/failed only)
+    # ------------------------------------------------------------------
+
+    # Persist only terminal statuses. Response model still allows six lifecycle literals.
+    BATCH_STATUS_TERMINAL = frozenset({'committed', 'failed'})
+    # Bounded sanitized error summary (matches CatalogIngestStatusResponse max_length).
+    BATCH_STATUS_ERROR_SUMMARY_MAX = 512
+
+    def build_batch_status_upsert_cypher(self) -> str:
+        """MERGE CatalogIngestBatch by uuid+group_id; never set Entity label.
+
+        Allowlisted properties only — no payloads, secrets, or arbitrary maps.
+        """
+        return """
+            MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})
+            ON CREATE SET
+                b.uuid = $uuid,
+                b.group_id = $group_id,
+                b.batch_id = $batch_id,
+                b.created_at = $created_at
+            SET b.status = $status,
+                b.request_sha256 = $request_sha256,
+                b.catalog_sha256 = $catalog_sha256,
+                b.entity_count = $entity_count,
+                b.edge_count = $edge_count,
+                b.provenance_count = $provenance_count,
+                b.error_summary = $error_summary,
+                b.updated_at = $updated_at,
+                b.committed_at = $committed_at
+            RETURN b.uuid AS uuid,
+                   b.group_id AS group_id,
+                   b.batch_id AS batch_id,
+                   b.status AS status,
+                   b.request_sha256 AS request_sha256,
+                   b.catalog_sha256 AS catalog_sha256,
+                   b.entity_count AS entity_count,
+                   b.edge_count AS edge_count,
+                   b.provenance_count AS provenance_count,
+                   b.error_summary AS error_summary,
+                   b.created_at AS created_at,
+                   b.updated_at AS updated_at,
+                   b.committed_at AS committed_at
+            """
+
+    def build_get_batch_status_cypher(self) -> str:
+        """MATCH status by composite uuid+group_id; CatalogIngestBatch only."""
+        return """
+            MATCH (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})
+            RETURN b.uuid AS uuid,
+                   b.group_id AS group_id,
+                   b.batch_id AS batch_id,
+                   b.status AS status,
+                   b.request_sha256 AS request_sha256,
+                   b.catalog_sha256 AS catalog_sha256,
+                   b.entity_count AS entity_count,
+                   b.edge_count AS edge_count,
+                   b.provenance_count AS provenance_count,
+                   b.error_summary AS error_summary,
+                   b.created_at AS created_at,
+                   b.updated_at AS updated_at,
+                   b.committed_at AS committed_at
+            """
+
+    def prepare_batch_status_params(
+        self,
+        *,
+        uuid: str,
+        group_id: str,
+        batch_id: str,
+        status: str,
+        entity_count: int,
+        edge_count: int,
+        provenance_count: int,
+        created_at: datetime,
+        updated_at: datetime,
+        request_sha256: str | None = None,
+        catalog_sha256: str | None = None,
+        error_summary: str = '',
+        committed_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Build allowlisted status property map; terminal status only."""
+        if not uuid or not str(uuid).strip():
+            raise CatalogStoreError('status uuid is required', code='validation_error')
+        if not group_id or not str(group_id).strip():
+            raise CatalogStoreError('status group_id is required', code='validation_error')
+        if not batch_id or not str(batch_id).strip():
+            raise CatalogStoreError('status batch_id is required', code='validation_error')
+        if status not in self.BATCH_STATUS_TERMINAL:
+            raise CatalogStoreError(
+                f'status must be terminal committed|failed, got {status!r}',
+                code='validation_error',
+            )
+        summary = error_summary if error_summary is not None else ''
+        if not isinstance(summary, str):
+            summary = str(summary)
+        if len(summary) > self.BATCH_STATUS_ERROR_SUMMARY_MAX:
+            summary = summary[: self.BATCH_STATUS_ERROR_SUMMARY_MAX]
+        return {
+            'uuid': str(uuid),
+            'group_id': str(group_id),
+            'batch_id': str(batch_id),
+            'status': status,
+            'request_sha256': request_sha256,
+            'catalog_sha256': catalog_sha256,
+            'entity_count': int(entity_count),
+            'edge_count': int(edge_count),
+            'provenance_count': int(provenance_count),
+            'error_summary': summary,
+            'created_at': created_at,
+            'updated_at': updated_at,
+            'committed_at': committed_at,
+        }
+
+    async def upsert_batch_status(
+        self,
+        tx: Any,
+        *,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute CatalogIngestBatch MERGE inside open transaction."""
+        # Re-validate terminal status at write boundary (params may bypass prepare).
+        status = str(params.get('status') or '')
+        if status not in self.BATCH_STATUS_TERMINAL:
+            raise CatalogStoreError(
+                f'status must be terminal committed|failed, got {status!r}',
+                code='validation_error',
+            )
+        if not params.get('uuid') or not params.get('group_id') or not params.get('batch_id'):
+            raise CatalogStoreError(
+                'status uuid, group_id, and batch_id are required',
+                code='validation_error',
+            )
+        cypher = self.build_batch_status_upsert_cypher()
+        result = await tx.run(cypher, **params)
+        row: dict[str, Any] = {}
+        if hasattr(result, 'data'):
+            rows = await result.data()
+            row = rows[0] if rows else {}
+        elif hasattr(result, 'single'):
+            record = await result.single()
+            row = dict(record) if record is not None else {}
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'batch status upsert returned no row',
+                code='neo4j_transaction_failed',
+            )
+        return row
+
+    async def get_batch_status(
+        self,
+        executor: Any,
+        *,
+        uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Read-only MATCH for CatalogIngestBatch by uuid+group_id."""
+        if not uuid or not group_id:
+            raise CatalogStoreError(
+                'status uuid and group_id are required',
+                code='validation_error',
+            )
+        cypher = self.build_get_batch_status_cypher()
+        params = {'uuid': uuid, 'group_id': group_id}
+        return await self._read_one(executor, cypher, params, tx=tx)
+
+    # ------------------------------------------------------------------
     # Typed edge endpoint resolution + edge upsert
     # ------------------------------------------------------------------
 

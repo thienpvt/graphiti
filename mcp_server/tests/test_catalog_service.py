@@ -16,6 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from config.schema import CatalogConfig  # noqa: E402
+from models.catalog_batch import GetCatalogIngestStatusRequest  # noqa: E402
 from models.catalog_common import CatalogErrorCode  # noqa: E402
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
 from models.catalog_entities import (  # noqa: E402
@@ -29,6 +30,7 @@ from models.catalog_entities import (  # noqa: E402
 )
 from services.catalog_identity import (  # noqa: E402
     canonical_sha256,
+    catalog_batch_uuid,
     catalog_edge_uuid,
     catalog_entity_uuid,
 )
@@ -2349,3 +2351,167 @@ async def test_mcp_tool_upsert_provenance_registered():
     server = _mcp_server()
     assert hasattr(server, 'upsert_provenance')
     assert callable(server.upsert_provenance)
+
+
+# ------------------------------------------------------------------
+# get_catalog_ingest_status (STAT-05/06)
+# ------------------------------------------------------------------
+
+
+def _status_request(batch_id: str = BATCH) -> GetCatalogIngestStatusRequest:
+    return GetCatalogIngestStatusRequest(group_id=GROUP, batch_id=batch_id)
+
+
+@pytest.mark.asyncio
+async def test_status_found_maps_response_no_payload_fields():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    batch_uuid = catalog_batch_uuid(FIXED_NS, GROUP, BATCH)
+    service._store.get_batch_status = AsyncMock(
+        return_value={
+            'uuid': batch_uuid,
+            'group_id': GROUP,
+            'batch_id': BATCH,
+            'status': 'committed',
+            'request_sha256': 'a' * 64,
+            'catalog_sha256': 'b' * 64,
+            'entity_count': 2,
+            'edge_count': 1,
+            'provenance_count': 0,
+            'error_summary': '',
+            'created_at': '2026-07-17T00:00:00+00:00',
+            'updated_at': '2026-07-17T00:01:00+00:00',
+            'committed_at': '2026-07-17T00:01:00+00:00',
+        }
+    )
+    resp = await service.get_catalog_ingest_status(client=client, request=_status_request())
+    assert resp.group_id == GROUP
+    assert resp.batch_id == BATCH
+    assert resp.batch_uuid == batch_uuid
+    assert resp.status == 'committed'
+    assert resp.entity_count == 2
+    assert resp.edge_count == 1
+    assert resp.error_summary == ''
+    # no payload / secret fields on response model
+    dumped = resp.model_dump()
+    for banned in ('payload', 'entities', 'edges', 'sources', 'api_key', 'password'):
+        assert banned not in dumped
+    service._store.get_batch_status.assert_awaited_once()
+    call_kwargs = service._store.get_batch_status.await_args.kwargs
+    assert call_kwargs['uuid'] == batch_uuid
+    assert call_kwargs['group_id'] == GROUP
+    # read-only: no write tx / embed
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+    client.embedder.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_status_missing_returns_structured_not_found_no_write():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_batch_status = AsyncMock(return_value=None)
+    resp = await service.get_catalog_ingest_status(client=client, request=_status_request())
+    assert resp.group_id == GROUP
+    assert resp.batch_id == BATCH
+    assert resp.batch_uuid == catalog_batch_uuid(FIXED_NS, GROUP, BATCH)
+    assert resp.error_code is not None
+    assert resp.error_code in (
+        CatalogErrorCode.validation_error,
+        CatalogErrorCode.internal_error,
+        CatalogErrorCode.provenance_target_missing,
+    ) or resp.error_code.value in (
+        'validation_error',
+        'internal_error',
+        'not_found',
+        'batch_not_found',
+        'provenance_target_missing',
+    )
+    # Prefer explicit not-found semantics when available (error_summary, no error_message field)
+    assert resp.error_summary
+    assert 'not' in resp.error_summary.lower() or 'missing' in resp.error_summary.lower()
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+    # get_batch_status still called (read)
+    service._store.get_batch_status.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_status_reinit_new_service_reads_from_store():
+    """Restart simulation: new CatalogService + same store still reads Neo4j state."""
+    client = _make_client()
+    store = CatalogNeo4jStore()
+    batch_uuid = catalog_batch_uuid(FIXED_NS, GROUP, BATCH)
+    row = {
+        'uuid': batch_uuid,
+        'group_id': GROUP,
+        'batch_id': BATCH,
+        'status': 'failed',
+        'request_sha256': None,
+        'catalog_sha256': None,
+        'entity_count': 0,
+        'edge_count': 0,
+        'provenance_count': 0,
+        'error_summary': 'neo4j transaction failed',
+        'created_at': '2026-07-17T00:00:00+00:00',
+        'updated_at': '2026-07-17T00:02:00+00:00',
+        'committed_at': None,
+    }
+    store.get_batch_status = AsyncMock(return_value=row)  # type: ignore[method-assign]
+
+    service_a = CatalogService(catalog_config=_enabled_config(), store=store)
+    resp_a = await service_a.get_catalog_ingest_status(client=client, request=_status_request())
+    assert resp_a.status == 'failed'
+    assert resp_a.error_summary == 'neo4j transaction failed'
+
+    # New service instance (reinit) with same store/driver
+    service_b = CatalogService(catalog_config=_enabled_config(), store=store)
+    resp_b = await service_b.get_catalog_ingest_status(client=client, request=_status_request())
+    assert resp_b.status == 'failed'
+    assert resp_b.batch_uuid == batch_uuid
+    assert resp_b.error_summary == 'neo4j transaction failed'
+    assert store.get_batch_status.await_count == 2
+    assert 'transaction' not in client.call_order
+    assert 'embed' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_status_feature_disabled_no_store_read():
+    client = _make_client()
+    service = CatalogService(catalog_config=_disabled_config())
+    service._store.get_batch_status = AsyncMock(return_value={'status': 'committed'})
+    resp = await service.get_catalog_ingest_status(client=client, request=_status_request())
+    assert resp.error_code == CatalogErrorCode.feature_disabled
+    service._store.get_batch_status.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_status_no_queue_or_llm():
+    client = _make_client()
+    queue = MagicMock()
+    service = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
+    batch_uuid = catalog_batch_uuid(FIXED_NS, GROUP, BATCH)
+    service._store.get_batch_status = AsyncMock(
+        return_value={
+            'uuid': batch_uuid,
+            'group_id': GROUP,
+            'batch_id': BATCH,
+            'status': 'committed',
+            'entity_count': 0,
+            'edge_count': 0,
+            'provenance_count': 0,
+            'error_summary': '',
+        }
+    )
+    await service.get_catalog_ingest_status(client=client, request=_status_request())
+    queue.assert_not_called()
+    client.llm_client.assert_not_called()
+    client.embedder.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_get_catalog_ingest_status_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'get_catalog_ingest_status')
+    assert callable(server.get_catalog_ingest_status)
