@@ -1447,6 +1447,31 @@ def test_identity_schema_version_required_and_rejects_non_v2(model_payload):
     assert ok.identity_schema_version == 'catalog-v2'
 
 
+def _retarget_graph_keys_for_system(payload: dict[str, Any], system_key: str) -> dict[str, Any]:
+    """Rewrite nested FE graph keys so shell system_key matches (test helper only)."""
+
+    def rewrite(value: Any) -> Any:
+        if isinstance(value, dict):
+            out: dict[str, Any] = {}
+            for key, child in value.items():
+                if key in {
+                    'graph_key',
+                    'source_graph_key',
+                    'target_graph_key',
+                    'expected_source_graph_key',
+                    'expected_target_graph_key',
+                } and isinstance(child, str):
+                    out[key] = child.replace('::FE::', f'::{system_key}::', 1)
+                else:
+                    out[key] = rewrite(child)
+            return out
+        if isinstance(value, list):
+            return [rewrite(item) for item in value]
+        return value
+
+    return rewrite(payload)
+
+
 @pytest.mark.parametrize(
     'model_payload',
     [
@@ -1509,31 +1534,6 @@ def test_identity_schema_version_required_and_rejects_non_v2(model_payload):
         ),
     ],
 )
-def _retarget_graph_keys_for_system(payload: dict[str, Any], system_key: str) -> dict[str, Any]:
-    """Rewrite nested FE graph keys so shell system_key matches (no silent product rewrite)."""
-
-    def rewrite(value: Any) -> Any:
-        if isinstance(value, dict):
-            out: dict[str, Any] = {}
-            for key, child in value.items():
-                if key in {
-                    'graph_key',
-                    'source_graph_key',
-                    'target_graph_key',
-                    'expected_source_graph_key',
-                    'expected_target_graph_key',
-                } and isinstance(child, str):
-                    out[key] = child.replace('::FE::', f'::{system_key}::', 1)
-                else:
-                    out[key] = rewrite(child)
-            return out
-        if isinstance(value, list):
-            return [rewrite(item) for item in value]
-        return value
-
-    return rewrite(payload)
-
-
 def test_system_key_required_closed_set(model_payload):
     model, payload_factory = model_payload
     base = payload_factory()
@@ -1547,7 +1547,9 @@ def test_system_key_required_closed_set(model_payload):
             model.model_validate({**base, 'system_key': bad})
 
     for good in ('FE', 'BO', 'COMMON'):
-        req = model.model_validate(_retarget_graph_keys_for_system({**base, 'system_key': good}, good))
+        req = model.model_validate(
+            _retarget_graph_keys_for_system({**base, 'system_key': good}, good)
+        )
         assert req.system_key == good
 
 

@@ -90,8 +90,9 @@ def validate_nested_json(obj: object, path: str = 'value') -> None:
                 stack.append((value[index], f'{current_path}[{index}]', depth + 1, False))
 
 
-# Fixed entity type → graph_key prefix map (15 types)
+# Fixed entity type → graph_key prefix map (18 types; System/DatabaseLink/SourceArtifact only adds)
 ENTITY_TYPE_PREFIXES: dict[str, str] = {
+    'System': 'SYSTEM::',
     'Database': 'DATABASE::',
     'DictionaryDocument': 'DOC::',
     'Schema': 'SCHEMA::',
@@ -107,6 +108,8 @@ ENTITY_TYPE_PREFIXES: dict[str, str] = {
     'Trigger': 'TRIGGER::',
     'Sequence': 'SEQUENCE::',
     'Synonym': 'SYNONYM::',
+    'DatabaseLink': 'DBLINK::',
+    'SourceArtifact': 'SOURCE::',
 }
 
 CATALOG_ENTITY_TYPES: frozenset[str] = frozenset(ENTITY_TYPE_PREFIXES.keys())

@@ -17,6 +17,7 @@ from models.catalog_common import (
 )
 from models.catalog_edges import CatalogEdgeItem
 from models.catalog_entities import CatalogEntityItem
+from models.catalog_graph_key import validate_entity_graph_key
 from models.catalog_provenance import (
     CatalogProvenanceEdgeTarget,
     CatalogProvenanceEntityTarget,
@@ -94,7 +95,7 @@ class UpsertCatalogBatchRequest(CatalogStrictModel):
         return v
 
     @model_validator(mode='after')
-    def _require_non_empty_work(self) -> UpsertCatalogBatchRequest:
+    def _require_non_empty_work_and_system_scope(self) -> UpsertCatalogBatchRequest:
         has_entities = bool(self.entities)
         has_edges = bool(self.edges)
         has_prov = self.provenance is not None and bool(self.provenance.sources)
@@ -102,6 +103,30 @@ class UpsertCatalogBatchRequest(CatalogStrictModel):
             raise ValueError(
                 'batch requires at least one of entities, edges, or provenance sources'
             )
+        for item in self.entities:
+            validate_entity_graph_key(
+                entity_type=item.entity_type,
+                graph_key=item.graph_key,
+                system_key=self.system_key,
+            )
+        for edge in self.edges:
+            validate_entity_graph_key(
+                entity_type=edge.source_entity_type,
+                graph_key=edge.source_graph_key,
+                system_key=self.system_key,
+            )
+            validate_entity_graph_key(
+                entity_type=edge.target_entity_type,
+                graph_key=edge.target_graph_key,
+                system_key=self.system_key,
+            )
+        if self.provenance is not None:
+            for target in self.provenance.entity_targets:
+                validate_entity_graph_key(
+                    entity_type=target.entity_type,
+                    graph_key=target.graph_key,
+                    system_key=self.system_key,
+                )
         return self
 
 

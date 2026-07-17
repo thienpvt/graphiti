@@ -22,6 +22,7 @@ from models.catalog_common import (
     CatalogStrictModel,
     validate_nested_json,
 )
+from models.catalog_graph_key import validate_entity_graph_key
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -104,18 +105,25 @@ class CatalogEdgeItem(CatalogStrictModel):
     def _enforced_by_requires_evidence(self) -> CatalogEdgeItem:
         if self.edge_type == 'EnforcedBy' and (not self.evidence or not self.evidence.strip()):
             raise ValueError('EnforcedBy requires non-empty evidence')
-        src_prefix = ENTITY_TYPE_PREFIXES[self.source_entity_type]
-        if not self.source_graph_key.startswith(src_prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: source {self.source_entity_type} '
-                f'requires prefix {src_prefix}'
-            )
-        tgt_prefix = ENTITY_TYPE_PREFIXES[self.target_entity_type]
-        if not self.target_graph_key.startswith(tgt_prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: target {self.target_entity_type} '
-                f'requires prefix {tgt_prefix}'
-            )
+        for entity_type, graph_key, role in (
+            (self.source_entity_type, self.source_graph_key, 'source'),
+            (self.target_entity_type, self.target_graph_key, 'target'),
+        ):
+            prefix = ENTITY_TYPE_PREFIXES[entity_type]
+            if not graph_key.startswith(prefix):
+                raise ValueError(
+                    f'graph_key_prefix_mismatch: {role} {entity_type} requires prefix {prefix}'
+                )
+            remainder = graph_key[len(prefix) :]
+            system_part = remainder.split('::', 1)[0] if '::' in remainder else ''
+            if system_part not in {'FE', 'BO', 'COMMON'}:
+                validate_entity_graph_key(
+                    entity_type=entity_type, graph_key=graph_key, system_key='FE'
+                )
+            else:
+                validate_entity_graph_key(
+                    entity_type=entity_type, graph_key=graph_key, system_key=system_part
+                )
         return self
 
 
@@ -138,3 +146,18 @@ class UpsertTypedEdgesRequest(CatalogStrictModel):
             raise ValueError('group_id is required and must be non-empty')
         _validate_group_id(v)
         return v
+
+    @model_validator(mode='after')
+    def _nested_endpoint_keys_match_shell_system(self) -> UpsertTypedEdgesRequest:
+        for edge in self.edges:
+            validate_entity_graph_key(
+                entity_type=edge.source_entity_type,
+                graph_key=edge.source_graph_key,
+                system_key=self.system_key,
+            )
+            validate_entity_graph_key(
+                entity_type=edge.target_entity_type,
+                graph_key=edge.target_graph_key,
+                system_key=self.system_key,
+            )
+        return self

@@ -19,6 +19,7 @@ from models.catalog_common import (
     CatalogStrictModel,
     validate_nested_json,
 )
+from models.catalog_graph_key import validate_entity_graph_key
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -83,12 +84,26 @@ class CatalogProvenanceEntityTarget(CatalogStrictModel):
         return v
 
     @model_validator(mode='after')
-    def _graph_key_prefix(self) -> CatalogProvenanceEntityTarget:
+    def _graph_key_grammar(self) -> CatalogProvenanceEntityTarget:
         prefix = ENTITY_TYPE_PREFIXES[self.entity_type]
         if not self.graph_key.startswith(prefix):
             raise ValueError(
                 f'graph_key_prefix_mismatch: {self.entity_type} requires prefix {prefix}'
             )
+        remainder = self.graph_key[len(prefix) :]
+        system_part = remainder.split('::', 1)[0] if '::' in remainder else ''
+        if system_part not in {'FE', 'BO', 'COMMON'}:
+            validate_entity_graph_key(
+                entity_type=self.entity_type,
+                graph_key=self.graph_key,
+                system_key='FE',
+            )
+            return self
+        validate_entity_graph_key(
+            entity_type=self.entity_type,
+            graph_key=self.graph_key,
+            system_key=system_part,
+        )
         return self
 
 
@@ -141,10 +156,16 @@ class UpsertProvenanceRequest(CatalogStrictModel):
         return v
 
     @model_validator(mode='after')
-    def _link_collection_bounds(self) -> UpsertProvenanceRequest:
+    def _link_collection_bounds_and_system(self) -> UpsertProvenanceRequest:
         total_links = len(self.sources) * (len(self.entity_targets) + len(self.edge_targets))
         if total_links > HARD_MAX_PROVENANCE_LINKS_PER_BATCH:
             raise ValueError(
                 f'provenance links exceed hard max ({HARD_MAX_PROVENANCE_LINKS_PER_BATCH})'
+            )
+        for target in self.entity_targets:
+            validate_entity_graph_key(
+                entity_type=target.entity_type,
+                graph_key=target.graph_key,
+                system_key=self.system_key,
             )
         return self
