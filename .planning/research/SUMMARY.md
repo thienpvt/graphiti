@@ -1,197 +1,162 @@
 # Project Research Summary
 
-**Project:** Deterministic Catalog Ingestion for Graphiti MCP
-**Domain:** Deterministic Neo4j catalog-upsert MCP tools (Graphiti MCP extension)
-**Researched:** 2026-07-16
+**Project:** Deterministic Catalog Ingestion for Graphiti MCP — v1.1 Catalog-v2 Pre-Canary Hardening
+**Domain:** Deterministic Neo4j catalog MCP control plane (identity, prepare/commit, manifests, verification)
+**Researched:** 2026-07-17
 **Confidence:** HIGH
 
 ## Executive Summary
 
-This milestone adds synchronous, typed, deterministic, idempotent Neo4j upsert tools to the existing Graphiti MCP server for structured database catalogs (PDF, DDL, Oracle dictionary, SQL-parser output). Experts build this as server-owned identity and Cypher beside-not through-semantic memory: fixed allowlists, UUIDv5 over an immutable deployment namespace, SHA-256 content audit, embed-before-write, real Neo4j transactions, and no LLM, no ingestion queue, no caller UUID authority. Existing add_memory and add_triplet paths remain for narrative memory; they are unsafe for roughly 14k entities and 30k-plus edges because they are async or non-deterministic and can invent generic endpoints.
+v1.1 hardens the shipped v1.0 deterministic catalog MCP surface before any regenerated canary. Experts build this as an additive administrative path beside Graphiti semantic tools: Pydantic-strict contracts, server-owned allowlists and endpoint maps, UUIDv5 identity, SHA-256 audit, Neo4j real transactions, embeddings outside domain writes, non-Entity control labels. Zero new runtime dependencies — extend installed Pydantic 2.11.x, neo4j 5.28.x, FastMCP, stdlib, and existing CatalogService / CatalogNeo4jStore.
 
-Recommended approach: implement entirely inside mcp_server/ against installed Graphiti 0.29.2 (PyPI lock) plus Neo4j 5.26+ / driver 5.28.1, reusing FastMCP, GraphitiService client, embedder factory, and Entity/RELATES_TO/Episodic shapes-but do not use stock EntityNode.save, add_triplet, add_episode, or bulk helpers as the write path. Research consensus is a dedicated CatalogNeo4jStore with fixed Cypher, ON CREATE/MATCH property control, and Neo4j-only write gating. Ship Phase 1 primitives first (upsert_typed_entities, upsert_typed_edges, resolve_typed_entities, verify_catalog_batch plus config/models/identity). Phase 2 is blocked until the full Phase 1 gate passes and a Phase 1 report is written. Phase 2 then adds provenance, CatalogIngestBatch status, and atomic upsert_catalog_batch.
+Approved prepare/commit contract (authoritative): `prepare_catalog_batch` validates/resolves/projects and persists a **bounded immutable canonical payload** server-side (restart-safe; chunked non-Entity control nodes if needed; **hashes/counts alone insufficient**). Commit clients send **only a token**. Prepare does **not** compute required embeddings. `commit_prepared_catalog_batch` embeds from the stored payload **before** opening its domain transaction, then writes **domain data + evidence + manifest + terminal batch status + plan terminal state in one Neo4j transaction** where supported. A separate post-rollback failure-status transaction is allowed **only** for failure reporting. Exact tools: `prepare_catalog_batch`, `commit_prepared_catalog_batch`, `discard_prepared_catalog_batch`, `get_catalog_capabilities`, `get_catalog_evidence`, `get_catalog_batch_manifest`, `resolve_typed_edges`.
 
-Key risks: (1) uuid4 or caller identity yields non-idempotent retries; (2) Graphiti SET n = $entity_data clobbers created_at and audit fields; (3) generic endpoint pollution via triplet-like paths; (4) embed-inside-tx or auto-commit multi-statement partial graphs; (5) Phase 2 provenance inventing schema or re-entering add_episode. Mitigate with server UUIDv5 plus canonical SHA-256, dedicated store, typed-endpoint enforcement, embed-before-tx plus one domain transaction, non-Entity status labels, and a hard Phase 1 gate. Out of scope remains absolute: no K8s deploy, no live-group mutation (oracle-catalog-v2), no full catalog ingest, no clear_graph or deletes, no multi-backend claims, no new runtime packages.
+Key risks: silent v1 to v2 rekey; open nested validation; incomplete hashes; Cartesian provenance; hashes-only prepare; embed-at-prepare; split success txs without co-committed manifest; gate confusion; live-group/canary writes. Mitigate with fail-closed FE/BO grammar, recursive extra=forbid, server endpoint maps, explicit evidence links, full payload prepare, embed-at-commit, single success tx, split read/write gates, tests only on `oracle-catalog-tool-test`. Catalog-v2 **intentionally breaks** seven deterministic request identity/provenance/hash contracts where required; preserve **tool names** and legacy semantic tools — do **not** claim old catalog-v1 request payloads remain accepted. No canary, production/live-group writes, parser/inference, or automatic v1 migration this milestone.
 
 ## Key Findings
 
 ### Recommended Stack
 
-Use the already-installed MCP stack only. No new runtime packages for Phase 1-2. Milestone write path is Neo4j-only; FalkorDB and other backends return disabled/error and stay untouched.
+Add **no** new packages. Reuse Python 3.10+, Pydantic 2.11.x (`ConfigDict(extra='forbid', strict=True)` on every nested model), neo4j async driver + real txs, FastMCP additive tools, stdlib uuid/hashlib/hmac/secrets/json, existing embedder **at commit only** for prepared batches, non-Entity control nodes mirroring CatalogIngestBatch.
 
 **Core technologies:**
-- Python >=3.10 / uv lockfile - monorepo async runtime; mcp_server/uv.lock is source of truth
-- mcp (FastMCP) 1.27.2 - register tools with @mcp.tool() only; no second app/router
-- graphiti-core 0.29.2 (PyPI wheel in lock) - models, embedder, search, Neo4j driver; prefer MCP package code against public 0.29.2 APIs
-- neo4j driver 5.28.1 + Neo4j server 5.26+ - real Neo4jDriver.transaction(); vector property procs
-- Pydantic 2.11.x + pydantic-settings - allowlisted request/config; extend GraphitiConfig for catalog namespace/limits
-- Configured EmbedderClient (OpenAI embedder default) - embeddings only; zero LLMClient calls
-- stdlib uuid.uuid5 + hashlib.sha256 - identity and audit; MD5 forbidden
-
-**Critical version / provenance notes:**
-- Lock resolves graphiti-core from PyPI 0.29.2, not path-editable monorepo graphiti_core/ (local tree also reports 0.29.2). Prefer implementing in mcp_server/; core changes only if an API gap is proven (open decision).
-- MCP embedder dimensions default 1536 in Neo4j YAML; do not assume bare env EMBEDDING_DIM 1024.
-- MEDIUM residual: whether stock EntityNode.save preserves every catalog property-research recommends not relying on it; default is dedicated Cypher.
+- **Pydantic 2.11.x:** recursive fail-closed contracts — nested extra does not inherit
+- **Neo4j 5.26+ / driver 5.28.x:** MERGE + composite UNIQUE + one success write unit
+- **stdlib secrets/hmac:** opaque prepare tokens; store digest only
+- **Existing CatalogNeo4jStore:** domain Cypher + control labels; no EntityNode.save for catalog
+- **pydantic-settings CatalogConfig:** split write vs read/capabilities gates
 
 ### Expected Features
 
-**Must have (table stakes / Phase 1):**
-- Catalog config: immutable GRAPHITI_CATALOG_UUID_NAMESPACE, batch limits (500 / 2,000 / 5,000), feature gate
-- Strict allowlisted entity/edge models (prefixes, protected props, hash, finite numbers, confidence)
-- upsert_typed_entities - sync UUIDv5 + SHA-256 + embed-before-tx + typed Neo4j MERGE
-- upsert_typed_edges - typed endpoints required; no implicit create
-- resolve_typed_entities - read-only missing/generic/duplicate/mistyped/uuid-mismatch/unembedded
-- verify_catalog_batch - read-only identity/type/endpoint/embedding audit
-- Sync commit/rollback semantics; no queue/LLM; server UUIDv5 only; group_id isolation; structured error codes
-- Preserve created_at; add updated_at; exact name_raw/name_canonical; Entity+type labels for search interop
-- Phase 1 gate report before any Phase 2 work
-- Tests only on oracle-catalog-tool-test
+**Must have (table stakes):**
+- Strict recursive request contracts + immutable execution flags
+- Catalog-v2 FE/BO/COMMON identity grammar (fail closed; `unsupported_identity_schema`, `invalid_system_key`)
+- Server-owned edge endpoint maps (`edge_endpoint_pair_not_allowed`)
+- Authoritative combined batch hashes + `get_catalog_capabilities` (works after server init even if writes disabled)
+- Prepare/commit/discard with full payload + token protocol (exact tool names above)
+- Explicit evidence links (no Cartesian) + `provenance_link_conflict`
+- Durable manifests + manifest-backed verification (`manifest_mismatch`)
+- `resolve_typed_edges`, `get_catalog_evidence`, `get_catalog_batch_manifest`
+- Split read/write gates; legacy tool names + semantic tools preserved
+- Plan codes: `prepared_plan_not_found`, `prepared_plan_expired`, `prepared_plan_conflict`, `prepared_plan_already_consumed`
 
-**Should have (differentiators / Phase 2 after gate):**
-- upsert_provenance on installed Episodic + MENTIONS (plus edge episodes as supported)-no add_episode/LLM/queue
-- CatalogIngestBatch (non-Entity) + get_catalog_ingest_status
-- upsert_catalog_batch - full validate, same-request endpoint resolution, pre-tx embeds, one atomic domain tx, failed-status outside domain tx, retry idempotency, batch_conflict
-- Operator docs: semantic-vs-deterministic, namespace immutability, ACCEPT_TAB, rollout/rollback (docs only)
+**Should have (trust differentiators):**
+- Capabilities as versioned contract surface (maps, grammar, hash recipe, limits)
+- Manifest as post-restart verification authority
+- Read diagnostics while mutation disabled
 
-**Defer (v2+ / out of scope this milestone):**
-- Full production catalog ingest / canary against live groups
-- Kubernetes deployment automation
-- Multi-backend catalog persistence claims
-- Auto community rebuild on upsert; any add_memory queue redesign; graph cleanup tools
-
-**Anti-features (do not build):** LLM catalog path, async catalog writes, caller UUID identity, auto namespace, implicit endpoints, arbitrary Cypher/labels/properties, MD5, payload logging, invented provenance schema, live-group mutation, clear_graph.
+**Defer (not v1.1):**
+- Parser / inference / path-impact APIs
+- Automatic v1 to v2 migration; canary execution; production writes
+- FalkorDB catalog claims; full 14k ingest; K8s deploy
 
 ### Architecture Approach
 
-Seven additive MCP tools beside existing semantic tools. Flow: thin @mcp.tool -> CatalogService (validate, UUIDv5, hash, embed-before-tx, feature gate) -> CatalogNeo4jStore (fixed Cypher + driver.transaction()). Reuse live GraphitiService.client for driver/embedder; never QueueService/LLM. Domain entities remain :Entity:<Type> with embeddings for hybrid search; internal status is :CatalogIngestBatch only.
+Additive MCP tools on shared CatalogService / CatalogNeo4jStore. Domain labels remain searchable Entity/RELATES_TO; control plane uses non-Entity CatalogIngestBatch, CatalogPreparedPlan (+ payload chunks), CatalogBatchManifest, optional CatalogEvidenceLink. Ordering: validate → endpoint map → UUIDv5 → domain hash → prepare stores payload **or** commit embeds then one success tx. No LLM/queue/add_episode on catalog path.
 
 **Major components:**
-1. CatalogConfig - immutable UUID namespace, limits, enabled flag (extend schema.py)
-2. Catalog models - allowlisted request/response + error codes (separate from semantic entity_types.py)
-3. catalog_identity - UUIDv5 + canonical SHA-256
-4. CatalogService - orchestration and embed-then-tx ordering
-5. CatalogNeo4jStore - dedicated Neo4j persistence (required; not stock model save)
-6. Phase 1 tools - entity/edge upsert + resolve + verify
-7. Phase 2 tools - provenance, batch status, atomic batch
-
-**Identity formulas (server-only):**
-- Entity: uuid5(ns, f"{group_id}|{entity_type}|{graph_key}")
-- Edge: uuid5(ns, f"{group_id}|{edge_type}|{edge_key}")
-- Source: uuid5(ns, f"{group_id}|Source|{source_key}")
-- Batch: uuid5(ns, f"{group_id}|Batch|{batch_id}")
-
-**Edge storage (reconciled):** keep Graphiti search shape ()-[:RELATES_TO {uuid, name, ...}]->() with allowlisted type in name / edge_type property-not free-form relationship types from clients.
+1. **Models (catalog_*):** recursive forbid; FE/BO grammar; evidence/manifest DTOs
+2. **Identity + endpoint map:** UUIDv5 name material; frozen server maps; full-domain SHA-256
+3. **Plan/manifest modules:** immutable payload lifecycle; token mint/verify; manifest assembly
+4. **CatalogService:** gates; prepare/commit/discard; resolve/verify modes
+5. **CatalogNeo4jStore:** domain MERGEs + control CRUD + CAS; no conflict repair
 
 ### Critical Pitfalls
 
-1. **Caller/uuid4 identity authority** - Always server UUIDv5; reject mismatched caller UUID with deterministic_uuid_conflict; pin namespace.
-2. **SET n = $entity_data clobber** - Dedicated ON CREATE/MATCH Cypher; protect created_at/embeddings/identity keys; content_hash short-circuit no-ops.
-3. **Generic endpoints / label accretion** - Exact {Entity, Type}; type conflict fails closed; edges never CREATE nodes.
-4. **Non-atomic writes / embed-after-write** - All embeddings before open tx; one domain tx; status writes outside domain tx on failure path.
-5. **Cypher injection via labels/properties** - Fixed allowlists only; re-validate at query builder; parameterize values.
-6. **Phase 2 provenance via add_episode/LLM or Entity-labeled status** - Installed episodic schema only; document gaps; CatalogIngestBatch never :Entity.
-7. **group_id bleed / live graph mutation** - Require group_id on every op; tests only oracle-catalog-tool-test; never touch oracle-catalog-v2 or deploy.
+1. **Silent v1 to v2 rekey** — fail closed on non-v2 keys; no auto-migration
+2. **Nested validation open** — extra=forbid on every nested model + service re-validate
+3. **Hash field omissions** — single versioned canonicalizer covering all domain collections
+4. **Hashes-only prepare / embed-at-prepare** — full payload store; embed only at commit
+5. **Split success txs / Cartesian evidence / gate-kills-reads** — one success tx; explicit links; split gates; no live/canary writes
 
 ## Implications for Roadmap
 
-Based on research, suggested phase structure is exactly two gated implementation phases (no deploy/ingest phase in this milestone).
+### Phase 1: Strict contracts + FE/BO identity grammar
+**Rationale:** All later work depends on fail-closed payloads and collision-free UUIDs
+**Delivers:** Recursive forbid/strict models; FE/BO/COMMON grammar; immutable flags; unit vectors
+**Addresses:** Strict contracts; identity isolation
+**Avoids:** Silent rekey; open nested extras
+**Error codes:** `validation_error`, `unsupported_identity_schema`, `invalid_system_key`, `graph_key_prefix_mismatch`
 
-### Phase 1: Typed Catalog Primitives (Foundation)
-**Rationale:** Provenance and batch orchestration depend on trusted identity, typed endpoints, atomic single-tool writes, and verify/resolve. PROJECT.md and all four research files hard-block Phase 2 until the Phase 1 gate is green.
-**Delivers:**
-- CatalogConfig + feature flag + immutable namespace validation
-- Allowlisted Pydantic models + structured error codes
-- UUIDv5 + canonical SHA-256 helpers
-- CatalogNeo4jStore entity/edge MERGE + read paths (Neo4j-gated)
-- upsert_typed_entities, upsert_typed_edges, resolve_typed_entities, verify_catalog_batch
-- MCP registration; unit + Neo4j integration tests; format/typecheck; existing MCP regression; generic-duplicate checks
-- Short Phase 1 gate report
-- Minimal operator docs for Phase 1 tools and namespace immutability
-**Addresses:** FEATURES table stakes / P1 matrix; STACK milestone API checklist rows for four Phase 1 tools
-**Avoids:** Pitfalls 1-10, 13-14 (identity, hash, clobber, labels, injection, concurrency basics, atomicity, group_id, embeddings/search, edge endpoints, validation, semantic-path regression)
-**Gate (exact):** focused unit tests; Neo4j integration on oracle-catalog-tool-test only; formatting; changed-code typecheck; MCP tool listing/schema; relevant existing MCP tests; generic-duplicate checks; Phase 1 report. Phase 2 must not start until all pass.
+### Phase 2: Endpoint maps + authoritative hashing + capabilities
+**Rationale:** Preflight topology and complete hashes before control-plane writes
+**Delivers:** Server EDGE_ENDPOINT_MAP; full-domain hash; `get_catalog_capabilities` (init-success even if writes off); map wired into edge/batch preflight
+**Addresses:** Endpoint authority; capabilities; hash completeness
+**Avoids:** Client maps; false idempotence
+**Error codes:** `edge_endpoint_pair_not_allowed`, `content_hash_mismatch`, `endpoint_type_mismatch`
 
-### Phase 2: Provenance and Atomic Batch Orchestration
-**Rationale:** Only after primitives are integration-proven. Batch composes entity/edge/provenance under one domain transaction; status and provenance have distinct failure modes (LLM temptation, search pollution, status/domain desync).
-**Delivers:**
-- upsert_provenance using installed Episodic + MENTIONS (plus closest compatible episode-edge linking; document if incomplete)
-- CatalogIngestBatch + get_catalog_ingest_status (Neo4j-persisted, non-Entity)
-- upsert_catalog_batch (validate all -> same-request endpoint map -> embed all -> one domain tx -> status after success / failed-status after rollback; retry idempotency; batch_conflict)
-- Full docs: atomicity, limits, ACCEPT_TAB, semantic-vs-deterministic, rollout/rollback guidance (no automation)
-- Expanded search_nodes / search_memory_facts / safe build_communities interop on test group only
-**Uses:** Neo4jDriver.transaction, EmbedderClient pre-tx, Episodic/MENTIONS save patterns, CatalogConfig limits
-**Implements:** Architecture Phase 2 store/status/batch components
-**Avoids:** Pitfalls 11-12 (provenance/LLM/schema; batch status/retry); continues 5, 7, 8, 14
+### Phase 3: Prepare/commit/discard + explicit evidence
+**Rationale:** Restart-safe multi-step ingest is the core v1.1 protocol
+**Delivers:** Full payload prepare; token; `commit_prepared_catalog_batch` (embed-then-one-tx); discard; explicit evidence links; CAS/TTL
+**Addresses:** Prepare protocol; evidence; concurrency
+**Avoids:** Domain-at-prepare; hashes-only plan; Cartesian product; dual success txs
+**Error codes:** `prepared_plan_*`, `provenance_link_conflict`, `embedding_failed`, `batch_conflict`
 
-### Explicit non-phases (do not schedule as delivery)
-- Production full-catalog load, K8s deploy, live-group canary mutation, multi-backend portability, community auto-update, graph deletion utilities
+### Phase 4: Manifests + manifest verify + split gates + edge resolve
+**Rationale:** Audit/restart truth and safe ops posture
+**Delivers:** Durable manifest co-committed; `get_catalog_batch_manifest` / `get_catalog_evidence`; manifest-backed verify; `resolve_typed_edges`; read vs write gates
+**Addresses:** Manifests; diagnostics under write-disable
+**Avoids:** Verify-by-client-list false green; single flag killing reads
+**Error codes:** `manifest_mismatch`, `feature_disabled` (writes only)
+
+### Phase 5: Exhaustive tests, security, compatibility, docs
+**Rationale:** Gate milestone without canary execution
+**Delivers:** Unit/service/store/MCP/concurrency/Neo4j/security/compat suites on `oracle-catalog-tool-test`; isolation probes; migration + canary procedure docs only
+**Addresses:** Compatibility; logging; isolation
+**Avoids:** Live `oracle-catalog-v2` mutation; payload/token logs; tool renames
 
 ### Phase Ordering Rationale
 
-- Config/models/identity before any Cypher - undefined namespace or allowlists make every UUID and query unsafe
-- Entities before standalone edges - edges require pre-existing typed endpoints
-- Resolve + verify with upserts in Phase 1 - production-safe operators need preflight/postflight before orchestration
-- Dedicated store from day one - stock Graphiti save paths fail property-preservation and multi-statement atomicity (STACK + ARCHITECTURE + PITFALLS agree; conservative choice: dedicated store required, not optional)
-- Phase 1 gate before provenance/batch - Phase 2 multiplies bugs in primitives across 14k-scale chunks
-- Status outside domain tx - failed-status persistence must not violate domain atomicity
-- No deploy/live mutation phases - operational constraint of the milestone
+- Contracts/identity before maps/hashes (invalid keys must not reach store)
+- Maps/hashes/capabilities before prepare (plan identity incomplete otherwise)
+- Full payload prepare before commit (commit is pure apply of frozen plan)
+- Manifest/verify after commit path exists
+- Security/compat continuous but final gate is isolation + docs without canary
 
 ### Research Flags
 
 Phases likely needing deeper research during planning:
-- **Phase 1 (persistence slice):** Confirm final Cypher for ON CREATE/MATCH property lists, vector property write order, and protected-field denylist vs entity_node_from_record read-back - patterns known, property map must be specified carefully
-- **Phase 1 (edge type durability):** Document search filter contract (EntityEdge.name / edge_types) vs extra edge_type property; keep RELATES_TO
-- **Phase 2 (provenance linking):** Installed Graphiti 0.29.2 episode-to-entity-edge linkage completeness is an open decision-if direct linking unsupported, document closest compatible representation; do not invent labels
-- **Phase 2 (batch status state machine):** Exact recovery when domain commits but status write fails (trust verify over status)
+- **Phase 3:** payload chunking property limits; single-tx size under defaults; token CAS details
+- **Phase 4:** manifest property size vs chunk children; verify pagination
 
-Phases with standard patterns (skip broad research-phase; plan from this SUMMARY + code):
-- **Phase 1 config/Pydantic/MCP registration** - established MCP server patterns
-- **Phase 1 UUIDv5/SHA-256 unit logic** - stdlib, fully specified
-- **Phase 1 tool surface wiring** - thin FastMCP adapters
+Phases with standard patterns (skip research-phase):
+- **Phase 1:** Pydantic forbid/strict patterns already verified
+- **Phase 2:** frozenset maps + existing canonical_sha256
+- **Phase 5:** extend v1.0 test/doc patterns
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Lockfile + source versions; MEDIUM only on reusing stock save vs dedicated Cypher (resolved conservatively: dedicated store) |
-| Features | HIGH | Directly from PROJECT.md Active/Out-of-Scope; no invented features |
-| Architecture | HIGH | Repo-sourced component map; dedicated store required across ARCHITECTURE/PITFALLS |
-| Pitfalls | HIGH | Code-evidenced (uuid4 defaults, SET map clobber, triplet generics, queue non-durability, index vs uniqueness) |
+| Stack | HIGH | Local pins + Neo4j/Pydantic docs; zero-new-deps clear |
+| Features | HIGH | PROJECT.md v1.1 + operator contracts; approved tool/error names applied |
+| Architecture | HIGH | Live catalog modules + approved prepare/commit atomicity contract |
+| Pitfalls | HIGH | Grounded in v1.0 store/service + v1.1 failure modes |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **Graphiti 0.29.2 lock vs monorepo path:** Prefer MCP-only implementation against PyPI 0.29.2 APIs. If core must change, make explicit version/path decision before coding.
-- **Stock save sufficiency:** Treat as insufficient for catalog domain writes unless Phase 1 proves otherwise; plan dedicated Cypher first (conservative reconciliation of STACK prefer-save-if-complete vs ARCHITECTURE/PITFALLS dedicated-required).
-- **Provenance schema fidelity on 0.29.2:** Open-plan Phase 2 research spike on Episodic/MENTIONS/entity_edges/episodes list write/read before implementing upsert_provenance.
-- **Natural-key uniqueness constraints:** Neo4j Community may lack multi-property node keys; enforce via UUIDv5 MERGE + application conflict detection; optional constraints only with migration plan.
-- **Embed text field:** Pin one stable embed source (name_canonical vs name) in Phase 1 plan for idempotent vectors; model upgrades still change vectors-document.
-- **Unrelated worktree dirt:** Preserve mcp_server/k8s/graphiti-neo4j.yaml, .codegraph/, mcp_server/sample_catalog.json unless explicitly approved-exclude from feature commits.
+- Exact FE/BO graph_key grammar string format: freeze in phase design (plane segment placement, overload signature normalization)
+- Neo4j property size for max batch payload: plan chunk schema + limits in Phase 3 planning
+- Whether legacy seven tools accept any v2-only fields additively: document fail-closed vs additive optional fields per tool without claiming v1 payloads remain valid under v2 grammar
+- Hash recipe version string for protocol bump on coverage change
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- .planning/PROJECT.md - requirements, allowlists, phase gate, error codes, out of scope
-- mcp_server/pyproject.toml, mcp_server/uv.lock - mcp 1.27.2, graphiti-core 0.29.2, neo4j 5.28.1, pydantic 2.11.7
-- mcp_server/src/graphiti_mcp_server.py - FastMCP tools, GraphitiService, queue/triplet behavior
-- mcp_server/src/config/schema.py, config/config-docker-neo4j.yaml - config + Neo4j defaults
-- graphiti_core/driver/neo4j_driver.py - transaction(), execute_query
-- graphiti_core/models/nodes/node_db_queries.py, models/edges/edge_db_queries.py - MERGE / SET shapes
-- graphiti_core/nodes.py, edges.py, graphiti.py - models, uuid4 defaults, add_triplet/add_episode
-- graphiti_core/graph_queries.py - indexes (not uniqueness constraints)
-- graphiti_core/helpers.py - label/group validation
-- .planning/research/STACK.md, FEATURES.md, ARCHITECTURE.md, PITFALLS.md
+- `.planning/PROJECT.md` — v1.1 active requirements, constraints, out-of-scope
+- Approved milestone contract (prepare payload, embed-at-commit, one success tx, tool names, error codes, no canary/migration)
+- Live `mcp_server` catalog identity/service/store and models
+- Pydantic ConfigDict / Neo4j 5 constraints and MERGE docs
+- Parallel research STACK, FEATURES, ARCHITECTURE, PITFALLS (2026-07-17), corrected in synthesis
 
 ### Secondary (MEDIUM confidence)
-- .planning/codebase/* - monorepo architecture/concerns maps
-- mcp_server/sample_catalog.json - fixture shape (not full ingest scope)
-- Embedding dim / truncation behavior in OpenAI embedder client
+- v1.0 milestone verification artifacts (CAS, embeddings-before-tx, isolation patterns to retain)
 
 ### Tertiary (LOW confidence)
-- Optional Neo4j composite uniqueness for (group_id, graph_key) - edition-dependent; plan app-level first
-- Exact 0.29.2 episode-edge provenance completeness - validate in Phase 2 planning
+- Exact chunk sizing thresholds for prepare payloads — validate against Neo4j property limits in Phase 3
 
 ---
-*Research completed: 2026-07-16*
+*Research completed: 2026-07-17*
 *Ready for roadmap: yes*

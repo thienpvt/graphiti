@@ -1,273 +1,316 @@
 # Feature Research
 
-**Domain:** Deterministic catalog-ingestion MCP tools (Graphiti MCP / Neo4j)
-**Researched:** 2026-07-16
-**Confidence:** HIGH (sourced from `.planning/PROJECT.md` Active/Out-of-Scope contracts + installed MCP/core behavior; no invented product features)
+**Domain:** Deterministic catalog MCP hardening (v1.1 Catalog-v2 Pre-Canary)
+**Researched:** 2026-07-17
+**Confidence:** HIGH
+
+**Scope note:** v1.0 shipped seven deterministic Neo4j catalog tools (entity/edge upsert, entity resolve, batch verify, provenance, atomic batch, ingest status). This document covers only v1.1 hardening observable from MCP clients and operators. Do not re-specify shipped v1.0 behavior except as compatibility baseline.
 
 ## Feature Landscape
 
-### Table Stakes (Users Expect These)
+### Table Stakes (Operators and Agents Expect These)
 
-Production-safe catalog upserts require these contracts. Missing any of them breaks safe retry, typed identity, or search interoperability for structured catalogs.
+Missing any of these makes the surface untrustworthy for a regenerated catalog-v2 canary.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Catalog-upsert configuration (`GRAPHITI_CATALOG_UUID_NAMESPACE` + conservative batch limits) | Immutable UUID namespace is identity root; limits bound memory/tx size | MEDIUM | Namespace must be explicitly supplied; never auto-generated. Defaults: 500 entities / 2,000 edges / 5,000 provenance links per batch |
-| Strict allowlisted request models (entity, edge, source, batch) | Reject schema drift, Cypher injection, oversized/invalid payloads | HIGH | Protect properties; validate hash, size, prefix, confidence [0,1], finite numbers (reject NaN/inf) |
-| `upsert_typed_entities` (sync, deterministic UUIDv5, SHA-256-audited, embedding-backed, typed Neo4j tx) | One retryable catalog entity = one committed typed node | HIGH | Phase 1. Identity: UUIDv5(`namespace`, `group_id\|entity_type\|graph_key`). Embed before write tx |
-| `resolve_typed_entities` (read-only preflight) | Detect missing/generic/duplicate/mistyped/UUID-mismatched/unembedded entities before write | MEDIUM | Phase 1. No mutations |
-| `upsert_typed_edges` with pre-existing typed endpoints only | Exact relationships without implicit endpoint creation | HIGH | Phase 1. Identity: UUIDv5(`namespace`, `group_id\|edge_type\|edge_key`). Fail on missing/mistyped/generic endpoints |
-| `verify_catalog_batch` (read-only batch/key verification) | Post-write/pre-orchestration audit of identities, types, endpoints, duplicates, embeddings, optional provenance | MEDIUM | Phase 1 gate companion |
-| Synchronous MCP write semantics | Caller must know commit vs rollback; async queue is unsafe for catalog baseline | MEDIUM | All new write tools return only after commit or rollback; no ingestion queue |
-| No LLM / no extraction on catalog path | Semantic extraction invents unwanted nodes/edges; non-deterministic | LOW–MEDIUM | Bypass `add_episode` / `add_memory` extraction entirely |
-| Server-derived UUIDv5 only | Caller UUID authority collides with Graphiti episode/triplet semantics | MEDIUM | Never treat caller-supplied DB UUIDs as identity authority |
-| SHA-256 canonical content hash (exactly 64 lowercase hex) | Change detection, audit, idempotent re-upsert | MEDIUM | MD5 forbidden. Persist hash on domain payloads |
-| Fixed entity-type allowlist + graph-key prefixes | Exact catalog ontology; prefix mismatch = validation failure | LOW | Database/`DATABASE::`, DictionaryDocument/`DOC::`, Schema/`SCHEMA::`, Table/`TABLE::`, View/`VIEW::`, MaterializedView/`MVIEW::`, Column/`COLUMN::`, Constraint/`CONSTRAINT::`, Index/`INDEX::`, Package/`PACKAGE::`, Procedure/`PROCEDURE::`, Function/`FUNCTION::`, Trigger/`TRIGGER::`, Sequence/`SEQUENCE::`, Synonym/`SYNONYM::` |
-| Fixed edge-type allowlist | Prevent free-form relationship sprawl | LOW | Contains, PrimaryKeyOf, UniqueKeyOf, ForeignKeyTo, EnforcedBy, TriggerOn, SynonymFor, DocumentedBy, Calls, ReadsFrom, WritesTo, JoinsWith, ReferencesByCode, DependsOn, DerivedFrom, UsesSequence. `EnforcedBy` requires explicit DDL/Oracle dictionary evidence |
-| `group_id` isolation on every read/write | Multi-tenant partition already core Graphiti contract | LOW | Tests only `oracle-catalog-tool-test`; never mutate `oracle-catalog-v2` during implementation |
-| Item-level structured error codes | Batch partial diagnosis without opaque strings | MEDIUM | Required codes: `validation_error`, `feature_disabled`, `invalid_uuid_namespace`, `batch_limit_exceeded`, `content_hash_mismatch`, `entity_type_conflict`, `graph_key_prefix_mismatch`, `deterministic_uuid_conflict`, `missing_endpoint`, `endpoint_type_mismatch`, `generic_endpoint_conflict`, `edge_identity_conflict`, `batch_conflict`, `provenance_target_missing`, `neo4j_transaction_failed`, `embedding_failed`, `internal_error` |
-| Preserve `created_at`; add `updated_at`; keep exact `name_raw`/`name_canonical`, labels, endpoint UUIDs | Idempotent update must not rewrite history or normalize away OCR/source fidelity | MEDIUM | Re-upsert same identity updates payload/hash/embedding/`updated_at` only |
-| Embeddings via configured embedder before Neo4j write transaction | Embedding failure must not leave partial graph writes | MEDIUM | Same embedder stack as existing Graphiti; failure → `embedding_failed`, no open write tx |
-| Neo4j-first typed persistence (preserve labels/attributes/embeddings) | Graphiti generic save paths can lose typed labels/attrs | HIGH | Prefer Neo4j 5.26+ driver semantics; no multi-backend claims in this milestone |
-| Additive MCP surface only | Existing tools (`add_memory`, search, triplet, delete, communities, clear_graph) stay unchanged | LOW | Catalog tools are new; do not change queue behavior |
-| Phase 1 quality gate before Phase 2 | Provenance/orchestration must rest on trusted primitives | MEDIUM | Unit + Neo4j integration + format + typecheck + MCP schema registration + regression + generic-duplicate checks; short Phase 1 report |
-| Focused tests on `oracle-catalog-tool-test` only | Avoid live catalog group mutation | MEDIUM | Unit + Neo4j integration; no `clear_graph` / live-group writes |
-| Search interoperability verification | Catalog nodes/edges must remain findable via existing hybrid search | MEDIUM | Verify `search_nodes`, `search_memory_facts`; safe `build_communities` execution (compatibility only, not auto-build on upsert) |
-| Documentation (tools, config, namespace immutability, allowlists, idempotency, atomicity, limits, ACCEPT_TAB examples, rollout/rollback, build command, semantic-vs-deterministic guidance) | Operators and agents must not misuse `add_memory` for catalogs | LOW | Rollout/rollback without deployment automation |
+| Strict recursive request contracts | Agents emit partial/extra fields; silent accept corrupts identity | MEDIUM | `extra='forbid'` recursively on all catalog request models and nested items; unknown fields fail closed with `validation_error` before any Neo4j/embedder work |
+| Immutable execution flags | Retry/replay must not reinterpret `dry_run`/`atomic` mid-plan | LOW | Flags are part of request identity; changing them on a prepared/committed batch returns conflict, never mutates plan semantics |
+| Catalog-v2 FE/BO/COMMON identity grammar | FE and BO objects collide without visible isolation | MEDIUM | Graph keys and type grammar must deterministically separate FE, BO, COMMON; wrong-lane keys fail closed; no silent reinterpretation of v1 keys as v2 |
+| Server-owned edge endpoint-pair maps | Client-supplied endpoint types alone cannot prevent illegal pairs | MEDIUM | Every allowlisted edge type has a finite source×target type map enforced before side effects; unknown/illegal pairs return structured errors |
+| Authoritative combined batch hashes | Client-only hashes can omit nested content | MEDIUM | Server computes canonical SHA-256 over all domain content (entities, edges, provenance, flags as documented); optional client hash compared; mismatch = `content_hash_mismatch` / `batch_conflict` |
+| Capabilities discovery | Agents must know limits, gates, identity grammar, endpoint maps without reading source | LOW | Read-only discovery response: enabled flags, limits, entity/edge allowlists, endpoint maps, protocol version, FE/BO grammar version — no secrets |
+| Durable prepare / commit / discard | Multi-step agent ingest needs restart-safe plans without partial domain writes | HIGH | Prepare persists **bounded immutable canonical payload** + hashes (restart-safe; chunked non-Entity OK; hashes-only insufficient); commit receives **token only**, embeds from stored payload, applies plan; discard drops plan without domain mutation; identical-plan replay idempotent |
+| Explicit evidence links (no Cartesian expansion) | Source×target product explodes and invents unproven links | MEDIUM | Provenance accepts only explicit `(source, target)` pairs or equivalent bounded links; reject implicit all-to-all; preserve deterministic source identity |
+| Durable batch manifests | Post-commit audit cannot rely on client memory | HIGH | Committed batch stores exact entity/edge/provenance identity list + hashes under non-`Entity` labels; restart-safe; excluded from entity search/communities |
+| Manifest-backed verification | Verify-by-batch-id without re-sending full payload | MEDIUM | `verify_catalog_batch` (or successor) can load expected set from durable manifest; report missing/wrong-type/endpoint/hash/provenance gaps |
+| `resolve_typed_edges` | Operators need edge diagnostics symmetric to entity resolve | MEDIUM | Read-only: found state, UUID, type, endpoints, hash, embedding presence, duplicates, anomalies; never writes or embeds |
+| Split read/write gates | Diagnostics must work while mutation is disabled | LOW | Writes gated by `catalog_upsert.enabled` (or write gate); resolve/verify/status/capabilities/manifest reads remain available under a read gate or always-on policy |
+| Legacy tool compatibility | Existing automations must not break | MEDIUM | Seven v1 tools keep schemas and deterministic guarantees; additive tools/fields only; search interop and `group_id` isolation unchanged |
+| Structured fail-closed errors | Operators need machine-actionable codes, not stack traces | LOW | Extend documented codes; never log full payloads/credentials/source text |
+| Test-group isolation | Implementation must not touch live catalog groups | LOW | Tests only `oracle-catalog-tool-test`; no `oracle-catalog-v2` writes; no production/canary execution in this milestone |
 
-### Differentiators (Competitive Advantage)
+### Differentiators (Trustworthy Catalog Behavior)
 
-These are the value of this milestone relative to existing Graphiti MCP semantic ingestion. They are still required by PROJECT.md Active requirements, but they are what make the product fit structured catalogs.
+These distinguish a canary-ready administrative surface from generic graph write APIs.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Deterministic UUIDv5 identity over fixed identity strings | Exact one-object identity for ~14k entities / 30k+ edges; safe retry | HIGH | Entity: `group_id\|entity_type\|graph_key`; Edge: `group_id\|edge_type\|edge_key`; Source: `group_id\|Source\|source_key`; Batch: `group_id\|Batch\|batch_id` |
-| Idempotent typed upserts (hash-audited) | Re-run same batch → same graph; detect content change without duplicate nodes | HIGH | Core Value: “retry safely and commit as exactly one deterministic, correctly typed, searchable Neo4j object” |
-| No implicit generic endpoint creation | Avoids `add_triplet` class of graph pollution when names/UUIDs missing | HIGH | Standalone edge upsert requires pre-existing **typed** endpoints |
-| `upsert_provenance` on installed episodic/provenance schema (no `add_episode`, no LLM, no queue, no generic domain nodes) | Trace catalog rows to PDF/DDL/dictionary evidence without semantic extraction | HIGH | Phase 2. If direct episode→entity linking unsupported, document closest installed representation — do not invent schema |
-| `CatalogIngestBatch` status nodes + `get_catalog_ingest_status` | Restart-safe batch status without polluting Entity search | MEDIUM | Phase 2. Non-`Entity` label; internal status only |
-| `upsert_catalog_batch` atomic orchestration | One request: validate → resolve endpoints → pre-tx embeddings → one atomic domain tx → safe failed-status persistence → retry idempotency → batch conflict detection | HIGH | Phase 2 only after Phase 1 gate. Complete validation of nested collections |
-| Same-request endpoint resolution inside batch | Batch can introduce entities then edges without multi-round-trip races | HIGH | Phase 2; standalone `upsert_typed_edges` still forbids implicit create |
-| Explicit semantic-vs-deterministic ingestion guidance | Agents choose `add_memory` for narrative memory, catalog tools for dictionaries/DDL | LOW | Documentation + tool purpose clarity |
+| Visible FE/BO lane separation | Agents and operators can tell front-end vs back-office catalog objects without out-of-band docs | MEDIUM | Grammar in keys/attributes is inspectable via resolve/manifest; wrong lane is a hard error, not a soft warning |
+| Endpoint-pair authority on server | Schema integrity survives buggy agents and regenerated parsers | MEDIUM | Maps are server constants; capabilities expose them; clients cannot widen pairs |
+| Immutable prepare-then-commit protocol | Agent crash mid-ingest cannot leave half-applied domain state for a prepared plan | HIGH | Prepare does not write domain entities/edges and does **not** embed; commit embeds then atomically writes domain+evidence+manifest+terminal statuses in one Neo4j tx where supported; discard non-destructive to domain |
+| Exact evidence links | Provenance remains auditable and non-fabricating under concurrent writes | MEDIUM | Explicit links + ordered/CAS patterns already proven in v1.0; v1.1 forbids Cartesian expansion path in nested batch |
+| Manifest as verification authority | Post-restart operators verify committed intent without replaying full request bodies | HIGH | Manifest hash must match commit-time plan hash; verify can assert completeness against manifest alone |
+| Capabilities as contract surface | Multi-agent fleets pin behavior to server-advertised protocol/grammar versions | LOW | Version fields must change when maps/grammar/hash coverage change |
+| Read diagnostics under write-disable | Safe production posture: inspect without enabling mutation | LOW | Operator can leave writes off, still resolve/verify/status/capabilities |
+| Migration guidance without silent rekey | Catalog-v1 → v2 is explicit and operator-driven | LOW | Docs only: no automatic identity migration; changing namespace or grammar re-keys — never silent |
 
-### Anti-Features (Commonly Requested, Often Problematic)
-
-Explicit PROJECT.md Out of Scope / Constraints. Do not build.
+### Anti-Features (Seem Useful; Reject)
 
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| LLM extraction for structured catalog data | Reuse `add_memory` / episodes | Non-deterministic identities, inferred relationships, unwanted generics | Deterministic typed upsert tools only |
-| Async queue / fire-and-forget catalog writes | Match `add_memory` DX | Success ≠ commit; restart drops work; partial state | Synchronous tools; return after commit/rollback |
-| Caller-supplied database UUID as identity authority | Client convenience | Collides with Graphiti UUID semantics; breaks determinism | Server UUIDv5 from configured namespace + graph keys |
-| Automatic UUID namespace generation | Zero-config deploy | Changing namespace rewrites every identity | Require explicit immutable `GRAPHITI_CATALOG_UUID_NAMESPACE` |
-| Implicit endpoint creation on edge upsert | Fewer round-trips | Generic Entity nodes; type drift; hard cleanup | Pre-create via `upsert_typed_entities` or batch same-request resolution |
-| Arbitrary Cypher / labels / property names from client | Flexibility | Cypher injection; schema drift | Fixed server allowlists only |
-| Full catalog production ingest in this milestone | Ship the ~14k object catalog | Out of scope; live groups risk | Fixtures + future canary only; test group `oracle-catalog-tool-test` |
-| Kubernetes deployment / live rollout automation | Ops convenience | Task must not deploy | Document config only |
-| Mutating existing live groups (`oracle-catalog-v2`, etc.) | Validate against real data | Data loss / pollution | Tests only `oracle-catalog-tool-test` |
-| Graph deletion / `clear_graph` in catalog workflow | Easy test reset | Destroys unrelated data | Never call clear/delete existing graph data in this work |
-| Changing `add_memory` queue behavior | Make semantic path “safer” | Breaks existing MCP contracts | Leave queue unchanged |
-| Multi-backend portability claims (FalkorDB/Kuzu/Neptune) | Abstraction purity | Typed persistence needs Neo4j semantics first | Neo4j first; isolate service boundaries only for future work |
-| Automatic community creation during upsert | Search quality | Heavy LLM maintenance; not ingestion | Community-neutral upserts; only verify `build_communities` still runs safely |
-| MD5 or non-canonical hashing | Legacy familiarity | Collision / audit weakness | SHA-256, 64 lowercase hex only |
-| Logging full payloads / source text / credentials | Debug ease | Secrets and PII in logs | Log batch IDs and counts only |
-| Invented provenance schema if episode linking differs | “Clean” design | Diverges from installed Graphiti search/provenance | Closest compatible installed representation + document gap |
+| Silent unknown-field strip | "Be lenient with agents" | Hides schema drift; identity/hash diverge from client intent | Fail closed with field path in `validation_error` |
+| Auto FE/BO remapping of v1 keys | "Ease migration" | Rekeys identities; breaks retry/idempotency; corrupts canary baselines | Explicit new keys + documented migration; never reinterpret |
+| Client-supplied endpoint maps | "Support new pairs without deploy" | Injection/schema drift; Cypher-adjacent risk; non-reproducible graphs | Server allowlist only; expand via versioned release |
+| Cartesian provenance (all sources × all targets) | "Fewer lines of agent code" | Invents unproven links; blows limits; non-auditable | Explicit evidence links only |
+| Prepare that writes domain objects | "Faster commit" | Partial domain state on crash; breaks atomic story | Prepare = plan/status only; domain write only on commit |
+| Mutable prepared plans | "Edit without re-prepare" | Hash/identity ambiguity; race with concurrent commit | Immutable plan; discard + re-prepare |
+| Soft warnings for illegal endpoint pairs | "Partial success" | Leaves illegal edges if atomic false elsewhere; canary false confidence | Fail closed before side effects; atomic batches roll back fully |
+| Automatic v1→v2 identity migration tool in-process | "One-click upgrade" | Dangerous on live groups; out of scope; irreversible rekey risk | Separate approved ops milestone; docs-only guidance in v1.1 |
+| Production/canary execution in this milestone | "Prove end-to-end" | Scope breach; mutates live groups; blocks honest gate | Docs + procedure only; execute canary under separate approval |
+| Parser / inferred relationships / path-impact APIs | "Complete catalog product" | Different milestone; contaminates substrate hardening | Defer: parser, inference, object-context, delta/retirement |
+| Caller UUID as identity authority | "Match external systems" | Breaks deterministic UUIDv5 contract | Server UUIDv5 only; external IDs as attributes |
+| Logging full catalog payloads | "Easier debug" | Secrets/PII/source leakage | Batch IDs + counts + structured codes only |
+| Disabling reads when writes disabled | "Single feature flag" | Blocks diagnosis of failed canaries | Split read/write gates |
+| FalkorDB/other backend claims | "Portability" | Unproven transaction/label/vector semantics | Neo4j only; no portability claim |
+
+## Observable Contracts (Client/Operator Perspective)
+
+### Request validation
+
+- Complete nested validation before any embedding or Neo4j write.
+- Unknown fields at any nesting depth → `validation_error` with path.
+- Collection/string/hash/prefix/confidence/NaN/infinity/protected-property rules remain enforced.
+- Execution flags (`dry_run`, `atomic`, prepare/commit mode) are validated and, once prepared, immutable relative to that `batch_id` + plan hash.
+
+### Identity (catalog-v2)
+
+- UUIDv5 authority unchanged: entity `group_id|entity_type|graph_key`; edge `group_id|edge_type|edge_key`; source `group_id|Source|source_key`; batch `group_id|Batch|batch_id`.
+- FE/BO/COMMON isolation is visible in grammar (keys and/or typed attributes as specified in phase design) and fail-closed on violation.
+- Caller database UUIDs never identity authority.
+- Namespace still immutable deployment config; change rekeys everything — document, never auto-generate.
+
+### Endpoint pairs
+
+- For each edge type, only documented `(source_entity_type, target_entity_type)` pairs accepted.
+- Prefix checks still apply per endpoint type.
+- `EnforcedBy` still requires non-empty evidence.
+- Illegal pair → structured error before embeddings/writes.
+
+### Hashes and capabilities
+
+- Server-authoritative content/request/catalog hashes cover all domain-bearing fields defined by the contract.
+- Optional client hashes compared; mismatch fails closed.
+- Capabilities tool/response exposes: write/read enabled, limits, allowlists, endpoint maps, protocol/grammar versions, backend = Neo4j only.
+
+### Prepare / commit / discard
+
+**Approved tools (exact names):** `prepare_catalog_batch`, `commit_prepared_catalog_batch`, `discard_prepared_catalog_batch`, `get_catalog_capabilities`, `get_catalog_evidence`, `get_catalog_batch_manifest`, `resolve_typed_edges`.
+
+| Operation | Domain graph write | Embeddings | Persists | Idempotent replay | On conflict |
+|-----------|--------------------|------------|----------|-------------------|-------------|
+| prepare | No | **No** (validation/resolution/projections only) | Immutable plan + **full bounded canonical payload** (+ hashes); token returned | Same plan → unchanged; different content same id → `prepared_plan_conflict` | No domain mutation |
+| commit | Yes — **one Neo4j tx**: domain + evidence + manifest + terminal batch status + plan terminal state | **Yes** — from stored payload **before** domain tx | Terminal committed state | Same plan hash → unchanged / already_consumed | Full rollback; optional separate failure-status tx only |
+| discard | No | No | Clears/marks plan discarded | Safe if already discarded | Never deletes unrelated domain data |
+| dry_run (legacy/path) | No | No | No persistent plan (or non-authoritative) | N/A | Validation only |
+
+### Provenance evidence
+
+- Explicit links only; no sources×targets product.
+- Missing targets → `provenance_target_missing`, no partial write under atomic.
+- No LLM, queue, or `add_memory` path.
+
+### Manifest and verification
+
+- On successful commit: durable manifest with exact identities, counts, hashes, timestamps.
+- Manifest nodes non-`Entity`; excluded from search/communities (same isolation principle as `CatalogIngestBatch`).
+- Verification modes: explicit keys (v1), batch_id → status, batch_id → manifest-backed expected set.
+- `resolve_typed_edges` mirrors entity resolve diagnostics for edges.
+
+### Gates
+
+| Surface | Write gate off | Read gate off (if separate) |
+|---------|----------------|-----------------------------|
+| upsert_* / prepare / commit | `feature_disabled` | N/A |
+| resolve_* / verify / status / capabilities / manifest read | Allowed | `feature_disabled` or equivalent |
+| Existing non-catalog MCP tools | Unaffected | Unaffected |
+
+### Required structured error codes (v1.1 additive)
+
+`unsupported_identity_schema`, `invalid_system_key`, `edge_endpoint_pair_not_allowed`, `prepared_plan_not_found`, `prepared_plan_expired`, `prepared_plan_conflict`, `prepared_plan_already_consumed`, `manifest_mismatch`, `provenance_link_conflict` — plus retained v1 codes (`validation_error`, `feature_disabled`, `content_hash_mismatch`, …).
+
+### Security / privacy
+
+- No client labels/property names interpolated into Cypher.
+- No credentials, full payloads, raw documents, or complete source text in logs or status/manifest summary fields.
+- `group_id` required and constrains every catalog read/write.
+- Bounded nested JSON (depth/nodes/string lengths) to resist payload bombs.
+
+### Compatibility
+
+- Preserve **MCP tool names** and legacy **semantic** tools. Catalog-v2 **intentionally breaks** seven deterministic request identity/provenance/hash contracts where required — **do not** claim old catalog-v1 request payloads remain accepted.
+- Search: catalog entities via `search_nodes`; facts via `search_memory_facts`.
+- No `clear_graph`, no live-group mutation in tests, no canary execution, no automatic v1→v2 migration, no parser/inference.
 
 ## Feature Dependencies
 
 ```
-Catalog config (namespace + limits + feature flag)
-    └──requires──> Allowlisted request models + validation
-                       └──requires──> Deterministic identity (UUIDv5 + SHA-256)
-                                          ├──requires──> Pre-tx embeddings (configured embedder)
-                                          │                  └──requires──> Neo4j typed write transactions
-                                          │                                     ├──upsert_typed_entities
-                                          │                                     └──upsert_typed_edges ──requires──> existing typed endpoints
-                                          ├──resolve_typed_entities (read-only)
-                                          └──verify_catalog_batch (read-only)
+Strict recursive contracts
+    └──requires──> Immutable execution flags
+                       └──enhances──> Authoritative batch hashes
 
-Phase 1 gate (unit + Neo4j int + format + typecheck + MCP registration + regression + generic-duplicate)
-    └──blocks──> Phase 2
+FE/BO identity grammar
+    └──requires──> Strict recursive contracts
+    └──enhances──> Manifest identity lists
 
-Phase 2:
-upsert_typed_entities + upsert_typed_edges + verify_catalog_batch
-    └──requires──> upsert_provenance (installed episodic/provenance schema)
-    └──requires──> CatalogIngestBatch status + get_catalog_ingest_status
-    └──requires──> upsert_catalog_batch (atomic orchestration)
-                       ├──requires──> same-request endpoint resolution
-                       ├──requires──> pre-transaction embeddings
-                       ├──requires──> failed-status persistence without domain partial commit
-                       └──requires──> retry idempotency + batch_conflict detection
+Server endpoint-pair maps
+    └──requires──> Strict recursive contracts
+    └──requires──> Capabilities discovery (advertise maps)
+    └──enhances──> resolve_typed_edges / edge upsert safety
 
-Search interoperability ──enhances──> all typed upserts (must remain Entity-searchable where intended)
-CatalogIngestBatch non-Entity label ──conflicts──> labeling status as Entity (would pollute search)
-Deterministic path ──conflicts──> LLM extraction / add_memory queue for same catalog writes
-Standalone upsert_typed_edges ──conflicts──> implicit endpoint creation
+Authoritative hashes
+    └──requires──> Strict contracts + explicit evidence model
+    └──requires──> Prepare/commit immutability
+
+Prepare/commit/discard
+    └──requires──> Authoritative hashes
+    └──requires──> Endpoint-pair maps + FE/BO grammar
+    └──requires──> Explicit evidence links
+    └──requires──> Durable manifests (on commit)
+    └──conflicts──> Prepare-with-domain-writes (anti-feature)
+
+Durable manifests
+    └──requires──> Successful atomic commit path
+    └──enhances──> Manifest-backed verification
+
+Manifest-backed verification
+    └──requires──> Durable manifests
+    └──enhances──> Split read/write gates (verify while writes off)
+
+resolve_typed_edges
+    └──requires──> Endpoint-pair maps (anomaly reporting)
+    └──enhances──> Manifest-backed verification
+
+Split read/write gates
+    └──enhances──> Capabilities discovery
+    └──enhances──> All read-only diagnostics
+
+Legacy compatibility
+    └──conflicts──> Breaking schema renames without aliases
+    └──requires──> Additive-only MCP tool changes
+
+Docs + tests (exhaustive)
+    └──requires──> All table-stakes contracts frozen
+    └──conflicts──> Production/canary execution (out of scope)
 ```
 
 ### Dependency Notes
 
-- **Config requires allowlists:** Without fixed namespace and limits, identity and batch safety are undefined.
-- **Edges require typed endpoints (standalone):** Prevents generic endpoint expansion observed with `add_triplet` when nodes are missing.
-- **Embeddings before write tx:** Embedding failure must map to `embedding_failed` with zero domain mutation.
-- **Phase 2 blocked on Phase 1 gate:** Provenance and batch orchestration depend on trusted entity/edge primitives.
-- **Status nodes must not be `Entity`:** Otherwise `search_nodes` / community paths treat ingest bookkeeping as domain knowledge.
-- **Atomic batch requires complete pre-validation:** Invalid nested item must not open domain transaction; conflicts roll back completely.
-- **Provenance must not call `add_episode`:** That reintroduces LLM extraction and async/episode identity issues called out in PROJECT context.
+- **Prepare/commit requires hashes + maps + grammar + evidence:** plan identity is incomplete without all four; otherwise commit cannot be deterministic.
+- **Manifest requires commit:** do not persist "expected" domain manifests from prepare alone if that implies domain presence; prepare stores plan, commit stores manifest of applied identities.
+- **Manifest-backed verify requires read path while writes disabled:** otherwise operators cannot audit a locked environment.
+- **Legacy compatibility conflicts with silent v2 rekey:** additive tools preferred over redefining `graph_key` meaning in place.
 
-## Behavioral Contracts (Production-Safe Upserts)
+## Edge Cases (Must Specify in Requirements)
 
-These are the non-negotiable runtime contracts for every catalog write tool.
+| Case | Expected behavior |
+|------|-------------------|
+| Unknown nested field in attributes/source_refs | `validation_error`; no write |
+| Prepared batch_id reused with different content hash | conflict; plan unchanged |
+| Commit after discard | fail; no domain write |
+| Commit when write gate off | `feature_disabled`; plan retained |
+| Prepare when write gate off | `feature_disabled` (prepare is mutation of control plane) unless design explicitly allows plan-only under read — default: prepare needs write gate |
+| Resolve/verify when write gate off | success if data exists |
+| Illegal endpoint pair in dry_run | error; no write; no plan unless prepare path |
+| Explicit provenance link to missing target | `provenance_target_missing`; atomic full fail |
+| Cartesian-sized link explosion attempt | reject at validation (link count / require explicit pairs) |
+| FE key used with BO-only edge pair | fail closed |
+| Concurrent identical commit | one logical domain outcome; idempotent unchanged |
+| Concurrent different content same batch_id | one winner; loser `batch_conflict`; no mixed graph |
+| Embedding failure during commit | no domain partial write; failed status via post-rollback status tx only |
+| Prepare stores hashes only | **rejected by contract** — payload must be rehydratable at commit |
+| Capabilities when writes disabled | still returns maps/limits/`enabled=false` after successful server init |
+| Server restart after prepare before commit | plan durable; commit still applies or discards |
+| Server restart after commit | status+manifest durable; verify works |
+| Legacy tool **names** without prepare | names preserved; v2 request contracts may fail closed on v1-shaped payloads |
+| Capabilities under disabled catalog writes | still returns enabled=false + maps/limits whenever server init succeeds |
 
-| Contract | Rule |
-|----------|------|
-| Typed | Only allowlisted entity/edge/source/batch types and prefixes; labels/properties server-owned |
-| Deterministic | Same namespace + `group_id` + type + key → same UUIDv5; same canonical payload → same SHA-256 |
-| Synchronous | MCP caller blocked until commit or rollback |
-| Idempotent | Re-upsert identical content: no duplicate nodes/edges; preserve `created_at`; refresh `updated_at`/payload/embeddings as needed |
-| Auditable | Persist canonical payload SHA-256; structured item-level errors |
-| Isolated | All ops constrained by `group_id` |
-| Non-semantic | Zero LLM calls; zero ingestion queue; zero generic endpoint creation |
-| Atomic (batch) | One domain transaction; conflict/write failure → full rollback; status persistence must not imply domain success |
-| Searchable | Domain entities/edges remain compatible with existing hybrid search embeddings/labels |
-| Safe ops | No deploy; no live-group mutation; no graph clear/delete; preserve unrelated working-tree files |
+## Migration Implications
 
-### Phase 1 Gate (explicit)
+| Topic | v1.1 stance |
+|-------|-------------|
+| Existing v1 identities in test/live graphs | Leave untouched; no auto-migration |
+| New catalog-v2 FE/BO keys | New writes only under explicit grammar |
+| Namespace change | Forbidden as casual ops; full rekey; docs warn |
+| Client scripts on seven tools | Keep working; optional new tools for prepare/commit/manifest/resolve_edges/capabilities |
+| Regenerated canary | Procedure documented; **not executed** this milestone |
+| Production writes | Out of scope |
+| Hash coverage expansion | Protocol version bump; old client hashes may mismatch until clients recompute — document |
 
-Phase 2 **must not start** until all of the following pass and a short Phase 1 report records the result:
+## MVP Definition (v1.1 Hardening)
 
-1. Focused unit tests for catalog primitives
-2. Neo4j integration tests (group `oracle-catalog-tool-test` only)
-3. Formatting
-4. Changed-code type checking
-5. MCP tool listing / schema registration for new tools
-6. Relevant existing MCP regression tests
-7. Generic-duplicate checks (no accidental generic Entity endpoints from catalog path)
+### Ship in this milestone
 
-Phase 1 delivers: `upsert_typed_entities`, `upsert_typed_edges`, `resolve_typed_entities`, `verify_catalog_batch` (+ config, models, validation, docs slice as needed for those tools).
+- [ ] Strict recursive fail-closed request contracts + immutable flags
+- [ ] Catalog-v2 FE/BO/COMMON identity grammar (visible, deterministic)
+- [ ] Server-owned edge endpoint-pair maps enforced pre-side-effect
+- [ ] Authoritative combined hashing + capabilities discovery
+- [ ] Durable prepare / commit / discard protocol
+- [ ] Explicit evidence links (no Cartesian expansion)
+- [ ] Durable manifests + manifest-backed verification
+- [ ] `resolve_typed_edges`
+- [ ] Split read/write gates
+- [ ] Legacy seven-tool compatibility + search/isolation preserved
+- [ ] Exhaustive unit/service/store/MCP/concurrency/Neo4j/security/compat tests on `oracle-catalog-tool-test` only
+- [ ] Operator docs: contracts, migration guidance, canary procedure **without** execution
 
-Phase 2 delivers: `upsert_provenance`, `upsert_catalog_batch`, `get_catalog_ingest_status` (+ `CatalogIngestBatch` status model).
+### Explicitly defer (not v1.1)
 
-## MVP Definition
-
-### Launch With (v1 / Phase 1 — foundation)
-
-- [ ] Catalog upsert configuration (immutable UUID namespace + batch limits + disable/feature path)
-- [ ] Allowlisted entity/edge request models with full validation
-- [ ] `upsert_typed_entities` — sync deterministic typed entity upsert
-- [ ] `upsert_typed_edges` — sync deterministic typed edge upsert (typed endpoints required)
-- [ ] `resolve_typed_entities` — read-only conflict/missing/generic/unembedded detector
-- [ ] `verify_catalog_batch` — read-only identity/type/endpoint/embedding verification
-- [ ] Structured error codes + `group_id` isolation
-- [ ] Pre-tx embeddings; SHA-256 audit; preserve `created_at` / add `updated_at`
-- [ ] Phase 1 unit + Neo4j integration + format + typecheck + MCP registration + regression gate report
-- [ ] Minimal docs for Phase 1 tools, namespace immutability, allowlists, idempotency
-
-### Add After Validation (v1.x / Phase 2 — only after gate)
-
-- [ ] `upsert_provenance` — installed Graphiti episodic/provenance representation, no LLM/queue
-- [ ] `CatalogIngestBatch` status nodes + `get_catalog_ingest_status`
-- [ ] `upsert_catalog_batch` — complete validation, same-request endpoint resolution, pre-tx embeddings, one atomic domain tx, failed-status persistence, retry idempotency, `batch_conflict`
-- [ ] Full docs: atomicity, limits, ACCEPT_TAB examples, rollout/rollback, semantic-vs-deterministic guidance
-- [ ] Search interoperability + safe `build_communities` verification coverage expanded as needed
-
-### Future Consideration (v2+ / explicitly deferred)
-
-- [ ] Full production catalog ingest / canary procedure against real groups
-- [ ] Kubernetes deployment automation
-- [ ] Multi-backend (non-Neo4j) catalog persistence claims
-- [ ] Automatic community updates on catalog upsert
-- [ ] Any change to `add_memory` queue durability model
-- [ ] Live-group migration tools or graph cleanup utilities
+- [ ] Oracle/SQL/PLSQL parser
+- [ ] Inferred relationships / scoring
+- [ ] Object-context / path / impact APIs
+- [ ] Catalog delta / retirement / FE-BO runtime correlation
+- [ ] Automatic v1→v2 identity migration
+- [ ] Production migration, production writes, canary execution
+- [ ] FalkorDB or multi-backend catalog claims
+- [ ] K8s deployment / full 14k entity ingest
 
 ## Feature Prioritization Matrix
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| Config + allowlisted models + validation | HIGH | MEDIUM | P1 |
-| `upsert_typed_entities` | HIGH | HIGH | P1 |
-| `upsert_typed_edges` (no implicit endpoints) | HIGH | HIGH | P1 |
-| Deterministic UUIDv5 + SHA-256 + preserve timestamps/names | HIGH | MEDIUM | P1 |
-| Sync / no LLM / no queue / no caller UUID authority | HIGH | MEDIUM | P1 |
-| `resolve_typed_entities` | HIGH | MEDIUM | P1 |
-| `verify_catalog_batch` | HIGH | MEDIUM | P1 |
-| Structured errors + `group_id` isolation | HIGH | MEDIUM | P1 |
-| Pre-tx embeddings + Neo4j typed tx | HIGH | HIGH | P1 |
-| Phase 1 gate report + tests on `oracle-catalog-tool-test` | HIGH | MEDIUM | P1 |
-| `upsert_provenance` | HIGH | HIGH | P2 (Phase 2) |
-| `CatalogIngestBatch` + `get_catalog_ingest_status` | HIGH | MEDIUM | P2 |
-| `upsert_catalog_batch` atomic orchestration | HIGH | HIGH | P2 |
-| Full operator docs / ACCEPT_TAB / rollout guidance | MEDIUM | LOW | P2 |
-| Search + `build_communities` compatibility verification | HIGH | MEDIUM | P1–P2 |
-| Full catalog ingest / K8s deploy / multi-backend | LOW (this milestone) | HIGH | P3 / out of scope |
-| Auto communities / caller UUID identity / LLM catalog path | LOW | HIGH | Anti-feature |
+| Strict recursive contracts | HIGH | MEDIUM | P1 |
+| FE/BO identity grammar | HIGH | MEDIUM | P1 |
+| Endpoint-pair maps | HIGH | MEDIUM | P1 |
+| Authoritative hashes | HIGH | MEDIUM | P1 |
+| Capabilities discovery | HIGH | LOW | P1 |
+| Prepare/commit/discard | HIGH | HIGH | P1 |
+| Explicit evidence links | HIGH | MEDIUM | P1 |
+| Durable manifests | HIGH | HIGH | P1 |
+| Manifest-backed verification | HIGH | MEDIUM | P1 |
+| resolve_typed_edges | HIGH | MEDIUM | P1 |
+| Split read/write gates | HIGH | LOW | P1 |
+| Legacy compatibility + tests/docs | HIGH | MEDIUM | P1 |
+| Auto migration tooling | MEDIUM | HIGH | P3 (out of scope) |
+| Parser / inference / path APIs | HIGH later | HIGH | P3 (later milestone) |
+| Canary execution | HIGH later | MEDIUM | P3 (separate approval) |
 
 **Priority key:**
-- P1: Phase 1 — must ship and gate before Phase 2
-- P2: Phase 2 — after Phase 1 report
-- P3: Deferred / out of scope for this milestone
+- P1: Must have for v1.1 pre-canary hardening
+- P2: Should have if schedule allows (none reserved — hardening is the milestone)
+- P3: Future / explicit non-goal this milestone
 
 ## Competitor / Baseline Feature Analysis
 
-Not external SaaS competitors — comparison is against **installed Graphiti MCP paths** that are unsafe for this catalog baseline.
-
-| Capability | `add_memory` / episodes | `add_triplet` | Deterministic catalog tools (this milestone) |
-|------------|-------------------------|---------------|-----------------------------------------------|
-| Sync commit to caller | No (queued) | Yes | Yes |
-| LLM extraction | Yes | No (but may still resolve via LLM paths in core) | Never |
-| Identity | Episode/entity UUIDs non-catalog-deterministic | Caller or generated UUID; name resolve | UUIDv5 from fixed namespace + graph keys |
-| Endpoint creation | Extraction creates entities | Can create generic endpoints if missing | Never for standalone edges; typed only |
-| Idempotent catalog retry | Unsafe / non-exact | Weak / UUID overwrite hazards | Required (hash + UUIDv5) |
-| Typed catalog ontology | Registry/`excluded_entity_types` fragile | Free-form names | Fixed allowlists + prefixes |
-| Provenance | Episode MENTIONS via extraction | Weak | Phase 2 installed-schema provenance links |
-| Batch atomicity | No | Single triplet | Phase 2 `upsert_catalog_batch` |
-| Suitable for 14k+ dictionary objects | No | No | Yes (with batch limits) |
-
-## Acceptance-Test Implications
-
-| Contract | Test implication |
-|----------|------------------|
-| Idempotent entity upsert | Insert → re-insert identical payload → same UUID, count unchanged, `created_at` stable, `updated_at` advances on change only as specified |
-| Content hash | Mutate payload → hash changes → upsert updates; wrong hash → `content_hash_mismatch` |
-| Prefix/type allowlist | Bad prefix/type → `graph_key_prefix_mismatch` / `entity_type_conflict` / `validation_error` |
-| Edge without endpoint | `missing_endpoint`; mistyped → `endpoint_type_mismatch`; bare Entity → `generic_endpoint_conflict` |
-| Deterministic UUID conflict | Same UUID different identity payload → `deterministic_uuid_conflict` |
-| Batch limits | Over limit → `batch_limit_exceeded` without partial write |
-| Namespace | Missing/invalid → `invalid_uuid_namespace` / `feature_disabled` |
-| Embeddings | Embedder failure → `embedding_failed`, zero domain nodes/edges written |
-| Tx failure | Neo4j error → `neo4j_transaction_failed`, full rollback |
-| Sync | Tool await completes only after commit/rollback observable in Neo4j |
-| Isolation | Writes in `oracle-catalog-tool-test` invisible/unaltered in other group_ids |
-| No LLM/queue | Catalog tools do not enqueue `QueueService`; no LLM client calls |
-| Search | Upserted typed entities/edges retrievable via `search_nodes` / `search_memory_facts` when embedded |
-| Communities | `build_communities` runs without crash on test group; upsert itself does not auto-build |
-| Phase 2 batch | Partial invalid item → no domain commit; retry same batch_id idempotent; conflicting batch → `batch_conflict` |
-| Provenance | Links only to existing targets; missing → `provenance_target_missing`; no generic domain nodes |
-| Status | `CatalogIngestBatch` not returned as Entity search hits |
-| Regression | Existing MCP tests still pass; no commits touch unrelated dirty files unless approved |
-
-## Supplied-Requirement Categorization Summary
-
-| Category | Contents |
-|----------|----------|
-| **Table stakes** | Config, allowlists/validation, four Phase 1 tools, sync/no-LLM/no-queue, UUIDv5+SHA-256, embeddings-before-tx, Neo4j typed writes, `group_id`, structured errors, timestamp/name preservation, Phase 1 gate, test isolation, search compatibility, docs for safe use |
-| **Differentiators** | Deterministic catalog identity at scale; idempotent audited upserts; no generic endpoints; Phase 2 provenance + atomic batch + non-Entity ingest status |
-| **Anti-features** | LLM catalog path, async catalog writes, caller UUID authority, auto namespace, implicit endpoints, arbitrary Cypher/labels, full ingest, K8s deploy, live-group mutation, graph clear/delete, changing `add_memory`, multi-backend claims, auto communities, MD5, payload logging, invented provenance schema |
-| **Phase 1 only** | `upsert_typed_entities`, `upsert_typed_edges`, `resolve_typed_entities`, `verify_catalog_batch` + foundations |
-| **Phase 2 only (gated)** | `upsert_provenance`, `upsert_catalog_batch`, `get_catalog_ingest_status` / `CatalogIngestBatch` |
-| **Explicit non-goals** | See PROJECT.md Out of Scope — retained verbatim in Anti-Features |
+| Feature | Semantic Graphiti MCP (`add_memory`) | Generic Cypher admin | Deterministic catalog (this product) |
+|---------|--------------------------------------|----------------------|--------------------------------------|
+| Exact identity | No (LLM extract + fresh UUIDs) | Manual | UUIDv5 + hashes |
+| Typed endpoints | Weak / generic create risk | Manual | Fail-closed maps |
+| Idempotent retry | Queue/async hazards | Manual | Designed |
+| Provenance | Episode extract | Ad hoc | Explicit links, no Cartesian |
+| Agent crash safety | Partial episodes possible | Manual tx | Prepare/commit + atomic domain |
+| Audit expected set | No | Manual queries | Durable manifest |
+| FE/BO isolation | None | Manual labels | Grammar + gates |
 
 ## Sources
 
-- `.planning/PROJECT.md` — validated/active requirements, out of scope, constraints, key decisions, identity/error allowlists, phase gate (HIGH)
-- `mcp_server/src/graphiti_mcp_server.py` — existing tools: `add_memory` (queued), `add_triplet` (can create endpoints), search, communities, clear/delete (HIGH)
-- `graphiti_core/graphiti.py` `add_triplet` — resolve/create endpoints, embedding generation, edge UUID overwrite hazards (HIGH)
-- `graphiti_core/nodes.py` / `edges.py` — Entity/Episodic models, `name_embedding`/`fact_embedding`, `group_id`, MENTIONS provenance edges (HIGH)
-- `mcp_server/src/models/*` — current semantic entity/edge types (baseline; catalog types are separate allowlists) (HIGH)
-- `mcp_server/sample_catalog.json` + `catalog/*` — structured dictionary shape motivating deterministic tools (MEDIUM for product scope; fixture evidence)
-- `.planning/codebase/ARCHITECTURE.md`, `CONCERNS.md` — MCP queue non-durability, Cypher label safety, Neo4j-first driver notes (HIGH)
+- `.planning/PROJECT.md` — v1.1 active requirements and non-goals
+- `.planning/milestones/v1.0-REQUIREMENTS.md` — shipped baseline (86 requirements)
+- `mcp_server/src/models/catalog_*.py` — current request/response contracts
+- `mcp_server/src/graphiti_mcp_server.py` / catalog services — existing seven-tool surface
+- Operator constraints: Neo4j-only, test group isolation, no production/canary execution
 
 ---
-*Feature research for: Deterministic Catalog Ingestion for Graphiti MCP*
-*Researched: 2026-07-16*
-*Scope discipline: no invented features; every Active/Out-of-Scope PROJECT constraint retained*
+*Feature research for: Catalog-v2 Pre-Canary Hardening (MCP client/operator contracts)*
+*Researched: 2026-07-17*
+*Replaces: obsolete v1.0-oriented FEATURES.md content for this milestone*
