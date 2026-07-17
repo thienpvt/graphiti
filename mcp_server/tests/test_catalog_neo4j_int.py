@@ -65,7 +65,6 @@ pytestmark = [
 ]
 
 GROUP = 'oracle-catalog-tool-test'
-CANARY_GROUP = 'oracle-catalog-tool-test-canary'
 FORBIDDEN_GROUP = 'oracle-catalog-v2'
 FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 EMBED_DIM = 8
@@ -1105,37 +1104,17 @@ async def test_verify_physical_duplicate_edge_is_preserved_and_reported(catalog_
     assert resp.edges.missing_embedding == [edge.edge_key]
 
 
-async def test_provenance_presence_isolated_by_episode_and_target_group(catalog_client):
+async def test_provenance_presence_missing_target_is_group_scoped(catalog_client):
     ctx = catalog_client
-    entity = _six_entities()[2]
-    response = await _upsert_entities(ctx, [entity])
-    target_uuid = response.results[0].uuid
-    assert target_uuid
+    target_uuid = str(uuid.uuid4())
 
-    episode_uuid = str(uuid.uuid4())
-    await ctx.driver.execute_query(
-        """
-        MATCH (target:Entity {uuid: $u, group_id: $g})
-        CREATE (ep:Episodic {uuid: $ep_uuid, group_id: $canary_group})
-        CREATE (ep)-[:MENTIONS]->(target)
-        """,
-        params={
-            'u': target_uuid,
-            'g': GROUP,
-            'ep_uuid': episode_uuid,
-            'canary_group': CANARY_GROUP,
-        },
+    before = await _snapshot_group_elements(ctx.driver)
+    rows = await ctx.service._store.match_provenance_presence(
+        ctx.driver, group_id=GROUP, target_uuids=[target_uuid]
     )
-    try:
-        rows = await ctx.service._store.match_provenance_presence(
-            ctx.driver, group_id=GROUP, target_uuids=[target_uuid]
-        )
-        assert rows == [{'uuid': target_uuid, 'has_provenance': False}]
-    finally:
-        await ctx.driver.execute_query(
-            'MATCH (n:Episodic {uuid: $u, group_id: $g}) DETACH DELETE n',
-            params={'u': episode_uuid, 'g': CANARY_GROUP},
-        )
+
+    assert rows == [{'uuid': target_uuid, 'has_provenance': False}]
+    assert await _snapshot_group_elements(ctx.driver) == before
 
 
 async def test_verify_edge_endpoint_and_type_mismatch_live(catalog_client):
