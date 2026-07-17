@@ -10,6 +10,17 @@ The v1.0 implementation preserves existing Graphiti and MCP behavior. It deliver
 
 A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
 
+## Current Milestone: v1.1 Catalog-v2 Pre-Canary Hardening
+
+**Goal:** Harden deterministic catalog identity, validation, provenance, prepare/commit, manifest, and verification contracts before any regenerated canary is executed.
+
+**Target features:**
+- Strict recursive catalog request contracts and fail-closed catalog-v2 FE/BO identity grammar
+- Server-owned edge endpoint maps plus authoritative batch hashing and capabilities discovery
+- Restart-safe immutable prepare/commit/discard protocol with exact evidence links
+- Durable batch manifests, manifest-backed verification, typed edge resolution, and split read/write gates
+- Exhaustive unit, service, store, MCP, concurrency, live Neo4j, security, compatibility, and documentation coverage
+
 ## Requirements
 
 ### Validated
@@ -23,7 +34,16 @@ A catalog item can be retried safely and commits as exactly one deterministic, c
 
 ### Active
 
-None for v1.0.
+- [ ] Catalog requests reject unknown fields recursively and enforce immutable execution flags
+- [ ] Catalog-v2 identities visibly and deterministically isolate FE, BO, and COMMON objects
+- [ ] Every catalog edge type enforces a finite server-owned endpoint type map before side effects
+- [ ] Combined batch hashes cover all domain content and expose server capabilities safely
+- [ ] Agents can prepare, commit, replay, and discard bounded restart-safe immutable batch plans
+- [ ] Provenance uses explicit deterministic evidence links without Cartesian expansion
+- [ ] Every committed batch has a durable exact manifest and manifest-backed verification
+- [ ] Read-only catalog diagnostics remain usable while catalog mutation is disabled
+- [ ] Existing legacy MCP contracts, deterministic guarantees, search interoperability, and graph isolation remain intact
+- [ ] Catalog-v2 migration and regenerated-canary guidance are complete without executing a canary
 
 ### Delivered in v1.0
 
@@ -49,6 +69,11 @@ None for v1.0.
 - Arbitrary Cypher, arbitrary labels, or arbitrary Neo4j property-name exposure — fixed server-owned schemas only
 - Automatic UUID namespace generation — deployments must provide one fixed UUID explicitly
 - Automatic community creation during upsert — only compatibility execution is tested
+- Oracle dictionary, SQL, or PL/SQL parsing — follows only after substrate hardening and canary validation
+- Relationship scoring or inference and agent context/path/impact tools — later retrieval milestone
+- Catalog delta, retirement, business transaction entities, or FE/BO runtime correlation — later domain work
+- Automatic catalog-v1 to catalog-v2 identity migration — identities must never be silently reinterpreted
+- Production migration, production writes, or canary execution — requires separate approval after v1.1 verification
 
 ## Context
 
@@ -135,4 +160,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-17 after v1.0 verification*
+*Last updated: 2026-07-17 after starting milestone v1.1*

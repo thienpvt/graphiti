@@ -1,20 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: Deterministic Catalog Ingestion for Graphiti MCP
-current_phase: 0
-status: Awaiting next milestone
-stopped_at: Milestone v1.0 completed, archived, and cleaned
-last_updated: "2026-07-17T06:40:10.793Z"
+milestone: v1.1
+milestone_name: Catalog-v2 Pre-Canary Hardening
+status: planning
+last_updated: "2026-07-17T15:38:40.678Z"
 last_activity: 2026-07-17
-last_activity_desc: Milestone v1.0 completed, archived, and cleaned
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 14
-  completed_plans: 14
-  percent: 100
-current_phase_name: null
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-07-17)
 
 ## Current Position
 
-Phase: Milestone v1.0 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-07-17 — Milestone v1.0 completed, archived, and cleaned
+Status: Defining requirements
+Last activity: 2026-07-17 — Milestone v1.1 started
 
 ## Performance Metrics
 
