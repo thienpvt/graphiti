@@ -214,20 +214,20 @@
       "category": "isolation",
       "plan": "03B-06",
       "requirement_id": "TEST-07",
-      "resolution": "Live suite hardcodes oracle-catalog-tool-test; never queries oracle-catalog-v2",
+      "resolution": "Current live suite source hardcodes oracle-catalog-tool-test and does not param-query oracle-catalog-v2; historical a67789a read-only v2 probes permanently block ready_for_phase_4 and keep oracle_catalog_v2_queried=true in derived safety",
       "row_index": 21,
       "task": "03B-06-T01",
-      "test_or_backstop": "mcp_server/tests/test_catalog_commit_neo4j_int.py::test_live_isolation_tool_test_only + catalog_phase3b_gate_runner.safety_no_probe",
+      "test_or_backstop": "mcp_server/tests/test_catalog_commit_neo4j_int.py::test_live_isolation_tool_test_only + catalog_phase3b_gate_runner.derive_safety_ledger",
       "verification": "live"
     },
     {
       "category": "capability-flip",
       "plan": "03B-06",
       "requirement_id": "MANI-06",
-      "resolution": "features.manifests static True after live proof; no runtime GATE-RESULTS read; verification false",
+      "resolution": "features.manifests remains static False while historical v2 hard gate blocks phase; no runtime GATE-RESULTS read; prepare_commit true; verification false; Phase 4 not opened",
       "row_index": 22,
       "task": "03B-06-T02",
-      "test_or_backstop": "mcp_server/src/services/catalog_capabilities.py + test_catalog_capabilities.py + catalog_phase3b_gate_runner.check_manifests_feature_true",
+      "test_or_backstop": "mcp_server/src/services/catalog_capabilities.py + test_catalog_capabilities.py + catalog_phase3b_gate_runner.check_manifests_feature_false",
       "verification": "structural"
     },
     {

@@ -341,17 +341,19 @@ def check_concurrency_scaffold(root: Path) -> None:
         )
 
 
-def check_manifests_feature_true(root: Path) -> None:
-    """Post 03B-06 proof: static features.manifests=True; verification remains False (D-33)."""
+def check_manifests_feature_false(root: Path) -> None:
+    """03B-06 blocked: static features.manifests=False; verification false; prepare_commit true."""
     capa = root / 'mcp_server/src/services/catalog_capabilities.py'
     if not capa.is_file():
         raise AssertionError('catalog_capabilities.py missing')
     src = capa.read_text(encoding='utf-8')
-    found = "'manifests': True" in src or '"manifests": True' in src
-    if not found:
+    if "'manifests': True" in src or '"manifests": True' in src:
         raise AssertionError(
-            'features.manifests must be True after Phase 3B live gate proof (D-33)'
+            'features.manifests must remain False while Phase 3B gate is blocked '
+            '(historical oracle-catalog-v2 probe; D-33)'
         )
+    if "'manifests': False" not in src and '"manifests": False' not in src:
+        raise AssertionError('features.manifests must be explicitly False')
     if "'manifest_verification': True" in src or '"manifest_verification": True' in src:
         raise AssertionError('features.manifest_verification must remain false (Phase 4)')
     if "'prepare_commit': True" not in src and '"prepare_commit": True' not in src:
@@ -476,7 +478,7 @@ CHECK_FUNCS = {
     'manifest_scaffold': check_manifest_scaffold,
     'recovery_scaffold': check_recovery_scaffold,
     'concurrency_scaffold': check_concurrency_scaffold,
-    'manifests_feature_true': check_manifests_feature_true,
+    'manifests_feature_false': check_manifests_feature_false,
     'edge_resolution_complete': check_edge_resolution_complete,
 }
 
@@ -629,8 +631,8 @@ def canonical_specs(root: Path, *, include_live: bool = False) -> list[dict[str,
             'kind': 'safety',
         },
         {
-            'id': 'manifests_feature_true',
-            'argv': _runner_check_argv('manifests_feature_true'),
+            'id': 'manifests_feature_false',
+            'argv': _runner_check_argv('manifests_feature_false'),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'structural',
@@ -837,11 +839,24 @@ def derive_live_proof_status(results: list[dict[str, Any]], require_neo4j: bool)
     }
 
 
+# Historical hard gate: initial live suite queried oracle-catalog-v2 read-only
+# for before/after isolation counts. Remediation cannot erase that phase history.
+HISTORICAL_ORACLE_CATALOG_V2_QUERIED = True
+HISTORICAL_V2_VIOLATION_NOTE = (
+    'initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for '
+    'before/after group counts; historical violation permanent; current source remediated'
+)
+
+
 def derive_safety_ledger(
     results: list[dict[str, Any]],
     root: Path | None = None,
 ) -> dict[str, Any]:
-    """Derive safety ledger from check results + live suite source evidence (not constants)."""
+    """Derive safety ledger from history + current source evidence (never constant false).
+
+    Historical oracle-catalog-v2 read-only probes are a hard gate: always true.
+    Current-source canary/clear_graph/param scans still run for residual violations.
+    """
     safety_ids = {'safety_no_probe'}
     by_id = {r.get('id'): r for r in results}
     safety_ok = all(
@@ -849,28 +864,29 @@ def derive_safety_ledger(
         for sid in safety_ids
     )
     canary_executed = False
-    v2_queried = False
     clear_called = False
+    current_source_v2_param = False
     if root is not None:
         live = root / 'mcp_server/tests/test_catalog_commit_neo4j_int.py'
         if live.is_file():
             src = live.read_text(encoding='utf-8')
             code = '\n'.join(_non_comment_lines(src))
             canary_executed = bool(re.search(r'\bcanary\b', code, re.IGNORECASE))
-            # Query-param use of forbidden group (assignment of FORBIDDEN constant alone is ok).
             for line in _non_comment_lines(src):
                 if 'params' in line and FORBIDDEN_GROUP in line:
-                    v2_queried = True
+                    current_source_v2_param = True
                 if 'execute_query' in line and FORBIDDEN_GROUP in line:
-                    v2_queried = True
+                    current_source_v2_param = True
                 if re.search(
                     rf"['\"]g['\"]\s*:\s*['\"]{re.escape(FORBIDDEN_GROUP)}['\"]",
                     line,
                 ):
-                    v2_queried = True
+                    current_source_v2_param = True
             clear_called = bool(re.search(r'\bclear_graph\s*\(', code))
         else:
             safety_ok = False
+    # Historical violation is permanent and blocks readiness regardless of current source.
+    v2_queried = HISTORICAL_ORACLE_CATALOG_V2_QUERIED or current_source_v2_param
     if canary_executed or v2_queried or clear_called:
         safety_ok = False
     return {
@@ -880,6 +896,9 @@ def derive_safety_ledger(
         'safety_checks_pass': safety_ok,
         'test_group': ALLOWED_TEST_GROUP,
         'forbidden_group': FORBIDDEN_GROUP,
+        'historical_oracle_catalog_v2_queried': HISTORICAL_ORACLE_CATALOG_V2_QUERIED,
+        'current_source_v2_param_query': current_source_v2_param,
+        'historical_violation_note': HISTORICAL_V2_VIOLATION_NOTE,
     }
 
 
@@ -1029,9 +1048,10 @@ def run_gate(
         'nyquist_compliant': False,
         'ready_for_phase_4': ready,
         'manifests': manifests,
-        'canary_executed': False,
-        'oracle_catalog_v2_queried': False,
-        'clear_graph_called': False,
+        # Top-level safety fields MUST mirror derived safety (never constant false).
+        'canary_executed': safety['canary_executed'],
+        'oracle_catalog_v2_queried': safety['oracle_catalog_v2_queried'],
+        'clear_graph_called': safety['clear_graph_called'],
         'safety': safety,
         'notes': {
             'integration_policy': (
@@ -1041,6 +1061,8 @@ def run_gate(
             'forbidden_group': FORBIDDEN_GROUP,
             'resolution_policy': '24/24 research probe map; no silent drop',
             'd32_policy': 'ready_for_phase_4 true only after live+safety+manifests',
+            'historical_v2_policy': HISTORICAL_V2_VIOLATION_NOTE,
+            'phase4_transition': 'blocked; no Phase 4 while historical v2 probe recorded',
         },
     }
     ledger['ledger_sha256'] = sha256_text(
@@ -1129,13 +1151,7 @@ def verify_ledger(
     if sentinel.get('argv_third') != 'assert False':
         errors.append('sentinel argv third element must be assert False')
 
-    if raw.get('canary_executed') is not False:
-        errors.append('canary_executed must be false')
-    if raw.get('oracle_catalog_v2_queried') is not False:
-        errors.append('oracle_catalog_v2_queried must be false')
-    if raw.get('clear_graph_called') is not False:
-        errors.append('clear_graph_called must be false')
-
+    # Top-level safety fields must equal derived safety (truthful blocked ledgers accepted).
     recomputed_local = derive_local_gate_pass(
         results if isinstance(results, list) else [],
         sentinel,
@@ -1160,6 +1176,21 @@ def verify_ledger(
         errors.append(
             f'ready_for_phase_4 mismatch ledger={raw.get("ready_for_phase_4")} recomputed={ready}'
         )
+    for key in ('canary_executed', 'oracle_catalog_v2_queried', 'clear_graph_called'):
+        if raw.get(key) != safety.get(key):
+            errors.append(
+                f'{key} top-level mismatch ledger={raw.get(key)!r} derived={safety.get(key)!r}'
+            )
+    # Historical violation must remain recorded (cannot be erased by remediation).
+    if safety.get('oracle_catalog_v2_queried') is not True:
+        errors.append('derived oracle_catalog_v2_queried must be true (historical hard gate)')
+    if raw.get('oracle_catalog_v2_queried') is not True:
+        errors.append('ledger oracle_catalog_v2_queried must be true (historical hard gate)')
+    # Truthful blocked ledger: ready_for_phase_4 must be false while violation holds.
+    if ready is not False:
+        errors.append('recomputed ready_for_phase_4 must be false under historical v2 gate')
+    if raw.get('ready_for_phase_4') is not False:
+        errors.append('ledger ready_for_phase_4 must be false under historical v2 gate')
 
     if isinstance(results, list):
         for r in results:
