@@ -1,31 +1,52 @@
-"""Service tests for prepare_catalog_batch control-plane path (PLAN-02/03/04/06/20)."""
+"""Service tests for prepare/commit/discard control-plane (PLAN-02..12/17..19)."""
 
 from __future__ import annotations
 
 import sys
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from config.schema import CatalogConfig  # noqa: E402
-from models.catalog_common import CatalogErrorCode  # noqa: E402
+from models.catalog_common import (  # noqa: E402
+    PLAN_STATE_COMMITTED,
+    PLAN_STATE_COMMITTING,
+    PLAN_STATE_DISCARDED,
+    PLAN_STATE_EXPIRED,
+    PLAN_STATE_PREPARED,
+    CatalogErrorCode,
+)
 from models.catalog_edges import CatalogEdgeItem  # noqa: E402
 from models.catalog_entities import CatalogEntityItem  # noqa: E402
-from models.catalog_prepare import PrepareCatalogBatchRequest  # noqa: E402
+from models.catalog_prepare import (  # noqa: E402
+    CommitPreparedCatalogBatchRequest,
+    DiscardPreparedCatalogBatchRequest,
+    PrepareCatalogBatchRequest,
+)
 from services.catalog_identity import (  # noqa: E402
+    CANONICALIZATION_VERSION,
+    CATALOG_SCHEMA_VERSION,
     batch_request_sha256,
     canonical_sha256,
     catalog_entity_uuid,
     catalog_prepared_plan_uuid,
     entity_canonical_payload,
+    mint_plan_token,
     plan_token_digest,
+)
+from services.catalog_prepared_artifact import (  # noqa: E402
+    PREPARED_ARTIFACT_SERIALIZATION_VERSION,
+    artifact_sha256,
+    chunk_artifact_bytes,
+    serialize_prepared_artifact,
 )
 from services.catalog_service import CatalogService  # noqa: E402
 from services.catalog_store import CatalogStoreError  # noqa: E402
@@ -33,6 +54,9 @@ from services.catalog_store import CatalogStoreError  # noqa: E402
 FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 GROUP = 'oracle-catalog-tool-test'
 BATCH = 'batch-prepare-001'
+PLAN_UUID = 'plan-uuid-fixed-001'
+REQUEST_SHA = 'c' * 64
+CATALOG_SHA = 'd' * 64
 
 
 def _entity(**overrides: Any) -> CatalogEntityItem:
@@ -443,3 +467,590 @@ async def test_shared_preflight_used_by_prepare_and_upsert():
     assert pre_upsert.early_kind is None
     assert pre_prepare.server_hash == pre_upsert.server_hash
     assert len(pre_prepare.entity_prepared) == len(pre_upsert.entity_prepared)
+
+
+# ---------------------------------------------------------------------------
+# Commit / discard claim-load seam (PLAN-07/10/11/12/17/18/19)
+# ---------------------------------------------------------------------------
+
+
+def _frozen_artifact(
+    *,
+    group_id: str = GROUP,
+    batch_id: str = BATCH,
+    request_sha256: str = REQUEST_SHA,
+    catalog_sha256: str = CATALOG_SHA,
+    plan_uuid: str = PLAN_UUID,
+    entity_count: int = 1,
+    edge_count: int = 0,
+) -> tuple[bytes, str, list[dict[str, Any]], dict[str, Any]]:
+    plan_id = f'{batch_id}|{request_sha256}'
+    body = {
+        'artifact_serialization_version': PREPARED_ARTIFACT_SERIALIZATION_VERSION,
+        'canonicalization_version': CANONICALIZATION_VERSION,
+        'identity_schema_version': 'catalog-v2',
+        'catalog_schema_version': CATALOG_SCHEMA_VERSION,
+        'group_id': group_id,
+        'batch_id': batch_id,
+        'system_key': 'FE',
+        'request_sha256': request_sha256,
+        'catalog_sha256': catalog_sha256,
+        'plan_id': plan_id,
+        'membership': {
+            'entities': [
+                {
+                    'uuid': 'ent-1',
+                    'entity_type': 'Table',
+                    'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                    'content_sha256': 'e' * 64,
+                    'projected_status': 'created',
+                    'name_embedding': [0.1, 0.2],
+                }
+            ]
+            if entity_count
+            else [],
+            'edges': [],
+            'sources': [],
+            'evidence_links': [],
+        },
+        'request_canonical': {'batch_id': batch_id},
+        'counts': {
+            'entities': entity_count,
+            'edges': edge_count,
+            'sources': 0,
+            'evidence_links': 0,
+            'created': entity_count,
+            'updated': 0,
+            'unchanged': 0,
+        },
+    }
+    artifact_bytes = serialize_prepared_artifact(body)
+    art_sha = artifact_sha256(artifact_bytes)
+    chunks = chunk_artifact_bytes(artifact_bytes, chunk_size=131_072)
+    root_meta = {
+        'uuid': plan_uuid,
+        'group_id': group_id,
+        'batch_id': batch_id,
+        'plan_id': plan_id,
+        'identity_schema_version': 'catalog-v2',
+        'canonicalization_version': CANONICALIZATION_VERSION,
+        'artifact_serialization_version': PREPARED_ARTIFACT_SERIALIZATION_VERSION,
+        'request_sha256': request_sha256,
+        'catalog_sha256': catalog_sha256,
+        'artifact_sha256': art_sha,
+        'chunk_count': len(chunks),
+        'payload_bytes': len(artifact_bytes),
+        'entity_count': entity_count,
+        'edge_count': edge_count,
+        'source_count': 0,
+        'evidence_link_count': 0,
+        'created_count': entity_count,
+        'updated_count': 0,
+        'unchanged_count': 0,
+    }
+    return artifact_bytes, art_sha, chunks, root_meta
+
+
+def _make_root(
+    *,
+    token: str,
+    state: str = PLAN_STATE_PREPARED,
+    expires_at: datetime | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+    _, art_sha, chunks, meta = _frozen_artifact()
+    now = datetime.now(timezone.utc)
+    root: dict[str, Any] = {
+        **meta,
+        'token_digest': plan_token_digest(token),
+        'state': state,
+        'expires_at': expires_at if expires_at is not None else now + timedelta(hours=1),
+        'created_at': now - timedelta(minutes=5),
+        'updated_at': now - timedelta(minutes=5),
+        'committing_started_at': now if state == PLAN_STATE_COMMITTING else None,
+    }
+    if overrides:
+        root.update(overrides)
+    return root, chunks, art_sha
+
+
+def _wire_commit(
+    service: CatalogService,
+    *,
+    root: dict[str, Any] | None,
+    chunks: list[dict[str, Any]] | None = None,
+    cas_side_effect=None,
+    cas_return: dict[str, Any] | None = None,
+) -> None:
+    service._store.load_prepared_plan_by_token_digest = AsyncMock(  # type: ignore[method-assign]
+        return_value=root
+    )
+    service._store.load_prepared_plan_chunks = AsyncMock(  # type: ignore[method-assign]
+        return_value=list(chunks or [])
+    )
+
+    async def _default_cas(tx, **kwargs):
+        _ = tx
+        to_state = kwargs.get('to_state')
+        if cas_return is not None:
+            return cas_return
+        base = dict(root or {})
+        base['state'] = to_state
+        base['updated_at'] = kwargs.get('updated_at')
+        if (
+            to_state == PLAN_STATE_COMMITTING
+            and root
+            and root.get('state') == PLAN_STATE_COMMITTING
+        ):
+            base['reentry'] = True
+        if to_state == PLAN_STATE_DISCARDED and root and root.get('state') == PLAN_STATE_DISCARDED:
+            base['idempotent'] = True
+        return base
+
+    service._store.cas_plan_state = AsyncMock(  # type: ignore[method-assign]
+        side_effect=cas_side_effect or _default_cas
+    )
+    # Domain / schema spies must stay zero on commit/discard.
+    service._store.upsert_entity_item = AsyncMock()  # type: ignore[method-assign]
+    service._store.upsert_edge_item = AsyncMock()  # type: ignore[method-assign]
+    service._store.upsert_source_episode = AsyncMock()  # type: ignore[method-assign]
+    service._store.upsert_mentions_link = AsyncMock()  # type: ignore[method-assign]
+    service._store.append_edge_episode = AsyncMock()  # type: ignore[method-assign]
+    service._store.upsert_batch_status = AsyncMock()  # type: ignore[method-assign]
+    service._store.claim_batch_status = AsyncMock()  # type: ignore[method-assign]
+    service._store.ensure_uuid_uniqueness_constraints = AsyncMock()  # type: ignore[method-assign]
+    service._store.create_prepared_plan_with_chunks = AsyncMock()  # type: ignore[method-assign]
+    service._store.ensure_plan_schema = AsyncMock()  # type: ignore[method-assign]
+
+
+def _commit_client() -> SimpleNamespace:
+    client = _make_client()
+    client.llm_client = MagicMock()
+    client.llm_client.generate = AsyncMock()
+    return client
+
+
+@pytest.mark.asyncio
+async def test_commit_happy_path_prepared_to_committing_zero_domain_external():
+    token = mint_plan_token()
+    root, chunks, art_sha = _make_root(token=token, state=PLAN_STATE_PREPARED)
+    client = _commit_client()
+    queue = MagicMock()
+    queue.enqueue = AsyncMock()
+    service = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
+    _wire_commit(service, root=root, chunks=chunks)
+
+    with patch(
+        'services.catalog_service.plan_token_matches',
+        wraps=__import__(
+            'services.catalog_identity', fromlist=['plan_token_matches']
+        ).plan_token_matches,
+    ) as match_spy:
+        resp = await service.commit_prepared_catalog_batch(
+            client=client,
+            request=CommitPreparedCatalogBatchRequest(plan_token=token),
+        )
+
+    assert resp.error_code is None
+    assert resp.state == PLAN_STATE_COMMITTING
+    assert resp.plan_uuid == root['uuid']
+    assert resp.request_sha256 == root['request_sha256']
+    assert resp.catalog_sha256 == root['catalog_sha256']
+    assert resp.artifact_sha256 == art_sha
+    assert resp.entity_count == 1
+    dumped = resp.model_dump()
+    assert 'membership' not in dumped
+    assert 'embeddings' not in dumped
+    assert 'payload' not in dumped
+    assert 'plan_token' not in dumped
+    match_spy.assert_called()
+    # raw token + stored digest
+    called_token, called_digest = match_spy.call_args[0]
+    assert called_token == token
+    assert called_digest == root['token_digest']
+    cas = cast(AsyncMock, service._store.cas_plan_state)
+    cas.assert_awaited()
+    await_args = cas.await_args
+    assert await_args is not None
+    cas_kwargs = await_args.kwargs
+    assert cas_kwargs['expected_from'] == PLAN_STATE_PREPARED
+    assert cas_kwargs['to_state'] == PLAN_STATE_COMMITTING
+    assert cas_kwargs['require_not_expired'] is True
+    client.embedder.create.assert_not_awaited()
+    client.llm_client.generate.assert_not_awaited()
+    queue.enqueue.assert_not_awaited()
+    _assert_zero_domain(service)
+    cast(AsyncMock, service._store.create_prepared_plan_with_chunks).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_commit_plan_token_matches_false_not_found_no_cas():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token)
+    # Stored digest does not match supplied token (tampered digest on root).
+    root['token_digest'] = '0' * 64
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+
+    with patch(
+        'services.catalog_service.plan_token_matches',
+        wraps=__import__(
+            'services.catalog_identity', fromlist=['plan_token_matches']
+        ).plan_token_matches,
+    ) as match_spy:
+        resp = await service.commit_prepared_catalog_batch(
+            client=client,
+            request=CommitPreparedCatalogBatchRequest(plan_token=token),
+        )
+
+    assert resp.error_code == CatalogErrorCode.prepared_plan_not_found
+    assert resp.state == ''
+    match_spy.assert_called()
+    cast(AsyncMock, service._store.cas_plan_state).assert_not_awaited()
+    cast(AsyncMock, service._store.load_prepared_plan_chunks).assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_commit_load_miss_not_found_without_match_success():
+    token = mint_plan_token()
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=None, chunks=[])
+
+    with patch(
+        'services.catalog_service.plan_token_matches',
+        wraps=__import__(
+            'services.catalog_identity', fromlist=['plan_token_matches']
+        ).plan_token_matches,
+    ) as match_spy:
+        resp = await service.commit_prepared_catalog_batch(
+            client=client,
+            request=CommitPreparedCatalogBatchRequest(plan_token=token),
+        )
+
+    assert resp.error_code == CatalogErrorCode.prepared_plan_not_found
+    cast(AsyncMock, service._store.cas_plan_state).assert_not_awaited()
+    # Load miss: match must not authorize (either not called or called only if load exists).
+    assert match_spy.call_count == 0
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_commit_reentry_committing_same_token():
+    token = mint_plan_token()
+    root, chunks, art_sha = _make_root(token=token, state=PLAN_STATE_COMMITTING)
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+
+    resp = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code is None
+    assert resp.state == PLAN_STATE_COMMITTING
+    assert resp.artifact_sha256 == art_sha
+    cas = cast(AsyncMock, service._store.cas_plan_state)
+    cas.assert_awaited()
+    await_args = cas.await_args
+    assert await_args is not None
+    assert await_args.kwargs['expected_from'] == PLAN_STATE_COMMITTING
+    assert await_args.kwargs['to_state'] == PLAN_STATE_COMMITTING
+    client.embedder.create.assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_commit_expected_request_sha256_omit_and_correct_identical():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token)
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+
+    resp_omit = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+    # Reset CAS mock for second call
+    _wire_commit(service, root={**root, 'state': PLAN_STATE_PREPARED}, chunks=chunks)
+    resp_ok = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(
+            plan_token=token,
+            expected_request_sha256=root['request_sha256'],
+        ),
+    )
+
+    assert resp_omit.error_code is None
+    assert resp_ok.error_code is None
+    assert resp_omit.plan_uuid == resp_ok.plan_uuid
+    assert resp_omit.request_sha256 == resp_ok.request_sha256
+    assert resp_omit.artifact_sha256 == resp_ok.artifact_sha256
+    assert resp_omit.state == resp_ok.state == PLAN_STATE_COMMITTING
+
+
+@pytest.mark.asyncio
+async def test_commit_expected_request_sha256_mismatch_before_cas():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token)
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+
+    resp = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(
+            plan_token=token,
+            expected_request_sha256='f' * 64,
+        ),
+    )
+
+    assert resp.error_code == CatalogErrorCode.prepared_plan_conflict
+    cast(AsyncMock, service._store.cas_plan_state).assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_commit_expired_prepared_marks_expired():
+    token = mint_plan_token()
+    past = datetime.now(timezone.utc) - timedelta(hours=2)
+    root, chunks, _ = _make_root(token=token, expires_at=past)
+
+    async def _cas(tx, **kwargs):
+        _ = tx
+        if kwargs.get('to_state') == PLAN_STATE_EXPIRED:
+            return {**root, 'state': PLAN_STATE_EXPIRED}
+        raise CatalogStoreError('prepared plan expired', code='prepared_plan_expired')
+
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks, cas_side_effect=_cas)
+
+    resp = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code == CatalogErrorCode.prepared_plan_expired
+    # Either explicit EXPIRED CAS or claim with require_not_expired raising expired.
+    cas = cast(AsyncMock, service._store.cas_plan_state)
+    assert cas.await_count >= 1
+    client.embedder.create.assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_commit_discarded_maps_not_found():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token, state=PLAN_STATE_DISCARDED)
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+
+    resp = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code == CatalogErrorCode.prepared_plan_not_found
+    cast(AsyncMock, service._store.cas_plan_state).assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_commit_committed_maps_already_consumed():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token, state=PLAN_STATE_COMMITTED)
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+
+    resp = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code == CatalogErrorCode.prepared_plan_already_consumed
+    cast(AsyncMock, service._store.cas_plan_state).assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_commit_binding_mismatch_fails_closed_no_cas():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token)
+    # Tamper root group_id vs artifact binding.
+    root['group_id'] = 'other-group'
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+
+    resp = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code == CatalogErrorCode.prepared_plan_conflict
+    cast(AsyncMock, service._store.cas_plan_state).assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_commit_never_calls_external_clients():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token)
+    client = _commit_client()
+    http = MagicMock()
+    http.get = AsyncMock()
+    client.http = http
+    queue = MagicMock()
+    queue.enqueue = AsyncMock()
+    service = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
+    _wire_commit(service, root=root, chunks=chunks)
+
+    resp = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code is None
+    client.embedder.create.assert_not_awaited()
+    client.llm_client.generate.assert_not_awaited()
+    queue.enqueue.assert_not_awaited()
+    http.get.assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_discard_prepared_to_discarded_and_idempotent():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token, state=PLAN_STATE_PREPARED)
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+
+    with patch(
+        'services.catalog_service.plan_token_matches',
+        wraps=__import__(
+            'services.catalog_identity', fromlist=['plan_token_matches']
+        ).plan_token_matches,
+    ) as match_spy:
+        resp1 = await service.discard_prepared_catalog_batch(
+            client=client,
+            request=DiscardPreparedCatalogBatchRequest(plan_token=token),
+        )
+
+    assert resp1.error_code is None
+    assert resp1.state == PLAN_STATE_DISCARDED
+    assert resp1.plan_uuid == root['uuid']
+    match_spy.assert_called()
+    assert match_spy.call_args[0][0] == token
+    assert match_spy.call_args[0][1] == root['token_digest']
+    cas = cast(AsyncMock, service._store.cas_plan_state)
+    await_args = cas.await_args
+    assert await_args is not None
+    assert await_args.kwargs['to_state'] == PLAN_STATE_DISCARDED
+    assert await_args.kwargs['expected_from'] == PLAN_STATE_PREPARED
+
+    # Second discard: already DISCARDED → idempotent success.
+    discarded_root = {**root, 'state': PLAN_STATE_DISCARDED}
+    _wire_commit(service, root=discarded_root, chunks=chunks)
+    resp2 = await service.discard_prepared_catalog_batch(
+        client=client,
+        request=DiscardPreparedCatalogBatchRequest(plan_token=token),
+    )
+    assert resp2.error_code is None
+    assert resp2.state == PLAN_STATE_DISCARDED
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_discard_committing_and_committed_conflict():
+    token = mint_plan_token()
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+
+    for state in (PLAN_STATE_COMMITTING, PLAN_STATE_COMMITTED):
+        root, chunks, _ = _make_root(token=token, state=state)
+        _wire_commit(service, root=root, chunks=chunks)
+        resp = await service.discard_prepared_catalog_batch(
+            client=client,
+            request=DiscardPreparedCatalogBatchRequest(plan_token=token),
+        )
+        assert resp.error_code == CatalogErrorCode.prepared_plan_conflict, state
+        cast(AsyncMock, service._store.cas_plan_state).assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_discard_match_failure_not_found_no_cas():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token)
+    root['token_digest'] = '1' * 64
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+
+    resp = await service.discard_prepared_catalog_batch(
+        client=client,
+        request=DiscardPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code == CatalogErrorCode.prepared_plan_not_found
+    cast(AsyncMock, service._store.cas_plan_state).assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_discard_never_calls_domain_delete_apis():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token)
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+    delete_entity = AsyncMock()
+    clear_graph = AsyncMock()
+    object.__setattr__(service._store, 'delete_entity', delete_entity)
+    object.__setattr__(service._store, 'clear_graph', clear_graph)
+
+    resp = await service.discard_prepared_catalog_batch(
+        client=client,
+        request=DiscardPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code is None
+    delete_entity.assert_not_awaited()
+    clear_graph.assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_commit_terminal_expired_state_no_revive():
+    token = mint_plan_token()
+    root, chunks, _ = _make_root(token=token, state=PLAN_STATE_EXPIRED)
+    client = _commit_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_commit(service, root=root, chunks=chunks)
+
+    resp = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code == CatalogErrorCode.prepared_plan_expired
+    cast(AsyncMock, service._store.cas_plan_state).assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+def test_commit_discard_helpers_exist_on_service():
+    service = CatalogService(catalog_config=_enabled_config())
+    assert hasattr(service, 'commit_prepared_catalog_batch')
+    assert hasattr(service, 'discard_prepared_catalog_batch')
+    assert callable(service.commit_prepared_catalog_batch)
+    assert callable(service.discard_prepared_catalog_batch)

@@ -96,7 +96,25 @@ def test_build_capabilities_endpoint_map_from_topology_export():
 
 
 def test_build_capabilities_limits_configured_and_hard():
-    from services.catalog_capabilities import build_catalog_capabilities
+    from models.catalog_common import (
+        DEFAULT_MAX_ACTIVE_PLANS_PER_GROUP,
+        DEFAULT_PLAN_TTL_SECONDS,
+        DEFAULT_PREPARED_CHUNK_BYTES,
+        DEFAULT_PREPARED_PAYLOAD_BYTES,
+        HARD_MAX_ACTIVE_PLANS_PER_GROUP,
+        HARD_MAX_PREPARED_PAYLOAD_BYTES,
+        HARD_PLAN_TTL_SECONDS,
+    )
+    from services.catalog_capabilities import (
+        HARD_MAX_ACTIVE_PLANS,
+        build_catalog_capabilities,
+    )
+    from services.catalog_capabilities import (
+        HARD_MAX_PREPARED_PAYLOAD_BYTES as CAP_HARD_PAYLOAD,
+    )
+    from services.catalog_capabilities import (
+        HARD_PLAN_TTL_SECONDS as CAP_HARD_TTL,
+    )
 
     cfg = CatalogConfig(
         enabled=False,
@@ -110,17 +128,25 @@ def test_build_capabilities_limits_configured_and_hard():
         'max_entities_per_batch': 100,
         'max_edges_per_batch': 200,
         'max_provenance_links_per_batch': 300,
+        'max_prepared_payload_bytes': DEFAULT_PREPARED_PAYLOAD_BYTES,
+        'max_active_plans': DEFAULT_MAX_ACTIVE_PLANS_PER_GROUP,
+        'plan_ttl_seconds': DEFAULT_PLAN_TTL_SECONDS,
+        'prepared_chunk_bytes': DEFAULT_PREPARED_CHUNK_BYTES,
         'max_page_size': 0,
     }
     assert caps.limits['hard'] == {
         'max_entities_per_batch': HARD_MAX_ENTITIES_PER_BATCH,
         'max_edges_per_batch': HARD_MAX_EDGES_PER_BATCH,
         'max_provenance_links_per_batch': HARD_MAX_PROVENANCE_LINKS_PER_BATCH,
-        'max_prepared_payload_bytes': 0,
-        'max_active_plans': 0,
-        'plan_ttl_seconds': 0,
+        'max_prepared_payload_bytes': HARD_MAX_PREPARED_PAYLOAD_BYTES,
+        'max_active_plans': HARD_MAX_ACTIVE_PLANS_PER_GROUP,
+        'plan_ttl_seconds': HARD_PLAN_TTL_SECONDS,
         'max_page_size': 0,
     }
+    # Module re-exports match catalog_common hard ceilings (non-zero).
+    assert CAP_HARD_PAYLOAD == HARD_MAX_PREPARED_PAYLOAD_BYTES == 16_777_216
+    assert CAP_HARD_TTL == HARD_PLAN_TTL_SECONDS == 86400
+    assert HARD_MAX_ACTIVE_PLANS == HARD_MAX_ACTIVE_PLANS_PER_GROUP == 32
     assert 'max_page_size' in caps.limits['configured']
     assert 'max_page_size' in caps.limits['hard']
 
@@ -143,12 +169,61 @@ def test_build_capabilities_features_phase_truthful():
         config=CatalogConfig(enabled=False, uuid_namespace=None),
         client=None,
     )
+    # D-29 / Wave 4: prepare_commit remains false until 03A-06 live proof.
     assert caps.features == {
         'prepare_commit': False,
         'explicit_evidence_links': True,
         'manifests': False,
         'manifest_verification': False,
     }
+    assert caps.features['prepare_commit'] is False
+    assert caps.features['manifests'] is False
+    assert caps.limits['hard']['max_page_size'] == 0
+
+
+def test_build_capabilities_plan_limits_nonzero_prepare_commit_false():
+    """PLAN-08/20 Wave 4: real HARD plan ceilings; prepare_commit still false."""
+    from models.catalog_common import (
+        HARD_MAX_ACTIVE_PLANS_PER_GROUP,
+        HARD_MAX_PREPARED_PAYLOAD_BYTES,
+        HARD_PLAN_TTL_SECONDS,
+    )
+    from services.catalog_capabilities import (
+        HARD_MAX_ACTIVE_PLANS,
+        build_catalog_capabilities,
+    )
+    from services.catalog_capabilities import (
+        HARD_MAX_PREPARED_PAYLOAD_BYTES as CAP_HARD_PAYLOAD,
+    )
+    from services.catalog_capabilities import (
+        HARD_PLAN_TTL_SECONDS as CAP_HARD_TTL,
+    )
+
+    caps = build_catalog_capabilities(
+        config=CatalogConfig(
+            enabled=True,
+            uuid_namespace=str(FIXED_NS),
+            plan_ttl_seconds=1800,
+            max_prepared_payload_bytes=1_048_576,
+            max_active_plans_per_group=4,
+            prepared_chunk_bytes=65_536,
+        ),
+        client=None,
+    )
+    assert CAP_HARD_PAYLOAD == HARD_MAX_PREPARED_PAYLOAD_BYTES
+    assert CAP_HARD_PAYLOAD > 0
+    assert HARD_MAX_ACTIVE_PLANS == HARD_MAX_ACTIVE_PLANS_PER_GROUP
+    assert CAP_HARD_TTL == HARD_PLAN_TTL_SECONDS
+    assert caps.limits['hard']['max_prepared_payload_bytes'] == HARD_MAX_PREPARED_PAYLOAD_BYTES
+    assert caps.limits['hard']['max_active_plans'] == HARD_MAX_ACTIVE_PLANS_PER_GROUP
+    assert caps.limits['hard']['plan_ttl_seconds'] == HARD_PLAN_TTL_SECONDS
+    assert caps.limits['configured']['plan_ttl_seconds'] == 1800
+    assert caps.limits['configured']['max_prepared_payload_bytes'] == 1_048_576
+    assert caps.limits['configured']['max_active_plans'] == 4
+    assert caps.limits['configured']['prepared_chunk_bytes'] == 65_536
+    assert caps.features['prepare_commit'] is False
+    assert caps.features['manifests'] is False
+    assert caps.limits['hard']['max_page_size'] == 0
 
 
 def test_build_capabilities_redacts_namespace_and_secrets():

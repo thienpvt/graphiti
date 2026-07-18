@@ -14,10 +14,17 @@ from config.schema import CatalogConfig
 from models.catalog_common import (
     CATALOG_EDGE_TYPES,
     ENTITY_TYPE_PREFIXES,
+    HARD_MAX_ACTIVE_PLANS_PER_GROUP,
     HARD_MAX_EDGES_PER_BATCH,
     HARD_MAX_ENTITIES_PER_BATCH,
     HARD_MAX_PROVENANCE_LINKS_PER_BATCH,
     IDENTITY_SCHEMA_VERSION,
+)
+from models.catalog_common import (
+    HARD_MAX_PREPARED_PAYLOAD_BYTES as _COMMON_HARD_MAX_PREPARED_PAYLOAD_BYTES,
+)
+from models.catalog_common import (
+    HARD_PLAN_TTL_SECONDS as _COMMON_HARD_PLAN_TTL_SECONDS,
 )
 from models.catalog_responses import CatalogCapabilitiesResponse
 from models.catalog_topology import endpoint_map_export
@@ -26,11 +33,12 @@ from services.catalog_identity import CANONICALIZATION_VERSION, CATALOG_SCHEMA_V
 Connectivity = Literal['ok', 'error', 'unknown']
 IndexReadiness = Literal['ready', 'unknown', 'n/a']
 
-# Phase-later hard ceilings not yet configured (explicit zero placeholders).
-HARD_MAX_PREPARED_PAYLOAD_BYTES = 0
-HARD_MAX_ACTIVE_PLANS = 0
-HARD_PLAN_TTL_SECONDS = 0
-# Pagination not configured in Phase 2; expose explicit zero authority for CAPA-06.
+# Real plan hard ceilings (PLAN-08 / D-29 partial). features.prepare_commit stays false
+# until 03A-06 live-proof gate; pagination remains explicitly zero.
+HARD_MAX_PREPARED_PAYLOAD_BYTES = _COMMON_HARD_MAX_PREPARED_PAYLOAD_BYTES
+HARD_MAX_ACTIVE_PLANS = HARD_MAX_ACTIVE_PLANS_PER_GROUP
+HARD_PLAN_TTL_SECONDS = _COMMON_HARD_PLAN_TTL_SECONDS
+# Pagination not configured; expose explicit zero authority for CAPA-06.
 HARD_MAX_PAGE_SIZE = 0
 
 
@@ -117,6 +125,10 @@ def build_catalog_capabilities(
                 'max_entities_per_batch': config.max_entities_per_batch,
                 'max_edges_per_batch': config.max_edges_per_batch,
                 'max_provenance_links_per_batch': config.max_provenance_links_per_batch,
+                'max_prepared_payload_bytes': config.max_prepared_payload_bytes,
+                'max_active_plans': config.max_active_plans_per_group,
+                'plan_ttl_seconds': config.plan_ttl_seconds,
+                'prepared_chunk_bytes': config.prepared_chunk_bytes,
                 'max_page_size': getattr(config, 'max_page_size', HARD_MAX_PAGE_SIZE),
             },
             'hard': {
@@ -132,6 +144,7 @@ def build_catalog_capabilities(
         embeddings=embeddings,
         neo4j_indexes=neo4j_indexes,
         features={
+            # D-29 / P22: remain false through Wave 4; 03A-06 flips after live proof.
             'prepare_commit': False,
             'explicit_evidence_links': True,
             'manifests': False,

@@ -56,8 +56,11 @@ CATALOG_REQUEST_TOOL_NAMES = {
     'upsert_provenance',
     'get_catalog_ingest_status',
     'upsert_catalog_batch',
+    'prepare_catalog_batch',
+    'commit_prepared_catalog_batch',
+    'discard_prepared_catalog_batch',
 }
-# Full catalog tool surface after Phase 2 CAPA-01: + read-only get_catalog_capabilities.
+# Full catalog tool surface: request-bound + get_catalog_capabilities (03A-05: +3 prepare tools).
 CATALOG_TOOL_NAMES = CATALOG_REQUEST_TOOL_NAMES | {
     'get_catalog_capabilities',
 }
@@ -4334,7 +4337,7 @@ async def test_mcp_tool_upsert_catalog_batch_registered():
 
 @pytest.mark.asyncio
 async def test_mcp_registers_exactly_eight_catalog_tools_and_preserves_legacy_tools():
-    """Phase 2 CAPA-01: eight catalog tools (seven request-bound + get_catalog_capabilities)."""
+    """03A-05: eleven catalog tools (10 request-bound + get_catalog_capabilities) + 14 legacy."""
     server = _mcp_server()
     tools = await server.mcp.list_tools()
     names = {tool.name for tool in tools}
@@ -4342,11 +4345,15 @@ async def test_mcp_registers_exactly_eight_catalog_tools_and_preserves_legacy_to
 
     assert registered_catalog == CATALOG_TOOL_NAMES
     assert 'get_catalog_capabilities' in registered_catalog
-    assert len(CATALOG_TOOL_NAMES) == 8
-    assert len(CATALOG_REQUEST_TOOL_NAMES) == 7
+    assert 'prepare_catalog_batch' in registered_catalog
+    assert 'commit_prepared_catalog_batch' in registered_catalog
+    assert 'discard_prepared_catalog_batch' in registered_catalog
+    assert 'upsert_catalog_batch' in registered_catalog
+    assert len(CATALOG_TOOL_NAMES) == 11
+    assert len(CATALOG_REQUEST_TOOL_NAMES) == 10
     assert LEGACY_TOOL_NAMES.issubset(names)
     assert len(LEGACY_TOOL_NAMES) == 14
-    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 22
+    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 25
     assert names == (CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES)
 
     schemas = {tool.name: tool.inputSchema for tool in tools if tool.name in CATALOG_TOOL_NAMES}
@@ -4367,14 +4374,25 @@ _FROZEN_CATALOG_TOOL_REQUEST_MODELS = {
     'upsert_provenance': None,  # filled at runtime
     'get_catalog_ingest_status': GetCatalogIngestStatusRequest,
     'upsert_catalog_batch': UpsertCatalogBatchRequest,
+    'prepare_catalog_batch': None,  # filled at runtime
+    'commit_prepared_catalog_batch': None,  # filled at runtime
+    'discard_prepared_catalog_batch': None,  # filled at runtime
 }
 
 
 def _catalog_request_models():
+    from models.catalog_prepare import (
+        CommitPreparedCatalogBatchRequest,
+        DiscardPreparedCatalogBatchRequest,
+        PrepareCatalogBatchRequest,
+    )
     from models.catalog_provenance import UpsertProvenanceRequest
 
     mapping = dict(_FROZEN_CATALOG_TOOL_REQUEST_MODELS)
     mapping['upsert_provenance'] = UpsertProvenanceRequest
+    mapping['prepare_catalog_batch'] = PrepareCatalogBatchRequest
+    mapping['commit_prepared_catalog_batch'] = CommitPreparedCatalogBatchRequest
+    mapping['discard_prepared_catalog_batch'] = DiscardPreparedCatalogBatchRequest
     return mapping
 
 
@@ -4445,8 +4463,10 @@ def _v2_request_payload(tool_name: str, **overrides):
         payload = {**base, 'sources': [_minimal_source_dict()]}
     elif tool_name == 'get_catalog_ingest_status':
         payload = {'group_id': GROUP, 'batch_id': 'cont07-status'}
-    elif tool_name == 'upsert_catalog_batch':
+    elif tool_name == 'upsert_catalog_batch' or tool_name == 'prepare_catalog_batch':
         payload = {**base, 'entities': [_minimal_entity_dict()], 'catalog_sha256': 'a' * 64}
+    elif tool_name == 'commit_prepared_catalog_batch' or tool_name == 'discard_prepared_catalog_batch':
+        payload = {'plan_token': 'x' * 32}
     else:
         raise AssertionError(f'unknown tool {tool_name}')
     payload.update(overrides)
@@ -4475,6 +4495,9 @@ def _side_effect_spies(server):
         'upsert_provenance',
         'get_catalog_ingest_status',
         'upsert_catalog_batch',
+        'prepare_catalog_batch',
+        'commit_prepared_catalog_batch',
+        'discard_prepared_catalog_batch',
     ):
         setattr(catalog_svc, name, AsyncMock(return_value={'status': 'spy-should-not-run'}))
 
@@ -4509,6 +4532,9 @@ def _assert_no_backend_side_effects(spies, body_entered: list):
         'upsert_provenance',
         'get_catalog_ingest_status',
         'upsert_catalog_batch',
+        'prepare_catalog_batch',
+        'commit_prepared_catalog_batch',
+        'discard_prepared_catalog_batch',
     ):
         getattr(cs, name).assert_not_called()
     spies['graphiti_service'].get_client.assert_not_called()
@@ -4518,7 +4544,7 @@ def _assert_no_backend_side_effects(spies, body_entered: list):
 
 @pytest.mark.asyncio
 async def test_catalog_tools_bind_typed_pydantic_request_models():
-    """Production CONT-07: all seven request-bound tools bind typed Pydantic request models."""
+    """Production CONT-07: all request-bound catalog tools bind typed Pydantic request models."""
     import typing
 
     server = _mcp_server()
