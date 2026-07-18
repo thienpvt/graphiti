@@ -108,6 +108,7 @@ def repo_root_from(start: Path | None = None) -> Path:
 
 
 def _uv_pytest(files: list[str], extra: list[str] | None = None) -> list[str]:
+    # Prefer tests/pytest.ini — registers integration/requires_neo4j markers.
     argv = [
         'uv',
         'run',
@@ -117,7 +118,7 @@ def _uv_pytest(files: list[str], extra: list[str] | None = None) -> list[str]:
         '-m',
         'pytest',
         '-c',
-        'mcp_server/pytest.ini',
+        'mcp_server/tests/pytest.ini',
         *files,
     ]
     if extra:
@@ -206,6 +207,10 @@ def check_wave0_files(root: Path) -> None:
         raise AssertionError(f'wave0 product/test files missing: {missing}')
 
 
+def _non_comment_lines(src: str) -> list[str]:
+    return [ln for ln in src.splitlines() if ln.strip() and not ln.lstrip().startswith('#')]
+
+
 def check_safety_no_probe(root: Path) -> None:
     for rel in (
         'mcp_server/tests/catalog_phase3b_gate_runner.py',
@@ -227,8 +232,32 @@ def check_safety_no_probe(root: Path) -> None:
                 raise AssertionError(f'{rel} assigns forbidden group as write target')
             if re.search(r'\bclear_graph\s*\(', src):
                 raise AssertionError(f'{rel} calls clear_graph')
+            if re.search(r'\bcanary\b', src, re.IGNORECASE):
+                raise AssertionError(f'{rel} references canary')
             if ALLOWED_TEST_GROUP not in src:
                 raise AssertionError(f'{rel} must hard-code {ALLOWED_TEST_GROUP}')
+            # Forbidden group must never appear as a Cypher/query param value.
+            for line in _non_comment_lines(src):
+                if 'params' in line and FORBIDDEN_GROUP in line:
+                    raise AssertionError(f'{rel} passes forbidden group as query param: {line}')
+                if 'execute_query' in line and FORBIDDEN_GROUP in line:
+                    raise AssertionError(f'{rel} execute_query references forbidden group: {line}')
+                if re.search(
+                    rf"['\"]g['\"]\s*:\s*['\"]{re.escape(FORBIDDEN_GROUP)}['\"]",
+                    line,
+                ):
+                    raise AssertionError(f'{rel} binds forbidden group to g: {line}')
+            # Must prove isolation without probing forbidden group.
+            if 'TrackingDriver' not in src and 'param_groups' not in src:
+                raise AssertionError(f'{rel} must spy driver group params for isolation')
+            if 'CATALOG_CEILING_SMOKE' not in src:
+                raise AssertionError(f'{rel} must honor CATALOG_CEILING_SMOKE for 500 ceiling')
+            search_ok = (
+                'graphiti_core.search.search' in src
+                or "import_module('graphiti_core.search.search')" in src
+            )
+            if not search_ok:
+                raise AssertionError(f'{rel} must use production graphiti search path')
 
     runner_src = (root / 'mcp_server/tests/catalog_phase3b_gate_runner.py').read_text(
         encoding='utf-8'
@@ -307,7 +336,9 @@ def check_concurrency_scaffold(root: Path) -> None:
         raise AssertionError('test_catalog_concurrency.py missing')
     src = path.read_text(encoding='utf-8')
     if 'def test_same_token_concurrent_one_logical_commit' not in src:
-        raise AssertionError('missing concurrency case: test_same_token_concurrent_one_logical_commit')
+        raise AssertionError(
+            'missing concurrency case: test_same_token_concurrent_one_logical_commit'
+        )
 
 
 def check_manifests_feature_true(root: Path) -> None:
@@ -326,11 +357,7 @@ def check_manifests_feature_true(root: Path) -> None:
     if "'prepare_commit': True" not in src and '"prepare_commit": True' not in src:
         raise AssertionError('features.prepare_commit must remain True')
     # Runtime must not open planning ledgers to decide the flag (code only; comments ok).
-    code_lines = [
-        ln
-        for ln in src.splitlines()
-        if ln.strip() and not ln.lstrip().startswith('#')
-    ]
+    code_lines = [ln for ln in src.splitlines() if ln.strip() and not ln.lstrip().startswith('#')]
     code = '\n'.join(code_lines)
     for forbidden in (
         'GATE-RESULTS',
@@ -344,8 +371,53 @@ def check_manifests_feature_true(root: Path) -> None:
             )
 
 
+def _resolve_backstop_path(root: Path, file_part: str) -> Path | None:
+    """Resolve test_or_backstop path; allow bare tests/*.py under mcp_server/tests."""
+    candidates = [
+        root / file_part,
+        root / 'mcp_server' / 'tests' / file_part,
+        root / 'mcp_server' / 'src' / file_part,
+    ]
+    for cand in candidates:
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _symbol_exists(root: Path, ref: str) -> bool:
+    """True when test_or_backstop points at existing file or file::symbol."""
+    ref = ref.strip()
+    if not ref:
+        return False
+    # Multi-ref: "a + b::c" — all parts must resolve.
+    parts = [p.strip() for p in ref.split('+')]
+    for part in parts:
+        if not part:
+            continue
+        # Allow module.function style for runner helpers.
+        if part.startswith('catalog_phase3b_gate_runner.'):
+            runner = root / 'mcp_server/tests/catalog_phase3b_gate_runner.py'
+            if not runner.is_file():
+                return False
+            text = runner.read_text(encoding='utf-8')
+            sym = part.split('.', 1)[1]
+            if f'def {sym}' not in text and sym not in text:
+                return False
+            continue
+        file_part, _, symbol = part.partition('::')
+        file_part = file_part.strip()
+        path = _resolve_backstop_path(root, file_part)
+        if path is None:
+            return False
+        if symbol:
+            src = path.read_text(encoding='utf-8')
+            if f'def {symbol}' not in src and symbol not in src:
+                return False
+    return True
+
+
 def check_edge_resolution_complete(root: Path) -> None:
-    """24/24 edge probe resolution map present and fully resolved."""
+    """24/24 edge probe resolution map present, owned, non-placeholder, live symbols real."""
     path = root / DEFAULT_RESOLUTION_REL
     if not path.is_file():
         raise AssertionError('03B-EDGE-PROBE-RESOLUTION.json missing')
@@ -360,13 +432,38 @@ def check_edge_resolution_complete(root: Path) -> None:
     indices = sorted(int(e.get('row_index', -1)) for e in entries if isinstance(e, dict))
     if indices != list(range(EXPECTED_PROBE_COUNT)):
         raise AssertionError(f'edge resolution row_index set incomplete: {indices}')
+    placeholder_tokens = (
+        'unresolved',
+        'silent',
+        'TODO',
+        'FIXME',
+        'placeholder',
+        'tbd',
+        'TBD',
+        'coming soon',
+    )
     for e in entries:
         if not isinstance(e, dict):
             raise AssertionError('edge resolution entry must be object')
+        row = int(e.get('row_index', -1))
+        expected_plan = plan_for_row(row)
+        if e.get('plan') != expected_plan:
+            raise AssertionError(
+                f'entry row {row} plan ownership drift: got {e.get("plan")!r} '
+                f'expected {expected_plan!r}'
+            )
         if e.get('verification') not in ('explicit', 'live', 'unit', 'structural'):
-            raise AssertionError(f'entry {e.get("row_index")} missing verification')
-        if e.get('resolution') in (None, '', 'unresolved', 'silent'):
-            raise AssertionError(f'entry {e.get("row_index")} unresolved')
+            raise AssertionError(f'entry {row} missing verification')
+        resolution = e.get('resolution')
+        if resolution in (None, '', 'unresolved', 'silent'):
+            raise AssertionError(f'entry {row} unresolved')
+        if any(tok in str(resolution) for tok in placeholder_tokens):
+            raise AssertionError(f'entry {row} placeholder resolution: {resolution!r}')
+        backstop = str(e.get('test_or_backstop') or '')
+        if not backstop:
+            raise AssertionError(f'entry {row} missing test_or_backstop')
+        if not _symbol_exists(root, backstop):
+            raise AssertionError(f'entry {row} live/unit symbol missing: {backstop}')
     if raw.get('no_silent_drop') is not True:
         raise AssertionError('no_silent_drop must be true')
 
@@ -651,7 +748,9 @@ def git_show_files(root: Path, commit: str = 'HEAD') -> list[str]:
 def run_argv(argv: list[str], root: Path, timeout: int = 1800) -> dict[str, Any]:
     env = os.environ.copy()
     if any(INTEGRATION_MODULE in a.replace('\\', '/') for a in argv):
-        env.setdefault('CATALOG_INT_REQUIRED', '1')
+        # Live proof is fail-closed: missing Neo4j fails; ceiling must be real 500.
+        env['CATALOG_INT_REQUIRED'] = '1'
+        env['CATALOG_CEILING_SMOKE'] = '1'
     result = subprocess.run(
         argv,
         shell=False,
@@ -738,17 +837,46 @@ def derive_live_proof_status(results: list[dict[str, Any]], require_neo4j: bool)
     }
 
 
-def derive_safety_ledger(results: list[dict[str, Any]]) -> dict[str, Any]:
+def derive_safety_ledger(
+    results: list[dict[str, Any]],
+    root: Path | None = None,
+) -> dict[str, Any]:
+    """Derive safety ledger from check results + live suite source evidence (not constants)."""
     safety_ids = {'safety_no_probe'}
     by_id = {r.get('id'): r for r in results}
     safety_ok = all(
         by_id.get(sid, {}).get('status') == 'pass' and by_id.get(sid, {}).get('exit_code') == 0
         for sid in safety_ids
     )
+    canary_executed = False
+    v2_queried = False
+    clear_called = False
+    if root is not None:
+        live = root / 'mcp_server/tests/test_catalog_commit_neo4j_int.py'
+        if live.is_file():
+            src = live.read_text(encoding='utf-8')
+            code = '\n'.join(_non_comment_lines(src))
+            canary_executed = bool(re.search(r'\bcanary\b', code, re.IGNORECASE))
+            # Query-param use of forbidden group (assignment of FORBIDDEN constant alone is ok).
+            for line in _non_comment_lines(src):
+                if 'params' in line and FORBIDDEN_GROUP in line:
+                    v2_queried = True
+                if 'execute_query' in line and FORBIDDEN_GROUP in line:
+                    v2_queried = True
+                if re.search(
+                    rf"['\"]g['\"]\s*:\s*['\"]{re.escape(FORBIDDEN_GROUP)}['\"]",
+                    line,
+                ):
+                    v2_queried = True
+            clear_called = bool(re.search(r'\bclear_graph\s*\(', code))
+        else:
+            safety_ok = False
+    if canary_executed or v2_queried or clear_called:
+        safety_ok = False
     return {
-        'canary_executed': False,
-        'oracle_catalog_v2_queried': False,
-        'clear_graph_called': False,
+        'canary_executed': canary_executed,
+        'oracle_catalog_v2_queried': v2_queried,
+        'clear_graph_called': clear_called,
         'safety_checks_pass': safety_ok,
         'test_group': ALLOWED_TEST_GROUP,
         'forbidden_group': FORBIDDEN_GROUP,
@@ -874,7 +1002,7 @@ def run_gate(
     sentinel = run_sentinel(root)
     local_gate_pass = derive_local_gate_pass(results, sentinel)
     live = derive_live_proof_status(results, require_neo4j)
-    safety = derive_safety_ledger(results)
+    safety = derive_safety_ledger(results, root)
     manifests = read_manifests_feature(root)
     ready = derive_ready_for_phase_4(
         local_gate_pass,
@@ -1019,7 +1147,7 @@ def verify_ledger(
         )
 
     live = derive_live_proof_status(results if isinstance(results, list) else [], req)
-    safety = derive_safety_ledger(results if isinstance(results, list) else [])
+    safety = derive_safety_ledger(results if isinstance(results, list) else [], root)
     source_manifests = read_manifests_feature(root)
     ready = derive_ready_for_phase_4(
         recomputed_local,
@@ -1118,8 +1246,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return (
             0
-            if ledger['local_gate_pass']
-            and (not args.require_neo4j or ledger['ready_for_phase_4'])
+            if ledger['local_gate_pass'] and (not args.require_neo4j or ledger['ready_for_phase_4'])
             else 1
         )
 

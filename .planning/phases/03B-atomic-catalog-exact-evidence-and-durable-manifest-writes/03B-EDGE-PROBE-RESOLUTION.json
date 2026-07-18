@@ -122,21 +122,21 @@
     },
     {
       "category": "evidence-encoding",
-      "plan": "03B-03",
+      "plan": "03B-04",
       "requirement_id": "EVID-11",
-      "resolution": "Empty/excerpt encoding bounds enforced; no grapheme-dependent identity",
+      "resolution": "Empty/excerpt encoding bounds enforced; no grapheme-dependent identity; co-commit path preserves encoding",
       "row_index": 12,
-      "task": "03B-03-T02",
-      "test_or_backstop": "mcp_server/tests/test_catalog_evidence_store.py",
+      "task": "03B-04-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence_store.py + mcp_server/tests/test_catalog_atomic_writer.py",
       "verification": "unit"
     },
     {
       "category": "search-interop",
-      "plan": "03B-03",
+      "plan": "03B-04",
       "requirement_id": "TEST-07",
-      "resolution": "Committed catalog Entity nodes remain searchable with embeddings",
+      "resolution": "Committed catalog Entity nodes remain searchable via graphiti_core.search NODE_HYBRID_SEARCH_RRF",
       "row_index": 13,
-      "task": "03B-06-T01",
+      "task": "03B-04-T02",
       "test_or_backstop": "mcp_server/tests/test_catalog_commit_neo4j_int.py::test_live_entity_search_interop",
       "verification": "live"
     },
@@ -242,7 +242,7 @@
     }
   ],
   "flagged_assumptions": [
-    "A1: configured-ceiling full 500 opt-in via CATALOG_CEILING_SMOKE; default smoke uses 20 entities on same path",
+    "A1: gate --require-neo4j forces CATALOG_CEILING_SMOKE=1 so live proof runs configured max entities=500; hard-stop on failure",
     "A5: plan lock semantics rely on existing CatalogPreparedPlan CAS; no new distributed lock",
     "grapheme encoding not used for identity material"
   ],
