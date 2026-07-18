@@ -38,20 +38,22 @@ created: 2026-07-18
 
 ## Per-Task Verification Map
 
+Aligned to six executable plans (03B-01 … 03B-06).
+
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 03B-W0-01 | Wave 0 | 0 | MANI-01/02/04/07 | T-03B-04 | Bounded deterministic manifest bytes/chunks | unit | `pytest test_catalog_manifest.py` | ❌ W0 | ⬜ pending |
-| 03B-W0-02 | Wave 0 | 0 | EVID-07/08/10/11 | T-03B-03/05 | Fixed non-Entity evidence, target conflicts fail | unit/store | `pytest test_catalog_evidence_store.py` | ❌ W0 | ⬜ pending |
-| 03B-W0-03 | Wave 0 | 0 | PLAN-13/14, MANI-06 | T-03B-01 | One success tx; all injected failures roll back | service | `pytest test_catalog_atomic_writer.py` | ❌ W0 | ⬜ pending |
-| 03B-W0-04 | Wave 0 | 0 | PLAN-14/15 | T-03B-02 | COMMITTING resumes; no PREPARED revival | service | `pytest test_catalog_commit_recovery.py` | ❌ W0 | ⬜ pending |
-| 03B-W0-05 | Wave 0 | 0 | PLAN-16, TEST-06 | T-03B-02 | Concurrent commits produce one logical result | concurrency | `pytest test_catalog_concurrency.py` | ❌ W0 | ⬜ pending |
-| 03B-W0-06 | Wave 0 | 0 | PLAN-13..16, EVID-07..11, MANI-01..07 | T-03B-01..08 | Live atomicity/isolation/search/control proof | integration | `pytest test_catalog_commit_neo4j_int.py` | ❌ W0 | ⬜ pending |
-| 03B-W0-07 | Wave 0 | 0 | TEST-06/07 | T-03B-GATE | HEAD-bound fail-closed phase gate | gate | `pytest test_catalog_phase3b_gate_runner.py` | ❌ W0 | ⬜ pending |
-| 03B-01 | 01 | 1 | MANI-01/02/03/04/07 | T-03B-04 | Manifest includes exact unchanged membership | unit | `pytest test_catalog_manifest.py` | ❌ W0 | ⬜ pending |
-| 03B-02 | 02 | 1 | EVID-07/08/09/10/11, TEST-07 | T-03B-03/05 | Exact evidence coalesces; no Cartesian/search pollution | unit/store | `pytest test_catalog_evidence_store.py` | ❌ W0 | ⬜ pending |
-| 03B-03 | 03 | 2 | PLAN-13/14, MANI-06 | T-03B-01 | Shared atomic writer co-commits or rolls back | service | `pytest test_catalog_atomic_writer.py` | ❌ W0 | ⬜ pending |
-| 03B-04 | 04 | 3 | PLAN-14/15/16, TEST-06 | T-03B-02 | Stable replay/recovery/concurrency | service/concurrency | `pytest test_catalog_commit_recovery.py test_catalog_concurrency.py` | ❌ W0 | ⬜ pending |
-| 03B-05 | 05 | 4 | all Phase 3B | T-03B-GATE | Live proof and truthful capabilities/gate | integration/gate | Phase 3B gate runner | ❌ W0 | ⬜ pending |
+| 03B-01-T1 | 01 | 1 | PLAN-13..16, EVID-07..11, MANI-01..07, TEST-06/07 (scaffold names) | T-03B-01/02/GATE | Wave 0 RED scaffolds collectable; no product pass | unit scaffold | `pytest --collect-only` five unit modules | ❌ W0 | ⬜ pending |
+| 03B-01-T2 | 01 | 1 | TEST-06/07, D-32/34 | T-03B-GATE/ISO | Gate default ready_for_phase_4=false; live group tool-test only | gate/live scaffold | `pytest test_catalog_phase3b_gate_runner.py test_catalog_commit_neo4j_int.py --collect-only` | ❌ W0 | ⬜ pending |
+| 03B-02-T1 | 02 | 2 | MANI-01/02/03/04/07 | T-03B-04 | Bounded deterministic manifest bytes/chunks; no batch_id membership | unit | `pytest test_catalog_manifest.py` | ❌ W0 | ⬜ pending |
+| 03B-02-T2 | 02 | 2 | D-28 response | T-03B-INFO | Additive commit fields only; no token/payload/embeddings | unit | `pytest test_catalog_manifest.py test_catalog_prepare_models.py` | ❌ W0 | ⬜ pending |
+| 03B-03-T1 | 03 | 3 | EVID-07/08/09/10/11, TEST-07 | T-03B-03/05/CY | Fixed non-Entity evidence; create-once; target fail-closed | unit/store | `pytest test_catalog_evidence_store.py -k "evidence or coalesce or conflict or label or target"` | ❌ W0 | ⬜ pending |
+| 03B-03-T2 | 03 | 3 | MANI-01/04/06/07, D-08/09 | T-03B-04 | Manifest root/chunks create-once; terminal agree; plan lock | unit/store | `pytest test_catalog_evidence_store.py` | ❌ W0 | ⬜ pending |
+| 03B-04-T1 | 04 | 4 | PLAN-13/14, MANI-06, D-30 | T-03B-01 | Shared writer; every fault boundary rolls back | service | `pytest test_catalog_atomic_writer.py` | ❌ W0 | ⬜ pending |
+| 03B-04-T2 | 04 | 4 | PLAN-13/14, EVID-09/10, D-06/26 | T-03B-EXT/FAIL | upsert+commit share writer; dry_run zero-write; no external I/O on commit | service | `pytest test_catalog_atomic_writer.py test_catalog_service.py -k "upsert or commit or dry_run or atomic or writer"` | ❌ W0 | ⬜ pending |
+| 03B-05-T1 | 05 | 5 | PLAN-14/15, MANI-07 | T-03B-REVIVE | COMMITTING resume; terminal agreement; no PREPARED revival | service | `pytest test_catalog_commit_recovery.py` | ❌ W0 | ⬜ pending |
+| 03B-05-T2 | 05 | 5 | PLAN-16, TEST-06, D-24/25 | T-03B-02/DUP | Concurrent same-token one logical; no dup manifest | concurrency | `pytest test_catalog_concurrency.py test_catalog_commit_recovery.py` | ❌ W0 | ⬜ pending |
+| 03B-06-T1 | 06 | 6 | PLAN-13..16, EVID-07..11, MANI-01..07 | T-03B-01/ISO | Live single-tx co-commit, rollback, search, isolation | integration | `pytest test_catalog_commit_neo4j_int.py` | ❌ W0 | ⬜ pending |
+| 03B-06-T2 | 06 | 6 | TEST-06/07, D-32/33 | T-03B-GATE/CAP | Fail-closed gate; static features.manifests=True after proof; verification false | gate/unit | `pytest test_catalog_phase3b_gate_runner.py test_catalog_capabilities.py` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -59,14 +61,14 @@ created: 2026-07-18
 
 ## Wave 0 Requirements
 
-- [ ] `mcp_server/tests/test_catalog_manifest.py` — canonical manifest/hash/chunk/bounds.
-- [ ] `mcp_server/tests/test_catalog_evidence_store.py` — create-once/conflict/target/label behavior.
-- [ ] `mcp_server/tests/test_catalog_atomic_writer.py` — shared writer and every fault boundary.
-- [ ] `mcp_server/tests/test_catalog_commit_recovery.py` — terminal agreement and stranded `COMMITTING`.
-- [ ] `mcp_server/tests/test_catalog_concurrency.py` — same-token and same-batch races.
-- [ ] `mcp_server/tests/test_catalog_commit_neo4j_int.py` — live atomicity, rollback, replay, evidence, manifest, search, isolation.
-- [ ] `mcp_server/tests/test_catalog_phase3b_gate_runner.py` plus runner — fail-closed HEAD/content/spec/live authority.
-- [ ] Extend `mcp_server/tests/test_catalog_capabilities.py` and existing service/MCP regressions.
+- [ ] `mcp_server/tests/test_catalog_manifest.py` — canonical manifest/hash/chunk/bounds (plan 01 scaffold → 02 GREEN).
+- [ ] `mcp_server/tests/test_catalog_evidence_store.py` — create-once/conflict/target/label (plan 01 → 03).
+- [ ] `mcp_server/tests/test_catalog_atomic_writer.py` — shared writer and every fault boundary (plan 01 → 04).
+- [ ] `mcp_server/tests/test_catalog_commit_recovery.py` — terminal agreement and stranded COMMITTING (plan 01 → 05).
+- [ ] `mcp_server/tests/test_catalog_concurrency.py` — same-token and same-batch races (plan 01 → 05).
+- [ ] `mcp_server/tests/test_catalog_commit_neo4j_int.py` — live atomicity, rollback, replay, evidence, manifest, search, isolation (plan 01 → 06).
+- [ ] `mcp_server/tests/test_catalog_phase3b_gate_runner.py` plus `catalog_phase3b_gate_runner.py` — fail-closed HEAD/content/spec/live authority (plan 01 → 06).
+- [ ] Extend `mcp_server/tests/test_catalog_capabilities.py` and existing service/MCP regressions (plan 06).
 
 ---
 

@@ -692,20 +692,16 @@ chunks = chunk_artifact_bytes(raw, chunk_size=DEFAULT_CHUNK_BYTES)
 | A4 | Commit response may gain committed counts without breaking clients (additive fields) | Responses | If MCP clients reject extra fields, keep optional/defaulted |
 | A5 | Neo4j write locks via `SET n.uuid = n.uuid` remain sufficient under 5.26 community | Locking | If not, add explicit batch/plan lock nodes |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Exact commit response schema fields**  
-   - What we know: token-only input; success may add counts/outcomes (D-28).  
-   - Unclear: whether to embed full per-item results like upsert.  
-   - Recommendation: return aggregate counts + `state=COMMITTED` + hashes; omit per-item list unless already required by existing commit response model — keep bounded.
+   - **RESOLVED:** Bounded additive commit response fields only (plan 03B-02 / D-28): `batch_uuid`, `manifest_sha256`, aggregate created/updated/unchanged counts, existing plan_uuid/hashes/state/category counts. No per-item membership lists, token, payload, embeddings, or excerpts.
 
 2. **Live Neo4j credentials in this worktree**  
-   - What we know: AuthError at default URI during research.  
-   - Unclear: operator env for gate.  
-   - Recommendation: gate runner skip-live vs fail per Phase 1/3A truthfulness pattern; do not claim live green without probe.
+   - **RESOLVED:** Unavailable live Neo4j truthfully skips live tests; `ready_for_phase_4` remains false until configured live proof is green (plan 03B-06 / D-32). Never claim live green without probe; configured live proof is mandatory for readiness.
 
 3. **Whether failed status is written for every commit failure class**  
-   - Discretion: recommend yes for domain/tx failures (mirror upsert); no for pure token not_found/expired (no batch scope). Correctness independent of side tx.
+   - **RESOLVED:** Post-rollback failed status remains optional per D-27. Correctness never depends on recording every failure class; side transaction never creates manifest or plan COMMITTED.
 
 ## Likely File Touch Map
 
