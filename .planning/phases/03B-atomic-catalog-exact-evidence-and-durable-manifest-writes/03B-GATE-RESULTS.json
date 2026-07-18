@@ -11,7 +11,7 @@
         "-m",
         "pytest",
         "-c",
-        "mcp_server/pytest.ini",
+        "mcp_server/tests/pytest.ini",
         "mcp_server/tests/test_catalog_phase3b_gate_runner.py",
         "--tb=short",
         "-q",
@@ -32,7 +32,7 @@
         "-m",
         "pytest",
         "-c",
-        "mcp_server/pytest.ini",
+        "mcp_server/tests/pytest.ini",
         "mcp_server/tests/test_catalog_manifest.py",
         "mcp_server/tests/test_catalog_evidence_store.py",
         "mcp_server/tests/test_catalog_atomic_writer.py",
@@ -247,7 +247,7 @@
         "-m",
         "pytest",
         "-c",
-        "mcp_server/pytest.ini",
+        "mcp_server/tests/pytest.ini",
         "mcp_server/tests/test_catalog_commit_neo4j_int.py",
         "-m",
         "integration",
@@ -272,8 +272,8 @@
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-CONTEXT.md": "cddae8b05ebef0e9fc862c750073f139e53f20ff1df9b3c0451604b22ed3bb9e",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-VALIDATION.md": "48abcd26ae9de4b77b549e165ddb1c613068aaebdeab72aabc676290db332954"
   },
-  "evaluated_head": "3045228bc1aabfb22af000dce2c9fcd4e5ebf8d6",
-  "ledger_sha256": "14c20de19e50c04f8d2c196b6f74c242100b8425abc6a56c30b364c533682a60",
+  "evaluated_head": "dabb972ddb7678328fde6accc6fa735f9e65ed90",
+  "ledger_sha256": "99acfea663b695794155c2331d51e11868becda254cfaae8d70b5c4906e83d56",
   "live_neo4j_atomic_proof": "pass",
   "live_neo4j_atomic_proof_pass": true,
   "local_gate_pass": true,
@@ -301,7 +301,7 @@
         "-m",
         "pytest",
         "-c",
-        "mcp_server/pytest.ini",
+        "mcp_server/tests/pytest.ini",
         "mcp_server/tests/test_catalog_phase3b_gate_runner.py",
         "--tb=short",
         "-q",
@@ -321,7 +321,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 14 items\n\nmcp_server\\tests\\test_catalog_phase3b_gate_runner.py ..............      [100%]\n\n============================= 14 passed in 0.27s ==============================\n"
+      "stdout": "\u001b[1m============================= test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 14 items\n\nmcp_server\\tests\\test_catalog_phase3b_gate_runner.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m      [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m14 passed\u001b[0m\u001b[32m in 0.29s\u001b[0m\u001b[32m ==============================\u001b[0m\n"
     },
     {
       "argv": [
@@ -333,7 +333,7 @@
         "-m",
         "pytest",
         "-c",
-        "mcp_server/pytest.ini",
+        "mcp_server/tests/pytest.ini",
         "mcp_server/tests/test_catalog_manifest.py",
         "mcp_server/tests/test_catalog_evidence_store.py",
         "mcp_server/tests/test_catalog_atomic_writer.py",
@@ -358,7 +358,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 103 items\n\nmcp_server\\tests\\test_catalog_manifest.py ...............                [ 14%]\nmcp_server\\tests\\test_catalog_evidence_store.py ........................ [ 37%]\n...                                                                      [ 40%]\nmcp_server\\tests\\test_catalog_atomic_writer.py ............              [ 52%]\nmcp_server\\tests\\test_catalog_commit_recovery.py ...........             [ 63%]\nmcp_server\\tests\\test_catalog_concurrency.py ....                        [ 66%]\nmcp_server\\tests\\test_catalog_phase3b_gate_runner.py ..............      [ 80%]\nmcp_server\\tests\\test_catalog_capabilities.py ....................       [100%]\n\n============================= 103 passed in 1.60s =============================\n"
+      "stdout": "\u001b[1m============================= test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 103 items\n\nmcp_server\\tests\\test_catalog_manifest.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                [ 14%]\u001b[0m\nmcp_server\\tests\\test_catalog_evidence_store.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m [ 37%]\n\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                                                      [ 40%]\u001b[0m\nmcp_server\\tests\\test_catalog_atomic_writer.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m              [ 52%]\u001b[0m\nmcp_server\\tests\\test_catalog_commit_recovery.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m             [ 63%]\u001b[0m\nmcp_server\\tests\\test_catalog_concurrency.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                        [ 66%]\u001b[0m\nmcp_server\\tests\\test_catalog_phase3b_gate_runner.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m      [ 80%]\u001b[0m\nmcp_server\\tests\\test_catalog_capabilities.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m       [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m103 passed\u001b[0m\u001b[32m in 1.65s\u001b[0m\u001b[32m =============================\u001b[0m\n"
     },
     {
       "argv": [
@@ -614,7 +614,7 @@
         "-m",
         "pytest",
         "-c",
-        "mcp_server/pytest.ini",
+        "mcp_server/tests/pytest.ini",
         "mcp_server/tests/test_catalog_commit_neo4j_int.py",
         "-m",
         "integration",
@@ -622,7 +622,7 @@
         "--tb=line"
       ],
       "counts": {
-        "deselected": 0,
+        "deselected": 1,
         "errors": 0,
         "failed": 0,
         "passed": 10,
@@ -635,7 +635,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 10 items\n\nmcp_server\\tests\\test_catalog_commit_neo4j_int.py ..........             [100%]\n\n============================== warnings summary ===============================\nmcp_server\\tests\\test_catalog_commit_neo4j_int.py:79\n  C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\\test_catalog_commit_neo4j_int.py:79: PytestUnknownMarkWarning: Unknown pytest.mark.integration - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    pytest.mark.integration,\n\nmcp_server\\tests\\test_catalog_commit_neo4j_int.py:80\n  C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\\test_catalog_commit_neo4j_int.py:80: PytestUnknownMarkWarning: Unknown pytest.mark.requires_neo4j - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    pytest.mark.requires_neo4j,\n\ntests/test_catalog_commit_neo4j_int.py::test_module_hardcodes_allowed_group_only\n  tests\\test_catalog_commit_neo4j_int.py:546: PytestWarning: The test <Function test_module_hardcodes_allowed_group_only> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.\n    def test_module_hardcodes_allowed_group_only():\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n======================= 10 passed, 3 warnings in 5.52s ========================\n"
+      "stdout": "\u001b[1m============================= test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 11 items / 1 deselected / 10 selected\n\nmcp_server\\tests\\test_catalog_commit_neo4j_int.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m             [100%]\u001b[0m\n\n\u001b[32m====================== \u001b[32m\u001b[1m10 passed\u001b[0m, \u001b[33m1 deselected\u001b[0m\u001b[32m in 6.72s\u001b[0m\u001b[32m =======================\u001b[0m\n"
     }
   ],
   "safety": {
@@ -660,5 +660,5 @@
     "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nAssertionError\n",
     "stdout": ""
   },
-  "spec_sha256": "029c2eeab9e02e63db8694efda134f699145d0f3c61bea92fbc760be22dbd6f7"
+  "spec_sha256": "399de6ae2c91dfea950c0a39a36a9e7f515a5045b4650190217a7588bd2ac268"
 }
