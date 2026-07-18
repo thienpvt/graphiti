@@ -231,6 +231,7 @@ class CommitPreparedCatalogBatchResponse(BaseModel):
     """Commit claim receipt — plan_uuid/hashes/state/counts only (PLAN-10/12).
 
     Never includes membership, payload, embeddings, or plan_token.
+    Additive Phase 3B fields (D-28): batch_uuid, manifest_sha256, committed_* counts.
     """
 
     plan_uuid: str
@@ -242,6 +243,12 @@ class CommitPreparedCatalogBatchResponse(BaseModel):
     edge_count: int = 0
     source_count: int = 0
     evidence_link_count: int = 0
+    # Additive committed-outcome fields (D-28); default-safe for old constructors.
+    batch_uuid: str | None = None
+    manifest_sha256: str | None = None
+    committed_created: int = 0
+    committed_updated: int = 0
+    committed_unchanged: int = 0
     error_code: CatalogErrorCode | None = None
     error_message: str | None = None
 

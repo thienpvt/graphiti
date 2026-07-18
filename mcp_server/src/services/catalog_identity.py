@@ -77,6 +77,21 @@ def catalog_manifest_uuid(namespace: uuid.UUID, group_id: str, batch_id: str) ->
     return str(uuid.uuid5(namespace, f'{group_id}|{IDENTITY_SCHEMA_VERSION}|Manifest|{batch_id}'))
 
 
+def catalog_manifest_chunk_uuid(
+    namespace: uuid.UUID, group_id: str, batch_id: str, chunk_index: int
+) -> str:
+    """Pure ManifestChunk identity.
+
+    Material: group_id|catalog-v2|ManifestChunk|{batch_id}|{index}
+    """
+    return str(
+        uuid.uuid5(
+            namespace,
+            f'{group_id}|{IDENTITY_SCHEMA_VERSION}|ManifestChunk|{batch_id}|{chunk_index}',
+        )
+    )
+
+
 def catalog_prepared_plan_uuid(namespace: uuid.UUID, group_id: str, plan_id: str) -> str:
     """Pure PreparedPlan identity: UUIDv5(ns, group_id|catalog-v2|PreparedPlan|plan_id)."""
     return str(
