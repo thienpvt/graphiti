@@ -190,6 +190,20 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def normalize_newlines_lf(data: bytes) -> bytes:
+    """Normalize CRLF and lone CR to LF for cross-platform digest stability.
+
+    Windows autocrlf / checkout-dependent line endings must not change the
+    semantic identity of the raw edge probe. Mirrors Phase 1 sha256_file_lf.
+    """
+    return data.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+
+
+def sha256_bytes_lf(data: bytes) -> str:
+    """SHA-256 of newline-normalized (LF) bytes."""
+    return sha256_bytes(normalize_newlines_lf(data))
+
+
 def write_text_lf(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     normalized = text.replace('\r\n', '\n').replace('\r', '\n')
@@ -213,10 +227,16 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def load_raw_probe(root: Path) -> tuple[dict[str, Any], bytes, str]:
+    """Load raw edge probe.
+
+    Returns (parsed_json, raw_bytes_unchanged, lf_normalized_sha256).
+    raw_bytes stay platform-native for same-checkout re-read identity checks;
+    digest is LF-normalized so Windows CRLF checkouts match primary LF digests.
+    """
     path = root / DEFAULT_RAW_PROBE_REL
     raw_bytes = path.read_bytes()
     data = json.loads(raw_bytes.decode('utf-8'))
-    digest = sha256_bytes(raw_bytes)
+    digest = sha256_bytes_lf(raw_bytes)
     return data, raw_bytes, digest
 
 
