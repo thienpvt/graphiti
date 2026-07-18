@@ -254,8 +254,8 @@
     ".planning/phases/02-topology-authority-evidence-contract-hashes-and-capabilities/02-PHASE2-GATE.md": "fd6da8366d495ac0ba6d26ce38adc9eba35e4ccf517668fb2274578e416812de",
     ".planning/phases/02-topology-authority-evidence-contract-hashes-and-capabilities/02-VALIDATION.md": "0c6f5640ad996816e3f5c07b442c667b36612a1f157a74824d5fce2d98195f8c"
   },
-  "evaluated_head": "15354d5d7aa707439e8556037bf77e030f49464f",
-  "ledger_sha256": "4e4c9987a96b2ba097b97882788a198ab3b1c176318f9334fac598b87a3f079f",
+  "evaluated_head": "ac77ebb60b6a769ff0fba493cde70d93cc7cbdbc",
+  "ledger_sha256": "2abafec1e796cd05309c7f09a18412ea643ca137e3f9ca823ce17658a0f808d7",
   "local_gate_pass": true,
   "no_new_store_or_control_plane_write_path": true,
   "notes": {
