@@ -2,7 +2,7 @@
 phase: 1
 slug: strict-contracts-and-catalog-v2-identity
 status: in_progress
-nyquist_compliant: true
+nyquist_compliant: false
 wave_0_complete: true
 created: 2026-07-18
 updated: 2026-07-18
@@ -12,7 +12,9 @@ updated: 2026-07-18
 
 > Current-HEAD commands are serialized argv contracts. Each command is decoded with `json.loads` and executed from repository root using `subprocess.run(argv, shell=False)`. Historical TDD failures are ancestry evidence only.
 >
-> `nyquist_compliant` remains false until Plan 01-08 captures every mandatory outcome and derives the final gate in memory.
+> `nyquist_compliant` remains false until Plan 01-11 re-runs the complete local gate after Plans 01-09 and 01-10.
+>
+> **2026-07-18 invalidation:** CR-01, CR-02, WR-01, and WR-02 are open. The green Plan 01-08 command ledger below is historical evidence only, not current authorization. Local readiness may be reconsidered only by Plan 01-11 after Plans 01-09 and 01-10 pass their mandatory checks.
 
 ## Test Infrastructure
 
@@ -76,6 +78,7 @@ These ancestry commits prove the historical RED gates. They are not current-HEAD
 - [x] Every current-HEAD row executed successfully with `shell=False`.
 - [x] Nine exact edge-probe nodes collected once and passed.
 - [x] All mandatory final checks captured and passed.
-- [x] `nyquist_compliant: true` derived in memory only after complete green evidence.
+- [x] Plan 01-08 historically derived `nyquist_compliant: true` from its then-complete green evidence.
+- [ ] Current Nyquist compliance is invalidated by open CR-01, CR-02, WR-01, and WR-02 findings.
 
-**Approval:** approved from the Plan 01-08 in-memory result mapping.
+**Approval:** superseded on 2026-07-18; Plan 01-08 approval is historical evidence only. Plan 01-11 alone may reconsider local readiness after Plans 01-09 and 01-10 pass.

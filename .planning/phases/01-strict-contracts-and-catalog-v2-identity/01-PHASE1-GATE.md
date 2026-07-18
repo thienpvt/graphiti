@@ -1,17 +1,17 @@
 # Phase 1 Gate Report
 
 **Date:** 2026-07-18
-**Consumer:** independent Phase 1 re-audit before any Phase 2 transition
-**Authority:** Plan 01-08 in-memory runner outcomes; no manual override
+**Consumer:** Plans 01-09 through 01-11 before any Phase 2 transition
+**Authority:** Plan 01-08 outcomes retained as historical evidence; current readiness invalidated by open findings
 **Policy:** every mandatory real check must return zero; Neo4j integration remains a truthful nonblocking skip without availability probe.
 
 ## Readiness Derivation
 
-- Failure propagation sentinel: pass; observed exit 1; expected nonzero and excluded from real gate aggregation.
-- Mandatory real checks passed: 9/9.
-- Catalog Neo4j integration: skip — Phase 1 unit policy; availability not probed.
-- In-memory derivation: `ready_for_phase_2=true`.
-- This report permits only the orchestrator re-audit decision; no Phase 2 work was started.
+- **2026-07-18 invalidation:** CR-01, CR-02, WR-01, and WR-02 are open.
+- Plan 01-08 failure-propagation and 9/9 mandatory-check outcomes remain historical evidence only, not current authorization.
+- Catalog Neo4j integration remains skip — Phase 1 unit policy; availability not probed.
+- Current derivation is false. Local readiness may be reconsidered only by Plan 01-11 after Plans 01-09 and 01-10 pass their mandatory checks.
+- No Phase 2 work is authorized or started.
 
 ## Check Ledger
 
@@ -83,10 +83,10 @@ catalog_neo4j_int=skip
 canary_executed=false
 oracle_catalog_v2_queried=false
 no_new_store_or_control_plane_write_path=true
-ready_for_phase_2=true
+ready_for_phase_2=false
 resolved=53
 unresolved=0
 
 ## Scope Stop
 
-Plan 01-08 ends here. Phase 2 transition is reserved for the independent orchestrator re-audit.
+Plan 01-08's green ledger is superseded as current authorization. Plans 01-09 and 01-10 must close CR-02/WR-01 and CR-01/WR-02 respectively; Plan 01-11 alone may reconsider local readiness. Independent audits remain mandatory, so Phase 2 stays blocked.
