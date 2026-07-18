@@ -3341,6 +3341,7 @@ def _batch_request(
     provenance: NestedProvenancePayload | None = None,
     dry_run: bool = False,
     request_sha256: str | None = None,
+    catalog_sha256: str = 'a' * 64,
 ) -> UpsertCatalogBatchRequest:
     return UpsertCatalogBatchRequest(
         identity_schema_version='catalog-v2',
@@ -3352,6 +3353,7 @@ def _batch_request(
         provenance=provenance,
         dry_run=dry_run,
         request_sha256=request_sha256,
+        catalog_sha256=catalog_sha256,
     )
 
 
@@ -4268,7 +4270,7 @@ def _v2_request_payload(tool_name: str, **overrides):
     elif tool_name == 'get_catalog_ingest_status':
         payload = {'group_id': GROUP, 'batch_id': 'cont07-status'}
     elif tool_name == 'upsert_catalog_batch':
-        payload = {**base, 'entities': [_minimal_entity_dict()]}
+        payload = {**base, 'entities': [_minimal_entity_dict()], 'catalog_sha256': 'a' * 64}
     else:
         raise AssertionError(f'unknown tool {tool_name}')
     payload.update(overrides)
@@ -5639,6 +5641,7 @@ async def test_gap_cr01_combined_batch_rolls_back_and_returns_typed_conflict():
         group_id=GROUP,
         batch_id='batch-race',
         entities=[loser],
+        catalog_sha256='a' * 64,
     )
     resp = await service.upsert_catalog_batch(client=client, request=batch_req)
     assert resp.status == 'failed'

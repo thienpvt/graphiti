@@ -892,6 +892,7 @@ def test_upsert_catalog_batch_accepts_nested_entities():
             'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
+            'catalog_sha256': 'a' * 64,
             'entities': [_entity_kwargs()],
             'edges': [],
             'provenance': None,
@@ -907,6 +908,7 @@ def test_upsert_catalog_batch_accepts_nested_entities():
             'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
+            'catalog_sha256': 'a' * 64,
             'entities': [
                 _entity_kwargs(graph_key='TABLE::FE::ORCL.HR.A', name_raw='A', name_canonical='a'),
                 _entity_kwargs(graph_key='TABLE::FE::ORCL.HR.B', name_raw='B', name_canonical='b'),
@@ -925,6 +927,7 @@ def test_upsert_catalog_batch_rejects_atomic_false():
             {
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'batch-1',
+            'catalog_sha256': 'a' * 64,
                 'entities': [_entity_kwargs()],
                 'atomic': False,
             }
@@ -939,6 +942,7 @@ def test_upsert_catalog_batch_rejects_empty_all_collections():
             {
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'batch-1',
+            'catalog_sha256': 'a' * 64,
                 'entities': [],
                 'edges': [],
                 'provenance': None,
@@ -965,6 +969,7 @@ def test_upsert_catalog_batch_accepts_provenance_only():
             'system_key': 'FE',
             'group_id': 'oracle-catalog-tool-test',
             'batch_id': 'batch-1',
+            'catalog_sha256': 'a' * 64,
             'entities': [],
             'edges': [],
             'provenance': {
@@ -989,6 +994,7 @@ def test_nested_batch_rejects_evidence_links_over_hard_max():
                 'system_key': 'FE',
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'batch-1',
+            'catalog_sha256': 'a' * 64,
                 'entities': [],
                 'provenance': {
                     'sources': [_source_kwargs()],
@@ -1004,7 +1010,7 @@ def test_nested_batch_rejects_evidence_links_over_hard_max():
         )
 
 
-def test_upsert_catalog_batch_optional_hashes():
+def test_upsert_catalog_batch_required_catalog_sha256_and_optional_request_hash():
     digest = 'b' * 64
     req = UpsertCatalogBatchRequest.model_validate(
         {
@@ -1018,13 +1024,27 @@ def test_upsert_catalog_batch_optional_hashes():
         }
     )
     assert req.request_sha256 == digest
+    assert req.catalog_sha256 == digest
     with pytest.raises(ValidationError):
         UpsertCatalogBatchRequest.model_validate(
             {
+                'identity_schema_version': 'catalog-v2',
+                'system_key': 'FE',
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'batch-1',
                 'entities': [_entity_kwargs()],
                 'request_sha256': 'not-hex',
+                'catalog_sha256': digest,
+            }
+        )
+    with pytest.raises(ValidationError):
+        UpsertCatalogBatchRequest.model_validate(
+            {
+                'identity_schema_version': 'catalog-v2',
+                'system_key': 'FE',
+                'group_id': 'oracle-catalog-tool-test',
+                'batch_id': 'batch-1',
+                'entities': [_entity_kwargs()],
             }
         )
 
@@ -1034,6 +1054,7 @@ def test_upsert_catalog_batch_requires_group_and_batch():
         UpsertCatalogBatchRequest.model_validate(
             {
                 'batch_id': 'batch-1',
+            'catalog_sha256': 'a' * 64,
                 'entities': [_entity_kwargs()],
             }
         )
@@ -1042,7 +1063,8 @@ def test_upsert_catalog_batch_requires_group_and_batch():
             {
                 'group_id': 'oracle-catalog-tool-test',
                 'entities': [_entity_kwargs()],
-            }
+            
+            'catalog_sha256': 'a' * 64,}
         )
 
 
@@ -1117,7 +1139,7 @@ def test_catalog_ingest_status_response_no_payload_or_secret_fields():
         batch_uuid=FIXED_NS,
         status='committed',
         request_sha256='c' * 64,
-        catalog_sha256=None,
+        catalog_sha256='a' * 64,
         entity_count=1,
         edge_count=0,
         provenance_count=0,
@@ -2003,7 +2025,8 @@ def test_shell_mismatch_batch_nested_entity_path():
                     batch_id='shell-batch',
                     entities=[_entity_kwargs(graph_key='TABLE::BO::ORCL.HR.EMPLOYEES')],
                 ),
-            }
+            
+            'catalog_sha256': 'a' * 64,}
         )
     _assert_shell_system_mismatch(exc.value)
 
