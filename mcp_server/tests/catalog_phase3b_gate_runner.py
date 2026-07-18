@@ -342,18 +342,21 @@ def check_concurrency_scaffold(root: Path) -> None:
 
 
 def check_manifests_feature_false(root: Path) -> None:
-    """03B-06 blocked: static features.manifests=False; verification false; prepare_commit true."""
+    """Pre-live: static features.manifests=False; verification false; prepare_commit true.
+
+    History audit does not permanently force this flag — it stays False until post-live flip.
+    """
     capa = root / 'mcp_server/src/services/catalog_capabilities.py'
     if not capa.is_file():
         raise AssertionError('catalog_capabilities.py missing')
     src = capa.read_text(encoding='utf-8')
     if "'manifests': True" in src or '"manifests": True' in src:
         raise AssertionError(
-            'features.manifests must remain False while Phase 3B gate is blocked '
-            '(historical oracle-catalog-v2 probe; D-33)'
+            'features.manifests must remain False pre-live (D-33); flip only after '
+            'accepted live proof + coordinator; historical audit alone does not set True'
         )
     if "'manifests': False" not in src and '"manifests": False' not in src:
-        raise AssertionError('features.manifests must be explicitly False')
+        raise AssertionError('features.manifests must be explicitly False pre-live')
     if "'manifest_verification': True" in src or '"manifest_verification": True' in src:
         raise AssertionError('features.manifest_verification must remain false (Phase 4)')
     if "'prepare_commit': True" not in src and '"prepare_commit": True' not in src:
@@ -1075,6 +1078,9 @@ def run_gate(
         manifests=manifests,
         require_neo4j=require_neo4j,
     )
+    # Additive completion signal: identical to ready_for_phase_4 (false pre-live).
+    phase_3b_complete = ready
+    pre_live_only = not require_neo4j
 
     ledger: dict[str, Any] = {
         'schema_version': SCHEMA_VERSION,
@@ -1092,6 +1098,8 @@ def run_gate(
         'local_gate_pass': local_gate_pass,
         'nyquist_compliant': False,
         'ready_for_phase_4': ready,
+        'phase_3b_complete': phase_3b_complete,
+        'pre_live_only': pre_live_only,
         'manifests': manifests,
         # Top-level safety fields MUST mirror derived safety (never constant false).
         'canary_executed': safety['canary_executed'],
@@ -1127,6 +1135,14 @@ def run_gate(
                 'authorized two-axis re-gate; Phase 4 still requires live+manifests; '
                 'history remains on audit axis; never query/mutate oracle-catalog-v2 again'
             ),
+            'phase_3b_complete_meaning': (
+                'phase_3b_complete equals ready_for_phase_4; false until live+manifests. '
+                'Non-live CLI exit 0 is local preflight only (pre_live_only=true), not completion.'
+            ),
+            'pre_live_only_meaning': (
+                'pre_live_only true when gate run without --require-neo4j; CLI 0 then means '
+                'local preflight green, not Phase 3B complete'
+            ),
             'local_gate_pass_meaning': (
                 'local_gate_pass means mandatory non-live command checks only '
                 '(pytest/ruff/pyright/structural). It is NOT overall gate success '
@@ -1141,7 +1157,11 @@ def run_gate(
                 'CLI run exits nonzero unless local_gate_pass and current '
                 'safety_checks_pass and no canary/clear_graph/current_source_v2; '
                 'aggregate historical v2 does not force nonzero; require-neo4j also '
-                'needs ready_for_phase_4'
+                'needs ready_for_phase_4. Non-live exit 0 is preflight only.'
+            ),
+            'manifests_pre_live': (
+                'features.manifests False pre-live; not permanently blocked by history; '
+                'flip only after accepted live proof'
             ),
         },
     }
@@ -1257,24 +1277,68 @@ def verify_ledger(
         errors.append(
             f'ready_for_phase_4 mismatch ledger={raw.get("ready_for_phase_4")} recomputed={ready}'
         )
+    # Additive: phase_3b_complete mirrors ready_for_phase_4 (false pre-live).
+    if 'phase_3b_complete' not in raw:
+        errors.append('phase_3b_complete missing')
+    elif raw.get('phase_3b_complete') != ready:
+        errors.append(
+            f'phase_3b_complete mismatch ledger={raw.get("phase_3b_complete")} expected={ready}'
+        )
+    if raw.get('phase_3b_complete') != raw.get('ready_for_phase_4'):
+        errors.append('phase_3b_complete must equal ready_for_phase_4')
+    if 'pre_live_only' not in raw:
+        errors.append('pre_live_only missing')
+    elif raw.get('pre_live_only') != (not req):
+        errors.append(
+            f'pre_live_only mismatch ledger={raw.get("pre_live_only")} expected={not req}'
+        )
+
     for key in ('canary_executed', 'oracle_catalog_v2_queried', 'clear_graph_called'):
         if raw.get(key) != safety.get(key):
             errors.append(
                 f'{key} top-level mismatch ledger={raw.get(key)!r} derived={safety.get(key)!r}'
             )
-    # Axis A: historical audit must remain recorded (cannot be erased).
+
+    # Nested safety must equal recomputed safety (full Axis A + B snapshot).
+    raw_safety = raw.get('safety')
+    if not isinstance(raw_safety, dict):
+        errors.append('safety object missing')
+    else:
+        for key, expected in safety.items():
+            if key not in raw_safety:
+                errors.append(f'safety.{key} missing')
+            elif raw_safety.get(key) != expected:
+                errors.append(
+                    f'safety.{key} mismatch ledger={raw_safety.get(key)!r} derived={expected!r}'
+                )
+
+    # Axis A: historical audit object must be present and exact (cannot be erased/tampered).
     if safety.get('historical_oracle_catalog_v2_queried') is not True:
         errors.append('derived historical_oracle_catalog_v2_queried must be true (permanent audit)')
     if safety.get('oracle_catalog_v2_queried') is not True:
         errors.append('derived oracle_catalog_v2_queried must be true (aggregate includes history)')
     if raw.get('oracle_catalog_v2_queried') is not True:
         errors.append('ledger oracle_catalog_v2_queried must be true (history erasure rejected)')
-    hist = raw.get('historical_audit') or (raw.get('safety') or {})
-    if hist.get('historical_oracle_catalog_v2_queried') is False or (
-        isinstance(raw.get('safety'), dict)
-        and raw['safety'].get('historical_oracle_catalog_v2_queried') is False
-    ):
-        errors.append('historical_oracle_catalog_v2_queried erasure rejected')
+
+    hist = raw.get('historical_audit')
+    if not isinstance(hist, dict):
+        errors.append('historical_audit missing')
+    else:
+        expected_hist = {
+            'historical_oracle_catalog_v2_queried': HISTORICAL_ORACLE_CATALOG_V2_QUERIED,
+            'commit': HISTORICAL_V2_COMMIT,
+            'class': HISTORICAL_V2_CLASS,
+            'scope': HISTORICAL_V2_SCOPE,
+            'note': HISTORICAL_V2_VIOLATION_NOTE,
+        }
+        for key, expected in expected_hist.items():
+            if key not in hist:
+                errors.append(f'historical_audit.{key} missing')
+            elif hist.get(key) != expected:
+                errors.append(
+                    f'historical_audit.{key} mismatch ledger={hist.get(key)!r} '
+                    f'expected={expected!r}'
+                )
     # Axis B: current safety may be green with history true; do NOT force ready false.
 
     if isinstance(results, list):
@@ -1344,6 +1408,8 @@ def main(argv: list[str] | None = None) -> int:
                     'local_gate_pass': ledger['local_gate_pass'],
                     'safety_checks_pass': (ledger.get('safety') or {}).get('safety_checks_pass'),
                     'ready_for_phase_4': ledger['ready_for_phase_4'],
+                    'phase_3b_complete': ledger.get('phase_3b_complete'),
+                    'pre_live_only': ledger.get('pre_live_only'),
                     'manifests': ledger['manifests'],
                     'evaluated_head': ledger['evaluated_head'],
                     'spec_sha256': ledger['spec_sha256'],

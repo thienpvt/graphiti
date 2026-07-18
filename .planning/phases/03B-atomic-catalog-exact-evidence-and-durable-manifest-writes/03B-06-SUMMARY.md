@@ -132,21 +132,24 @@ Do not restate "11/11 results" as accepted proof.
 
 ## Gate ledger (non-live, schema v2)
 
-- Regenerated with `require_neo4j=false` (live skipped).
+- Regenerated with `require_neo4j=false` (live skipped); final pre-live HEAD rebind required after code changes.
 - `schema_version=phase3b-gate-results.v2`
 - `ready_for_phase_4=false` (no live / manifests false)
+- `phase_3b_complete=false` (equals `ready_for_phase_4`; additive completion signal)
+- `pre_live_only=true` on non-live runs (CLI exit 0 = local preflight only, not completion)
 - `oracle_catalog_v2_queried=true` (aggregate includes permanent history)
 - `safety.historical_oracle_catalog_v2_queried=true`
 - `safety.current_source_v2_param_query=false`
 - `safety.safety_checks_pass=true` when current axis clean
-- `manifests=false`
-- `verify_ledger` accepts truthful history + green current; rejects history erasure
-- CLI `run` exits **0** when current axis green non-live (history true does not force nonzero)
+- `historical_audit` exact: commit `a67789a`, class `test_policy`, scope `local_neo4j_no_corresponding_data`, fixed note
+- `manifests=false` (pre-live; not permanently blocked by history)
+- `verify_ledger` requires exact historical_audit + nested safety equals recomputed; rejects erasure/tamper
+- CLI `run` exits **0** when current axis green non-live (history true does not force nonzero; still preflight)
 - Signal names:
   - `local_gate_pass` = mandatory **non-live command checks only**. Not overall success.
   - `safety.safety_checks_pass` = **current** axis only (not forced false by history).
   - `oracle_catalog_v2_queried` = aggregate audit (history OR current dirty).
-  - `ready_for_phase_4` = Phase 4 readiness (false until live+manifests under require-neo4j).
+  - `ready_for_phase_4` / `phase_3b_complete` = Phase 4 readiness / phase complete (false until live+manifests under require-neo4j).
 - No Neo4j connection during this re-gate wave.
 
 ## Task Commits (historical; plan not complete)

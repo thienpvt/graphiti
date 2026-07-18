@@ -248,12 +248,16 @@ def test_history_only_accepted_with_green_current(tmp_path: Path, monkeypatch: p
     assert ledger['canary_executed'] is False
     assert ledger['clear_graph_called'] is False
     assert ledger['ready_for_phase_4'] is False
+    assert ledger['phase_3b_complete'] is False
+    assert ledger['pre_live_only'] is True
     assert ledger['manifests'] is False
     assert ledger['schema_version'] == gate.SCHEMA_VERSION
     assert ledger['schema_version'] == 'phase3b-gate-results.v2'
     assert ledger['historical_audit']['commit'] == 'a67789a'
     assert ledger['historical_audit']['class'] == 'test_policy'
     assert ledger['historical_audit']['scope'] == 'local_neo4j_no_corresponding_data'
+    assert ledger['historical_audit']['note'] == gate.HISTORICAL_V2_VIOLATION_NOTE
+    assert ledger['historical_audit']['historical_oracle_catalog_v2_queried'] is True
     ver = gate.verify_ledger(root, ledger_path, require_neo4j=False)
     assert ver['ok'] is True, ver['errors']
     assert gate.derive_cli_exit_code(ledger, require_neo4j=False) == 0
@@ -719,3 +723,184 @@ def test_main_run_exits_nonzero_when_current_safety_fails(
     monkeypatch.setattr(gate, 'repo_root_from', lambda start=None: root)  # noqa: ARG005
     code = gate.main(['run', '--ledger', str(ledger_path), '--root', str(root)])
     assert code == 1
+
+
+def _fresh_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict]:
+    root = _root()
+    ledger_path = tmp_path / '03B-GATE-RESULTS.json'
+
+    def fake_run_argv(argv, root_arg, timeout=1800):  # noqa: ARG001
+        return {
+            'exit_code': 0,
+            'stdout': '1 passed',
+            'stderr': '',
+            'counts': {'passed': 1, 'failed': 0, 'skipped': 0, 'deselected': 0, 'errors': 0},
+        }
+
+    monkeypatch.setattr(gate, 'run_argv', fake_run_argv)
+    monkeypatch.setenv('CATALOG_PHASE3B_GATE_SKIP_SELF', '1')
+    ledger = gate.run_gate(root, ledger_path, require_neo4j=False)
+    return ledger_path, ledger
+
+
+def test_verify_rejects_missing_historical_audit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger_path, _ = _fresh_ledger(tmp_path, monkeypatch)
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    del raw['historical_audit']
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(_root(), ledger_path, require_neo4j=False)
+    assert ver['ok'] is False
+    assert any('historical_audit missing' in e for e in ver['errors'])
+
+
+def test_verify_rejects_wrong_historical_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger_path, _ = _fresh_ledger(tmp_path, monkeypatch)
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['historical_audit']['commit'] = 'deadbeef'
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(_root(), ledger_path, require_neo4j=False)
+    assert ver['ok'] is False
+    assert any('historical_audit.commit' in e for e in ver['errors'])
+
+
+def test_verify_rejects_wrong_historical_class(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger_path, _ = _fresh_ledger(tmp_path, monkeypatch)
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['historical_audit']['class'] = 'production'
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(_root(), ledger_path, require_neo4j=False)
+    assert ver['ok'] is False
+    assert any('historical_audit.class' in e for e in ver['errors'])
+
+
+def test_verify_rejects_wrong_historical_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger_path, _ = _fresh_ledger(tmp_path, monkeypatch)
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['historical_audit']['scope'] = 'wrong_scope'
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(_root(), ledger_path, require_neo4j=False)
+    assert ver['ok'] is False
+    assert any('historical_audit.scope' in e for e in ver['errors'])
+
+
+def test_verify_rejects_wrong_historical_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger_path, _ = _fresh_ledger(tmp_path, monkeypatch)
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['historical_audit']['note'] = 'tampered note'
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(_root(), ledger_path, require_neo4j=False)
+    assert ver['ok'] is False
+    assert any('historical_audit.note' in e for e in ver['errors'])
+
+
+def test_verify_rejects_nested_aggregate_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger_path, _ = _fresh_ledger(tmp_path, monkeypatch)
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['safety']['oracle_catalog_v2_queried'] = False
+    # keep top-level true so nested mismatch is the signal
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(_root(), ledger_path, require_neo4j=False)
+    assert ver['ok'] is False
+    joined = ' '.join(ver['errors'])
+    assert 'safety.oracle_catalog_v2_queried' in joined
+
+
+def test_verify_rejects_omitted_nested_historical_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    ledger_path, _ = _fresh_ledger(tmp_path, monkeypatch)
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    del raw['safety']['historical_oracle_catalog_v2_queried']
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(_root(), ledger_path, require_neo4j=False)
+    assert ver['ok'] is False
+    assert any('safety.historical_oracle_catalog_v2_queried missing' in e for e in ver['errors'])
+
+
+def test_verify_rejects_current_axis_nested_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    ledger_path, _ = _fresh_ledger(tmp_path, monkeypatch)
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['safety']['safety_checks_pass'] = False  # derived is True for clean source
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(_root(), ledger_path, require_neo4j=False)
+    assert ver['ok'] is False
+    assert any('safety.safety_checks_pass mismatch' in e for e in ver['errors'])
+
+
+def test_verify_rejects_missing_phase_3b_complete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ledger_path, _ = _fresh_ledger(tmp_path, monkeypatch)
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    del raw['phase_3b_complete']
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(_root(), ledger_path, require_neo4j=False)
+    assert ver['ok'] is False
+    assert any('phase_3b_complete missing' in e for e in ver['errors'])
+
+
+def test_product_sourced_manifests_false_blocks_ready_with_synthetic_live():
+    """Product-sourced manifests=False: synthetic live pass still ready false (pre-live)."""
+    root = _root()
+    assert gate.read_manifests_feature(root) is False
+    safety = _current_clean_safety()
+    live_pass = {
+        'live_neo4j_atomic_proof': 'pass',
+        'live_neo4j_atomic_proof_pass': True,
+        'skipped_or_failed': False,
+    }
+    assert (
+        gate.derive_ready_for_phase_4(
+            True,
+            live_pass,
+            safety,
+            manifests=gate.read_manifests_feature(root),
+            require_neo4j=True,
+        )
+        is False
+    )
+
+
+def test_require_neo4j_pass_product_manifests_false_ready_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Integration path: live green but product manifests False => ready false."""
+    root = _root()
+    ledger_path = tmp_path / '03B-GATE-RESULTS.json'
+
+    def fake_run_argv(argv, root_arg, timeout=1800):  # noqa: ARG001
+        joined = ' '.join(argv)
+        if 'test_catalog_commit_neo4j_int' in joined:
+            return {
+                'exit_code': 0,
+                'stdout': '7 passed',
+                'stderr': '',
+                'counts': {
+                    'passed': 7,
+                    'failed': 0,
+                    'skipped': 0,
+                    'deselected': 0,
+                    'errors': 0,
+                },
+            }
+        return {
+            'exit_code': 0,
+            'stdout': '1 passed',
+            'stderr': '',
+            'counts': {'passed': 1, 'failed': 0, 'skipped': 0, 'deselected': 0, 'errors': 0},
+        }
+
+    monkeypatch.setattr(gate, 'run_argv', fake_run_argv)
+    monkeypatch.setenv('CATALOG_PHASE3B_GATE_SKIP_SELF', '1')
+    # Do NOT patch read_manifests_feature — product source must remain False.
+
+    ledger = gate.run_gate(root, ledger_path, require_neo4j=True)
+    assert ledger['local_gate_pass'] is True
+    assert ledger['live_neo4j_atomic_proof_pass'] is True
+    assert ledger['manifests'] is False
+    assert ledger['ready_for_phase_4'] is False
+    assert ledger['phase_3b_complete'] is False
+    assert ledger['pre_live_only'] is False
+    assert ledger['oracle_catalog_v2_queried'] is True
+    assert ledger['safety']['safety_checks_pass'] is True
+    assert gate.derive_cli_exit_code(ledger, require_neo4j=True) == 1
