@@ -31,7 +31,7 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 - [x] **Phase 2: Topology Authority, Evidence Contract, Hashes, Capabilities** - Endpoint map, exact evidence schema, authoritative hashes, capabilities; local gate ready_for_phase_3a=true
 - [x] **Phase 3A: Immutable Prepare/Commit Control Plane** - Prepare/discard/token, immutable payload, zero domain write on prepare; local gate ready_for_phase_3b=true
 - [x] **Phase 3B: Atomic Catalog, Exact Evidence, Durable Manifest Writes** - Domain+evidence+manifest co-commit, rollback, search interop
-- [ ] **Phase 4: Manifest-Backed Verification and Read-Only Diagnostics** - Manifest reads, verify, edge resolve, split gates
+- [x] **Phase 4: Manifest-Backed Verification and Read-Only Diagnostics** - Manifest reads, verify, edge resolve, split gates (completed 2026-07-18)
 - [ ] **Phase 5: Verification, Security, Compatibility, and Migration Docs** - Exhaustive tests, isolation, docs, final report without canary
 - Phase 6 canary: separate approval only — not in this milestone requirement set
 
@@ -219,7 +219,7 @@ Plans:
   4. Separate read/write feature gates keep capabilities and catalog diagnostics usable when writes are disabled; read paths never initialize/repair schema or open write transactions
   5. Explicit-key verification remains available; gate/registration tests prove read tools work while writes are off
 
-**Plans**: 6/6 plans executed
+**Plans**: 6/6 plans complete
 
 **Wave 1**
 
@@ -247,6 +247,7 @@ Plans:
 
 **Research**: complete (`04-RESEARCH.md`) — manifest reassembly, pagination, verification authority, split gates
 **Planning gate**: passed after one revision; 21/21 requirements, D-01–D-31, 42/42 edge probes, 31/31 decision coverage
+**Gate**: Passed — goal 5/5 truths; requirements_verified 21/21; Nyquist 21/21 req + 42/42 edge probes; security closed 11/11; review clean; `manifest_verification=true`; `ready_for_phase_5=true`; `canary_executed=false`; historical `a67789a` two-axis retained; Phase 5 unblocked
 **Stop condition**: Any invalid/missing manifest, cross-group read, read-side mutation, expected-from-observed verification, or legacy-tool regression blocks Phase 5
 
 ### Phase 5: Verification, Security, Compatibility, and Migration Docs
@@ -278,8 +279,8 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 5/5 | Complete; ready_for_phase_3a=true | 2026-07-18 |
 | Phase 3A. Immutable Prepare/Commit Control Plane | 6/6 | Complete; ready_for_phase_3b=true | 2026-07-18 |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
-| Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 0/6 | Planned; ready to execute | - |
-| Phase 5. Verification, Security, Compatibility, and Migration Docs | 0/TBD | Not started | - |
+| Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
+| Phase 5. Verification, Security, Compatibility, and Migration Docs | 0/TBD | Not started; Phase 4 dependency satisfied | - |
 
 ## Coverage
 

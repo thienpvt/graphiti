@@ -48,7 +48,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **IDEN-05**: The graph-key registry defines complete catalog-v2 grammar for all allowed types, including System, Database, DictionaryDocument, Schema, Table, View, MaterializedView, Column, Constraint, Index, Package, Procedure, Function, Trigger, Sequence, Synonym, DatabaseLink, and SourceArtifact.
 - [x] **IDEN-06**: Procedure and Function identities include a deterministic overload discriminator so package and standalone overloads cannot collapse.
 - [x] **IDEN-07**: FE and BO objects with identical Oracle database, schema, object, and leaf names have different graph keys and server-derived UUIDs while remaining in one `group_id` graph.
-- [ ] **IDEN-08**: Catalog entities expose their complete system-scoped graph keys through resolve, manifest, evidence, and verification responses used by agents. Phase 1 model/service echo tests are partial foundation evidence only; Phase 4 uniquely owns completion across all response surfaces.
+- [x] **IDEN-08**: Catalog entities expose their complete system-scoped graph keys through resolve, manifest, evidence, and verification responses used by agents. Phase 1 model/service echo tests are partial foundation evidence only; Phase 4 uniquely owns completion across all response surfaces.
 - [x] **IDEN-09**: `System`, `DatabaseLink`, and `SourceArtifact` are added to the fixed entity allowlist with fixed server-owned prefixes and grammars; no business-level entity types are added.
 - [x] **IDEN-10**: Entity UUIDs derive from an explicitly versioned canonical name equivalent to `group_id|catalog-v2|entity_type|graph_key` under the configured immutable namespace.
 - [x] **IDEN-11**: Edge, provenance source, evidence-link, batch, manifest, and prepared-plan identities use equivalent explicit catalog-v2 versioning and deterministic server derivation.
@@ -125,8 +125,8 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **EVID-09**: Existing Graphiti-compatible source Episodic, MENTIONS, and RELATES_TO `episodes` behavior remains available for search interoperability without fabricating links.
 - [x] **EVID-10**: Detailed per-link evidence for both entity and relationship targets is retained in bounded non-Entity control-plane records.
 - [x] **EVID-11**: Evidence/control records never carry Entity labels, enter entity indexes, or participate in community clustering.
-- [ ] **EVID-12**: The read-only `get_catalog_evidence` tool returns compact group-isolated evidence for one entity or edge target with bounded pagination and optional excerpts.
-- [ ] **EVID-13**: `verify_catalog_batch` can require and compare exact evidence-link identities and counts, not only a boolean provenance-presence flag.
+- [x] **EVID-12**: The read-only `get_catalog_evidence` tool returns compact group-isolated evidence for one entity or edge target with bounded pagination and optional excerpts.
+- [x] **EVID-13**: `verify_catalog_batch` can require and compare exact evidence-link identities and counts, not only a boolean provenance-presence flag.
 - [x] **EVID-14**: Catalog-v2 rejects the legacy Cartesian provenance request shape; no automatic conversion of multi-source target arrays is performed.
 
 ### Durable Batch Manifest and Verification
@@ -135,27 +135,27 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **MANI-02**: Manifest membership includes objects observed unchanged during the request, including shared entities; it does not depend on an object's current `batch_id` property.
 - [x] **MANI-03**: Existing entity and edge `batch_id` properties remain only as compatibility or last-change metadata and are never the authoritative membership source.
 - [x] **MANI-04**: Manifest data is stored in bounded, group-isolated, non-Entity control-plane records with deterministic catalog-v2 manifest identity and canonical consistency hash.
-- [ ] **MANI-05**: `get_catalog_batch_manifest` returns group ID, batch ID, request hash, catalog hash, identity schema version, exact counts, and paginated compact item identities.
+- [x] **MANI-05**: `get_catalog_batch_manifest` returns group ID, batch ID, request hash, catalog hash, identity schema version, exact counts, and paginated compact item identities.
 - [x] **MANI-06**: Manifest creation and terminal status/plan updates are part of the same atomic success transaction as domain and evidence writes.
 - [x] **MANI-07**: Identical replay does not duplicate, reorder, or silently rewrite manifest entries.
-- [ ] **VERI-01**: Batch-only `verify_catalog_batch` loads the committed manifest as its expected membership authority.
-- [ ] **VERI-02**: Batch-only expected counts come from committed manifest/status metadata, never from the number of physical rows returned by a live query.
-- [ ] **VERI-03**: Verification reports missing manifest members and extra physical duplicates instead of normalizing them away.
-- [ ] **VERI-04**: Verification checks exact entity type, deterministic entity UUID, exact edge type, deterministic edge UUID, endpoint UUIDs and graph keys, required name/fact embeddings, exact provenance/evidence links, and manifest hash/count consistency.
-- [ ] **VERI-05**: A committed catalog-v2 batch with no valid manifest fails with `manifest_mismatch`.
-- [ ] **VERI-06**: Existing explicit-key verification remains available alongside manifest-backed batch verification.
-- [ ] **RESE-01**: `resolve_typed_edges` resolves by edge type and edge key and returns UUID, source/target UUIDs and graph keys, exact type, content hash, and embedding presence.
-- [ ] **RESE-02**: Edge resolution reports not-found, physical duplicates, type mismatch, endpoint mismatch, endpoint-pair violation, and deterministic UUID mismatch without repairing data.
-- [ ] **RESE-03**: Edge resolution is group-isolated, read-only, performs no embedding, and works while catalog writes are disabled.
+- [x] **VERI-01**: Batch-only `verify_catalog_batch` loads the committed manifest as its expected membership authority.
+- [x] **VERI-02**: Batch-only expected counts come from committed manifest/status metadata, never from the number of physical rows returned by a live query.
+- [x] **VERI-03**: Verification reports missing manifest members and extra physical duplicates instead of normalizing them away.
+- [x] **VERI-04**: Verification checks exact entity type, deterministic entity UUID, exact edge type, deterministic edge UUID, endpoint UUIDs and graph keys, required name/fact embeddings, exact provenance/evidence links, and manifest hash/count consistency.
+- [x] **VERI-05**: A committed catalog-v2 batch with no valid manifest fails with `manifest_mismatch`.
+- [x] **VERI-06**: Existing explicit-key verification remains available alongside manifest-backed batch verification.
+- [x] **RESE-01**: `resolve_typed_edges` resolves by edge type and edge key and returns UUID, source/target UUIDs and graph keys, exact type, content hash, and embedding presence.
+- [x] **RESE-02**: Edge resolution reports not-found, physical duplicates, type mismatch, endpoint mismatch, endpoint-pair violation, and deterministic UUID mismatch without repairing data.
+- [x] **RESE-03**: Edge resolution is group-isolated, read-only, performs no embedding, and works while catalog writes are disabled.
 
 ### Read and Write Feature Gates
 
-- [ ] **GATE-01**: Catalog read diagnostics and catalog mutations use separate explicit feature gates with safe defaults.
-- [ ] **GATE-02**: `get_catalog_capabilities` remains callable whenever the MCP server is initialized, independent of the write gate.
-- [ ] **GATE-03**: `get_catalog_ingest_status`, `get_catalog_batch_manifest`, `resolve_typed_entities`, `resolve_typed_edges`, `verify_catalog_batch`, and `get_catalog_evidence` remain usable when writes are disabled, identity configuration is available, and Neo4j is readable.
-- [ ] **GATE-04**: Read-only catalog operations do not initialize, alter, or repair schema and never open write transactions.
-- [ ] **GATE-05**: Missing batch status is distinguishable through `found=false` or an explicit not-found state/code and never masquerades as a committed or operational failure.
-- [ ] **GATE-06**: Every gated read and write retains complete `group_id` isolation.
+- [x] **GATE-01**: Catalog read diagnostics and catalog mutations use separate explicit feature gates with safe defaults.
+- [x] **GATE-02**: `get_catalog_capabilities` remains callable whenever the MCP server is initialized, independent of the write gate.
+- [x] **GATE-03**: `get_catalog_ingest_status`, `get_catalog_batch_manifest`, `resolve_typed_entities`, `resolve_typed_edges`, `verify_catalog_batch`, and `get_catalog_evidence` remain usable when writes are disabled, identity configuration is available, and Neo4j is readable.
+- [x] **GATE-04**: Read-only catalog operations do not initialize, alter, or repair schema and never open write transactions.
+- [x] **GATE-05**: Missing batch status is distinguishable through `found=false` or an explicit not-found state/code and never masquerades as a committed or operational failure.
+- [x] **GATE-06**: Every gated read and write retains complete `group_id` isolation.
 
 ### Verification, Regression, and Documentation
 
@@ -166,8 +166,8 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **TEST-05**: Prepare tests prove no domain/status mutation, immutable persisted payloads, token-only commit, restart safety, TTL/size/cardinality limits, and missing/expired/discarded/consumed/conflicting behavior.
 - [x] **TEST-06**: Concurrency tests prove one logical result for identical concurrent commit, token scope cannot change, expired plans cannot revive, and no duplicate manifest/evidence/domain records appear.
 - [x] **TEST-07**: Evidence tests prove multiple sources link only to explicitly declared targets, no Cartesian provenance occurs, exact link verification works, and conflicting immutable link targets fail closed.
-- [ ] **TEST-08**: Manifest and resolver tests prove unchanged shared entities remain members, missing manifest items/count drift are detected, missing manifests fail, and edge twins/endpoint mismatches are reported.
-- [ ] **TEST-09**: Gate and registration tests prove read tools work while writes are disabled, all 14 legacy tools remain registered, all expected catalog-v2 tools are registered, and `get_status` remains compatible.
+- [x] **TEST-08**: Manifest and resolver tests prove unchanged shared entities remain members, missing manifest items/count drift are detected, missing manifests fail, and edge twins/endpoint mismatches are reported.
+- [x] **TEST-09**: Gate and registration tests prove read tools work while writes are disabled, all 14 legacy tools remain registered, all expected catalog-v2 tools are registered, and `get_status` remains compatible.
 - [ ] **TEST-10**: Security tests prove no LLM, queue, prohibited Graphiti tool, implicit community, client Cypher identifier, payload, source text, credential, authorization header, raw token, or unsafe exception appears in deterministic execution or logs.
 - [ ] **TEST-11**: Live Neo4j tests prove atomic rollback, search interoperability, exact evidence/manifest behavior, control labels excluded from normal entity search, and no writes outside `oracle-catalog-tool-test`.
 - [ ] **TEST-12**: Targeted unit, service, store, MCP, concurrency, live Neo4j, Ruff, and Pyright checks are run when available; each final result reports pass/fail/skip truthfully without fixing unrelated baseline failures.
@@ -247,7 +247,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | IDEN-05 | Phase 1 | Complete |
 | IDEN-06 | Phase 1 | Complete |
 | IDEN-07 | Phase 1 | Complete |
-| IDEN-08 | Phase 4 | Pending |
+| IDEN-08 | Phase 4 | Complete |
 | IDEN-09 | Phase 1 | Complete |
 | IDEN-10 | Phase 1 | Complete |
 | IDEN-11 | Phase 1 | Complete |
@@ -309,31 +309,31 @@ Deferred until the deterministic substrate is implemented and verified.
 | EVID-09 | Phase 3B | Complete |
 | EVID-10 | Phase 3B | Complete |
 | EVID-11 | Phase 3B | Complete |
-| EVID-12 | Phase 4 | Pending |
-| EVID-13 | Phase 4 | Pending |
+| EVID-12 | Phase 4 | Complete |
+| EVID-13 | Phase 4 | Complete |
 | EVID-14 | Phase 2 | Complete |
 | MANI-01 | Phase 3B | Complete |
 | MANI-02 | Phase 3B | Complete |
 | MANI-03 | Phase 3B | Complete |
 | MANI-04 | Phase 3B | Complete |
-| MANI-05 | Phase 4 | Pending |
+| MANI-05 | Phase 4 | Complete |
 | MANI-06 | Phase 3B | Complete |
 | MANI-07 | Phase 3B | Complete |
-| VERI-01 | Phase 4 | Pending |
-| VERI-02 | Phase 4 | Pending |
-| VERI-03 | Phase 4 | Pending |
-| VERI-04 | Phase 4 | Pending |
-| VERI-05 | Phase 4 | Pending |
-| VERI-06 | Phase 4 | Pending |
-| RESE-01 | Phase 4 | Pending |
-| RESE-02 | Phase 4 | Pending |
-| RESE-03 | Phase 4 | Pending |
-| GATE-01 | Phase 4 | Pending |
-| GATE-02 | Phase 4 | Pending |
-| GATE-03 | Phase 4 | Pending |
-| GATE-04 | Phase 4 | Pending |
-| GATE-05 | Phase 4 | Pending |
-| GATE-06 | Phase 4 | Pending |
+| VERI-01 | Phase 4 | Complete |
+| VERI-02 | Phase 4 | Complete |
+| VERI-03 | Phase 4 | Complete |
+| VERI-04 | Phase 4 | Complete |
+| VERI-05 | Phase 4 | Complete |
+| VERI-06 | Phase 4 | Complete |
+| RESE-01 | Phase 4 | Complete |
+| RESE-02 | Phase 4 | Complete |
+| RESE-03 | Phase 4 | Complete |
+| GATE-01 | Phase 4 | Complete |
+| GATE-02 | Phase 4 | Complete |
+| GATE-03 | Phase 4 | Complete |
+| GATE-04 | Phase 4 | Complete |
+| GATE-05 | Phase 4 | Complete |
+| GATE-06 | Phase 4 | Complete |
 | TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 2 | Complete |
 | TEST-03 | Phase 1 | Complete |
@@ -341,8 +341,8 @@ Deferred until the deterministic substrate is implemented and verified.
 | TEST-05 | Phase 3A | Complete |
 | TEST-06 | Phase 3B | Complete |
 | TEST-07 | Phase 3B | Complete |
-| TEST-08 | Phase 4 | Pending |
-| TEST-09 | Phase 4 | Pending |
+| TEST-08 | Phase 4 | Complete |
+| TEST-09 | Phase 4 | Complete |
 | TEST-10 | Phase 5 | Pending |
 | TEST-11 | Phase 5 | Pending |
 | TEST-12 | Phase 5 | Pending |

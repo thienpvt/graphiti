@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-status: ready_to_execute
-stopped_at: Phase 4 planned and plan-checker verified
-last_updated: "2026-07-18T19:55:54.219Z"
+status: ready_to_plan
+stopped_at: Phase 4 complete; tracking reconciled; Phase 5 next
+last_updated: "2026-07-18T20:44:35Z"
 progress:
   total_phases: 6
   completed_phases: 6
   total_plans: 37
   completed_plans: 37
   percent: 100
-current_phase: 04
-current_phase_name: Manifest-Backed Verification and Read-Only Diagnostics
+current_phase: 05
+current_phase_name: Verification, Security, Compatibility, and Migration Docs
 last_activity: 2026-07-19
-last_activity_desc: Phase 04 research, validation, six plans, and plan-checker verification complete
+last_activity_desc: Phase 4 complete 6/6; tracking reconciled; Phase 5 next/unblocked
 ---
 
 # Project State
@@ -24,17 +24,18 @@ last_activity_desc: Phase 04 research, validation, six plans, and plan-checker v
 See: `.planning/PROJECT.md`
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 04 — Manifest-Backed Verification and Read-Only Diagnostics
+**Current focus:** Phase 05 — Verification, Security, Compatibility, and Migration Docs
 
 ## Current Position
 
-Phase 4 discussion, research, validation strategy, and planning complete. Six plans verified and ready for autonomous execution.
+Phase 4 complete. Tracking reconciled to artifact truth. Phase 5 next/unblocked; plans not started.
 
-- Phase 4 plans: 0/6 executed; six ordered waves.
-- Plan checker: PASSED after one revision, 21/21 requirements and D-01 through D-31 covered.
-- Edge-probe ledger: 42/42 dispositions; no silent drops.
-- Decision coverage: 31/31; API coverage gate: not required, detector false.
-- Phase 3B prerequisite remains green; `manifest_verification=false` until Phase 4 final proof.
+- Phase 4 plans: 6/6 Complete
+- Goal verification: 5/5 truths; requirements_verified 21/21; status passed
+- Nyquist: 21/21 requirements; 42/42 edge probes
+- Security: closed 11/11; review clean
+- Gate: `manifest_verification=true`; `ready_for_phase_5=true`; `canary_executed=false`
+- Historical `a67789a` two-axis safety retained; current v2 ban unchanged
 
 ## Performance Metrics
 
@@ -47,8 +48,8 @@ Phase 4 discussion, research, validation strategy, and planning complete. Six pl
 | Phase 2 | 5/5 | Complete |
 | Phase 3A | 6/6 | Complete |
 | Phase 3B | 6/6 | Complete |
-| Phase 4 | 0/6 | Planned; ready to execute |
-| Phase 5 | TBD | Blocked on Phase 4 |
+| Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
+| Phase 5 | TBD | Next / unblocked; not started |
 
 ## Accumulated Context
 
@@ -61,12 +62,13 @@ Phase 4 discussion, research, validation strategy, and planning complete. Six pl
 - Never query or mutate `oracle-catalog-v2`.
 - Phase 3B uses two-axis safety: permanent historical audit for `a67789a`; independent current safety. Historical event class `test_policy`, scope `local_neo4j_no_corresponding_data`.
 - Phase 3B shared writer atomically co-commits domain, exact evidence, durable manifest, batch terminal, and plan terminal state.
-- `features.manifests=true`; `manifest_verification=false` until Phase 4.
+- `features.manifests=true`; `manifest_verification=true` (Phase 4 proof complete).
 - Automatically choose recommended options during Phase 4/5 discussion.
+- `canary_executed=false` remains hard truth through Phase 5 readiness work.
 
 ### Pending Todos
 
-1. Execute/review/validate/secure/verify Phase 4.
+1. Plan Phase 5 final readiness work without canary (`/gsd-plan-phase 5`).
 2. Execute Phase 5 final readiness work without canary.
 3. Run local Ollama E2E before milestone cleanup.
 4. Require explicit confirmation before cleanup/deletion.
@@ -77,7 +79,6 @@ Phase 4 discussion, research, validation strategy, and planning complete. Six pl
 - Never weaken a real product, transaction, validation, security, test, or hard gate.
 - Ignore only malformed parser projections and transient internal/tool/API errors.
 - No remote-state mutation without separate approval.
-- Phase 4 deep review found CR-01/CR-02 blockers and six warnings requiring disposition
 
 ## Quick Tasks Completed
 
@@ -99,5 +100,5 @@ Phase 4 discussion, research, validation strategy, and planning complete. Six pl
 
 ## Session Continuity
 
-Stopped at: Phase 4 planned and plan-checker verified.
-Next: `/gsd-execute-phase 4 --auto --no-transition`.
+Stopped at: Phase 4 complete; tracking reconciled.
+Next: `/gsd-plan-phase 5`.
