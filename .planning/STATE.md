@@ -4,16 +4,16 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 1
 current_phase_name: Strict Contracts and Catalog-v2 Identity
-status: Phase 1 evidence gate green; awaiting independent re-audit; ready_for_phase_2=true
-stopped_at: Completed 01-09-PLAN.md
-last_updated: "2026-07-18T00:48:45.789Z"
+status: Phase 1 gap closure — 01-10 complete; readiness false; next 01-11
+stopped_at: Completed 01-10-PLAN.md
+last_updated: "2026-07-18T01:04:12.232Z"
 last_activity: 2026-07-18
-last_activity_desc: "Completed 01-08 final matrix: 9/9 mandatory real checks pass; Neo4j integration remains skip without probe"
+last_activity_desc: "Completed 01-10 lock-authoritative entity conflicts and offline catalog-v2 fixtures"
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 13
-  completed_plans: 11
+  completed_plans: 12
   percent: 50
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 1 of 7 (Strict Contracts and Catalog-v2 Identity) — IN PROGRESS
-Plan: 08 of 08 complete
-Status: Phase 1 evidence gate green; awaiting independent re-audit; ready_for_phase_2=true
-Last activity: 2026-07-18 — Completed 01-08 final matrix: 9/9 mandatory real checks pass; Neo4j integration remains skip without probe
+Plan: 10 of 11 complete (next 01-11)
+Status: Phase 1 gap closure in progress; ready_for_phase_2=false
+Last activity: 2026-07-18 — Completed 01-10 lock-authoritative entity conflicts and offline catalog-v2 fixtures
 
-Progress: [█████████░] 85%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -71,6 +71,7 @@ Progress: [█████████░] 85%
 | Phase 01 P06 | 40min | 2 tasks | 13 files |
 | Phase 01 P08 | 23min | 3 tasks | 8 files |
 | Phase 01-strict-contracts-and-catalog-v2-identity P09 | 6min | 3 tasks | 9 files |
+| Phase 01 P10 | 14min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -115,10 +116,13 @@ Recent decisions affecting current work:
 - [Phase 1]: Final evidence gate is green; stop before Phase 2 for independent orchestrator re-audit
 - [Phase ?]: Plan 01-09: CR-02 reference_time model validation preserves exact ISO source string; WR-01 exact graph-key field locations via validate_entity_graph_key_at
 - [Phase ?]: Plan 01-09: readiness remains false; CR-01/WR-02 delegated to 01-10; 01-11 alone may reconsider local readiness
+- [Phase ?]: Entity MERGE self-lock + under-lock immutable/type CASE is mutation authority
+- [Phase ?]: Combined batch catches EntityInvariantRace as typed conflict after domain rollback
+- [Phase ?]: Pure offline catalog-v2 FE fixtures; live race defined but unexecuted
 
 ### Pending Todos
 
-Next: independent Phase 1 re-audit. Plan 01-08 is complete; evidence gate reports ready_for_phase_2=true. Do not transition or execute Phase 2 in this session.
+Next: Plan 01-11 readiness reconsideration only after mandatory checks. ready_for_phase_2=false. Do not transition or execute Phase 2 in this session.
 
 ### Blockers/Concerns
 
@@ -145,7 +149,7 @@ Next: independent Phase 1 re-audit. Plan 01-08 is complete; evidence gate report
 
 ## Session Continuity
 
-Last session: 2026-07-18T00:48:45.783Z
-Stopped at: Completed 01-09-PLAN.md
+Last session: 2026-07-18T01:04:12.225Z
+Stopped at: Completed 01-10-PLAN.md
 Resume file: None
 Next: Independent Phase 1 re-audit; stop before Phase 2 execution
