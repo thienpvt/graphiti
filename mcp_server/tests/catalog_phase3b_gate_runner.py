@@ -354,25 +354,45 @@ def check_concurrency_scaffold(root: Path) -> None:
         )
 
 
-def check_manifests_feature_true(root: Path) -> None:
-    """Post-live flip: static features.manifests=True; verification false; prepare_commit true.
+def _feature_bool_marker(src: str, name: str, value: bool) -> bool:
+    """True when source assigns features.<name> to the given bool (single or double quotes)."""
+    lit = 'True' if value else 'False'
+    single = chr(39) + name + chr(39) + ': ' + lit
+    double = chr(34) + name + chr(34) + ': ' + lit
+    return single in src or double in src
 
-    Flip is source-static only after accepted live preflip + coordinator. Runtime must not
-    read planning ledgers to decide the flag.
+
+def check_manifests_feature_true(root: Path) -> None:
+    """Post-live flip: static features.manifests=True; prepare_commit true.
+
+    Phase 3B owns manifests + prepare_commit. features.manifest_verification is Phase 4's
+    flag: accept False (pre-Phase-4 / historical 3B heads) or True (truthful Phase 4
+    completion). Do not freeze verification permanently false — that breaks cross-phase
+    gates after 04-06. Runtime must not read planning ledgers to decide any flag.
     """
     capa = root / 'mcp_server/src/services/catalog_capabilities.py'
     if not capa.is_file():
         raise AssertionError('catalog_capabilities.py missing')
     src = capa.read_text(encoding='utf-8')
-    if "'manifests': True" not in src and '"manifests": True' not in src:
+    if not _feature_bool_marker(src, 'manifests', True):
         raise AssertionError(
             'features.manifests must be True after accepted live proof + coordinator flip (D-33)'
         )
-    if "'manifests': False" in src or '"manifests": False' in src:
+    if _feature_bool_marker(src, 'manifests', False):
         raise AssertionError('features.manifests must not remain False after final flip')
-    if "'manifest_verification': True" in src or '"manifest_verification": True' in src:
-        raise AssertionError('features.manifest_verification must remain false (Phase 4)')
-    if "'prepare_commit': True" not in src and '"prepare_commit": True' not in src:
+    # Staged: False before Phase 4 flip, True after truthful Phase 4 completion.
+    has_mv_false = _feature_bool_marker(src, 'manifest_verification', False)
+    has_mv_true = _feature_bool_marker(src, 'manifest_verification', True)
+    if not (has_mv_false or has_mv_true):
+        raise AssertionError(
+            'features.manifest_verification must be declared True or False '
+            '(False pre-Phase-4; True after Phase 4 completion)'
+        )
+    if has_mv_false and has_mv_true:
+        raise AssertionError(
+            'features.manifest_verification must not be both True and False in source'
+        )
+    if not _feature_bool_marker(src, 'prepare_commit', True):
         raise AssertionError('features.prepare_commit must remain True')
     # Runtime must not open planning ledgers to decide the flag (code only; comments ok).
     code_lines = [ln for ln in src.splitlines() if ln.strip() and not ln.lstrip().startswith('#')]
@@ -1174,7 +1194,8 @@ def run_gate(
             ),
             'manifests_post_flip': (
                 'features.manifests True after accepted live preflip + coordinator final flip; '
-                'static source only; no runtime GATE-RESULTS read; verification remains false'
+                'static source only; no runtime GATE-RESULTS read; prepare_commit true; '
+                'manifest_verification is Phase 4 staged (False pre-04-06, True post-proof)'
             ),
         },
     }
