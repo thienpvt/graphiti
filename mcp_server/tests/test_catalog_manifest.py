@@ -44,12 +44,17 @@ _PRODUCT_SYMBOLS = (
 )
 
 
+def _load_module(module_name: str) -> Any:
+    """importlib load; fail closed (Wave 0 / IDE-safe — no static product imports)."""
+    try:
+        return importlib.import_module(module_name)
+    except ImportError as exc:
+        pytest.fail(f'03B not implemented: {module_name} missing ({exc})')
+
+
 def _product() -> Any:
     """Load services.catalog_manifest; fail closed if missing."""
-    try:
-        return importlib.import_module('services.catalog_manifest')
-    except ImportError as exc:
-        pytest.fail(f'03B not implemented: services.catalog_manifest missing ({exc})')
+    return _load_module('services.catalog_manifest')
 
 
 def _require(*names: str) -> Any:
@@ -58,6 +63,22 @@ def _require(*names: str) -> Any:
     if missing:
         pytest.fail(f'03B not implemented: missing symbols {missing}')
     return mod
+
+
+def _attr(mod: Any, symbol: str) -> Any:
+    value = getattr(mod, symbol, None)
+    if value is None:
+        pytest.fail(f'03B not implemented: missing symbol {symbol}')
+    return value
+
+
+# Module-level dynamic product symbols (no `from services/models ...` static imports).
+_PREPARED_ARTIFACT_MOD = _load_module('services.catalog_prepared_artifact')
+_IDENTITY_MOD = _load_module('services.catalog_identity')
+_RESPONSES_MOD = _load_module('models.catalog_responses')
+reassemble_artifact_bytes = _attr(_PREPARED_ARTIFACT_MOD, 'reassemble_artifact_bytes')
+catalog_manifest_chunk_uuid = _attr(_IDENTITY_MOD, 'catalog_manifest_chunk_uuid')
+CommitPreparedCatalogBatchResponse = _attr(_RESPONSES_MOD, 'CommitPreparedCatalogBatchResponse')
 
 
 def _empty_membership() -> dict[str, Any]:
@@ -479,8 +500,6 @@ def test_manifest_byte_identical_rehash():
     assert digest == hashlib.sha256(raw).hexdigest()
     assert digest == mod.manifest_sha256(raw)
     # chunk_manifest_body reuses framing and reassembles to same bytes
-    from services.catalog_prepared_artifact import reassemble_artifact_bytes
-
     chunks = mod.chunk_manifest_body(body, chunk_size=64)
     rebuilt = reassemble_artifact_bytes(chunks, expected_sha256=digest, expected_length=len(raw))
     assert rebuilt == raw
@@ -507,8 +526,6 @@ def test_manifest_builder_ignores_batch_id_for_membership():
 
 def test_catalog_manifest_chunk_uuid_deterministic():
     """D-17: ManifestChunk material group_id|catalog-v2|ManifestChunk|batch_id|index."""
-    from services.catalog_identity import catalog_manifest_chunk_uuid
-
     a = catalog_manifest_chunk_uuid(FIXED_NS, GROUP, BATCH_ID, 0)
     b = catalog_manifest_chunk_uuid(FIXED_NS, GROUP, BATCH_ID, 0)
     c = catalog_manifest_chunk_uuid(FIXED_NS, GROUP, BATCH_ID, 1)
@@ -529,8 +546,6 @@ def test_manifest_module_has_no_io():
 
 def test_commit_response_additive_defaults_safe():
     """D-28: CommitPreparedCatalogBatchResponse additive fields default-safe."""
-    from models.catalog_responses import CommitPreparedCatalogBatchResponse
-
     # Old constructor shape still works (no new required fields).
     resp = CommitPreparedCatalogBatchResponse(
         plan_uuid='11111111-1111-1111-1111-111111111111',
