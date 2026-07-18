@@ -1129,6 +1129,7 @@ def _head_compatible(root: Path, evaluated_head: str) -> tuple[bool, str]:
             '03B-06-SUMMARY.md',
             '03B-VALIDATION.md',
             '03B-EDGE-PROBE-RESOLUTION.json',
+            '03B-PATTERNS.md',
         )
         if norm and all(any(f.endswith(s) for s in allowed_suffixes) for f in norm):
             return True, 'ledger-only-child'
