@@ -50,9 +50,12 @@ class CatalogEvidenceLocator(CatalogStrictModel):
 
     @model_validator(mode='after')
     def _end_ge_start(self) -> CatalogEvidenceLocator:
-        if self.start_line is not None and self.end_line is not None:
-            if self.end_line < self.start_line:
-                raise ValueError('end_line must be >= start_line')
+        if (
+            self.start_line is not None
+            and self.end_line is not None
+            and self.end_line < self.start_line
+        ):
+            raise ValueError('end_line must be >= start_line')
         return self
 
 
