@@ -5246,6 +5246,11 @@ class CatalogService:
                 if status == 'unchanged' and existing.get('content_sha256') != prep.content_sha256:
                     raise self._EntityInvariantRace(CatalogErrorCode.batch_conflict)
             if status != 'unchanged':
+                if not prep.name_embedding:
+                    raise CatalogStoreError(
+                        'frozen name_embedding missing for non-unchanged entity',
+                        code='embedding_failed',
+                    )
                 row = await self._store.upsert_entity_item(
                     tx,
                     entity_type=prep.item.entity_type,
@@ -5262,7 +5267,7 @@ class CatalogService:
                         content_sha256=prep.content_sha256,
                         created_at=request_ts,
                         updated_at=request_ts,
-                        name_embedding=prep.name_embedding or [],
+                        name_embedding=list(prep.name_embedding),
                         attributes=prep.item.attributes,
                         source_refs=prep.item.source_refs,
                         confidence=prep.item.confidence,
@@ -5299,6 +5304,11 @@ class CatalogService:
                 if existing.get('content_sha256') != prep.content_sha256:
                     raise self._EdgeEndpointRace(CatalogErrorCode.batch_conflict)
             else:
+                if not prep.fact_embedding:
+                    raise CatalogStoreError(
+                        'frozen fact_embedding missing for non-unchanged edge',
+                        code='embedding_failed',
+                    )
                 row = await self._store.upsert_edge_item(
                     tx,
                     params=self._store.prepare_edge_params(
@@ -5314,7 +5324,7 @@ class CatalogService:
                         content_sha256=prep.content_sha256,
                         created_at=request_ts,
                         updated_at=request_ts,
-                        fact_embedding=prep.fact_embedding or [],
+                        fact_embedding=list(prep.fact_embedding),
                         attributes=prep.item.attributes,
                         confidence=prep.item.confidence,
                     ),
