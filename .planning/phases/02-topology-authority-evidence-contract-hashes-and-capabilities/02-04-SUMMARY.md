@@ -154,6 +154,7 @@ status: complete
 1. **Task 1: namespace fingerprint + pure capabilities builder + response model** - `ffd8654` (feat)
 2. **Task 2: MCP get_catalog_capabilities registration + get_status compatibility** - `7d5cd51` (feat)
 3. **Lint fix (unused import)** - `300ecfe` (style)
+4. **Pyright test narrowing** - `cf4e928` (fix)
 
 ## Files Created/Modified
 
@@ -182,6 +183,13 @@ status: complete
 - **Files modified:** `mcp_server/tests/test_catalog_capabilities.py`
 - **Commit:** `300ecfe`
 
+**2. [Rule 1 - Bug] Scoped Pyright model_dump on union result**
+- **Found during:** coordinator canonical pyright pass
+- **Issue:** `result.model_dump()` on `CatalogCapabilitiesResponse | ErrorResponse` inferred as dict
+- **Fix:** `assert isinstance(result, CatalogCapabilitiesResponse)` before `model_dump`
+- **Files modified:** `mcp_server/tests/test_catalog_capabilities.py`
+- **Commit:** `cf4e928`
+
 ### Known follow-ups (out of plan ownership)
 
 - `test_catalog_service.py::test_mcp_registers_exactly_seven_catalog_tools_and_preserves_legacy_tools` still asserts total tool count `== 21`. Plan forbade editing that file (owned by 02-01/02-03). Additive tool raises live total to 22; covered by this plan's `test_mcp_registers_capabilities_plus_legacy_and_catalog_tools` (`len(names) >= 22`). Update service registration count in a later owned fix if needed.
@@ -191,13 +199,14 @@ status: complete
 - `pytest test_catalog_capabilities.py` — 18 passed
 - Phase-2 subset (capabilities/topology/evidence/hash/identity) — 418 passed
 - Ruff check/format — clean on plan files
-- Scoped Pyright — 0 errors on capabilities + responses
+- Canonical scoped Pyright (builder/responses/MCP/tests) — 0 errors
 
 ## TDD Gate Compliance
 
 1. RED: capabilities tests failed with missing module
 2. GREEN: builder/response + MCP registration commits after tests
 3. style cleanup commit for unused import
+4. fix: narrow MCP result type for pyright
 
 ## Self-Check: PASSED
 
@@ -205,4 +214,4 @@ status: complete
 - FOUND: `mcp_server/src/models/catalog_responses.py` (`CatalogCapabilitiesResponse`)
 - FOUND: `mcp_server/src/graphiti_mcp_server.py` (`get_catalog_capabilities`)
 - FOUND: `mcp_server/tests/test_catalog_capabilities.py`
-- FOUND: commits `ffd8654`, `7d5cd51`, `300ecfe`
+- FOUND: commits `ffd8654`, `7d5cd51`, `300ecfe`, `cf4e928`
