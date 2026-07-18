@@ -22,7 +22,6 @@ from models.catalog_responses import (  # noqa: E402
     PrepareCatalogBatchResponse,
 )
 
-
 FIXED_SHA = 'a' * 64
 GROUP = 'oracle-catalog-tool-test'
 
@@ -331,8 +330,8 @@ def test_hard_plan_ceiling_constants():
         HARD_MAX_PREPARED_PAYLOAD_BYTES,
         HARD_PLAN_TTL_SECONDS,
         HARD_PREPARED_CHUNK_BYTES,
-        PLAN_STATE_COMMITTING,
         PLAN_STATE_COMMITTED,
+        PLAN_STATE_COMMITTING,
         PLAN_STATE_DISCARDED,
         PLAN_STATE_EXPIRED,
         PLAN_STATE_PREPARED,

@@ -9,8 +9,6 @@ import sys
 import uuid
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from services import catalog_identity as identity_mod  # noqa: E402
