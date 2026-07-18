@@ -214,10 +214,10 @@
         "python",
         "mcp_server/tests/catalog_phase3b_gate_runner.py",
         "check",
-        "manifests_feature_true"
+        "manifests_feature_false"
       ],
       "expected_exit": 0,
-      "id": "manifests_feature_true",
+      "id": "manifests_feature_false",
       "kind": "structural",
       "mandatory": true
     },
@@ -236,60 +236,40 @@
       "id": "edge_resolution_complete",
       "kind": "structural",
       "mandatory": true
-    },
-    {
-      "argv": [
-        "uv",
-        "run",
-        "--project",
-        "mcp_server",
-        "python",
-        "-m",
-        "pytest",
-        "-c",
-        "mcp_server/tests/pytest.ini",
-        "mcp_server/tests/test_catalog_commit_neo4j_int.py",
-        "-m",
-        "integration",
-        "-q",
-        "--tb=line"
-      ],
-      "expected_exit": 0,
-      "id": "live_neo4j_atomic_proof",
-      "kind": "live",
-      "mandatory": true
     }
   ],
   "clear_graph_called": false,
-  "content_digest": "f5ed852651a8f19e1b6cf97bd8241ce8605448798ede16a7cfbbea4c18e8b0d2",
+  "content_digest": "71049bf392bbec88fc8ced1774b8f4bcdf2027d702addbfec743dfa1fadc9a90",
   "content_sha256_map": {
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-01-SUMMARY.md": "48dd8a0bf0d24af9af99e8f2dd8d7affe5dc532426d8721eeee9df367287adf0",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-02-SUMMARY.md": "b80c8d90bc9aaea112ab029d5f45713f54c03ec716bf9597993d2a3dd16478c8",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-03-SUMMARY.md": "e4588e44f38cec692a7e44eb78a7018388e69fa3b7ee6a4cb0b12746d40b62b5",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-04-SUMMARY.md": "23a47b787975df98767bd829e70418acd4f23dbf199b98ec57801bdf4994097f",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-05-SUMMARY.md": "5be8619756f3f805db7474aac9ea1fc8d58e9b43fc0ff175f4c4a563eac69af7",
-    ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-06-SUMMARY.md": "45e858a0300f8280be3dcfa95663fa34ba1d45c2b6e87c24d4480d9280fab76f",
+    ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-06-SUMMARY.md": "0f5a533b24487c13e263a79e67d5d23d023a72ccbe88770f4ac7b2e96a242b79",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-CONTEXT.md": "cddae8b05ebef0e9fc862c750073f139e53f20ff1df9b3c0451604b22ed3bb9e",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-VALIDATION.md": "48abcd26ae9de4b77b549e165ddb1c613068aaebdeab72aabc676290db332954"
   },
-  "evaluated_head": "c650da9403879a78837cae53ed79a490bebb71e0",
-  "ledger_sha256": "153bbd8a91bf5e2c856f2ef475da419980d848316df6d9988915f6ccc1f07021",
-  "live_neo4j_atomic_proof": "pass",
-  "live_neo4j_atomic_proof_pass": true,
+  "evaluated_head": "419bfc064e919b51ed2932a018af0da6dd512ec6",
+  "ledger_sha256": "9a479a5a04953b144f45b05057c90dca70d2be7135aec1442c415441a6c18a69",
+  "live_neo4j_atomic_proof": "skip",
+  "live_neo4j_atomic_proof_pass": false,
   "local_gate_pass": true,
-  "manifests": true,
+  "manifests": false,
   "notes": {
     "d32_policy": "ready_for_phase_4 true only after live+safety+manifests",
     "forbidden_group": "oracle-catalog-v2",
+    "historical_v2_policy": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; historical violation permanent; current source remediated",
     "integration_policy": "live suite invoked only under --require-neo4j; skip/fail blocks readiness",
+    "phase4_transition": "blocked; no Phase 4 while historical v2 probe recorded",
     "resolution_policy": "24/24 research probe map; no silent drop",
     "test_group": "oracle-catalog-tool-test"
   },
   "nyquist_compliant": false,
-  "oracle_catalog_v2_queried": false,
+  "oracle_catalog_v2_queried": true,
   "raw_edge_probe_count": 24,
-  "ready_for_phase_4": true,
-  "require_neo4j": true,
+  "ready_for_phase_4": false,
+  "require_neo4j": false,
   "results": [
     {
       "argv": [
@@ -307,21 +287,16 @@
         "-q",
         "--tb=line"
       ],
-      "counts": {
-        "deselected": 0,
-        "errors": 0,
-        "failed": 0,
-        "passed": 14,
-        "skipped": 0
-      },
+      "counts": {},
       "exit_code": 0,
       "expected_exit": 0,
       "id": "runner_self_tests",
       "kind": "pytest",
       "mandatory": true,
+      "note": "nested self-test skipped",
       "status": "pass",
       "stderr": "",
-      "stdout": "\u001b[1m============================= test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 14 items\n\nmcp_server\\tests\\test_catalog_phase3b_gate_runner.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m      [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m14 passed\u001b[0m\u001b[32m in 0.28s\u001b[0m\u001b[32m ==============================\u001b[0m\n"
+      "stdout": "skipped-nested-self"
     },
     {
       "argv": [
@@ -348,7 +323,7 @@
         "deselected": 0,
         "errors": 0,
         "failed": 0,
-        "passed": 103,
+        "passed": 105,
         "skipped": 0
       },
       "exit_code": 0,
@@ -358,7 +333,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "\u001b[1m============================= test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 103 items\n\nmcp_server\\tests\\test_catalog_manifest.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                [ 14%]\u001b[0m\nmcp_server\\tests\\test_catalog_evidence_store.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m [ 37%]\n\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                                                      [ 40%]\u001b[0m\nmcp_server\\tests\\test_catalog_atomic_writer.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m              [ 52%]\u001b[0m\nmcp_server\\tests\\test_catalog_commit_recovery.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m             [ 63%]\u001b[0m\nmcp_server\\tests\\test_catalog_concurrency.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                        [ 66%]\u001b[0m\nmcp_server\\tests\\test_catalog_phase3b_gate_runner.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m      [ 80%]\u001b[0m\nmcp_server\\tests\\test_catalog_capabilities.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m       [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m103 passed\u001b[0m\u001b[32m in 1.68s\u001b[0m\u001b[32m =============================\u001b[0m\n"
+      "stdout": "\u001b[1m============================= test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 105 items\n\nmcp_server\\tests\\test_catalog_manifest.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                [ 14%]\u001b[0m\nmcp_server\\tests\\test_catalog_evidence_store.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m [ 37%]\n\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                                                      [ 40%]\u001b[0m\nmcp_server\\tests\\test_catalog_atomic_writer.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m              [ 51%]\u001b[0m\nmcp_server\\tests\\test_catalog_commit_recovery.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m             [ 61%]\u001b[0m\nmcp_server\\tests\\test_catalog_concurrency.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                        [ 65%]\u001b[0m\nmcp_server\\tests\\test_catalog_phase3b_gate_runner.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m    [ 80%]\u001b[0m\nmcp_server\\tests\\test_catalog_capabilities.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m       [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m105 passed\u001b[0m\u001b[32m in 1.65s\u001b[0m\u001b[32m =============================\u001b[0m\n"
     },
     {
       "argv": [
@@ -571,17 +546,17 @@
         "python",
         "mcp_server/tests/catalog_phase3b_gate_runner.py",
         "check",
-        "manifests_feature_true"
+        "manifests_feature_false"
       ],
       "counts": {},
       "exit_code": 0,
       "expected_exit": 0,
-      "id": "manifests_feature_true",
+      "id": "manifests_feature_false",
       "kind": "structural",
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "{\"check\": \"manifests_feature_true\", \"status\": \"pass\"}\n"
+      "stdout": "{\"check\": \"manifests_feature_false\", \"status\": \"pass\"}\n"
     },
     {
       "argv": [
@@ -603,47 +578,17 @@
       "status": "pass",
       "stderr": "",
       "stdout": "{\"check\": \"edge_resolution_complete\", \"status\": \"pass\"}\n"
-    },
-    {
-      "argv": [
-        "uv",
-        "run",
-        "--project",
-        "mcp_server",
-        "python",
-        "-m",
-        "pytest",
-        "-c",
-        "mcp_server/tests/pytest.ini",
-        "mcp_server/tests/test_catalog_commit_neo4j_int.py",
-        "-m",
-        "integration",
-        "-q",
-        "--tb=line"
-      ],
-      "counts": {
-        "deselected": 1,
-        "errors": 0,
-        "failed": 0,
-        "passed": 10,
-        "skipped": 0
-      },
-      "exit_code": 0,
-      "expected_exit": 0,
-      "id": "live_neo4j_atomic_proof",
-      "kind": "live",
-      "mandatory": true,
-      "status": "pass",
-      "stderr": "",
-      "stdout": "\u001b[1m============================= test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 11 items / 1 deselected / 10 selected\n\nmcp_server\\tests\\test_catalog_commit_neo4j_int.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m             [100%]\u001b[0m\n\n\u001b[32m====================== \u001b[32m\u001b[1m10 passed\u001b[0m, \u001b[33m1 deselected\u001b[0m\u001b[32m in 6.77s\u001b[0m\u001b[32m =======================\u001b[0m\n"
     }
   ],
   "safety": {
     "canary_executed": false,
     "clear_graph_called": false,
+    "current_source_v2_param_query": false,
     "forbidden_group": "oracle-catalog-v2",
-    "oracle_catalog_v2_queried": false,
-    "safety_checks_pass": true,
+    "historical_oracle_catalog_v2_queried": true,
+    "historical_violation_note": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; historical violation permanent; current source remediated",
+    "oracle_catalog_v2_queried": true,
+    "safety_checks_pass": false,
     "test_group": "oracle-catalog-tool-test"
   },
   "schema_version": "phase3b-gate-results.v1",
@@ -660,5 +605,5 @@
     "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nAssertionError\n",
     "stdout": ""
   },
-  "spec_sha256": "399de6ae2c91dfea950c0a39a36a9e7f515a5045b4650190217a7588bd2ac268"
+  "spec_sha256": "e16d8ea34986a2177a69b71aee22dcb0dad3774932c587fe32b2898fdf3617ef"
 }
