@@ -263,12 +263,12 @@ Plans:
   4. Operator and migration docs cover tool inventory, catalog-v2 grammar/map/hash/capabilities/prepare/evidence/manifest/gates/errors/config, obsolete pre-hardening identities/hashes, no automatic migration, and offline canary-artifact regeneration without running the canary
   5. Final structured report sets `canary_executed=false` and sets `ready_to_regenerate_canary=true` only after truthful execution classifications plus post-execution code review, Nyquist, ASVS security, and goal verification are green with no blockers
 
-**Plans**: 7 plans
+**Plans**: 1/7 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 05-01-PLAN.md — RED scaffolds: security/Cypher/endpoint matrix, compatibility baseline, offline canary, live/Ollama, fail-closed initial/final ledgers
+- [x] 05-01-PLAN.md — RED scaffolds: security/Cypher/endpoint matrix, compatibility baseline, offline canary, live/Ollama, fail-closed initial/final ledgers
 
 **Wave 2** *(blocked on Wave 1)*
 

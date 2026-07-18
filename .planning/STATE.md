@@ -4,13 +4,13 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 status: ready_to_execute
 stopped_at: Phase 5 plans verified; execution not started
-last_updated: "2026-07-18T22:09:58.331Z"
+last_updated: "2026-07-18T22:12:45.576Z"
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 44
   completed_plans: 37
-  percent: 86
+  percent: 84
 current_phase: 05
 current_phase_name: Verification, Security, Compatibility, and Migration Docs
 last_activity: 2026-07-19
@@ -24,7 +24,7 @@ last_activity_desc: Phase 5 planning complete; 7 plans verified across 6 waves
 See: `.planning/PROJECT.md`
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 05 — Verification, Security, Compatibility, and Migration Docs
+**Current focus:** Phase 05 — verification-security-compatibility-and-migration-docs
 
 ## Current Position
 
