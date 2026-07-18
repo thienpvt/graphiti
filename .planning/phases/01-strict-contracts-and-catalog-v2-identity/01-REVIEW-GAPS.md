@@ -84,6 +84,30 @@ silent_drops = 0
 - Extra findings: none
 - `key_equality=true`
 
+## Residual Findings (accepted; not Phase 1 hard blockers)
+
+Second-cycle code review residuals. **Not** members of the closed `{CR-01, CR-02, WR-01, WR-02}` key set. Documented here so they are not silent drops. Disposition: accepted residual → later hardening (Phase 3B concurrency or Phase 5). Do **not** flip `ready_for_phase_2` on residual presence alone; independent audits remain the readiness gate.
+
+### WR-R01 — Edge MERGE lacks lock-authoritative identity arbitration
+
+| Field | Value |
+|-------|-------|
+| **Root cause** | `build_edge_upsert_cypher` MERGEs `RELATES_TO` and classifies created/unchanged/updated without under-lock immutable checks that emit `error_code=edge_identity_conflict` before mutable SET/vector (entity CR-01 pattern) |
+| **Mitigations present** | `detect_edge_identity_conflict` on pre-read and in-tx recheck; identity fields (`name`/`edge_key`/endpoints) set only `ON CREATE`; `CatalogErrorCode.edge_identity_conflict`; unit proof `test_edge_identity_conflict_no_mutation` |
+| **Gap vs CR-01** | Conflict decision is service-layer under re-read, not Cypher lock-retained arbitration after MERGE |
+| **Disposition** | **accepted residual** — not a Phase 1 hard blocker; harden with edge lock-authoritative Cypher in Phase 3B concurrency or Phase 5 |
+| **Status** | ACCEPTED_RESIDUAL |
+
+### WR-R02 — `_write_status_from_row` default `'updated'` on unknown status
+
+| Field | Value |
+|-------|-------|
+| **Root cause** | If row `status` ∉ `{created,updated,unchanged,error}` and projected also outside that set, helper returns `'updated'` |
+| **Mitigations present** | `status=='error'` or any `error_code` always returns `'error'` (never success); entity/edge Cypher returns only created\|updated\|unchanged\|error; unit proof `test_gap_cr01_write_status_from_row_error_never_falls_back_to_updated` |
+| **Residual risk** | Malformed/partial row without error_code could report updated |
+| **Disposition** | **accepted residual** — fail-open only on unknown non-error; not a Phase 1 hard blocker; tighten to fail-closed `error` in later hardening if desired |
+| **Status** | ACCEPTED_RESIDUAL |
+
 ## Readiness Note
 
-Local readiness remains false until Plan 01-11 runner verifies a complete green ledger. Independent code/goal/Nyquist/security audits remain pending and are never claimed here.
+Local matrix green via Plan 01-11 runner ledger (`local_gate_pass=true`, `nyquist_compliant=true` local). `ready_for_phase_2=false` while independent code/goal/Nyquist/security audits remain pending. WR-R01/WR-R02 are accepted residuals and do not alone authorize Phase 2.
