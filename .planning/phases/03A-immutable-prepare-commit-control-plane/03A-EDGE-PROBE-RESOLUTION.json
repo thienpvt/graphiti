@@ -1,0 +1,349 @@
+{
+  "entries": [
+    {
+      "category": "prepare-model",
+      "plan": "03A-01",
+      "requirement_id": "PLAN-01",
+      "resolution": "Strict prepare request models reject extra fields and enforce required shape",
+      "row_index": 0,
+      "task": "03A-01-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_models.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "preflight",
+      "plan": "03A-04",
+      "requirement_id": "PLAN-02",
+      "resolution": "Prepare reuses upsert preflight path; dry_run upsert regression retained",
+      "row_index": 1,
+      "task": "03A-04-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "zero-domain",
+      "plan": "03A-04",
+      "requirement_id": "PLAN-03",
+      "resolution": "Prepare writes zero domain/evidence/status labels; live neo4j_int counts confirm",
+      "row_index": 2,
+      "task": "03A-04-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_service.py::test_prepare_zero_domain + test_catalog_prepare_neo4j_int.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "artifact",
+      "plan": "03A-02",
+      "requirement_id": "PLAN-04",
+      "resolution": "Full prepared artifact content canonicalized with schema-bound fields",
+      "row_index": 3,
+      "task": "03A-02-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepared_artifact.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "chunk-restart",
+      "plan": "03A-02",
+      "requirement_id": "PLAN-05",
+      "resolution": "Chunk+reassemble byte-identical; live multi-chunk restart proof on Neo4j",
+      "row_index": 4,
+      "task": "03A-02-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepared_artifact.py + test_catalog_prepare_neo4j_int.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "token",
+      "plan": "03A-02",
+      "requirement_id": "PLAN-06",
+      "resolution": "One-time plan_token issued at prepare; never re-emitted",
+      "row_index": 5,
+      "task": "03A-02-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_token.py + test_catalog_prepare_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "digest",
+      "plan": "03A-02",
+      "requirement_id": "PLAN-07",
+      "resolution": "token_digest stored; plan_token_matches uses hmac.compare_digest; live props digest-only",
+      "row_index": 6,
+      "task": "03A-02-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_token.py + test_catalog_prepare_neo4j_int.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "limits",
+      "plan": "03A-01",
+      "requirement_id": "PLAN-08",
+      "resolution": "Configured plan limits clamped to HARD ceilings; capabilities expose both",
+      "row_index": 7,
+      "task": "03A-01-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_models.py + test_catalog_capabilities.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "labels",
+      "plan": "03A-03",
+      "requirement_id": "PLAN-09",
+      "resolution": "Control labels CatalogPreparedPlan/Chunk/Lock never Entity; live label assert",
+      "row_index": 8,
+      "task": "03A-03-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_store.py + test_catalog_prepare_neo4j_int.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "commit-model",
+      "plan": "03A-01",
+      "requirement_id": "PLAN-10",
+      "resolution": "Commit/discard models token-only; reject replacement payload authority",
+      "row_index": 9,
+      "task": "03A-01-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_models.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "load-errors",
+      "plan": "03A-03",
+      "requirement_id": "PLAN-11",
+      "resolution": "Load/CAS surfaces prepared_plan_* error codes for missing/expired/conflict",
+      "row_index": 10,
+      "task": "03A-03-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_store.py + test_catalog_prepare_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "no-external",
+      "plan": "03A-05",
+      "requirement_id": "PLAN-12",
+      "resolution": "Commit path never calls LLM/embedder/queue; service spies assert",
+      "row_index": 11,
+      "task": "03A-05-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "binding",
+      "plan": "03A-02",
+      "requirement_id": "PLAN-17",
+      "resolution": "Token binding fields cover group/batch/artifact_sha256; live binding holds",
+      "row_index": 12,
+      "task": "03A-02-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_token.py + test_catalog_prepare_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "no-revive",
+      "plan": "03A-03",
+      "requirement_id": "PLAN-18",
+      "resolution": "CAS matrix forbids terminal→PREPARED revival; service enforces",
+      "row_index": 13,
+      "task": "03A-03-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_store.py + test_catalog_prepare_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "discard",
+      "plan": "03A-03",
+      "requirement_id": "PLAN-19",
+      "resolution": "Discard PREPARED→DISCARDED idempotent with expected_from=PREPARED; live proof",
+      "row_index": 14,
+      "task": "03A-03-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_store.py + test_catalog_prepare_neo4j_int.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "upsert-dry-run",
+      "plan": "03A-04",
+      "requirement_id": "PLAN-20",
+      "resolution": "upsert_catalog_batch dry_run preserved; zero control-plane writes",
+      "row_index": 15,
+      "task": "03A-04-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "embed-order",
+      "plan": "03A-04",
+      "requirement_id": "SAFE-11",
+      "resolution": "Embeddings complete before plan persist transaction opens",
+      "row_index": 16,
+      "task": "03A-04-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "gate-matrix",
+      "plan": "03A-06",
+      "requirement_id": "TEST-05",
+      "resolution": "Phase 3A gate runner aggregates focused+live+safety+34/34 resolution",
+      "row_index": 17,
+      "task": "03A-06-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_phase3a_gate_runner.py + catalog_phase3a_gate_runner.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "strict-extra",
+      "plan": "03A-01",
+      "requirement_id": "CONT-02",
+      "resolution": "CatalogStrictModel forbid_extra on prepare/commit/discard models",
+      "row_index": 18,
+      "task": "03A-01-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_models.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "group-isolation",
+      "plan": "03A-06",
+      "requirement_id": "SAFE-01",
+      "resolution": "Live suite GROUP=oracle-catalog-tool-test only; teardown scoped DETACH DELETE",
+      "row_index": 19,
+      "task": "03A-06-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_neo4j_int.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "no-canary",
+      "plan": "03A-06",
+      "requirement_id": "SAFE-02",
+      "resolution": "Safety ledger canary_executed=false; runner never invokes canary scripts",
+      "row_index": 20,
+      "task": "03A-06-T02",
+      "test_or_backstop": "mcp_server/tests/catalog_phase3a_gate_runner.py safety ledger",
+      "verification": "explicit"
+    },
+    {
+      "category": "capabilities",
+      "plan": "03A-05",
+      "requirement_id": "CAPA-prepare_commit",
+      "resolution": "features.prepare_commit false pre-gate (03A-05); true after 03A-06 live proof",
+      "row_index": 21,
+      "task": "03A-06-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "tool-names",
+      "plan": "03A-05",
+      "requirement_id": "CATALOG_TOOL_NAMES",
+      "resolution": "Three additive prepare/commit/discard tools registered; safe errors",
+      "row_index": 22,
+      "task": "03A-05-T02",
+      "test_or_backstop": "mcp_server/tests/test_graphiti_mcp_server.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "no-v2",
+      "plan": "03A-06",
+      "requirement_id": "SAFE-v2",
+      "resolution": "oracle-catalog-v2 never write target; FORBIDDEN_GROUP constant + int asserts",
+      "row_index": 23,
+      "task": "03A-06-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_neo4j_int.py + gate safety",
+      "verification": "explicit"
+    },
+    {
+      "category": "capacity",
+      "plan": "03A-03",
+      "requirement_id": "PLAN-capacity",
+      "resolution": "Per-group capacity lock serializes active plan count; live fill+discard frees",
+      "row_index": 24,
+      "task": "03A-03-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_store.py + test_catalog_prepare_neo4j_int.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "committing-seam",
+      "plan": "03A-03",
+      "requirement_id": "PLAN-committing",
+      "resolution": "COMMITTING re-entry CAS legal; no domain co-commit until 3B",
+      "row_index": 25,
+      "task": "03A-03-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_store.py + test_catalog_prepare_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "immutability-conflict",
+      "plan": "03A-03",
+      "requirement_id": "PLAN-immutability",
+      "resolution": "Same identity different digest fails closed at create/load",
+      "row_index": 26,
+      "task": "03A-03-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_store.py + test_catalog_prepare_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "reassembly-mismatch",
+      "plan": "03A-02",
+      "requirement_id": "PLAN-reassembly",
+      "resolution": "Chunk reassembly digest/size mismatch fails closed in pure unit",
+      "row_index": 27,
+      "task": "03A-02-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepared_artifact.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "expiry",
+      "plan": "03A-03",
+      "requirement_id": "PLAN-expiry",
+      "resolution": "Expiry access path CAS PREPARED→EXPIRED; live short TTL proof",
+      "row_index": 28,
+      "task": "03A-03-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_store.py + test_catalog_prepare_neo4j_int.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "features-truthful",
+      "plan": "03A-05",
+      "requirement_id": "CAPA-features",
+      "resolution": "Capabilities features/limits truthful; manifests false; page size 0",
+      "row_index": 29,
+      "task": "03A-05-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "log-redaction",
+      "plan": "03A-04",
+      "requirement_id": "SAFE-log",
+      "resolution": "Service never logs raw plan_token or full payload; batch ids/counts only",
+      "row_index": 30,
+      "task": "03A-04-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_service.py",
+      "verification": "backstop"
+    },
+    {
+      "category": "schema-constraints",
+      "plan": "03A-03",
+      "requirement_id": "PLAN-schema",
+      "resolution": "Plan schema constraints CREATE IF NOT EXISTS for control labels",
+      "row_index": 31,
+      "task": "03A-03-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_store.py",
+      "verification": "backstop"
+    },
+    {
+      "category": "dry-run-control",
+      "plan": "03A-04",
+      "requirement_id": "PLAN-dry-run-cp",
+      "resolution": "dry_run upsert leaves zero control-plane nodes",
+      "row_index": 32,
+      "task": "03A-04-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_service.py",
+      "verification": "explicit"
+    },
+    {
+      "category": "hard-stop",
+      "plan": "03A-06",
+      "requirement_id": "PLAN-hard-stop",
+      "resolution": "Live Neo4j hard-stop; skip/fail keeps ready_for_phase_3b=false under --require-neo4j",
+      "row_index": 33,
+      "task": "03A-06-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_prepare_neo4j_int.py + catalog_phase3a_gate_runner.py",
+      "verification": "explicit"
+    }
+  ],
+  "flagged_assumptions": [],
+  "no_silent_drop": true,
+  "raw_item_count": 34,
+  "raw_source": "03A-RESEARCH.md Spec-Less Probe Inventory P01..P34",
+  "schema_version": "phase3a-edge-probe-resolution.v1"
+}

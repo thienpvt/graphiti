@@ -169,20 +169,20 @@ def test_build_capabilities_features_phase_truthful():
         config=CatalogConfig(enabled=False, uuid_namespace=None),
         client=None,
     )
-    # D-29 / Wave 4: prepare_commit remains false until 03A-06 live proof.
+    # D-29 / 03A-06: prepare_commit true after live immutable proof; manifests stay false.
     assert caps.features == {
-        'prepare_commit': False,
+        'prepare_commit': True,
         'explicit_evidence_links': True,
         'manifests': False,
         'manifest_verification': False,
     }
-    assert caps.features['prepare_commit'] is False
+    assert caps.features['prepare_commit'] is True
     assert caps.features['manifests'] is False
     assert caps.limits['hard']['max_page_size'] == 0
 
 
-def test_build_capabilities_plan_limits_nonzero_prepare_commit_false():
-    """PLAN-08/20 Wave 4: real HARD plan ceilings; prepare_commit still false."""
+def test_build_capabilities_plan_limits_nonzero_prepare_commit_true():
+    """PLAN-08/20 Wave 5: real HARD plan ceilings; prepare_commit true post live proof."""
     from models.catalog_common import (
         HARD_MAX_ACTIVE_PLANS_PER_GROUP,
         HARD_MAX_PREPARED_PAYLOAD_BYTES,
@@ -221,7 +221,7 @@ def test_build_capabilities_plan_limits_nonzero_prepare_commit_false():
     assert caps.limits['configured']['max_prepared_payload_bytes'] == 1_048_576
     assert caps.limits['configured']['max_active_plans'] == 4
     assert caps.limits['configured']['prepared_chunk_bytes'] == 65_536
-    assert caps.features['prepare_commit'] is False
+    assert caps.features['prepare_commit'] is True
     assert caps.features['manifests'] is False
     assert caps.limits['hard']['max_page_size'] == 0
 
@@ -337,8 +337,9 @@ async def test_get_catalog_capabilities_works_when_writes_disabled(monkeypatch):
     assert dumped['catalog_writes_enabled'] is False
     assert dumped['uuid_namespace_configured'] is False
     assert dumped['namespace_fingerprint'] is None
-    assert dumped['features']['prepare_commit'] is False
+    assert dumped['features']['prepare_commit'] is True
     assert dumped['features']['explicit_evidence_links'] is True
+    assert dumped['features']['manifests'] is False
     assert 'uuid_namespace' not in dumped
     mock_service.get_client.assert_not_called()
 
