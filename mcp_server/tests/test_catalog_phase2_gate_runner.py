@@ -321,3 +321,64 @@ def test_edge_probe_raw_structure():
     assert len(data['items']) == 68
     assert len(digest) == 64
     assert len(raw_bytes) > 0
+
+
+# LF-normalized SHA-256 of 02-EDGE-PROBE.json (CRLF/CR → LF before hash).
+EXPECTED_RAW_PROBE_LF_SHA256 = (
+    '16144e5ebc2ae9a46cda9b45ce0206e1290b954988c227ce97ec0a05f6149ce0'
+)
+
+
+def test_normalize_newlines_lf_crlf_and_lone_cr():
+    assert gate.normalize_newlines_lf(b'a\r\nb\rc\n') == b'a\nb\nc\n'
+    assert gate.normalize_newlines_lf(b'plain') == b'plain'
+    assert gate.normalize_newlines_lf(b'\r\n\r\n') == b'\n\n'
+    assert gate.normalize_newlines_lf(b'\r\r') == b'\n\n'
+
+
+def test_sha256_bytes_lf_stable_across_newline_forms():
+    lf = b'{"items":[]}\n'
+    crlf = b'{"items":[]}\r\n'
+    lone_cr = b'{"items":[]}\r'
+    mixed = b'{"items":[]}\r\nline2\rline3\n'
+    d_lf = gate.sha256_bytes_lf(lf)
+    d_crlf = gate.sha256_bytes_lf(crlf)
+    d_cr = gate.sha256_bytes_lf(lone_cr)
+    assert d_lf == d_crlf == d_cr
+    # Un-normalized digests differ when raw form differs.
+    assert gate.sha256_bytes(lf) != gate.sha256_bytes(crlf)
+    assert gate.sha256_bytes_lf(mixed) == gate.sha256_bytes(
+        b'{"items":[]}\nline2\nline3\n'
+    )
+
+
+def test_load_raw_probe_digest_is_lf_normalized_and_matches_fixture(tmp_path: Path):
+    # LF and CRLF fixture copies yield the same load_raw_probe digest.
+    sample_lf = b'{"schema":"x","items":[{"a":1}],"coverage":{}}\n'
+    sample_crlf = sample_lf.replace(b'\n', b'\r\n')
+    assert b'\r\n' in sample_crlf
+    expected = gate.sha256_bytes_lf(sample_lf)
+    assert expected == gate.sha256_bytes_lf(sample_crlf)
+
+    for label, payload in (('lf', sample_lf), ('crlf', sample_crlf)):
+        root = tmp_path / label
+        probe = root / gate.DEFAULT_RAW_PROBE_REL
+        probe.parent.mkdir(parents=True, exist_ok=True)
+        probe.write_bytes(payload)
+        data, raw_bytes, digest = gate.load_raw_probe(root)
+        assert digest == expected
+        assert raw_bytes == payload  # raw bytes preserved for re-read checks
+        assert data['items'] == [{'a': 1}]
+
+
+def test_actual_raw_probe_lf_normalized_digest():
+    root = _root()
+    data, raw_bytes, digest = gate.load_raw_probe(root)
+    assert len(data['items']) == 68
+    assert digest == EXPECTED_RAW_PROBE_LF_SHA256
+    # Digest equals pure helper over raw bytes regardless of on-disk newlines.
+    assert digest == gate.sha256_bytes_lf(raw_bytes)
+    assert digest == gate.sha256_file_lf(root / gate.DEFAULT_RAW_PROBE_REL)
+    # Same-checkout re-read identity still holds on raw_bytes.
+    again = (root / gate.DEFAULT_RAW_PROBE_REL).read_bytes()
+    assert again == raw_bytes
