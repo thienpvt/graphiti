@@ -525,3 +525,52 @@ def test_manifest_module_has_no_io():
     assert 'neo4j' not in src.lower()
     assert 'open(' not in src
     assert 'http' not in src.lower()
+
+
+def test_commit_response_additive_defaults_safe():
+    """D-28: CommitPreparedCatalogBatchResponse additive fields default-safe."""
+    from models.catalog_responses import CommitPreparedCatalogBatchResponse
+
+    # Old constructor shape still works (no new required fields).
+    resp = CommitPreparedCatalogBatchResponse(
+        plan_uuid='11111111-1111-1111-1111-111111111111',
+        state='COMMITTING',
+    )
+    assert resp.batch_uuid is None
+    assert resp.manifest_sha256 is None
+    assert resp.committed_created == 0
+    assert resp.committed_updated == 0
+    assert resp.committed_unchanged == 0
+
+    filled = CommitPreparedCatalogBatchResponse(
+        plan_uuid='11111111-1111-1111-1111-111111111111',
+        state='COMMITTED',
+        batch_uuid='22222222-2222-2222-2222-222222222222',
+        manifest_sha256='a' * 64,
+        committed_created=1,
+        committed_updated=2,
+        committed_unchanged=3,
+        entity_count=6,
+    )
+    dumped = filled.model_dump()
+    assert dumped['batch_uuid'] == '22222222-2222-2222-2222-222222222222'
+    assert dumped['manifest_sha256'] == 'a' * 64
+    assert dumped['committed_created'] == 1
+    assert dumped['committed_updated'] == 2
+    assert dumped['committed_unchanged'] == 3
+    # Still never exposes forbidden surfaces.
+    for forbidden in (
+        'plan_token',
+        'membership',
+        'payload',
+        'embeddings',
+        'name_embedding',
+        'fact_embedding',
+        'excerpt',
+        'source_text',
+    ):
+        assert forbidden not in dumped
+    # Field set remains bounded (no membership arrays).
+    assert 'entities' not in dumped
+    assert 'edges' not in dumped
+    assert 'evidence_links' not in dumped
