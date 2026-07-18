@@ -131,15 +131,16 @@ status: complete
 - Implemented RESEARCH §C recovery matrix inside `_write_catalog_batch_atomic` after plan lock + batch claim: terminal agreement short-circuit, partial-terminal fail-closed, else full idempotent writer.
 - COMMITTED plan roots now attempt durable agreement receipt (`_commit_terminal_state_receipt`) before already-consumed fallback; identical replays return equal bounded receipts.
 - Permanent domain conflicts leave plan `COMMITTING`; `_PLAN_CAS_LEGAL` still forbids `COMMITTING→PREPARED`.
-- GREEN recovery suite (10) + concurrency suite (4); prepare-store CAS + atomic/prepare regressions green (90 total).
+- GREEN recovery suite + concurrency + prepare-store CAS + atomic/prepare regressions green (94 total).
 - Different-token same-batch arbitration documents reuse of `batch_conflict` / `prepared_plan_conflict` / `prepared_plan_already_consumed` (no new codes).
-- Adversarial review gaps closed: CR-01 stale PREPARED→live COMMITTING re-entry; CR-02 frozen expected manifest; WR-01 claim already_consumed→receipt; WR-02 durable outcome counts first==replay.
+- Adversarial review gaps closed: CR-01 stale PREPARED→live COMMITTING re-entry + zero-row CAS TOCTOU reload; CR-02 frozen expected manifest; WR-01 claim already_consumed→receipt; WR-02 durable outcome counts first==replay with legitimate zeros preserved.
 
 ## Task Commits
 
 1. **Task 1: Stranded COMMITTING recovery + stable replay** - `8094e5c` (feat)
 2. **Task 2: Same-token and same-batch concurrency** - `fd33827` (test)
 3. **Adversarial fix: CR-01/02 WR-01/02** - `e9c96b5` (fix)
+4. **Re-review residual: CR-01 zero-row + WR-02 zero counts** - `0a5467d` (fix)
 
 ## Files Created/Modified
 
@@ -158,6 +159,8 @@ status: complete
 - Internal recovery reads stay non-public (no Phase 4 MCP tools).
 - Expected manifest digest authority is frozen membership reassembly (CR-02), never snapshot echo.
 - Durable plan `created_count`/`updated_count`/`unchanged_count` written only on COMMITTING→COMMITTED (WR-02).
+- Zero-row COMMITTING CAS reloads under same tx: live COMMITTING→reentry; live COMMITTED→already_consumed (CR-01 residual).
+- Short-circuit/receipt count selection uses `is None`, never truthy `or`, so durable zero is preserved (WR-02 residual).
 
 ## Deviations from Plan
 
@@ -205,6 +208,20 @@ status: complete
 - **Files modified:** `catalog_service.py`, `catalog_store.py`, recovery/store tests
 - **Commit:** `e9c96b5`
 
+**7. [Rule 1 - Bug] CR-01 residual zero-row CAS TOCTOU**
+- **Found during:** Re-review
+- **Issue:** After initial PREPARED load, winner can move PREPARED→COMMITTING before raw SET; zero-row CAS raised generic conflict instead of reentry/consumed.
+- **Fix:** On COMMITTING target zero-row, reload under same tx; COMMITTING→reentry, COMMITTED→already_consumed.
+- **Files modified:** `catalog_store.py`, `test_catalog_prepare_store.py`
+- **Commit:** `0a5467d`
+
+**8. [Rule 1 - Bug] WR-02 residual truthy `or` zero counts**
+- **Found during:** Re-review
+- **Issue:** Short-circuit used `snap or plan or 0`, replacing legitimate durable zero with projected non-zero.
+- **Fix:** Explicit `is None` selection for created/updated/unchanged; zero-created/nonzero-updated equality tests.
+- **Files modified:** `catalog_service.py`, recovery + atomic writer tests
+- **Commit:** `0a5467d`
+
 ## Flagged assumptions (discharged)
 
 - Different-token conflict codes: **reused** `batch_conflict`, `prepared_plan_conflict`, `prepared_plan_already_consumed` — no new registry members.
@@ -218,7 +235,7 @@ uv run --project mcp_server pytest \
   mcp_server/tests/test_catalog_prepare_store.py \
   mcp_server/tests/test_catalog_atomic_writer.py \
   mcp_server/tests/test_catalog_prepare_service.py -q
-# 90 passed
+# 94 passed
 
 ruff check (changed files): clean
 ruff format --check: clean
@@ -236,7 +253,7 @@ None.
 ## Self-Check: PASSED
 
 - FOUND: product + test files for plan 05
-- FOUND: commits `8094e5c`, `fd33827`, `e9c96b5`
+- FOUND: commits `8094e5c`, `fd33827`, `e9c96b5`, `0a5467d`
 - No COMMITTING→PREPARED in `_PLAN_CAS_LEGAL`
 - No process-local lock authority in `catalog_service.py`
-- CR-01/02 WR-01/02 covered by real-store-semantics unit tests
+- CR-01/02 WR-01/02 + zero-row CAS + zero-count preservation covered
