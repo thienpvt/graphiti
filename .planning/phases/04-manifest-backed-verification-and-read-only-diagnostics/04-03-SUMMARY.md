@@ -176,6 +176,7 @@ status: complete
 |------|------|--------|-------|
 | 1 | Store manifest chunk payload load + Cypher safety | `8ce1d72` | catalog_store.py, test_catalog_store_unit.py |
 | 2 | Service reassembly + get_catalog_batch_manifest pagination | `8f2dcc0` | catalog_service, catalog_manifest, models, test_catalog_manifest_read |
+| fix | Narrow counts mapping for scoped Pyright | `33fe32c` | catalog_service.py |
 
 ## Files Created/Modified
 
@@ -198,7 +199,14 @@ status: complete
 
 ## Deviations from Plan
 
-None - plan executed exactly as written.
+### Auto-fixed Issues
+
+**1. [Rule 1 - Bug] Pyright reportOptionalMemberAccess on counts.get**
+- **Found during:** Wave 3 scoped Pyright gate
+- **Issue:** Ternary `body.get('counts') if isinstance(body.get('counts'), dict) else {}` did not narrow type; four `.get` calls reported optional member access
+- **Fix:** Bind `raw_counts = body.get('counts')` then `isinstance` branch into typed `counts: dict[str, Any]`
+- **Files modified:** `mcp_server/src/services/catalog_service.py`
+- **Commit:** `33fe32c`
 
 ## Threat Flags
 
@@ -223,4 +231,7 @@ None. Service method is complete; MCP registration intentionally deferred to pla
 - FOUND: `mcp_server/tests/test_catalog_manifest_read.py`
 - FOUND commit: `8ce1d72`
 - FOUND commit: `8f2dcc0`
+- FOUND commit: `33fe32c`
 - VERIFY: 78 passed (`test_catalog_manifest_read` + `test_catalog_store_unit`)
+- VERIFY: scoped Pyright 0 errors (Wave 3 product files)
+- VERIFY: scoped Ruff all checks passed
