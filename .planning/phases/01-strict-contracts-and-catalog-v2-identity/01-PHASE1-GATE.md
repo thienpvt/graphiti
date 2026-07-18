@@ -10,7 +10,7 @@
 - **2026-07-18 local closure:** CR-01, CR-02, WR-01, and WR-02 mapped COVERED; local_gate_pass=true; independent audits pending.
 - Plan 01-08 failure-propagation and historical 9/9 mandatory-check outcomes remain historical evidence only, not current authorization.
 - Catalog Neo4j integration remains skip — Phase 1 unit policy; availability not probed.
-- Local derivation is green via verified 01-GATE-RESULTS.json rebound to primary HEAD; final readiness remains false while independent audits are pending.
+- Local derivation green via verified 01-GATE-RESULTS.json; independent audits green; Plan 01-12 set ready_for_phase_2=true.
 - No Phase 2 work is authorized or started.
 
 ## Check Ledger
@@ -88,7 +88,7 @@ catalog_neo4j_int=skip
 canary_executed=false
 oracle_catalog_v2_queried=false
 no_new_store_or_control_plane_write_path=true
-ready_for_phase_2=false
+ready_for_phase_2=true
 resolved=53
 unresolved=0
 
@@ -96,16 +96,16 @@ local_gate_pass=true
 
 nyquist_compliant=true
 
-independent_code_review=pending
+independent_code_review=pass
 
-independent_goal_verification=pending
+independent_goal_verification=pass
 
-independent_nyquist_audit=pending
+independent_nyquist_audit=pass
 
-independent_security_audit=pending
+independent_security_audit=pass
 
 availability_probed=false
 
 ## Scope Stop
 
-Plan 01-11 local matrix is green (`local_gate_pass=true`, `nyquist_compliant=true`) via tracked runner ledger `01-GATE-RESULTS.json` bound on primary line `claude/v1.1-pre-canary-hardening` at HEAD `cfdbeec` (ledger `evaluated_head` may be this HEAD or its parent under ledger-only-child policy). CR-01/CR-02/WR-01/WR-02 are COVERED with no silent drop. Independent code, goal, Nyquist, and security audits remain pending. `ready_for_phase_2=false`. Orchestrator must run the four independent audits; only after all four green may a tiny 01-12 finalization plan flip final readiness. Phase 2 is not started.
+Plan 01-12 final readiness earned. Local matrix green (`local_gate_pass=true`, `nyquist_compliant=true`) via tracked runner ledger `01-GATE-RESULTS.json` on primary `claude/v1.1-pre-canary-hardening`. Independent audits: goal PASSED 23/23; security SECURED 47/47 threats_open=0; Nyquist COMPLIANT; code CLEAR_WITH_RESIDUALS (WR-R01/WR-R02 accepted, closed CR/WR keys unchanged). `independent_code_review=pass`, `independent_goal_verification=pass`, `independent_nyquist_audit=pass`, `independent_security_audit=pass`. `ready_for_phase_2=true`. CR-01/CR-02/WR-01/WR-02 COVERED. Session policy stop-after-phase-1: Phase 2 is not planned or started.

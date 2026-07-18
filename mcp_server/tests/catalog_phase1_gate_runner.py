@@ -902,17 +902,33 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
     if raw.get('availability_probed') is not False:
         errors.append('availability_probed must be false')
 
-    for field in (
+    audit_fields = (
         'independent_code_review',
         'independent_goal_verification',
         'independent_nyquist_audit',
         'independent_security_audit',
-    ):
-        if raw.get(field) != 'pending':
-            errors.append(f'{field} must be pending')
-
-    if raw.get('ready_for_phase_2') is not False:
-        errors.append('ready_for_phase_2 must be false in ledger')
+    )
+    audit_vals = [raw.get(f) for f in audit_fields]
+    if all(v == 'pending' for v in audit_vals):
+        if raw.get('ready_for_phase_2') is not False:
+            errors.append('ready_for_phase_2 must be false while independent audits pending')
+    elif all(v == 'pass' for v in audit_vals):
+        # Plan 01-12 final readiness: all four independent audits green.
+        if raw.get('local_gate_pass') is not True:
+            errors.append('local_gate_pass must be true when independent audits pass')
+        if raw.get('ready_for_phase_2') is not True:
+            errors.append('ready_for_phase_2 must be true when independent audits pass')
+    else:
+        for field, val in zip(audit_fields, audit_vals, strict=True):
+            if val not in ('pending', 'pass', 'fail'):
+                errors.append(f'{field} invalid: {val!r}')
+            elif val not in ('pending', 'pass'):
+                errors.append(f'{field} is {val!r}; mixed/fail audit set not final-ready')
+        if any(v == 'fail' for v in audit_vals) and raw.get('ready_for_phase_2') is not False:
+            errors.append('ready_for_phase_2 must be false when any independent audit fails')
+        if any(v == 'pending' for v in audit_vals) and any(v == 'pass' for v in audit_vals):
+            if raw.get('ready_for_phase_2') is not False:
+                errors.append('ready_for_phase_2 must be false while any independent audit pending')
 
     # Recompute local_gate_pass
     recomputed = derive_local_gate_pass(

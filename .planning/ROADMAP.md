@@ -82,7 +82,7 @@ Plans:
   4. Caller UUIDs never control identity; structured errors expose safe diagnostics only
   5. Unit coverage for recursive forbid, immutable flags, full entity grammar, FE/BO/overload separation, and UUID material versioning passes before Phase 2 write-adjacent work
 
-**Plans**: 11/11 plans executed
+**Plans**: 12/12 plans executed
 
 Plans:
 
@@ -97,8 +97,9 @@ Plans:
 - [x] 01-09-PLAN.md — CR-02/WR-01 provenance timestamp + graph-key locations
 - [x] 01-10-PLAN.md — CR-01/WR-02 locked entity conflicts + offline fixtures
 - [x] 01-11-PLAN.md — Tracked local gate runner, evidence ledger, audit handoff
+- [x] 01-12-PLAN.md — Final readiness after four independent audits green
 
-**Gate**: Local matrix green (`local_gate_pass=true`, `nyquist_compliant=true`) via `01-GATE-RESULTS.json`. `ready_for_phase_2=false` while independent code/goal/Nyquist/security audits remain pending. Orchestrator must run those four audits; only after all four green may a tiny 01-12 finalization plan flip final readiness. Phase 2 not started.
+**Gate**: Final readiness earned (`ready_for_phase_2=true`). Local matrix green; independent audits: goal PASSED 23/23, security SECURED 47/47, Nyquist COMPLIANT, code CLEAR_WITH_RESIDUALS (WR-R01/WR-R02 accepted). Session stop-after-phase-1: Phase 2 not started.
 
 ### Phase 2: Topology Authority, Evidence Contract, Hashes, and Capabilities
 
@@ -193,7 +194,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | v1.0 Phase 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
 | v1.0 Phase 2. Provenance and Atomic Batch | 6/6 | Complete | 2026-07-17 |
 | Phase 0. Baseline, Inventory, and Compatibility Policy | 2/2 | Complete | 2026-07-17 |
-| Phase 1. Strict Contracts and Catalog-v2 Identity | 11/11 | Local green; audits pending | - |
+| Phase 1. Strict Contracts and Catalog-v2 Identity | 12/12 | Complete; ready_for_phase_2=true | 2026-07-18 |
 | Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 0/TBD | Not started | - |
 | Phase 3A. Immutable Prepare/Commit Control Plane | 0/TBD | Not started | - |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 0/TBD | Not started | - |

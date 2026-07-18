@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 1
 current_phase_name: Strict Contracts and Catalog-v2 Identity
-status: Phase 1 local gate green on primary HEAD; ready_for_phase_2=false; independent audits pending
-stopped_at: Completed 01-11-PLAN.md
-last_updated: "2026-07-18T01:19:42.271Z"
+status: phase1_complete
+stopped_at: Completed 01-12-PLAN.md
+last_updated: "2026-07-18T02:00:00.000Z"
 last_activity: 2026-07-18
-last_activity_desc: Completed 01-11 tracked gate runner, CR/WR no-silent-drop evidence, local ledger apply
+last_activity_desc: Phase 1 final readiness after four independent audits; stop-after-phase-1
 progress:
-  total_phases: 2
+  total_phases: 7
   completed_phases: 2
-  total_plans: 13
-  completed_plans: 13
-  percent: 100
+  total_plans: 14
+  completed_plans: 14
+  percent: 29
 ---
 
 # Project State
@@ -24,24 +24,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 1 — Strict Contracts and Catalog-v2 Identity (gap closure)
+**Current focus:** Phase 1 complete — stop-after-phase-1 session policy (no Phase 2 this session)
 
 ## Current Position
 
-Phase: 1 of 7 (Strict Contracts and Catalog-v2 Identity) — LOCAL GREEN / AUDITS PENDING
-Plan: 11 of 11 complete (local); final readiness blocked on independent audits
-Status: local_gate_pass=true; nyquist_compliant=true; ready_for_phase_2=false; catalog_neo4j_int=skip; availability_probed=false; independent_code_review/goal/nyquist/security=pending
-Last activity: 2026-07-18 — Rebound Phase 1 gate ledger to primary HEAD; ready_for_phase_2=false; independent audits pending
+Phase: 1 of 7 (Strict Contracts and Catalog-v2 Identity) — COMPLETE
+Plan: 12 of 12 complete; `ready_for_phase_2=true`
+Status: local_gate_pass=true; nyquist_compliant=true; four independent audits pass; WR-R01/WR-R02 accepted residuals
+Last activity: 2026-07-18 — Plan 01-12 final readiness; session stops after Phase 1
 
-Progress: [██████████] 100% local plans; final readiness blocked
+Progress: Phase 0+1 complete; remaining phases deferred by stop-after-phase-1
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 22 (14 in v1.0, 8 in v1.1 Phase 0+1)
+- Total plans completed: 26 (14 in v1.0, 12 in v1.1 Phase 0+1)
 - Average duration: tracked in plan summaries
-- Total execution time: tracked in plan summaries
 
 **By Phase:**
 
@@ -49,31 +48,14 @@ Progress: [██████████] 100% local plans; final readiness blo
 |-------|-------|-------|----------|
 | v1.0 Phase 1. Typed Catalog Primitives | 8 | 8 | see summaries |
 | v1.0 Phase 2. Provenance and Atomic Batch | 6 | 6 | see summaries |
-| Phase 0–5 (v1.1, 7 work units) | 7 |  | - |
 | Phase 0 | 2 | 2 | see summaries |
-| Phase 1 | 8 | 8 | see summaries |
+| Phase 1 | 12 | 12 | see summaries |
 
 **Prior milestone:**
 
 - v1.0 Phase 1: 5/5 truths, 55/55 requirements
 - v1.0 Phase 2: 5/5 truths, 31/31 requirements
 - v1.0 audit: 6/6 flows, 86/86 requirements
-
-**Per-Plan Metrics:**
-
-| Plan | Duration | Tasks | Files |
-|------|----------|-------|-------|
-| Phase 01 P01 | 4min | 2 tasks | 6 files |
-| Phase 01 P02 | 25min | 2 tasks | 7 files |
-| Phase 01 P03 | 3min | 2 tasks | 3 files |
-| Phase 01 P04 | 40min | 2 tasks + hard-gate | 5 files |
-| Phase 01 P05 | 15min | 2 tasks | 4 files |
-| Phase 01 P06 | 40min | 2 tasks | 13 files |
-| Phase 01 P08 | 23min | 3 tasks | 8 files |
-| Phase 01-strict-contracts-and-catalog-v2-identity P09 | 6min | 3 tasks | 9 files |
-| Phase 01 P10 | 14min | 2 tasks | 8 files |
-| Phase 01 P11 | ~35min | 3 tasks | 12 files |
-| Phase 01 P11 | 35min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -83,53 +65,17 @@ Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
 - Planning artifacts remapped from offset Phases 3–7 to canonical Phase 0 / 1 / 2 / 3A / 3B / 4 / 5; 138 requirement IDs preserved uniquely
-- Evidence contract freezes in Phase 2 before prepare hashing; 3A control plane before 3B domain write
-- No store/control-plane writes before strict model/identity/map/hash/evidence-contract unit gates (Phase 1–2)
-- No commit before Phase 3A prepare/discard zero-domain-write proof
-- No manifest-backed verify before Phase 3B atomic commit+manifest+concurrency
-- Prepare stores the full immutable payload, resolved membership, and required embeddings; commit makes no external calls and uses one success tx for domain+evidence+manifest+terminals
-- Stop and report if Neo4j cannot store prepared payloads or co-commit success unit
-- Catalog-v2 intentionally breaks v1 request identity/provenance/hash contracts; preserve tool names
-- Cherry-picked pre-hardening canary artifacts record an ACCEPT_TAB dry-run/commit in `oracle-catalog-v2`; treat them as offline historical evidence only
 - No canary execution, `oracle-catalog-v2` query/mutation, automatic v1 migration, or deployment this milestone
-- Approved edge vocabulary remains the existing 16 types; `LikelyReferencesTo`, `MapsTo`, and `SynchronizesTo` are deferred
-- Phase 6 canary is separate/out of scope and carries no requirement IDs
-- Phase 3A/3B and Phase 4 require phase-specific research during planning
-- [Phase 1]: Shared CatalogStrictModel base; required catalog-v2/system_key shells; Literal True write flags
-- [Phase 1]: Response models remain non-strict BaseModel; status request omits version/system_key
-- [Phase 1]: REFACTOR no-op for 01-01; no dual-version compatibility helpers
-- [Phase 1]: Pure catalog_graph_key fullmatch registry; shell system_key authority; no v1 rewrite
-- [Phase 1]: Procedure/Function require nonempty #OVERLOAD; package optional; SourceArtifact distinct from provenance source_key
-- [Phase 1]: REFACTOR no-op for 01-02; no dual-version rewrite helpers
-- [Phase 1]: catalog-v2 UUID materials via IDENTITY_SCHEMA_VERSION; signatures stable
-- [Phase 1]: Pure EvidenceLink/Manifest/PreparedPlan helpers only; no persistence
-- [Phase 1]: REFACTOR no-op for 01-03; no dual-version identity shim
-- [Phase 1]: Converter pure in catalog_common; CatalogSafeFastMCP wires SAFE-08 structured ToolError for seven catalog tools only
-- [Phase 1]: Fresh ToolError(JSON) outside except; legacy/non-validation ToolErrors unchanged
-- [Phase 1]: CONT-07 proven via FastMCP call_tool + typed request annotations on all seven catalog tools
-- [Phase 1]: REFACTOR no-op for 01-04; no dual-version helpers
-- [Phase 1]: 01-PHASE1-GATE was green after 01-05; Plan 01-06 invalidated it to ready_for_phase_2=false pending 01-07/01-08 gap closure
-- [Phase 1]: catalog_neo4j_int=skip without live probe; Phase 0 canary-script fails remain baseline noise
-- [Phase 1]: Missing system_key remains Pydantic missing/validation_error; only explicit invalid_system_key errors receive that structured code
-- [Phase 1]: CatalogSourceRef models are dumped to plain JSON dictionaries before canonical hashing and store serialization
-- [Phase 1]: Strict scalar aliases reject coercion before Literal handling; nested graph-key scope errors retain exact request-relative locations
-- [Phase 1]: IDEN-08 unique completion belongs to Phase 4; Phase 1 graph-key echo tests are partial foundation evidence only
-- [Phase 1]: IDEN-13 unique completion belongs to Phase 5; Phase 1 v1-material inequality and historical-golden guards are partial foundation evidence only
-- [Phase 1]: Final evidence gate is green; stop before Phase 2 for independent orchestrator re-audit
-- [Phase ?]: Plan 01-09: CR-02 reference_time model validation preserves exact ISO source string; WR-01 exact graph-key field locations via validate_entity_graph_key_at
-- [Phase ?]: Plan 01-09: readiness remains false; CR-01/WR-02 delegated to 01-10; 01-11 alone may reconsider local readiness
-- [Phase 1]: Entity MERGE self-lock + under-lock immutable/type CASE is mutation authority
-- [Phase 1]: Combined batch catches EntityInvariantRace as typed conflict after domain rollback
-- [Phase 1]: Plan 01-11 tracked stdlib gate runner is sole local_gate_pass authority; apply refuses stale/tampered/incomplete ledgers
-- [Phase 1]: ready_for_phase_2 stays false while independent code/goal/Nyquist/security audits are pending
-- [Phase 1]: CR-01/CR-02/WR-01/WR-02 closed with exact no-silent-drop key equality in 01-REVIEW-GAPS.md
-- [Phase ?]: Pure offline catalog-v2 FE fixtures; live race defined but unexecuted
-- [Phase ?]: Plan 01-11 tracked stdlib gate runner is sole local_gate_pass authority
-- [Phase ?]: ready_for_phase_2 stays false while independent code/goal/Nyquist/security audits pending
+- [Phase 1]: Plan 01-11 tracked stdlib gate runner is sole local_gate_pass authority; LF-normalized content digests
+- [Phase 1]: ready_for_phase_2 stays false until four independent audits green
+- [Phase 1]: CR-01/CR-02/WR-01/WR-02 closed with no-silent-drop key equality
+- [Phase 1]: WR-R01/WR-R02 accepted residuals (edge lock parity; status default polish) — not hard blockers
+- [Phase 1]: Plan 01-12 final readiness after goal PASSED, security SECURED, Nyquist COMPLIANT, code CLEAR_WITH_RESIDUALS
+- [Session]: stop-after-phase-1 — do not discuss/plan/execute Phase 2 this session
 
 ### Pending Todos
 
-Next: Plan 01-11 readiness reconsideration only after mandatory checks. ready_for_phase_2=false. Do not transition or execute Phase 2 in this session.
+Session stop after Phase 1. Later (separate session): Phase 2+ under milestone policy; local Ollama E2E before cleanup; milestone audit/completion; explicit cleanup confirmation.
 
 ### Blockers/Concerns
 
@@ -142,6 +88,8 @@ Next: Plan 01-11 readiness reconsideration only after mandatory checks. ready_fo
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260718-ca6 | Document Phase 1 residual WR-R01/WR-R02 as accepted residuals | 2026-07-18 | e31bb04 | [260718-ca6-document-phase-1-residual-findings](./quick/260718-ca6-document-phase-1-residual-findings/) |
+| 260718-c2u | LF-stable Phase 1 gate digests + Scope Stop bind | 2026-07-18 | 4c9fff3 | [260718-c2u-remediate-phase-1-nyquist-digest-bind](./quick/260718-c2u-remediate-phase-1-nyquist-digest-bind/) |
 | 260718-bnv | Remediate Phase 1 Nyquist non-compliance: rebind gate ledger to primary HEAD | 2026-07-18 | 63f7fe8 | [260718-bnv-remediate-phase-1-nyquist-non-compliance](./quick/260718-bnv-remediate-phase-1-nyquist-non-compliance/) |
 | 260717-wvz | Reconcile ROADMAP.md and REQUIREMENTS.md to the canonical pre-canary roadmap; preserve 138/138 unique mappings | 2026-07-17 | 37ff944 | [260717-wvz-reconcile-planning-roadmap-md-and-planni](./quick/260717-wvz-reconcile-planning-roadmap-md-and-planni/) |
 
@@ -154,10 +102,12 @@ Next: Plan 01-11 readiness reconsideration only after mandatory checks. ready_fo
 | Future | Catalog delta/retirement / business transactions | Deferred | v1.1 requirements |
 | Ops | Production canary / live-group migration | Separate approval | v1.0 close / v1.1 scope |
 | Backend | FalkorDB/other catalog portability | Deferred | v1.0 / v1.1 |
+| Residual | WR-R01 edge MERGE lock-authoritative identity arbitration | Accepted residual → Phase 3B/5 | Phase 1 01-12 |
+| Residual | WR-R02 `_write_status_from_row` fail-closed unknown status | Accepted residual → later polish | Phase 1 01-12 |
 
 ## Session Continuity
 
-Last session: 2026-07-18T01:19:42.264Z
-Stopped at: Completed 01-11-PLAN.md
+Last session: 2026-07-18
+Stopped at: Completed 01-12-PLAN.md (Phase 1 final readiness)
 Resume file: None
-Next: Independent Phase 1 re-audit; stop before Phase 2 execution
+Next: Later session — Phase 2 only under new authorization; this session ends after Phase 1
