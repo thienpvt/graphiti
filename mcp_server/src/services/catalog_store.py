@@ -3584,6 +3584,28 @@ class CatalogNeo4jStore:
             )
         return row
 
+    async def read_terminal_commit_snapshot(
+        self,
+        tx: Any,
+        *,
+        group_id: str,
+        batch_id: str,
+        plan_uuid: str,
+        batch_uuid: str,
+    ) -> dict[str, Any] | None:
+        """Group-scoped plan+batch+manifest snapshot for recovery classification (D-09)."""
+        if not group_id or not batch_id or not plan_uuid or not batch_uuid:
+            return None
+        result = await tx.run(
+            self.build_terminal_commit_agrees_cypher(),
+            group_id=group_id,
+            batch_id=batch_id,
+            plan_uuid=plan_uuid,
+            batch_uuid=batch_uuid,
+        )
+        row = await self._first_from_tx_result(result)
+        return dict(row) if row else None
+
     async def terminal_commit_agrees(
         self,
         tx: Any,
@@ -3597,14 +3619,13 @@ class CatalogNeo4jStore:
         batch_uuid = str(projection.get('batch_uuid') or '')
         if not group_id or not batch_id or not plan_uuid or not batch_uuid:
             return False
-        result = await tx.run(
-            self.build_terminal_commit_agrees_cypher(),
+        row = await self.read_terminal_commit_snapshot(
+            tx,
             group_id=group_id,
             batch_id=batch_id,
             plan_uuid=plan_uuid,
             batch_uuid=batch_uuid,
         )
-        row = await self._first_from_tx_result(result)
         if not row:
             return False
         if str(row.get('plan_state') or '') != PLAN_STATE_COMMITTED:

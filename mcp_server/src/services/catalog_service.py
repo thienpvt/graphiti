@@ -5175,22 +5175,29 @@ class CatalogService:
             # Direct upsert already-committed same hash short-circuit via conflict path.
             raise self._BatchStatusConflict('already_committed')
 
-        # Terminal agreement short-circuit (prepared recovery hook; plan 05 deep matrix).
+        # Recovery matrix (D-07..D-11, D-23): classify durable terminal evidence.
+        # Never CAS COMMITTING→PREPARED; never repair partial terminals.
         if projection.plan is not None:
+            plan_uuid = str(projection.plan.get('plan_uuid') or '')
+            _, _, digest_preview = self._build_manifest_write_params(projection)
             agree_projection = {
                 'group_id': group_id,
                 'batch_id': batch_id,
                 'batch_uuid': batch_uuid,
-                'plan_uuid': str(projection.plan.get('plan_uuid') or ''),
+                'plan_uuid': plan_uuid,
                 'request_sha256': effective_hash,
                 'catalog_sha256': projection.catalog_sha256,
                 'artifact_sha256': projection.artifact_sha256,
                 'identity_schema_version': projection.identity_schema_version,
-                'manifest_sha256': '',  # filled after build if needed
+                'manifest_sha256': digest_preview,
             }
-            # Build digest for agreement compare without writing.
-            _, _, digest_preview = self._build_manifest_write_params(projection)
-            agree_projection['manifest_sha256'] = digest_preview
+            snapshot = await self._store.read_terminal_commit_snapshot(
+                tx,
+                group_id=group_id,
+                batch_id=batch_id,
+                plan_uuid=plan_uuid,
+                batch_uuid=batch_uuid,
+            )
             if await self._store.terminal_commit_agrees(tx, projection=agree_projection):
                 return {
                     'short_circuit': True,
@@ -5200,6 +5207,10 @@ class CatalogService:
                     'provenance_results': [],
                     'batch_uuid': batch_uuid,
                 }
+            self._raise_if_partial_terminal(
+                snapshot=snapshot,
+                projection=agree_projection,
+            )
 
         # 2. Entities
         written_request_entities: set[str] = set()
@@ -6253,6 +6264,11 @@ class CatalogService:
         edge_count: int = 0,
         source_count: int = 0,
         evidence_link_count: int = 0,
+        batch_uuid: str | None = None,
+        manifest_sha256: str | None = None,
+        committed_created: int = 0,
+        committed_updated: int = 0,
+        committed_unchanged: int = 0,
     ) -> CommitPreparedCatalogBatchResponse:
         return CommitPreparedCatalogBatchResponse(
             plan_uuid=plan_uuid,
@@ -6264,8 +6280,257 @@ class CatalogService:
             edge_count=edge_count,
             source_count=source_count,
             evidence_link_count=evidence_link_count,
+            batch_uuid=batch_uuid,
+            manifest_sha256=manifest_sha256,
+            committed_created=committed_created,
+            committed_updated=committed_updated,
+            committed_unchanged=committed_unchanged,
             error_code=code,
             error_message=message,
+        )
+
+    def _raise_if_partial_terminal(
+        self,
+        *,
+        snapshot: dict[str, Any] | None,
+        projection: dict[str, Any],
+    ) -> None:
+        """Fail closed on partial/contradictory terminal evidence (D-09/D-11).
+
+        Incomplete success (no durable terminals) returns without raising so the
+        full idempotent writer may resume. Never repairs; never revives PREPARED.
+        """
+        if not snapshot:
+            return
+        plan_state = str(snapshot.get('plan_state') or '')
+        batch_status = str(snapshot.get('batch_status') or '')
+        manifest_sha = str(snapshot.get('manifest_sha256') or '')
+        expected_manifest = str(projection.get('manifest_sha256') or '')
+        has_manifest = bool(manifest_sha)
+        has_batch = bool(batch_status)
+        has_plan = bool(plan_state)
+
+        if not has_plan and not has_batch and not has_manifest:
+            return
+
+        # Fully absent success artifacts under COMMITTING → resume full write.
+        if (
+            plan_state in {'', PLAN_STATE_COMMITTING}
+            and batch_status in {'', 'writing', 'open', 'failed'}
+            and not has_manifest
+        ):
+            return
+
+        if plan_state == PLAN_STATE_COMMITTED:
+            if batch_status != 'committed':
+                raise self._PartialTerminalConflict(
+                    CatalogErrorCode.batch_conflict,
+                    'partial terminal: plan COMMITTED without committed batch',
+                )
+            if not has_manifest:
+                raise self._PartialTerminalConflict(
+                    CatalogErrorCode.manifest_mismatch,
+                    'partial terminal: plan COMMITTED without durable manifest',
+                )
+            if expected_manifest and manifest_sha != expected_manifest:
+                raise self._PartialTerminalConflict(
+                    CatalogErrorCode.manifest_mismatch,
+                    'partial terminal: manifest_sha256 mismatch',
+                )
+            for key in (
+                'request_sha256',
+                'catalog_sha256',
+                'identity_schema_version',
+            ):
+                if str(snapshot.get(key) or '') != str(projection.get(key) or ''):
+                    raise self._PartialTerminalConflict(
+                        CatalogErrorCode.prepared_plan_conflict,
+                        f'partial terminal: {key} mismatch',
+                    )
+            # Should have agreed already; treat residual as fail-closed.
+            raise self._PartialTerminalConflict(
+                CatalogErrorCode.prepared_plan_conflict,
+                'partial terminal: COMMITTED plan without agreement',
+            )
+
+        if batch_status == 'committed':
+            raise self._PartialTerminalConflict(
+                CatalogErrorCode.batch_conflict,
+                'partial terminal: batch committed without plan COMMITTED',
+            )
+        if has_manifest:
+            raise self._PartialTerminalConflict(
+                CatalogErrorCode.manifest_mismatch,
+                'partial terminal: manifest present without committed agreement',
+            )
+        if plan_state and plan_state not in {PLAN_STATE_COMMITTING, PLAN_STATE_PREPARED}:
+            raise self._PartialTerminalConflict(
+                CatalogErrorCode.prepared_plan_conflict,
+                'partial terminal: unexpected plan state',
+            )
+
+    async def _commit_terminal_state_receipt(
+        self,
+        *,
+        client: Any,
+        root: dict[str, Any],
+        plan_uuid: str,
+        group_id: str,
+        request_sha: str | None,
+        catalog_sha: str | None,
+        art_sha: str | None,
+        entity_count: int,
+        edge_count: int,
+        source_count: int,
+        evidence_link_count: int,
+    ) -> CommitPreparedCatalogBatchResponse:
+        """Stable receipt when durable plan is already COMMITTED (D-09/D-23).
+
+        Zero domain rewrite. Partial/contradictory evidence fails closed.
+        """
+        batch_id = str(root.get('batch_id') or '')
+        namespace = self._namespace()
+        if namespace is None or not group_id or not batch_id or not plan_uuid:
+            return self._commit_fail(
+                CatalogErrorCode.prepared_plan_already_consumed,
+                'prepared plan already consumed',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTED,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+        batch_uuid = catalog_batch_uuid(namespace, group_id, batch_id)
+        snapshot: dict[str, Any] | None = None
+        try:
+            async with client.driver.transaction() as tx:
+                await self._store.lock_prepared_plan_for_commit(
+                    tx, plan_uuid=plan_uuid, group_id=group_id
+                )
+                snapshot = await self._store.read_terminal_commit_snapshot(
+                    tx,
+                    group_id=group_id,
+                    batch_id=batch_id,
+                    plan_uuid=plan_uuid,
+                    batch_uuid=batch_uuid,
+                )
+                agree_projection = {
+                    'group_id': group_id,
+                    'batch_id': batch_id,
+                    'batch_uuid': batch_uuid,
+                    'plan_uuid': plan_uuid,
+                    'request_sha256': str(request_sha or ''),
+                    'catalog_sha256': str(catalog_sha or ''),
+                    'artifact_sha256': art_sha,
+                    'identity_schema_version': str(
+                        root.get('identity_schema_version') or IDENTITY_SCHEMA_VERSION
+                    ),
+                    'manifest_sha256': str((snapshot or {}).get('manifest_sha256') or ''),
+                }
+                if snapshot is not None and await self._store.terminal_commit_agrees(
+                    tx, projection=agree_projection
+                ):
+                    return CommitPreparedCatalogBatchResponse(
+                        plan_uuid=plan_uuid,
+                        request_sha256=request_sha,
+                        catalog_sha256=catalog_sha,
+                        artifact_sha256=art_sha,
+                        state=PLAN_STATE_COMMITTED,
+                        entity_count=entity_count,
+                        edge_count=edge_count,
+                        source_count=source_count,
+                        evidence_link_count=evidence_link_count,
+                        batch_uuid=batch_uuid,
+                        manifest_sha256=str(snapshot.get('manifest_sha256') or '') or None,
+                        committed_created=int(root.get('created_count') or 0),
+                        committed_updated=int(root.get('updated_count') or 0),
+                        committed_unchanged=int(root.get('unchanged_count') or 0),
+                    )
+        except CatalogStoreError as exc:
+            return self._commit_fail(
+                self._map_store_error_code(exc),
+                str(exc) or 'terminal receipt read failed',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTED,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog commit_prepared_catalog_batch terminal_receipt_failed '
+                'plan_uuid=%s reason=%s',
+                plan_uuid,
+                type(exc).__name__,
+            )
+            return self._commit_fail(
+                CatalogErrorCode.neo4j_transaction_failed,
+                'terminal receipt read failed',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTED,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+
+        # Partial terminal under COMMITTED root: fail closed, no rewrite.
+        try:
+            self._raise_if_partial_terminal(
+                snapshot=snapshot,
+                projection={
+                    'group_id': group_id,
+                    'batch_id': batch_id,
+                    'batch_uuid': batch_uuid,
+                    'plan_uuid': plan_uuid,
+                    'request_sha256': str(request_sha or ''),
+                    'catalog_sha256': str(catalog_sha or ''),
+                    'artifact_sha256': art_sha,
+                    'identity_schema_version': str(
+                        root.get('identity_schema_version') or IDENTITY_SCHEMA_VERSION
+                    ),
+                    'manifest_sha256': str((snapshot or {}).get('manifest_sha256') or ''),
+                },
+            )
+        except self._PartialTerminalConflict as exc:
+            return self._commit_fail(
+                exc.code,
+                exc.message,
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTED,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+                batch_uuid=batch_uuid,
+            )
+        return self._commit_fail(
+            CatalogErrorCode.prepared_plan_already_consumed,
+            'prepared plan already consumed',
+            plan_uuid=plan_uuid,
+            request_sha256=request_sha,
+            catalog_sha256=catalog_sha,
+            artifact_sha256=art_sha,
+            state=PLAN_STATE_COMMITTED,
+            entity_count=entity_count,
+            edge_count=edge_count,
+            source_count=source_count,
+            evidence_link_count=evidence_link_count,
+            batch_uuid=batch_uuid,
         )
 
     def _discard_fail(
@@ -6426,9 +6691,19 @@ class CatalogService:
                 'prepared plan not found',
             )
         if state == PLAN_STATE_COMMITTED:
-            return _echo_fail(
-                CatalogErrorCode.prepared_plan_already_consumed,
-                'prepared plan already consumed',
+            # D-09/D-23: terminal agreement → stable receipt; partial → fail closed.
+            return await self._commit_terminal_state_receipt(
+                client=client,
+                root=root,
+                plan_uuid=plan_uuid,
+                group_id=group_id,
+                request_sha=request_sha,
+                catalog_sha=catalog_sha,
+                art_sha=art_sha,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
             )
         if state == PLAN_STATE_EXPIRED:
             return _echo_fail(
@@ -6681,9 +6956,24 @@ class CatalogService:
         try:
             async with client.driver.transaction() as tx:
                 write_out = await self._write_catalog_batch_atomic(tx, projection)
+        except self._PartialTerminalConflict as exc:
+            # D-09/D-11: leave plan COMMITTING; no PREPARED revival; no silent repair.
+            return self._commit_fail(
+                exc.code,
+                exc.message,
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTING,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
         except self._BatchStatusConflict as exc:
             if exc.reason == 'already_committed':
-                # Should be rare on prepared path; treat as conflict (plan 05 recovery).
+                # Partial terminal or competing writer left batch committed without agreement.
                 return self._commit_fail(
                     CatalogErrorCode.batch_conflict,
                     'batch already committed with conflicting terminal state',
@@ -6928,6 +7218,14 @@ class CatalogService:
         def __init__(self, reason: str):
             self.reason = reason
             super().__init__(reason)
+
+    class _PartialTerminalConflict(Exception):
+        """D-09/D-11: partial or contradictory terminal evidence; fail closed."""
+
+        def __init__(self, code: CatalogErrorCode, message: str):
+            self.code = code
+            self.message = message
+            super().__init__(message)
 
     async def _batch_recheck_edge_in_tx(
         self,
