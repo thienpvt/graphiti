@@ -219,7 +219,7 @@ Plans:
   4. Separate read/write feature gates keep capabilities and catalog diagnostics usable when writes are disabled; read paths never initialize/repair schema or open write transactions
   5. Explicit-key verification remains available; gate/registration tests prove read tools work while writes are off
 
-**Plans**: 3/6 plans executed
+**Plans**: 4/6 plans executed
 
 **Wave 1**
 
@@ -235,7 +235,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 04-04-PLAN.md — Manifest-authoritative batch verification, exact drift, evidence identities, explicit-key compatibility
+- [x] 04-04-PLAN.md — Manifest-authoritative batch verification, exact drift, evidence identities, explicit-key compatibility
 
 **Wave 5** *(blocked on Wave 4)*
 
