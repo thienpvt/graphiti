@@ -28,6 +28,11 @@ from mcp.client.streamable_http import streamable_http_client  # noqa: E402
 from models.catalog_batch import NestedProvenancePayload, UpsertCatalogBatchRequest  # noqa: E402
 from models.catalog_edges import CatalogEdgeItem  # noqa: E402
 from models.catalog_entities import CatalogEntityItem  # noqa: E402
+from models.catalog_evidence import CatalogEvidenceLink  # noqa: E402
+from models.catalog_prepare import (  # noqa: E402
+    CommitPreparedCatalogBatchRequest,
+    PrepareCatalogBatchRequest,
+)
 from models.catalog_provenance import (  # noqa: E402
     CatalogProvenanceEdgeTarget,
     CatalogProvenanceEntityTarget,
@@ -57,6 +62,56 @@ ARTIFACT_FIELDS = {
     'entities',
     'edges',
     'provenance',
+}
+
+# Phase 5 offline hardened path (IDEN-13 / DOCS-06). Historical EXPECTED_BATCHES remain
+# inventory only and are invalid as hardened authority (D-05, D-11).
+HARDENED_ARTIFACT_FIELDS = {
+    'identity_schema_version',
+    'system_key',
+    'group_id',
+    'batch_id',
+    'catalog_sha256',
+    'atomic',
+    'entities',
+    'edges',
+    'provenance',
+}
+HARDENED_IDENTITY_SCHEMA_VERSION = 'catalog-v2'
+HARDENED_SYSTEM_KEY = 'FE'
+HARDENED_GROUP_ID = 'oracle-catalog-tool-test'
+FUTURE_TARGET_GROUP_METADATA = 'oracle-catalog-v2'  # metadata only; never transported
+HARDENED_ARTIFACT_DIR = ROOT / 'catalog' / 'canary-v2-requests-hardened'
+HISTORICAL_ARTIFACT_DIR = ROOT / 'catalog' / 'canary-v2-requests'
+HISTORICAL_ACCEPT_TAB_REQUEST_SHA256 = (
+    'a84e8a7ad71c3d5c9ebd3655a3a049e883b9bf97cc7c5c9ece640c77e1b2539a'
+)
+
+# Preferred future execution sequence — never live-invoked in Phase 5 (D-10).
+COMMIT_TOOL_SEQUENCE = [
+    'prepare_catalog_batch',
+    'commit_prepared_catalog_batch',
+    'get_catalog_ingest_status',
+    'verify_catalog_batch',
+    'resolve_typed_entities',
+    'get_catalog_batch_manifest',
+    'get_catalog_evidence',
+    'search_nodes',
+    'search_memory_facts',
+]
+PROHIBITED_LEGACY_TOOLS = {
+    'add_memory',
+    'add_triplet',
+    'build_communities',
+    'clear_graph',
+    'delete_entity_edge',
+    'delete_episode',
+    'summarize_saga',
+    'update_entity',
+    'upsert_provenance',
+    'upsert_typed_edges',
+    'upsert_typed_entities',
+    'upsert_catalog_batch',  # historical direct upsert is not hardened authority
 }
 
 EXPECTED_BATCHES: dict[str, dict[str, Any]] = {
@@ -416,6 +471,271 @@ def _validate_expected_batch(
             'request_hash_mismatch', 'server request hash does not match approved batch'
         )
     return server_hash
+
+
+def _reject_unknown_model_fields(raw: Any, model_fields: set[str], path: str) -> dict[str, Any]:
+    """Reject unknown keys; allow omitted optional defaults (unlike historical exact-set)."""
+    if not isinstance(raw, dict):
+        raise RunnerError('invalid_shape', f'{path} must be an object')
+    unknown = sorted(set(raw) - model_fields)
+    if unknown:
+        raise RunnerError('field_set_mismatch', f'{path} unknown fields: {unknown}')
+    return raw
+
+
+def _validate_hardened_raw_field_sets(raw: dict[str, Any]) -> None:
+    _require_exact_fields(raw, HARDENED_ARTIFACT_FIELDS, '$')
+    entities = raw.get('entities')
+    edges = raw.get('edges')
+    provenance = raw.get('provenance')
+    if not isinstance(entities, list) or not isinstance(edges, list):
+        raise RunnerError('invalid_shape', '$.entities and $.edges must be arrays')
+    for index, item in enumerate(entities):
+        _reject_unknown_model_fields(
+            item, set(CatalogEntityItem.model_fields), f'$.entities[{index}]'
+        )
+    for index, item in enumerate(edges):
+        _reject_unknown_model_fields(item, set(CatalogEdgeItem.model_fields), f'$.edges[{index}]')
+    _reject_unknown_model_fields(
+        provenance, set(NestedProvenancePayload.model_fields), '$.provenance'
+    )
+    if 'entity_targets' in provenance or 'edge_targets' in provenance:
+        raise RunnerError(
+            'cartesian_provenance_rejected',
+            'Cartesian entity_targets/edge_targets rejected; use evidence_links',
+        )
+    sources = provenance.get('sources')
+    evidence_links = provenance.get('evidence_links')
+    if not isinstance(sources, list) or not isinstance(evidence_links, list):
+        raise RunnerError('invalid_shape', 'provenance sources/evidence_links must be arrays')
+    for index, item in enumerate(sources):
+        _reject_unknown_model_fields(
+            item, set(CatalogSourceItem.model_fields), f'$.provenance.sources[{index}]'
+        )
+    for index, item in enumerate(evidence_links):
+        _reject_unknown_model_fields(
+            item, set(CatalogEvidenceLink.model_fields), f'$.provenance.evidence_links[{index}]'
+        )
+
+
+def reject_historical_as_hardened(raw: dict[str, Any] | Path) -> None:
+    """Historical direct-upsert artifacts are not hardened authority (D-05, D-11)."""
+    if isinstance(raw, Path):
+        data = strict_json_loads(raw.read_bytes())
+        if not isinstance(data, dict):
+            raise RunnerError('invalid_shape', 'artifact root must be an object')
+        raw = data
+    historical_markers = []
+    if raw.get('identity_schema_version') != HARDENED_IDENTITY_SCHEMA_VERSION:
+        historical_markers.append('missing catalog-v2 identity_schema_version')
+    if 'system_key' not in raw:
+        historical_markers.append('missing system_key')
+    provenance = raw.get('provenance') or {}
+    if isinstance(provenance, dict) and (
+        'entity_targets' in provenance or 'edge_targets' in provenance
+    ):
+        historical_markers.append('Cartesian provenance')
+    if historical_markers:
+        raise RunnerError(
+            'historical_not_hardened_authority',
+            'historical canary artifact is not hardened authority: '
+            + '; '.join(historical_markers),
+        )
+
+
+def validate_hardened_artifact(
+    payload_path: Path,
+    *,
+    expected_artifact_sha256: str | None = None,
+    expected_request_sha256: str | None = None,
+) -> tuple[bytes, dict[str, Any], PrepareCatalogBatchRequest, str, str]:
+    """Strict-load and validate one hardened catalog-v2 prepare-shaped payload offline."""
+    if expected_artifact_sha256 is not None and not SHA256_RE.fullmatch(expected_artifact_sha256):
+        raise RunnerError(
+            'invalid_expected_hash', '--expected-artifact-sha256 must be lowercase SHA-256'
+        )
+    if expected_request_sha256 is not None and not SHA256_RE.fullmatch(expected_request_sha256):
+        raise RunnerError(
+            'invalid_expected_hash', '--expected-request-sha256 must be lowercase SHA-256'
+        )
+    try:
+        artifact_bytes = payload_path.read_bytes()
+    except OSError as exc:
+        raise RunnerError('file_read_failed', f'cannot read {payload_path.name}') from exc
+    artifact_sha256 = sha256_bytes(artifact_bytes)
+    if expected_artifact_sha256 is not None and artifact_sha256 != expected_artifact_sha256:
+        raise RunnerError(
+            'artifact_hash_mismatch', 'artifact byte hash does not match expected hash'
+        )
+    raw = strict_json_loads(artifact_bytes)
+    if not isinstance(raw, dict):
+        raise RunnerError('invalid_shape', 'artifact root must be an object')
+    reject_historical_as_hardened(raw)
+    if canonical_artifact_bytes(raw) != artifact_bytes:
+        raise RunnerError(
+            'non_canonical_artifact',
+            'artifact bytes must be canonical JSON followed by exactly one LF',
+        )
+    _validate_hardened_raw_field_sets(raw)
+    if raw['identity_schema_version'] != HARDENED_IDENTITY_SCHEMA_VERSION:
+        raise RunnerError('identity_schema_mismatch', 'identity_schema_version must be catalog-v2')
+    if raw['system_key'] != HARDENED_SYSTEM_KEY:
+        raise RunnerError('system_key_mismatch', 'system_key must be FE for sanitized fixture')
+    if raw['group_id'] != HARDENED_GROUP_ID:
+        raise RunnerError(
+            'group_id_mismatch',
+            'hardened offline group_id must be oracle-catalog-tool-test',
+        )
+    if raw['atomic'] is not True:
+        raise RunnerError('atomic_required', 'artifact atomic field must be true')
+    try:
+        prepare_request = PrepareCatalogBatchRequest.model_validate(raw, strict=True)
+    except ValidationError as exc:
+        raise RunnerError(
+            'request_validation_failed', 'artifact fails prepare request validation'
+        ) from exc
+    # Content hashes via Upsert shape (same domain body + dry_run false)
+    upsert = UpsertCatalogBatchRequest.model_validate({**raw, 'dry_run': False}, strict=True)
+    _validate_content_hashes(upsert)
+    server_hash = CatalogService.batch_request_sha256(upsert)
+    if expected_request_sha256 is not None and server_hash != expected_request_sha256:
+        raise RunnerError(
+            'request_hash_mismatch', 'server request hash does not match expected hash'
+        )
+    return artifact_bytes, raw, prepare_request, artifact_sha256, server_hash
+
+
+def build_prepare_transport_request(raw: dict[str, Any]) -> dict[str, Any]:
+    """Prepare tool envelope: full domain body, no dry_run, no plan_token."""
+    payload = copy.deepcopy(raw)
+    payload.pop('dry_run', None)
+    payload.pop('plan_token', None)
+    PrepareCatalogBatchRequest.model_validate(payload, strict=True)
+    return payload
+
+
+def build_commit_transport_request(
+    plan_token: str, *, expected_request_sha256: str | None = None
+) -> dict[str, Any]:
+    """Token-only commit envelope (D-20). plan_token stays in-memory for fakes only."""
+    body: dict[str, Any] = {'plan_token': plan_token}
+    if expected_request_sha256 is not None:
+        body['expected_request_sha256'] = expected_request_sha256
+    CommitPreparedCatalogBatchRequest.model_validate(body, strict=True)
+    return body
+
+
+def simulate_prepare_commit_sequence(
+    raw: dict[str, Any],
+    *,
+    request_sha256: str,
+    plan_token: str = 'offline-plan-token',
+) -> list[tuple[str, dict[str, Any]]]:
+    """Pure offline expected MCP call sequence for hardened canary (never executed live)."""
+    prepare_body = build_prepare_transport_request(raw)
+    commit_body = build_commit_transport_request(plan_token, expected_request_sha256=request_sha256)
+    group_id = raw['group_id']
+    batch_id = raw['batch_id']
+    entities = raw['entities']
+    edges = raw['edges']
+    representative_entity = entities[0]
+    representative_edge = edges[0]
+    return [
+        ('prepare_catalog_batch', {'request': prepare_body}),
+        ('commit_prepared_catalog_batch', {'request': commit_body}),
+        (
+            'get_catalog_ingest_status',
+            {'request': {'group_id': group_id, 'batch_id': batch_id}},
+        ),
+        (
+            'verify_catalog_batch',
+            {
+                'request': {
+                    'group_id': group_id,
+                    'batch_id': batch_id,
+                    'entities': [
+                        {'entity_type': item['entity_type'], 'graph_key': item['graph_key']}
+                        for item in entities
+                    ],
+                    'edges': [
+                        {
+                            'edge_type': item['edge_type'],
+                            'edge_key': item['edge_key'],
+                            'expected_source_graph_key': item['source_graph_key'],
+                            'expected_target_graph_key': item['target_graph_key'],
+                            'expected_source_uuid': None,
+                            'expected_target_uuid': None,
+                        }
+                        for item in edges
+                    ],
+                    'require_provenance': True,
+                }
+            },
+        ),
+        (
+            'resolve_typed_entities',
+            {
+                'request': {
+                    'group_id': group_id,
+                    'entities': [
+                        {'entity_type': item['entity_type'], 'graph_key': item['graph_key']}
+                        for item in entities
+                    ],
+                    'graph_keys': None,
+                }
+            },
+        ),
+        (
+            'get_catalog_batch_manifest',
+            {'request': {'group_id': group_id, 'batch_id': batch_id}},
+        ),
+        (
+            'get_catalog_evidence',
+            {
+                'request': {
+                    'group_id': group_id,
+                    'entity_type': representative_entity['entity_type'],
+                    'graph_key': representative_entity['graph_key'],
+                }
+            },
+        ),
+        (
+            'search_nodes',
+            {
+                'query': representative_entity['graph_key'],
+                'group_ids': [group_id],
+                'max_nodes': 10,
+                'entity_types': [representative_entity['entity_type']],
+                'center_node_uuid': None,
+            },
+        ),
+        (
+            'search_memory_facts',
+            {
+                'query': representative_edge['fact'],
+                'group_ids': [group_id],
+                'max_facts': 10,
+                'center_node_uuid': None,
+                'edge_types': [representative_edge['edge_type']],
+                'valid_at_after': None,
+                'valid_at_before': None,
+                'invalid_at_after': None,
+                'invalid_at_before': None,
+            },
+        ),
+    ]
+
+
+def assert_sequence_has_no_prohibited_tools(sequence: list[tuple[str, dict[str, Any]]]) -> None:
+    names = [name for name, _ in sequence]
+    if names != COMMIT_TOOL_SEQUENCE:
+        raise RunnerError(
+            'sequence_mismatch',
+            f'expected {COMMIT_TOOL_SEQUENCE}, got {names}',
+        )
+    banned = set(names) & PROHIBITED_LEGACY_TOOLS
+    if banned:
+        raise RunnerError('prohibited_tool', f'prohibited tools in sequence: {sorted(banned)}')
 
 
 def validate_artifact(
