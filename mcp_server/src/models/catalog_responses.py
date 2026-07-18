@@ -178,3 +178,26 @@ class CatalogBatchWriteResponse(BaseModel):
     rolled_back: int = 0
     error_code: CatalogErrorCode | None = None
     error_message: str | None = None
+
+
+class CatalogCapabilitiesResponse(BaseModel):
+    """Read-only catalog-v2 capabilities discovery (CAPA-01..08). No secrets."""
+
+    package_version: str
+    backend: str | None = None
+    connectivity: Literal['ok', 'error', 'unknown'] = 'unknown'
+    catalog_writes_enabled: bool = False
+    catalog_reads_enabled: bool = True
+    uuid_namespace_configured: bool = False
+    namespace_fingerprint: str | None = None
+    identity_schema_version: str
+    canonicalization_version: str
+    catalog_schema_version: str
+    entity_types: list[str] = Field(default_factory=list)
+    entity_prefixes: dict[str, str] = Field(default_factory=dict)
+    edge_types: list[str] = Field(default_factory=list)
+    endpoint_map: dict[str, list[list[str]]] = Field(default_factory=dict)
+    limits: dict[str, Any] = Field(default_factory=dict)
+    embeddings: dict[str, Any] = Field(default_factory=dict)
+    neo4j_indexes: Literal['ready', 'unknown', 'n/a'] = 'unknown'
+    features: dict[str, bool] = Field(default_factory=dict)
