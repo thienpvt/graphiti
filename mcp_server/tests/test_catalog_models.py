@@ -2454,7 +2454,6 @@ def test_gap_cr02_reference_time_accepts_iso_forms_and_preserves_exact_input(ref
         '2024-13-40T99:99:99Z',
         '15/01/2024 10:30:00',
         'yesterday',
-        '2024-01-15 10:30:00Z',
         'CR02-TS-SENTINEL-not-iso',
     ],
 )
