@@ -17,6 +17,7 @@ from config.schema import CatalogConfig
 from models.catalog_batch import GetCatalogIngestStatusRequest, UpsertCatalogBatchRequest
 from models.catalog_common import CatalogErrorCode
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest
+from models.catalog_topology import validate_edge_endpoint_pair
 from models.catalog_entities import (
     CatalogEntityItem,
     ResolveEntityRef,
@@ -1804,8 +1805,23 @@ class CatalogService:
         conflicted_edge_uuids: set[str] = set()
         early_errors: dict[int, CatalogItemResult] = {}
 
-        # 1) identity + hash + coalesce
+        # 1) topology preflight + identity + hash + coalesce (before resolve/embed/tx)
         for idx, item in enumerate(request.edges):
+            try:
+                validate_edge_endpoint_pair(
+                    item.edge_type, item.source_entity_type, item.target_entity_type
+                )
+            except ValueError as exc:
+                early_errors[idx] = CatalogItemResult(
+                    index=idx,
+                    status='error',
+                    edge_key=item.edge_key,
+                    edge_type=item.edge_type,
+                    error_code=CatalogErrorCode.edge_endpoint_pair_not_allowed,
+                    error_message=str(exc),
+                )
+                continue
+
             try:
                 payload = self.edge_canonical_payload(item)
                 digest = canonical_sha256(payload)
@@ -3944,6 +3960,23 @@ class CatalogService:
 
         for local_index, item in enumerate(request.edges):
             result_index = edge_offset + local_index
+            try:
+                validate_edge_endpoint_pair(
+                    item.edge_type, item.source_entity_type, item.target_entity_type
+                )
+            except ValueError as exc:
+                errors.append(
+                    CatalogItemResult(
+                        index=result_index,
+                        status='error',
+                        edge_key=item.edge_key,
+                        edge_type=item.edge_type,
+                        error_code=CatalogErrorCode.edge_endpoint_pair_not_allowed,
+                        error_message=str(exc),
+                        details={'kind': 'edge'},
+                    )
+                )
+                continue
             digest = canonical_sha256(self.edge_canonical_payload(item))
             try:
                 assert_optional_client_hash(item.content_sha256, digest)
