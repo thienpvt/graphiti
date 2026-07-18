@@ -2420,3 +2420,156 @@ def test_empty_resolve_and_missing_entities_are_rejected_distinctly():
         ResolveTypedEntitiesRequest.model_validate(payload)
     assert missing_exc.value.errors()[0]['type'] == 'missing'
     assert tuple(missing_exc.value.errors()[0]['loc']) == ('entities',)
+
+
+# ---------------------------------------------------------------------------
+# Plan 01-09 gap coverage: CR-02 reference_time + WR-01 graph-key locations
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'reference_time',
+    [
+        '2024-01-15T10:30:00Z',
+        '2024-01-15T10:30:00z',
+        '2024-01-15T10:30:00+00:00',
+        '2024-01-15T12:30:00+02:00',
+        '2024-01-15T10:30:00',
+        '2024-01-15T10:30:00.123456',
+        '2024-01-15T10:30:00.123456+00:00',
+        '2024-01-15T10:30:00Z ',
+        '2024-01-15T10:30:00+00:00 ',
+    ],
+)
+def test_gap_cr02_reference_time_accepts_iso_forms_and_preserves_exact_input(reference_time: str):
+    item = CatalogSourceItem.model_validate(_source_kwargs(reference_time=reference_time))
+    assert item.reference_time == reference_time
+    assert item.reference_time is not None
+
+
+@pytest.mark.parametrize(
+    'reference_time',
+    [
+        'not-a-timestamp',
+        '2024-13-40T99:99:99Z',
+        '15/01/2024 10:30:00',
+        'yesterday',
+        '2024-01-15 10:30:00Z',
+        'CR02-TS-SENTINEL-not-iso',
+    ],
+)
+def test_gap_cr02_malformed_reference_time_fails_at_exact_field_location(reference_time: str):
+    with pytest.raises(ValidationError) as exc:
+        CatalogSourceItem.model_validate(_source_kwargs(reference_time=reference_time))
+    matching = [
+        err for err in exc.value.errors() if tuple(err['loc']) == ('reference_time',)
+    ]
+    assert len(matching) == 1, exc.value.errors()
+    structured = _get_catalog_validation_error_to_structured()(exc.value)
+    assert structured['code'] == CatalogErrorCode.validation_error
+    assert structured['field_path'] == 'reference_time'
+    raw = str(exc.value)
+    assert reference_time not in structured['message']
+    assert 'fromisoformat' not in raw.lower()
+    assert 'Invalid isoformat' not in raw
+
+
+def _gap_wr01_malformed_graph_key_cases():
+    bad = 'TABLE::ORCL.HR.EMPLOYEES'
+    bad_entity = _entity_kwargs(graph_key=bad)
+    bad_edge_source = _edge_kwargs(source_graph_key=bad, source_entity_type='Table')
+    bad_edge_target = _edge_kwargs(target_graph_key=bad, target_entity_type='Table')
+    bad_target = _entity_target(graph_key=bad)
+    return [
+        (
+            UpsertTypedEntitiesRequest,
+            _v2_shell(batch_id='wr01', entities=[bad_entity]),
+            ('entities', 0, 'graph_key'),
+        ),
+        (
+            ResolveTypedEntitiesRequest,
+            _v2_shell(entities=[{'entity_type': 'Table', 'graph_key': bad}]),
+            ('entities', 0, 'graph_key'),
+        ),
+        (
+            VerifyCatalogBatchRequest,
+            _v2_shell(entities=[{'entity_type': 'Table', 'graph_key': bad}]),
+            ('entities', 0, 'graph_key'),
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            _v2_shell(batch_id='wr01', edges=[bad_edge_source]),
+            ('edges', 0, 'source_graph_key'),
+        ),
+        (
+            UpsertTypedEdgesRequest,
+            _v2_shell(batch_id='wr01', edges=[bad_edge_target]),
+            ('edges', 0, 'target_graph_key'),
+        ),
+        (
+            UpsertProvenanceRequest,
+            _v2_shell(
+                batch_id='wr01',
+                sources=[_source_kwargs()],
+                entity_targets=[bad_target],
+            ),
+            ('entity_targets', 0, 'graph_key'),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            _v2_shell(batch_id='wr01', entities=[bad_entity]),
+            ('entities', 0, 'graph_key'),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            _v2_shell(batch_id='wr01', entities=[], edges=[bad_edge_source]),
+            ('edges', 0, 'source_graph_key'),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            _v2_shell(batch_id='wr01', entities=[], edges=[bad_edge_target]),
+            ('edges', 0, 'target_graph_key'),
+        ),
+        (
+            UpsertCatalogBatchRequest,
+            _v2_shell(
+                batch_id='wr01',
+                entities=[],
+                provenance={
+                    'sources': [_source_kwargs()],
+                    'entity_targets': [bad_target],
+                },
+            ),
+            ('provenance', 'entity_targets', 0, 'graph_key'),
+        ),
+    ]
+
+
+@pytest.mark.parametrize(('model', 'payload', 'expected_loc'), _gap_wr01_malformed_graph_key_cases())
+def test_gap_wr01_malformed_graph_key_reports_exact_field_location(model, payload, expected_loc):
+    with pytest.raises(ValidationError) as exc:
+        model.model_validate(payload)
+    locs = [tuple(err['loc']) for err in exc.value.errors()]
+    assert expected_loc in locs, locs
+    assert all(err['type'] != 'invalid_system_key' for err in exc.value.errors())
+    structured = _get_catalog_validation_error_to_structured()(exc.value)
+    assert structured['code'] == CatalogErrorCode.validation_error
+    assert structured['field_path'] == '.'.join(str(part) for part in expected_loc)
+
+
+def test_gap_wr01_valid_grammar_shell_mismatch_keeps_invalid_system_key():
+    fe_key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
+    with pytest.raises(ValidationError) as exc:
+        UpsertTypedEntitiesRequest.model_validate(
+            _v2_shell(
+                system_key='BO',
+                batch_id='wr01-mismatch',
+                entities=[_entity_kwargs(graph_key=fe_key)],
+            )
+        )
+    matching = [err for err in exc.value.errors() if err['type'] == 'invalid_system_key']
+    assert len(matching) == 1, exc.value.errors()
+    assert tuple(matching[0]['loc']) == ('entities', 0, 'graph_key')
+    structured = _get_catalog_validation_error_to_structured()(exc.value)
+    assert structured['code'] == CatalogErrorCode.invalid_system_key
+    assert structured['field_path'] == 'entities.0.graph_key'

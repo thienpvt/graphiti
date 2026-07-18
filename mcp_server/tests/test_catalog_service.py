@@ -4854,3 +4854,262 @@ async def test_fastmcp_empty_resolve_rejected_before_service(entities_override):
         _assert_no_backend_side_effects(spies, body_entered)
     finally:
         tool.fn = original_fn
+
+
+# ---------------------------------------------------------------------------
+# Plan 01-09 gap coverage: CR-02 / WR-01 FastMCP protocol
+# ---------------------------------------------------------------------------
+
+
+def _assert_safe_tool_error_payload(err, *, expected_field_path: str, sentinel: str):
+    import json
+
+    from pydantic import ValidationError
+
+    chain = err
+    while chain is not None:
+        assert not isinstance(chain, ValidationError), 'ValidationError leaked into protocol chain'
+        chain = getattr(chain, '__cause__', None) or getattr(chain, '__context__', None)
+    raw = str(err)
+    assert sentinel not in raw
+    assert 'fromisoformat' not in raw.lower()
+    assert 'Invalid isoformat' not in raw
+    assert 'pydantic' not in raw.lower()
+    assert 'Traceback' not in raw
+    js = raw.find('{')
+    assert js >= 0, f'missing structured JSON: {raw!r}'
+    structured = json.loads(raw[js:])
+    assert set(structured.keys()) == {
+        'code',
+        'message',
+        'field_path',
+        'retryable',
+        'correlation_id',
+    }
+    assert structured['code'] == 'validation_error'
+    assert structured['field_path'] == expected_field_path
+    assert structured['retryable'] is False
+    assert isinstance(structured['correlation_id'], str) and structured['correlation_id']
+    assert sentinel not in structured['message']
+    assert 'fromisoformat' not in structured['message'].lower()
+    return structured
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('tool_name', 'overrides', 'expected_path', 'sentinel'),
+    [
+        (
+            'upsert_provenance',
+            {
+                'sources': [
+                    {
+                        **_minimal_source_dict(),
+                        'reference_time': 'CR02-TS-SENTINEL-not-iso',
+                    }
+                ]
+            },
+            'sources.0.reference_time',
+            'CR02-TS-SENTINEL-not-iso',
+        ),
+        (
+            'upsert_catalog_batch',
+            {
+                'entities': [],
+                'provenance': {
+                    'sources': [
+                        {
+                            **_minimal_source_dict(),
+                            'reference_time': 'CR02-TS-SENTINEL-batch',
+                        }
+                    ]
+                },
+            },
+            'provenance.sources.0.reference_time',
+            'CR02-TS-SENTINEL-batch',
+        ),
+    ],
+)
+async def test_gap_cr02_fastmcp_malformed_reference_time_no_leak_no_side_effect(
+    tool_name, overrides, expected_path, sentinel
+):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool(tool_name)
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool(
+                tool_name,
+                {'request': _v2_request_payload(tool_name, **overrides)},
+            )
+        _assert_safe_tool_error_payload(
+            exc.value, expected_field_path=expected_path, sentinel=sentinel
+        )
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
+
+
+def _gap_wr01_fastmcp_malformed_cases():
+    bad = 'TABLE::ORCL.HR.EMPLOYEES'
+    bad_entity = {**_minimal_entity_dict(), 'graph_key': bad}
+    bad_edge_source = {
+        **_minimal_edge_dict(),
+        'source_graph_key': bad,
+        'source_entity_type': 'Table',
+    }
+    bad_edge_target = {
+        **_minimal_edge_dict(),
+        'target_graph_key': bad,
+        'target_entity_type': 'Table',
+    }
+    bad_target = {'entity_type': 'Table', 'graph_key': bad}
+    return [
+        ('upsert_typed_entities', {'entities': [bad_entity]}, 'entities.0.graph_key', bad),
+        (
+            'resolve_typed_entities',
+            {'entities': [{'entity_type': 'Table', 'graph_key': bad}]},
+            'entities.0.graph_key',
+            bad,
+        ),
+        (
+            'verify_catalog_batch',
+            {'entities': [bad_target]},
+            'entities.0.graph_key',
+            bad,
+        ),
+        (
+            'upsert_typed_edges',
+            {'edges': [bad_edge_source]},
+            'edges.0.source_graph_key',
+            bad,
+        ),
+        (
+            'upsert_typed_edges',
+            {'edges': [bad_edge_target]},
+            'edges.0.target_graph_key',
+            bad,
+        ),
+        (
+            'upsert_provenance',
+            {'entity_targets': [bad_target]},
+            'entity_targets.0.graph_key',
+            bad,
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [bad_entity]},
+            'entities.0.graph_key',
+            bad,
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [], 'edges': [bad_edge_source]},
+            'edges.0.source_graph_key',
+            bad,
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [], 'edges': [bad_edge_target]},
+            'edges.0.target_graph_key',
+            bad,
+        ),
+        (
+            'upsert_catalog_batch',
+            {
+                'entities': [],
+                'provenance': {
+                    'sources': [_minimal_source_dict()],
+                    'entity_targets': [bad_target],
+                },
+            },
+            'provenance.entity_targets.0.graph_key',
+            bad,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('tool_name', 'overrides', 'expected_path', 'sentinel'),
+    _gap_wr01_fastmcp_malformed_cases(),
+)
+async def test_gap_wr01_fastmcp_malformed_graph_key_exact_path_no_side_effect(
+    tool_name, overrides, expected_path, sentinel
+):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool(tool_name)
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool(
+                tool_name,
+                {'request': _v2_request_payload(tool_name, **overrides)},
+            )
+        structured = _assert_safe_tool_error_payload(
+            exc.value, expected_field_path=expected_path, sentinel=sentinel
+        )
+        assert structured['code'] == 'validation_error'
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
+
+
+@pytest.mark.asyncio
+async def test_gap_wr01_fastmcp_shell_mismatch_keeps_invalid_system_key():
+    import json
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool('upsert_typed_entities')
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    payload = _v2_request_payload(
+        'upsert_typed_entities',
+        system_key='BO',
+        entities=[
+            {
+                **_minimal_entity_dict(),
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+            }
+        ],
+    )
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool('upsert_typed_entities', {'request': payload})
+        raw = str(exc.value)
+        structured = json.loads(raw[raw.find('{') :])
+        assert structured['code'] == 'invalid_system_key'
+        assert structured['field_path'] == 'entities.0.graph_key'
+        assert 'TABLE::FE::ORCL.HR.EMPLOYEES' not in structured['message']
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
