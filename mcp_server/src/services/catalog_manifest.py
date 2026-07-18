@@ -200,6 +200,29 @@ def manifest_sha256(manifest_bytes: object) -> str:
     return hashlib.sha256(bytes(manifest_bytes)).hexdigest()
 
 
+def page_members(
+    items: list[dict[str, Any]],
+    *,
+    offset: int,
+    limit: int,
+    hard_max: int | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """Slice durable category order with offset/limit; never re-sort (MANI-05, D-02).
+
+    Raises ValueError on invalid pagination or limit above hard_max.
+    """
+    if not isinstance(items, list):
+        raise ValueError('items must be a list')
+    if not isinstance(offset, int) or offset < 0:
+        raise ValueError('invalid pagination: offset must be >= 0')
+    if not isinstance(limit, int) or limit < 1:
+        raise ValueError('invalid pagination: limit must be >= 1')
+    if hard_max is not None and limit > hard_max:
+        raise ValueError(f'page size exceeds hard max ({hard_max})')
+    total = len(items)
+    return items[offset : offset + limit], total
+
+
 def chunk_manifest_bytes(
     manifest_bytes: object,
     *,

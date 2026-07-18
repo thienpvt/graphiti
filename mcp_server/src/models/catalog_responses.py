@@ -206,6 +206,73 @@ class CatalogCapabilitiesResponse(BaseModel):
     features: dict[str, bool] = Field(default_factory=dict)
 
 
+class CompactManifestEntityMember(BaseModel):
+    """Compact durable entity identity from committed manifest (MANI-05, IDEN-08)."""
+
+    uuid: str
+    entity_type: str
+    graph_key: str
+    content_sha256: str
+    projected_status: str | None = None
+
+
+class CompactManifestEdgeMember(BaseModel):
+    """Compact durable edge identity from committed manifest."""
+
+    uuid: str
+    edge_type: str
+    edge_key: str
+    content_sha256: str
+    projected_status: str | None = None
+
+
+class CompactManifestSourceMember(BaseModel):
+    """Compact durable source identity from committed manifest."""
+
+    uuid: str
+    source_key: str
+    content_sha256: str
+    projected_status: str | None = None
+
+
+class CompactManifestEvidenceLinkMember(BaseModel):
+    """Compact durable evidence-link identity from committed manifest."""
+
+    uuid: str
+    link_key: str
+    content_sha256: str
+
+
+class GetCatalogBatchManifestResponse(BaseModel):
+    """Paginated durable membership read (MANI-05). Compact projection only.
+
+    Never includes embeddings, payload_b64, source text, or credentials.
+    """
+
+    group_id: str
+    batch_id: str
+    found: bool = False
+    request_sha256: str | None = None
+    catalog_sha256: str | None = None
+    artifact_sha256: str | None = None
+    manifest_sha256: str | None = None
+    identity_schema_version: str | None = None
+    canonicalization_version: str | None = None
+    catalog_schema_version: str | None = None
+    entity_count: int = 0
+    edge_count: int = 0
+    source_count: int = 0
+    evidence_link_count: int = 0
+    offset: int = 0
+    limit: int = 0
+    entities: list[CompactManifestEntityMember] = Field(default_factory=list)
+    edges: list[CompactManifestEdgeMember] = Field(default_factory=list)
+    sources: list[CompactManifestSourceMember] = Field(default_factory=list)
+    evidence_links: list[CompactManifestEvidenceLinkMember] = Field(default_factory=list)
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
 class PrepareCatalogBatchResponse(BaseModel):
     """One-time prepare receipt — hashes/counts/projections only (D-19, PLAN-06).
 
