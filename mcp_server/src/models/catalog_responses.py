@@ -201,3 +201,55 @@ class CatalogCapabilitiesResponse(BaseModel):
     embeddings: dict[str, Any] = Field(default_factory=dict)
     neo4j_indexes: Literal['ready', 'unknown', 'n/a'] = 'unknown'
     features: dict[str, bool] = Field(default_factory=dict)
+
+
+class PrepareCatalogBatchResponse(BaseModel):
+    """One-time prepare receipt — hashes/counts/projections only (D-19, PLAN-06).
+
+    Never includes canonical payload, membership, or embeddings.
+    """
+
+    plan_token: str
+    plan_uuid: str
+    request_sha256: str
+    catalog_sha256: str
+    artifact_sha256: str
+    identity_schema_version: str
+    expires_at: str
+    entity_count: int = 0
+    edge_count: int = 0
+    source_count: int = 0
+    evidence_link_count: int = 0
+    projected_created: int = 0
+    projected_updated: int = 0
+    projected_unchanged: int = 0
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
+class CommitPreparedCatalogBatchResponse(BaseModel):
+    """Commit claim receipt — plan_uuid/hashes/state/counts only (PLAN-10/12).
+
+    Never includes membership, payload, embeddings, or plan_token.
+    """
+
+    plan_uuid: str
+    request_sha256: str | None = None
+    catalog_sha256: str | None = None
+    artifact_sha256: str | None = None
+    state: str
+    entity_count: int = 0
+    edge_count: int = 0
+    source_count: int = 0
+    evidence_link_count: int = 0
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
+class DiscardPreparedCatalogBatchResponse(BaseModel):
+    """Discard receipt — plan_uuid + terminal state (D-11)."""
+
+    plan_uuid: str | None = None
+    state: str = 'DISCARDED'
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
