@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -1481,3 +1483,90 @@ def test_wr05_list_manifest_chunks_cypher_group_scoped():
     assert 'group_id: $group_id' in cypher
     assert 'ORDER BY c.chunk_index ASC' in cypher
     assert ':Entity' not in cypher
+
+
+def test_build_load_manifest_chunks_cypher_returns_payload():
+    """MANI-05: payload load Cypher returns payload_b64 + group-scoped params."""
+    store = CatalogNeo4jStore()
+    cypher = store.build_load_manifest_chunks_cypher()
+    assert 'CatalogBatchManifestChunk' in cypher
+    assert 'payload_b64' in cypher
+    assert 'c.payload_b64 AS payload_b64' in cypher
+    assert 'byte_offset' in cypher
+    assert 'byte_length' in cypher
+    assert 'chunk_sha256' in cypher
+    assert 'chunk_index' in cypher
+    assert 'chunk_count' in cypher
+    assert 'manifest_uuid: $manifest_uuid' in cypher
+    assert 'group_id: $group_id' in cypher
+    assert 'ORDER BY c.chunk_index ASC' in cypher
+    assert ':Entity' not in cypher
+    # Read-only: no write verbs as Cypher keywords (not substrings of property names).
+    assert not re.search(r'\bCREATE\b', cypher, re.IGNORECASE)
+    assert not re.search(r'\bMERGE\b', cypher, re.IGNORECASE)
+    assert not re.search(r'\bSET\b', cypher, re.IGNORECASE)
+    assert not re.search(r'\bDELETE\b', cypher, re.IGNORECASE)
+    assert not re.search(r'\bDETACH\b', cypher, re.IGNORECASE)
+
+
+@pytest.mark.asyncio
+async def test_load_manifest_chunks_with_payload_uses_read_many_only():
+    """D-21: load_manifest_chunks_with_payload uses _read_many; no write Cypher."""
+    import inspect
+
+    store = CatalogNeo4jStore()
+    src = inspect.getsource(store.load_manifest_chunks_with_payload)
+    assert '_read_many' in src
+    assert 'ensure_' not in src
+    assert 'write_' not in src
+    assert 'CREATE' not in src
+    assert 'MERGE' not in src
+    assert 'SET ' not in src
+
+    captured: dict[str, Any] = {}
+
+    async def fake_read_many(executor, cypher, params, *, tx=None):
+        captured['cypher'] = cypher
+        captured['params'] = params
+        return [
+            {
+                'uuid': 'c0',
+                'group_id': 'oracle-catalog-tool-test',
+                'manifest_uuid': 'm1',
+                'chunk_index': 0,
+                'chunk_count': 1,
+                'byte_offset': 0,
+                'byte_length': 4,
+                'chunk_sha256': 'ab' * 32,
+                'payload_b64': 'dGVzdA==',
+            }
+        ]
+
+    store._read_many = fake_read_many  # type: ignore[method-assign]
+    rows = await store.load_manifest_chunks_with_payload(
+        object(),
+        manifest_uuid='m1',
+        group_id='oracle-catalog-tool-test',
+    )
+    assert len(rows) == 1
+    assert rows[0]['payload_b64'] == 'dGVzdA=='
+    assert captured['params'] == {
+        'manifest_uuid': 'm1',
+        'group_id': 'oracle-catalog-tool-test',
+    }
+    assert 'payload_b64' in captured['cypher']
+    assert '$group_id' in captured['cypher']
+    assert '$manifest_uuid' in captured['cypher']
+
+
+@pytest.mark.asyncio
+async def test_load_manifest_chunks_with_payload_requires_ids():
+    store = CatalogNeo4jStore()
+    with pytest.raises(CatalogStoreError):
+        await store.load_manifest_chunks_with_payload(
+            object(), manifest_uuid='', group_id='oracle-catalog-tool-test'
+        )
+    with pytest.raises(CatalogStoreError):
+        await store.load_manifest_chunks_with_payload(
+            object(), manifest_uuid='m1', group_id=''
+        )

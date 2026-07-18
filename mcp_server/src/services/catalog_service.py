@@ -28,6 +28,7 @@ from models.catalog_common import (
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest
 from models.catalog_entities import (
     CatalogEntityItem,
+    GetCatalogBatchManifestRequest,
     ResolveEntityRef,
     ResolveTypedEntitiesRequest,
     UpsertTypedEntitiesRequest,
@@ -47,7 +48,12 @@ from models.catalog_responses import (
     CatalogItemResult,
     CatalogWriteResponse,
     CommitPreparedCatalogBatchResponse,
+    CompactManifestEdgeMember,
+    CompactManifestEntityMember,
+    CompactManifestEvidenceLinkMember,
+    CompactManifestSourceMember,
     DiscardPreparedCatalogBatchResponse,
+    GetCatalogBatchManifestResponse,
     PrepareCatalogBatchResponse,
     ResolveEntityResult,
     ResolveTypedEntitiesResponse,
@@ -56,6 +62,7 @@ from models.catalog_responses import (
     VerifyEntitySection,
 )
 from models.catalog_topology import validate_edge_endpoint_pair
+from services.catalog_capabilities import HARD_MAX_PAGE_SIZE
 from services.catalog_identity import (
     CANONICALIZATION_VERSION,
     CATALOG_SCHEMA_VERSION,
@@ -94,6 +101,7 @@ from services.catalog_identity import (
 from services.catalog_manifest import (
     build_manifest_body_from_membership,
     chunk_manifest_bytes,
+    page_members,
     serialize_manifest_body,
 )
 from services.catalog_manifest import (
@@ -3804,6 +3812,345 @@ class CatalogService:
             updated_at=self._status_ts(row.get('updated_at')),
             committed_at=self._status_ts(row.get('committed_at')),
             error_summary=err_summary,
+        )
+
+    # ------------------------------------------------------------------
+    # Manifest membership read (MANI-05 / IDEN-08)
+    # ------------------------------------------------------------------
+
+    class _ManifestLoadError(Exception):
+        """Internal fail-closed signal for committed-manifest reassembly."""
+
+        def __init__(self, code: CatalogErrorCode, message: str, *, found: bool) -> None:
+            super().__init__(message)
+            self.code = code
+            self.message = message
+            self.found = found
+
+    async def _load_committed_manifest_body(
+        self,
+        *,
+        client: Any,
+        group_id: str,
+        batch_id: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Reassemble durable manifest body; fail closed on missing/corrupt (D-05).
+
+        Returns (root, body). Never synthesizes membership from live domain rows.
+        Missing root → found=False; incomplete/hash mismatch → manifest_mismatch.
+        """
+        root = await self._store.read_manifest_root_for_recovery(
+            client.driver,
+            group_id=group_id,
+            batch_id=batch_id,
+        )
+        if not root:
+            raise self._ManifestLoadError(
+                CatalogErrorCode.manifest_mismatch,
+                'manifest root not found',
+                found=False,
+            )
+        manifest_uuid = str(root.get('uuid') or '')
+        if not manifest_uuid:
+            raise self._ManifestLoadError(
+                CatalogErrorCode.manifest_mismatch,
+                'manifest root missing uuid',
+                found=False,
+            )
+        try:
+            chunks = await self._store.load_manifest_chunks_with_payload(
+                client.driver,
+                manifest_uuid=manifest_uuid,
+                group_id=group_id,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog load_manifest_chunks failed batch_id=%s reason=%s',
+                batch_id,
+                type(exc).__name__,
+            )
+            raise self._ManifestLoadError(
+                CatalogErrorCode.internal_error,
+                'manifest chunk load failed',
+                found=False,
+            ) from exc
+
+        expected_count = int(root.get('chunk_count') or 0)
+        if expected_count < 1 or len(chunks) != expected_count:
+            raise self._ManifestLoadError(
+                CatalogErrorCode.manifest_mismatch,
+                'incomplete or incoherent manifest chunks',
+                found=True,
+            )
+        expected_sha = str(root.get('manifest_sha256') or '')
+        expected_len = int(root.get('payload_bytes') or 0)
+        try:
+            raw = reassemble_artifact_bytes(
+                chunks,
+                expected_sha256=expected_sha or None,
+                expected_length=expected_len or None,
+            )
+        except ValueError as exc:
+            raise self._ManifestLoadError(
+                CatalogErrorCode.manifest_mismatch,
+                'manifest reassembly failed',
+                found=True,
+            ) from exc
+        if pure_manifest_sha256(raw) != expected_sha.lower():
+            raise self._ManifestLoadError(
+                CatalogErrorCode.manifest_mismatch,
+                'manifest digest mismatch',
+                found=True,
+            )
+        try:
+            body = json.loads(raw.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise self._ManifestLoadError(
+                CatalogErrorCode.manifest_mismatch,
+                'manifest body decode failed',
+                found=True,
+            ) from exc
+        if not isinstance(body, dict):
+            raise self._ManifestLoadError(
+                CatalogErrorCode.manifest_mismatch,
+                'manifest body is not an object',
+                found=True,
+            )
+        return root, body
+
+    @staticmethod
+    def _compact_entity_member(row: dict[str, Any]) -> CompactManifestEntityMember:
+        return CompactManifestEntityMember(
+            uuid=str(row['uuid']),
+            entity_type=str(row['entity_type']),
+            graph_key=str(row['graph_key']),
+            content_sha256=str(row['content_sha256']),
+            projected_status=(
+                str(row['projected_status']) if row.get('projected_status') is not None else None
+            ),
+        )
+
+    @staticmethod
+    def _compact_edge_member(row: dict[str, Any]) -> CompactManifestEdgeMember:
+        return CompactManifestEdgeMember(
+            uuid=str(row['uuid']),
+            edge_type=str(row['edge_type']),
+            edge_key=str(row['edge_key']),
+            content_sha256=str(row['content_sha256']),
+            projected_status=(
+                str(row['projected_status']) if row.get('projected_status') is not None else None
+            ),
+        )
+
+    @staticmethod
+    def _compact_source_member(row: dict[str, Any]) -> CompactManifestSourceMember:
+        return CompactManifestSourceMember(
+            uuid=str(row['uuid']),
+            source_key=str(row['source_key']),
+            content_sha256=str(row['content_sha256']),
+            projected_status=(
+                str(row['projected_status']) if row.get('projected_status') is not None else None
+            ),
+        )
+
+    @staticmethod
+    def _compact_evidence_member(row: dict[str, Any]) -> CompactManifestEvidenceLinkMember:
+        return CompactManifestEvidenceLinkMember(
+            uuid=str(row['uuid']),
+            link_key=str(row['link_key']),
+            content_sha256=str(row['content_sha256']),
+        )
+
+    async def get_catalog_batch_manifest(
+        self,
+        *,
+        client: Any,
+        request: GetCatalogBatchManifestRequest,
+    ) -> GetCatalogBatchManifestResponse:
+        """Paginated durable membership read (MANI-05, IDEN-08).
+
+        Authority is committed manifest body only. No live batch_id synthesis,
+        no embeddings/payload/source text in projection, no schema/write.
+        """
+        group_id = request.group_id
+        batch_id = request.batch_id
+        configured_max = int(getattr(self.catalog_config, 'max_page_size', 100) or 100)
+        if configured_max < 1:
+            configured_max = 100
+        # Effective ceiling is min(configured, hard); hard is absolute fail-closed bound.
+        effective_max = min(configured_max, HARD_MAX_PAGE_SIZE)
+        limit = request.limit if request.limit is not None else effective_max
+        offset = int(request.offset)
+
+        def _empty(
+            *,
+            found: bool = False,
+            error_code: CatalogErrorCode | None = None,
+            error_message: str | None = None,
+            limit_val: int = 0,
+        ) -> GetCatalogBatchManifestResponse:
+            return GetCatalogBatchManifestResponse(
+                group_id=group_id,
+                batch_id=batch_id,
+                found=found,
+                offset=offset,
+                limit=limit_val,
+                error_code=error_code,
+                error_message=error_message,
+            )
+
+        # Page size above hard max fails closed before any store access (T-04-BOUND).
+        if limit > HARD_MAX_PAGE_SIZE:
+            return _empty(
+                found=False,
+                error_code=CatalogErrorCode.validation_error,
+                error_message=f'page size exceeds hard max ({HARD_MAX_PAGE_SIZE})',
+                limit_val=limit,
+            )
+        if limit > effective_max:
+            return _empty(
+                found=False,
+                error_code=CatalogErrorCode.validation_error,
+                error_message=f'page size exceeds configured max ({effective_max})',
+                limit_val=limit,
+            )
+        if offset < 0 or limit < 1:
+            return _empty(
+                found=False,
+                error_code=CatalogErrorCode.validation_error,
+                error_message='invalid pagination',
+                limit_val=limit,
+            )
+
+        gate = self._read_gate(client, group_id=group_id, item_count=1)
+        if gate is not None:
+            code, message = gate
+            logger.info(
+                'catalog get_catalog_batch_manifest gated batch_id=%s code=%s',
+                batch_id,
+                code,
+            )
+            return _empty(found=False, error_code=code, error_message=message, limit_val=limit)
+
+        try:
+            root, body = await self._load_committed_manifest_body(
+                client=client,
+                group_id=group_id,
+                batch_id=batch_id,
+            )
+        except self._ManifestLoadError as exc:
+            logger.info(
+                'catalog get_catalog_batch_manifest fail_closed batch_id=%s code=%s',
+                batch_id,
+                exc.code,
+            )
+            return _empty(
+                found=exc.found,
+                error_code=exc.code,
+                error_message=exc.message,
+                limit_val=limit,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog get_catalog_batch_manifest read_failed batch_id=%s reason=%s',
+                batch_id,
+                type(exc).__name__,
+            )
+            return _empty(
+                found=False,
+                error_code=CatalogErrorCode.internal_error,
+                error_message='manifest read failed',
+                limit_val=limit,
+            )
+
+        # Durable category lists only — preserve body order; never re-sort live.
+        def _as_list(key: str) -> list[dict[str, Any]]:
+            raw = body.get(key)
+            if raw is None:
+                return []
+            if not isinstance(raw, list):
+                return []
+            return [r for r in raw if isinstance(r, dict)]
+
+        entities_all = _as_list('entities')
+        edges_all = _as_list('edges')
+        sources_all = _as_list('sources')
+        evidence_all = _as_list('evidence_links')
+
+        raw_counts = body.get('counts')
+        if isinstance(raw_counts, dict):
+            counts: dict[str, Any] = raw_counts
+        else:
+            # Fail closed on non-object counts: use durable list lengths only.
+            counts = {}
+        entity_count = int(counts.get('entities', len(entities_all)) or 0)
+        edge_count = int(counts.get('edges', len(edges_all)) or 0)
+        source_count = int(counts.get('sources', len(sources_all)) or 0)
+        evidence_count = int(counts.get('evidence_links', len(evidence_all)) or 0)
+
+        try:
+            entities_page, _ = page_members(
+                entities_all, offset=offset, limit=limit, hard_max=HARD_MAX_PAGE_SIZE
+            )
+            edges_page, _ = page_members(
+                edges_all, offset=offset, limit=limit, hard_max=HARD_MAX_PAGE_SIZE
+            )
+            sources_page, _ = page_members(
+                sources_all, offset=offset, limit=limit, hard_max=HARD_MAX_PAGE_SIZE
+            )
+            evidence_page, _ = page_members(
+                evidence_all, offset=offset, limit=limit, hard_max=HARD_MAX_PAGE_SIZE
+            )
+        except ValueError as exc:
+            return _empty(
+                found=True,
+                error_code=CatalogErrorCode.validation_error,
+                error_message=str(exc)[:512],
+                limit_val=limit,
+            )
+
+        # Compact projection: allowlisted identity fields only (T-04-INFO).
+        entities_out = [self._compact_entity_member(r) for r in entities_page]
+        edges_out = [self._compact_edge_member(r) for r in edges_page]
+        sources_out = [self._compact_source_member(r) for r in sources_page]
+        evidence_out = [self._compact_evidence_member(r) for r in evidence_page]
+
+        logger.info(
+            'catalog get_catalog_batch_manifest batch_id=%s entities=%s edges=%s '
+            'sources=%s evidence=%s offset=%s limit=%s',
+            batch_id,
+            entity_count,
+            edge_count,
+            source_count,
+            evidence_count,
+            offset,
+            limit,
+        )
+        return GetCatalogBatchManifestResponse(
+            group_id=str(body.get('group_id') or group_id),
+            batch_id=str(body.get('batch_id') or batch_id),
+            found=True,
+            request_sha256=str(body.get('request_sha256') or root.get('request_sha256') or '')
+            or None,
+            catalog_sha256=str(body.get('catalog_sha256') or root.get('catalog_sha256') or '')
+            or None,
+            artifact_sha256=(
+                str(body.get('artifact_sha256') or root.get('artifact_sha256') or '') or None
+            ),
+            manifest_sha256=str(root.get('manifest_sha256') or '') or None,
+            identity_schema_version=str(body.get('identity_schema_version') or '') or None,
+            canonicalization_version=str(body.get('canonicalization_version') or '') or None,
+            catalog_schema_version=str(body.get('catalog_schema_version') or '') or None,
+            entity_count=entity_count,
+            edge_count=edge_count,
+            source_count=source_count,
+            evidence_link_count=evidence_count,
+            offset=offset,
+            limit=limit,
+            entities=entities_out,
+            edges=edges_out,
+            sources=sources_out,
+            evidence_links=evidence_out,
         )
 
     # ------------------------------------------------------------------

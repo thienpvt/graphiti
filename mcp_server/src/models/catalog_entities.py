@@ -300,3 +300,24 @@ class VerifyCatalogBatchRequest(CatalogStrictModel):
                 loc=('entities', index, 'graph_key'),
             )
         return self
+
+
+class GetCatalogBatchManifestRequest(CatalogStrictModel):
+    """Request for get_catalog_batch_manifest (read-only, MANI-05).
+
+    Pagination is offset/limit over durable Phase 3B category order.
+    Limit defaults to configured max_page_size when omitted at the service layer.
+    """
+
+    group_id: str = Field(..., min_length=1)
+    batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
+    offset: int = Field(default=0, ge=0)
+    limit: int | None = Field(default=None, ge=1)
+
+    @field_validator('group_id')
+    @classmethod
+    def _validate_group_id_field(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('group_id is required and must be non-empty')
+        _validate_group_id(v)
+        return v

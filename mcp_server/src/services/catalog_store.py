@@ -3297,6 +3297,25 @@ class CatalogNeo4jStore:
             ORDER BY c.chunk_index ASC
             """
 
+    def build_load_manifest_chunks_cypher(self) -> str:
+        """Load ordered manifest chunks with payload_b64 for reassembly (MANI-05).
+
+        Mirrors prepared-plan chunk load shape. Read-only; no client labels.
+        """
+        return """
+            MATCH (c:CatalogBatchManifestChunk {manifest_uuid: $manifest_uuid, group_id: $group_id})
+            RETURN c.uuid AS uuid,
+                   c.group_id AS group_id,
+                   c.manifest_uuid AS manifest_uuid,
+                   c.chunk_index AS chunk_index,
+                   c.chunk_count AS chunk_count,
+                   c.byte_offset AS byte_offset,
+                   c.byte_length AS byte_length,
+                   c.chunk_sha256 AS chunk_sha256,
+                   c.payload_b64 AS payload_b64
+            ORDER BY c.chunk_index ASC
+            """
+
     def build_create_manifest_root_cypher(self) -> str:
         """CREATE-once CatalogBatchManifest root (never Entity)."""
         return """
@@ -3837,5 +3856,29 @@ class CatalogNeo4jStore:
             executor,
             self.build_read_manifest_root_by_batch_cypher(),
             {'group_id': str(group_id), 'batch_id': str(batch_id)},
+            tx=tx,
+        )
+
+    async def load_manifest_chunks_with_payload(
+        self,
+        executor: Any,
+        *,
+        manifest_uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Load ordered manifest chunk payloads for reassembly (MANI-05, D-21).
+
+        Uses _read_many only — never schema-init or write Cypher.
+        """
+        if not manifest_uuid or not group_id:
+            raise CatalogStoreError(
+                'manifest_uuid and group_id are required',
+                code='validation_error',
+            )
+        return await self._read_many(
+            executor,
+            self.build_load_manifest_chunks_cypher(),
+            {'manifest_uuid': str(manifest_uuid), 'group_id': str(group_id)},
             tx=tx,
         )
