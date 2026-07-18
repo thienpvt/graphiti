@@ -4077,7 +4077,12 @@ class CatalogService:
         sources_all = _as_list('sources')
         evidence_all = _as_list('evidence_links')
 
-        counts = body.get('counts') if isinstance(body.get('counts'), dict) else {}
+        raw_counts = body.get('counts')
+        if isinstance(raw_counts, dict):
+            counts: dict[str, Any] = raw_counts
+        else:
+            # Fail closed on non-object counts: use durable list lengths only.
+            counts = {}
         entity_count = int(counts.get('entities', len(entities_all)) or 0)
         edge_count = int(counts.get('edges', len(edges_all)) or 0)
         source_count = int(counts.get('sources', len(sources_all)) or 0)
