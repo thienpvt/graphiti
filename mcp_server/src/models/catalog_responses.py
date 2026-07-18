@@ -138,6 +138,9 @@ class CatalogIngestStatusResponse(BaseModel):
     batch_id: str
     batch_uuid: str
     status: CatalogIngestStatus
+    # GATE-05: distinguish pure absence (found=False, error_code=None) from
+    # validation/gate failures (error_code set). Default True for found rows.
+    found: bool = True
     request_sha256: str | None = None
     catalog_sha256: str | None = None
     entity_count: int = 0

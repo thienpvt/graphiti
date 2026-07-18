@@ -870,8 +870,13 @@ def test_empty_resolve_rejected_before_service_no_side_effects():
 
 @pytest.mark.asyncio
 async def test_resolve_feature_disabled_no_write_no_embed():
+    # GATE-03: reads gated by reads_enabled (not write enabled).
     client = _make_client()
-    service = CatalogService(catalog_config=_disabled_config())
+    service = CatalogService(
+        catalog_config=CatalogConfig(
+            enabled=False, reads_enabled=False, uuid_namespace=str(FIXED_NS)
+        )
+    )
     service._store.match_entities_for_resolve = AsyncMock()
     resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
     assert any(
@@ -1251,8 +1256,13 @@ def _verify_request(**kwargs):
 
 @pytest.mark.asyncio
 async def test_verify_feature_disabled_no_write_no_embed():
+    # GATE-03: reads gated by reads_enabled (not write enabled).
     client = _make_client()
-    service = CatalogService(catalog_config=_disabled_config())
+    service = CatalogService(
+        catalog_config=CatalogConfig(
+            enabled=False, reads_enabled=False, uuid_namespace=str(FIXED_NS)
+        )
+    )
     service._store.match_entities_for_verify = AsyncMock()
     service._store.match_edges_for_verify = AsyncMock()
     resp = await service.verify_catalog_batch(client=client, request=_verify_request())
@@ -3293,19 +3303,9 @@ async def test_status_missing_returns_structured_not_found_no_write():
     assert resp.group_id == GROUP
     assert resp.batch_id == BATCH
     assert resp.batch_uuid == catalog_batch_uuid(FIXED_NS, GROUP, BATCH)
-    assert resp.error_code is not None
-    assert resp.error_code in (
-        CatalogErrorCode.validation_error,
-        CatalogErrorCode.internal_error,
-        CatalogErrorCode.provenance_target_missing,
-    ) or resp.error_code.value in (
-        'validation_error',
-        'internal_error',
-        'not_found',
-        'batch_not_found',
-        'provenance_target_missing',
-    )
-    # Prefer explicit not-found semantics when available (error_summary, no error_message field)
+    # GATE-05: pure absence is found=False with error_code=None (not validation_error).
+    assert resp.found is False
+    assert resp.error_code is None
     assert resp.error_summary
     assert 'not' in resp.error_summary.lower() or 'missing' in resp.error_summary.lower()
     assert 'transaction' not in client.call_order
@@ -3367,11 +3367,17 @@ async def test_status_reinit_new_service_reads_from_store():
 
 @pytest.mark.asyncio
 async def test_status_feature_disabled_no_store_read():
+    # GATE-03: reads gated by reads_enabled (not write enabled).
     client = _make_client()
-    service = CatalogService(catalog_config=_disabled_config())
+    service = CatalogService(
+        catalog_config=CatalogConfig(
+            enabled=False, reads_enabled=False, uuid_namespace=str(FIXED_NS)
+        )
+    )
     service._store.get_batch_status = AsyncMock(return_value={'status': 'committed'})
     resp = await service.get_catalog_ingest_status(client=client, request=_status_request())
     assert resp.error_code == CatalogErrorCode.feature_disabled
+    assert resp.found is False
     service._store.get_batch_status.assert_not_awaited()
     assert 'transaction' not in client.call_order
 
