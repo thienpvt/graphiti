@@ -523,3 +523,35 @@ def test_batch_gate_counts_evidence_links_not_cartesian():
     gate = service._batch_gate_error(client, req)
     assert gate is not None
     assert gate[0].value == 'batch_limit_exceeded'
+
+
+def test_batch_gate_counts_sources_under_configured_max():
+    """Configured provenance cap applies to sources, not only evidence_links."""
+    from unittest.mock import MagicMock
+
+    from config.schema import CatalogConfig
+    from services.catalog_service import CatalogService
+
+    cfg = CatalogConfig(
+        enabled=True,
+        uuid_namespace='6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+        max_provenance_links_per_batch=1,
+    )
+    service = CatalogService(catalog_config=cfg)
+    client = MagicMock()
+    client.driver = MagicMock()
+    client.driver.provider = MagicMock(value='neo4j')
+    req = _batch(
+        entities=[],
+        provenance=NestedProvenancePayload(
+            sources=[
+                _source(source_key='SRC::a'),
+                _source(source_key='SRC::b'),
+            ],
+            evidence_links=[],
+        ),
+    )
+    gate = service._batch_gate_error(client, req)
+    assert gate is not None
+    assert gate[0].value == 'batch_limit_exceeded'
+    assert 'provenance sources' in gate[1]

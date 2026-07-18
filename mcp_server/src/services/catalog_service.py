@@ -3606,9 +3606,12 @@ class CatalogService:
         provider = getattr(getattr(client, 'driver', None), 'provider', None)
         if getattr(provider, 'value', provider) != 'neo4j':
             return CatalogErrorCode.backend_unavailable, 'catalog writes require Neo4j backend'
-        provenance_link_count = (
-            len(request.provenance.evidence_links) if request.provenance is not None else 0
-        )
+        provenance = request.provenance
+        if provenance is not None:
+            source_count = len(provenance.sources)
+            link_count = len(provenance.evidence_links)
+        else:
+            source_count = link_count = 0
         limits = (
             (
                 len(request.entities),
@@ -3617,7 +3620,12 @@ class CatalogService:
             ),
             (len(request.edges), self.catalog_config.max_edges_per_batch, 'edges'),
             (
-                provenance_link_count,
+                source_count,
+                self.catalog_config.max_provenance_links_per_batch,
+                'provenance sources',
+            ),
+            (
+                link_count,
                 self.catalog_config.max_provenance_links_per_batch,
                 'provenance links',
             ),
