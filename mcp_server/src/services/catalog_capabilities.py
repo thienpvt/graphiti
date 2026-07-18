@@ -150,7 +150,8 @@ def build_catalog_capabilities(
             # D-33: True after accepted 03B-06 live preflip + coordinator final flip.
             # Runtime MUST NOT read .planning/* or 03B-GATE-RESULTS to decide this flag.
             'manifests': True,
-            # Phase 4: public manifest-backed verification remains disabled.
-            'manifest_verification': False,
+            # Phase 4 (04-06): true only after registration + focused suite proofs (D-24).
+            # Runtime MUST NOT read .planning/* or 04-GATE-RESULTS to decide this flag.
+            'manifest_verification': True,
         },
     )

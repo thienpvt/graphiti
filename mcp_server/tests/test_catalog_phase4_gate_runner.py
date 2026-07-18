@@ -160,7 +160,7 @@ def test_wave0_files_and_scaffolds_present():
     gate.check_resolve_edges_scaffold(root)
     gate.check_evidence_read_scaffold(root)
     gate.check_safety_no_probe(root)
-    gate.check_manifest_verification_not_flipped(root)
+    gate.check_manifest_verification_true(root)
     gate.check_registration_contract(root)
 
 
@@ -173,7 +173,8 @@ def test_canonical_specs_shape_and_reject_shell():
     assert 'wave0_files' in ids
     assert 'safety_no_probe' in ids
     assert 'gates_scaffold' in ids
-    assert 'manifest_verification_not_flipped' in ids
+    assert 'manifest_verification_true' in ids
+    assert 'registration_contract' in ids
     for s in specs:
         gate.validate_spec(s, root)
         assert s['expected_exit'] == 0
@@ -247,8 +248,8 @@ def test_atomic_write_json_raises_when_replace_always_permission_error(
     assert gate.os.replace.call_count == 8
 
 
-def test_run_gate_defaults_ready_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """run_gate Wave 0 path: ready_for_phase_5 false; canary false; history preserved."""
+def test_run_gate_post_proof_ready_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """run_gate after 04-06 proofs: ready_for_phase_5 true; canary false; history preserved."""
     root = _root()
     ledger_path = tmp_path / '04-GATE-RESULTS.json'
 
@@ -263,20 +264,19 @@ def test_run_gate_defaults_ready_false(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setattr(gate, 'run_argv', fake_run_argv)
     monkeypatch.setenv('CATALOG_PHASE4_GATE_SKIP_SELF', '1')
     ledger = gate.run_gate(root, ledger_path)
-    assert ledger['ready_for_phase_5'] is False
-    assert ledger['phase_4_complete'] is False
     assert ledger['canary_executed'] is False
     assert ledger['clear_graph_called'] is False
     assert ledger['oracle_catalog_v2_queried'] is True  # historical aggregate
     assert ledger['historical_audit']['commit'] == 'a67789a'
-    assert ledger['manifest_verification'] is False
+    assert ledger['manifest_verification'] is True
     assert ledger['schema_version'] == gate.SCHEMA_VERSION
     assert ledger['raw_edge_probe_count'] == 42
-    assert ledger['unit_service_pass'] is False
-    assert ledger['registration_pass'] is False
-    assert gate.derive_cli_exit_code(ledger) == 0 or gate.derive_cli_exit_code(ledger) == 1
-    # CLI may be 0 when local structural checks pass under fakes; readiness still false.
-    assert ledger['ready_for_phase_5'] is False
+    assert ledger['unit_service_pass'] is True
+    assert ledger['registration_pass'] is True
+    assert ledger['ready_for_phase_5'] is True
+    assert ledger['phase_4_complete'] is True
+    assert ledger['api_coverage_detector'] is False
+    assert gate.derive_cli_exit_code(ledger) == 0
 
 
 def test_no_forbidden_group_as_test_target_in_scaffolds():
@@ -292,9 +292,9 @@ def test_no_forbidden_group_as_test_target_in_scaffolds():
         assert ban.search(src) is None, rel
 
 
-def test_read_manifest_verification_feature_false_wave0():
+def test_read_manifest_verification_feature_true_post_proof():
     root = _root()
-    assert gate.read_manifest_verification_feature(root) is False
+    assert gate.read_manifest_verification_feature(root) is True
 
 
 def test_derive_local_gate_pass_requires_all_mandatory():

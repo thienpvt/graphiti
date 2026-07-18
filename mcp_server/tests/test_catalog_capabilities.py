@@ -78,7 +78,7 @@ def test_build_capabilities_reads_enabled_follows_config():
     )
     assert off.catalog_writes_enabled is False
     assert off.catalog_reads_enabled is False
-    assert off.features['manifest_verification'] is False
+    assert off.features['manifest_verification'] is True
     assert off.limits['hard']['max_page_size'] == HARD_MAX_PAGE_SIZE == 500
     assert off.limits['configured']['max_page_size'] == 100
 
@@ -203,11 +203,11 @@ def test_build_capabilities_features_phase_truthful():
         'prepare_commit': True,
         'explicit_evidence_links': True,
         'manifests': True,
-        'manifest_verification': False,
+        'manifest_verification': True,
     }
     assert caps.features['prepare_commit'] is True
     assert caps.features['manifests'] is True
-    assert caps.features['manifest_verification'] is False
+    assert caps.features['manifest_verification'] is True
     assert caps.limits['hard']['max_page_size'] == 500
 
 
@@ -253,7 +253,7 @@ def test_build_capabilities_plan_limits_nonzero_prepare_commit_true():
     assert caps.limits['configured']['prepared_chunk_bytes'] == 65_536
     assert caps.features['prepare_commit'] is True
     assert caps.features['manifests'] is True
-    assert caps.features['manifest_verification'] is False
+    assert caps.features['manifest_verification'] is True
     assert caps.limits['hard']['max_page_size'] == 500
 
 
@@ -371,7 +371,7 @@ async def test_get_catalog_capabilities_works_when_writes_disabled(monkeypatch):
     assert dumped['features']['prepare_commit'] is True
     assert dumped['features']['explicit_evidence_links'] is True
     assert dumped['features']['manifests'] is True
-    assert dumped['features']['manifest_verification'] is False
+    assert dumped['features']['manifest_verification'] is True
     assert 'uuid_namespace' not in dumped
     mock_service.get_client.assert_not_called()
 
