@@ -1481,4 +1481,3 @@ def test_wr05_list_manifest_chunks_cypher_group_scoped():
     assert 'group_id: $group_id' in cypher
     assert 'ORDER BY c.chunk_index ASC' in cypher
     assert ':Entity' not in cypher
-

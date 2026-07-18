@@ -962,4 +962,3 @@ async def test_wr05_manifest_idempotent_chunk_hash_mismatch_conflict():
     with pytest.raises(CatalogStoreError) as ei:
         await store.write_manifest_root_and_chunks(tx, root=root, chunks=chunks)
     assert ei.value.code == 'batch_conflict'
-
