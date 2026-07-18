@@ -82,7 +82,7 @@ Plans:
   4. Caller UUIDs never control identity; structured errors expose safe diagnostics only
   5. Unit coverage for recursive forbid, immutable flags, full entity grammar, FE/BO/overload separation, and UUID material versioning passes before Phase 2 write-adjacent work
 
-**Plans**: 11/11 plans executed (local gate green; independent audits pending)
+**Plans**: 11/11 plans executed
 
 Plans:
 
