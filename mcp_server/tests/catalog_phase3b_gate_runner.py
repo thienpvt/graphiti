@@ -939,6 +939,32 @@ def derive_ready_for_phase_4(
     return require_neo4j
 
 
+def derive_cli_exit_code(ledger: dict[str, Any], *, require_neo4j: bool) -> int:
+    """CLI process exit for `run`. Fail-closed under historical/current safety block.
+
+    local_gate_pass alone is NOT overall success — it only means mandatory non-live
+    command checks passed. Safety (incl. permanent historical v2) and readiness
+    must also hold. Under permanent history, this always returns 1.
+    """
+    if not ledger.get('local_gate_pass'):
+        return 1
+    safety = ledger.get('safety') or {}
+    if safety.get('safety_checks_pass') is not True:
+        return 1
+    if ledger.get('canary_executed') is not False:
+        return 1
+    if ledger.get('oracle_catalog_v2_queried') is not False:
+        return 1
+    if ledger.get('clear_graph_called') is not False:
+        return 1
+    if require_neo4j and ledger.get('ready_for_phase_4') is not True:
+        return 1
+    # Non-live path: still require safety green above; ready stays false by design.
+    if not require_neo4j and ledger.get('ready_for_phase_4') is True:
+        return 1  # impossible under current policy; guard anyway
+    return 0
+
+
 def run_gate(
     root: Path,
     ledger_path: Path,
@@ -1063,6 +1089,19 @@ def run_gate(
             'd32_policy': 'ready_for_phase_4 true only after live+safety+manifests',
             'historical_v2_policy': HISTORICAL_V2_VIOLATION_NOTE,
             'phase4_transition': 'blocked; no Phase 4 while historical v2 probe recorded',
+            'local_gate_pass_meaning': (
+                'local_gate_pass means mandatory non-live command checks only '
+                '(pytest/ruff/pyright/structural). It is NOT overall gate success '
+                'and does NOT include historical/current safety or Phase 4 readiness.'
+            ),
+            'safety_meaning': (
+                'safety.safety_checks_pass and top-level canary/v2/clear_graph are '
+                'separate from local_gate_pass; historical v2 permanently fails safety'
+            ),
+            'cli_exit_policy': (
+                'CLI run exits nonzero unless local_gate_pass and safety_checks_pass '
+                'and no canary/v2/clear_graph; require-neo4j also needs ready_for_phase_4'
+            ),
         },
     }
     ledger['ledger_sha256'] = sha256_text(
@@ -1257,6 +1296,9 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     'local_gate_pass': ledger['local_gate_pass'],
+                    'safety_checks_pass': (ledger.get('safety') or {}).get(
+                        'safety_checks_pass'
+                    ),
                     'ready_for_phase_4': ledger['ready_for_phase_4'],
                     'manifests': ledger['manifests'],
                     'evaluated_head': ledger['evaluated_head'],
@@ -1275,11 +1317,7 @@ def main(argv: list[str] | None = None) -> int:
                 indent=2,
             )
         )
-        return (
-            0
-            if ledger['local_gate_pass'] and (not args.require_neo4j or ledger['ready_for_phase_4'])
-            else 1
-        )
+        return derive_cli_exit_code(ledger, require_neo4j=args.require_neo4j)
 
     return 2
 

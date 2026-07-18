@@ -480,3 +480,72 @@ def test_default_ready_for_phase_4_constant_contract():
         )
         is False
     )
+
+
+def test_cli_exit_nonzero_when_historical_safety_blocks():
+    """CLI success requires safety_checks_pass; local_gate_pass alone is not enough."""
+    blocked = {
+        'local_gate_pass': True,
+        'ready_for_phase_4': False,
+        'canary_executed': False,
+        'oracle_catalog_v2_queried': True,
+        'clear_graph_called': False,
+        'safety': {
+            'safety_checks_pass': False,
+            'oracle_catalog_v2_queried': True,
+            'historical_oracle_catalog_v2_queried': True,
+        },
+    }
+    assert gate.derive_cli_exit_code(blocked, require_neo4j=False) == 1
+    assert gate.derive_cli_exit_code(blocked, require_neo4j=True) == 1
+
+    # Pure-function green safety (not current product history) can exit 0 non-live.
+    clean = {
+        'local_gate_pass': True,
+        'ready_for_phase_4': False,
+        'canary_executed': False,
+        'oracle_catalog_v2_queried': False,
+        'clear_graph_called': False,
+        'safety': {'safety_checks_pass': True, 'oracle_catalog_v2_queried': False},
+    }
+    assert gate.derive_cli_exit_code(clean, require_neo4j=False) == 0
+    # require-neo4j still needs ready_for_phase_4 true
+    assert gate.derive_cli_exit_code(clean, require_neo4j=True) == 1
+    clean_ready = dict(clean, ready_for_phase_4=True)
+    assert gate.derive_cli_exit_code(clean_ready, require_neo4j=True) == 0
+
+
+def test_main_run_exits_nonzero_for_blocked_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """main(['run', ...]) exits 1 under historical block without executing real checks."""
+    root = _root()
+    ledger_path = tmp_path / '03B-GATE-RESULTS.json'
+    blocked_ledger = {
+        'local_gate_pass': True,
+        'ready_for_phase_4': False,
+        'manifests': False,
+        'evaluated_head': 'deadbeef',
+        'spec_sha256': '0' * 64,
+        'content_digest': '0' * 64,
+        'live_neo4j_atomic_proof': 'skip',
+        'live_neo4j_atomic_proof_pass': False,
+        'canary_executed': False,
+        'oracle_catalog_v2_queried': True,
+        'clear_graph_called': False,
+        'safety': {
+            'safety_checks_pass': False,
+            'oracle_catalog_v2_queried': True,
+            'historical_oracle_catalog_v2_queried': True,
+        },
+        'results': [],
+    }
+
+    def fake_run_gate(r, path, *, require_neo4j=False, injected_overrides=None):  # noqa: ARG001
+        ledger_path.write_text(json.dumps(blocked_ledger), encoding='utf-8')
+        return blocked_ledger
+
+    monkeypatch.setattr(gate, 'run_gate', fake_run_gate)
+    monkeypatch.setattr(gate, 'repo_root_from', lambda start=None: root)  # noqa: ARG005
+    code = gate.main(['run', '--ledger', str(ledger_path), '--root', str(root)])
+    assert code == 1
