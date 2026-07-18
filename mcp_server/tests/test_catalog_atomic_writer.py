@@ -5,8 +5,10 @@ Product `_write_catalog_batch_atomic` lands in 03B-04. Until then cases collect 
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,13 +16,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 GROUP = 'oracle-catalog-tool-test'
 
-try:
-    from services.catalog_service import CatalogService  # noqa: F401
 
-    _SERVICE_AVAILABLE = True
-except ImportError:
-    _SERVICE_AVAILABLE = False
-    CatalogService = None  # type: ignore[assignment,misc]
+def _service_mod() -> Any | None:
+    try:
+        return importlib.import_module('services.catalog_service')
+    except ImportError:
+        return None
 
 
 def _red(reason: str = '03B not implemented') -> None:
@@ -29,6 +30,10 @@ def _red(reason: str = '03B not implemented') -> None:
 
 def test_shared_writer_used_by_upsert_and_commit_paths():
     """PLAN-13: direct upsert and prepared commit share one atomic writer."""
+    mod = _service_mod()
+    if mod is not None:
+        # Symbol reserved for GREEN; absence keeps RED via _red below.
+        _ = getattr(mod, '_write_catalog_batch_atomic', None)
     _red('test_shared_writer_used_by_upsert_and_commit_paths')
 
 

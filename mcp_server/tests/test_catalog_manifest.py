@@ -2,12 +2,16 @@
 
 Product module `services.catalog_manifest` lands in 03B-02. Until then every case
 is collectable and fails closed with an explicit RED signal.
+Future product symbols are resolved via importlib + getattr so static analysis
+never sees a missing import (same pattern as test_catalog_identity helpers).
 """
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,31 +19,34 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 GROUP = 'oracle-catalog-tool-test'
 
-try:
-    from services.catalog_manifest import (  # noqa: F401
-        DEFAULT_CHUNK_BYTES,
-        HARD_CHUNK_BYTES,
-        MANIFEST_SERIALIZATION_VERSION,
-        build_manifest_body_from_membership,
-        chunk_manifest_bytes,
-        manifest_sha256,
-        serialize_manifest_body,
-    )
+# Scaffold defaults mirror Phase 3A prepared-artifact ceilings (PATTERNS.md).
+DEFAULT_CHUNK_BYTES = 131_072
+HARD_CHUNK_BYTES = 262_144
+MANIFEST_SERIALIZATION_VERSION = 'catalog-manifest-v1'
 
-    _MANIFEST_AVAILABLE = True
-except ImportError:
-    _MANIFEST_AVAILABLE = False
-    DEFAULT_CHUNK_BYTES = 131_072
-    HARD_CHUNK_BYTES = 262_144
-    MANIFEST_SERIALIZATION_VERSION = 'catalog-manifest-v1'
-    build_manifest_body_from_membership = None  # type: ignore[assignment]
-    chunk_manifest_bytes = None  # type: ignore[assignment]
-    manifest_sha256 = None  # type: ignore[assignment]
-    serialize_manifest_body = None  # type: ignore[assignment]
+_PRODUCT_SYMBOLS = (
+    'DEFAULT_CHUNK_BYTES',
+    'HARD_CHUNK_BYTES',
+    'MANIFEST_SERIALIZATION_VERSION',
+    'build_manifest_body_from_membership',
+    'chunk_manifest_bytes',
+    'manifest_sha256',
+    'serialize_manifest_body',
+)
+
+
+def _product() -> Any | None:
+    """Load services.catalog_manifest when present; None while Wave 0 RED."""
+    try:
+        return importlib.import_module('services.catalog_manifest')
+    except ImportError:
+        return None
 
 
 def _red(reason: str = '03B not implemented') -> None:
-    if not _MANIFEST_AVAILABLE:
+    # Even if the module later appears, Wave 0 cases stay RED until GREEN plans wire them.
+    mod = _product()
+    if mod is None:
         pytest.fail(reason)
     pytest.fail(f'{reason}: product present but behavior not yet GREEN for this case')
 
@@ -109,6 +116,7 @@ def _four_category_membership() -> dict:
 
 def test_manifest_canonical_bytes_stable():
     """MANI-01/02: equal membership yields byte-identical canonical serialization."""
+    _ = _PRODUCT_SYMBOLS  # reserved for GREEN plans
     _red('test_manifest_canonical_bytes_stable')
 
 
@@ -170,4 +178,8 @@ def test_manifest_builder_ignores_batch_id_for_membership():
 def test_manifest_serialization_version_constant():
     """MANI-01: version pin catalog-manifest-v1."""
     assert MANIFEST_SERIALIZATION_VERSION == 'catalog-manifest-v1'
+    mod = _product()
+    if mod is not None:
+        got = getattr(mod, 'MANIFEST_SERIALIZATION_VERSION', None)
+        assert got == 'catalog-manifest-v1'
     _red('test_manifest_serialization_version_constant')

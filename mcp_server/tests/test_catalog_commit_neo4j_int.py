@@ -6,13 +6,19 @@ Teardown (when product lands): DETACH DELETE WHERE group_id = TEST_GROUP.
 
 Wave 0: collectable; skip when bolt/credentials unavailable; RED when product
 atomic co-commit path is missing. Product GREEN lands in 03B-06.
+
+Fixtures constants are loaded via importlib.util.spec_from_file_location so
+pyright (extraPaths=src only) never resolves a static tests-local import.
 """
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import os
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -24,11 +30,28 @@ if str(_TESTS_DIR) not in sys.path:
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-try:
-    from catalog_neo4j_fixtures import FORBIDDEN_GROUP, GROUP  # noqa: E402
-except ImportError:  # pragma: no cover - fixtures always present in this repo
-    GROUP = 'oracle-catalog-tool-test'
-    FORBIDDEN_GROUP = 'oracle-catalog-v2'
+
+def _load_fixtures() -> ModuleType | None:
+    path = _TESTS_DIR / 'catalog_neo4j_fixtures.py'
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location('catalog_neo4j_fixtures', path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_fixtures = _load_fixtures()
+GROUP = str(getattr(_fixtures, 'GROUP', 'oracle-catalog-tool-test')) if _fixtures else (
+    'oracle-catalog-tool-test'
+)
+FORBIDDEN_GROUP = (
+    str(getattr(_fixtures, 'FORBIDDEN_GROUP', 'oracle-catalog-v2'))
+    if _fixtures
+    else 'oracle-catalog-v2'
+)
 
 # D-34: live isolation constant — hard-coded tool-test only.
 TEST_GROUP = 'oracle-catalog-tool-test'
@@ -58,6 +81,8 @@ async def _probe_neo4j() -> Any:
     """Return a connected driver or skip/fail truthfully when unavailable."""
     uri, user, password = _neo4j_env()
     try:
+        if importlib.util.find_spec('neo4j') is None:
+            raise ImportError('neo4j package not installed')
         from neo4j import AsyncGraphDatabase
     except ImportError as exc:
         if _catalog_int_required():

@@ -341,7 +341,9 @@ def run_named_check(root: Path, check_id: str) -> None:
     func(root)
 
 
-def validate_spec(spec: dict[str, Any], root: Path) -> None:
+def validate_spec(spec: dict[str, Any], root: Path | None = None) -> None:
+    """Validate one argv spec. `root` retained for API parity with Phase 3A."""
+    _ = root  # reserved for future path-bound argv checks
     if not isinstance(spec, dict):
         raise ValueError('spec must be dict')
     sid = spec.get('id')
@@ -375,7 +377,7 @@ def validate_spec(spec: dict[str, Any], root: Path) -> None:
                 raise ValueError(f'{sid}: must not invoke {INTEGRATION_MODULE} outside live kind')
 
 
-def validate_specs(specs: list[dict[str, Any]], root: Path) -> None:
+def validate_specs(specs: list[dict[str, Any]], root: Path | None = None) -> None:
     ids = [s['id'] for s in specs]
     if len(ids) != len(set(ids)):
         raise ValueError(f'duplicate spec ids: {ids}')

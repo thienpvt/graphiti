@@ -1,12 +1,16 @@
 """RED Wave 0: exact evidence store create-once/conflict/label contract (EVID-07..11).
 
 Product evidence write path lands in 03B-03. Until then cases collect and RED.
+MAX_EVIDENCE_LENGTH is loaded via importlib so a missing constant fails at runtime,
+not as a static missing-import diagnostic.
 """
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,21 +18,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 GROUP = 'oracle-catalog-tool-test'
 
-try:
-    from models.catalog_common import MAX_EVIDENCE_LENGTH  # noqa: F401
 
-    _MAX_EVIDENCE_AVAILABLE = True
-except ImportError:
-    _MAX_EVIDENCE_AVAILABLE = False
-    MAX_EVIDENCE_LENGTH = 4000  # scaffold default; product owns the real constant
+def _common() -> Any:
+    return importlib.import_module('models.catalog_common')
 
-try:
-    from services.catalog_store import CatalogNeo4jStore  # noqa: F401
 
-    _STORE_AVAILABLE = True
-except ImportError:
-    _STORE_AVAILABLE = False
-    CatalogNeo4jStore = None  # type: ignore[assignment,misc]
+def _max_evidence_length() -> int:
+    common = _common()
+    value = getattr(common, 'MAX_EVIDENCE_LENGTH', None)
+    if not isinstance(value, int) or value <= 0:
+        pytest.fail('MAX_EVIDENCE_LENGTH missing or invalid on models.catalog_common')
+    return value
 
 
 def _red(reason: str = '03B not implemented') -> None:
@@ -83,5 +83,6 @@ def test_evidence_coalesce_byte_identical():
 
 def test_evidence_excerpt_length_bound_uses_string_length():
     """EVID-11: excerpt bound uses MAX_EVIDENCE_LENGTH string length (not bytes)."""
-    assert isinstance(MAX_EVIDENCE_LENGTH, int) and MAX_EVIDENCE_LENGTH > 0
+    max_len = _max_evidence_length()
+    assert max_len > 0
     _red('test_evidence_excerpt_length_bound_uses_string_length')

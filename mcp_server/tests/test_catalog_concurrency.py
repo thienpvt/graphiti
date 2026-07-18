@@ -5,8 +5,10 @@ Product concurrency path lands in 03B-05. Until then cases collect and RED.
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,13 +16,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 GROUP = 'oracle-catalog-tool-test'
 
-try:
-    from services.catalog_service import CatalogService  # noqa: F401
 
-    _SERVICE_AVAILABLE = True
-except ImportError:
-    _SERVICE_AVAILABLE = False
-    CatalogService = None  # type: ignore[assignment,misc]
+def _service_mod() -> Any | None:
+    try:
+        return importlib.import_module('services.catalog_service')
+    except ImportError:
+        return None
 
 
 def _red(reason: str = '03B not implemented') -> None:
@@ -30,6 +31,9 @@ def _red(reason: str = '03B not implemented') -> None:
 def test_same_token_concurrent_one_logical_commit():
     """PLAN-16/TEST-06: concurrent commit with the same token yields one logical
     commit (primary named RED case)."""
+    mod = _service_mod()
+    if mod is not None:
+        _ = getattr(mod, 'commit_prepared_catalog_batch', None)
     _red('test_same_token_concurrent_one_logical_commit')
 
 
