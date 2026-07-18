@@ -1260,8 +1260,15 @@ class CatalogService:
         *,
         group_id: str,
         item_count: int,
+        max_items: int | None = None,
+        limit_name: str = 'max_entities_per_batch',
     ) -> tuple[CatalogErrorCode, str] | None:
-        """Shared feature/namespace/backend gates for read-only tools."""
+        """Shared feature/namespace/backend gates for read-only tools.
+
+        Callers that resolve edges must pass max_edges_per_batch via max_items
+        and limit_name so edge batch limits are not silently clamped by the
+        entity default (CR-01).
+        """
         # group_id required at call sites for isolation; validate non-empty early.
         if not group_id:
             return (
@@ -1286,11 +1293,22 @@ class CatalogService:
                 CatalogErrorCode.backend_unavailable,
                 'catalog operations require Neo4j backend',
             )
-        max_n = self.catalog_config.max_entities_per_batch
+        # Default remains entity batch max so existing entity readers stay unchanged.
+        max_n = (
+            int(max_items)
+            if max_items is not None
+            else int(self.catalog_config.max_entities_per_batch)
+        )
+        # Fail closed on non-positive configured ceilings.
+        if max_n < 1:
+            return (
+                CatalogErrorCode.validation_error,
+                f'{limit_name} is not configured',
+            )
         if item_count > max_n:
             return (
                 CatalogErrorCode.batch_limit_exceeded,
-                f'items exceed max_entities_per_batch ({max_n})',
+                f'items exceed {limit_name} ({max_n})',
             )
         return None
 
@@ -1418,7 +1436,13 @@ class CatalogService:
         """
         refs = list(request.edges)
 
-        gate = self._read_gate(client, group_id=request.group_id, item_count=len(refs))
+        gate = self._read_gate(
+            client,
+            group_id=request.group_id,
+            item_count=len(refs),
+            max_items=int(self.catalog_config.max_edges_per_batch),
+            limit_name='max_edges_per_batch',
+        )
         if gate is not None:
             code, message = gate
             results = [
@@ -1585,12 +1609,24 @@ class CatalogService:
                 ordered.append(a)
 
         verified = str(live_type) if live_type else None
-        if verified == ref.edge_type and 'edge_type_mismatch' not in ordered:
-            status = 'found'
-        elif verified is not None:
-            status = 'edge_type_mismatch' if 'edge_type_mismatch' in ordered else 'found'
+        # Mirror entity resolve: primary status reflects the dominant anomaly
+        # while full anomaly list remains for diagnostics (WR-06).
+        if 'duplicate_edge_key' in ordered:
+            status = 'duplicate_edge_key'
+        elif 'edge_type_mismatch' in ordered:
+            status = 'edge_type_mismatch'
+        elif 'endpoint_pair_violation' in ordered:
+            status = 'endpoint_pair_violation'
+        elif 'endpoint_mismatch' in ordered:
+            status = 'endpoint_mismatch'
+        elif 'uuid_mismatch' in ordered:
+            status = 'uuid_mismatch'
+        elif 'missing_embedding' in ordered:
+            status = 'missing_embedding'
+        elif 'missing_content_hash' in ordered:
+            status = 'missing_content_hash'
         else:
-            status = 'found' if ordered else 'found'
+            status = 'found'
 
         return ResolveEdgeResult(
             index=index,
@@ -1716,6 +1752,35 @@ class CatalogService:
             assert target_edge_type is not None and target_edge_key is not None
             target_uuid = catalog_edge_uuid(namespace, group_id, target_edge_type, target_edge_key)
 
+        # WR-02: found_target requires exact group_id + deterministic UUID probe.
+        # Evidence-link rows alone never prove the target object exists.
+        try:
+            if target_kind == 'entity':
+                target_row = await self._store.get_entity_by_uuid(
+                    client.driver,
+                    uuid=target_uuid,
+                    group_id=group_id,
+                )
+            else:
+                target_row = await self._store.get_edge_by_uuid(
+                    client.driver,
+                    uuid=target_uuid,
+                    group_id=group_id,
+                )
+        except Exception as exc:
+            logger.error(
+                'catalog get_catalog_evidence target_probe_failed reason=%s',
+                type(exc).__name__,
+            )
+            return _empty(
+                target_uuid=target_uuid,
+                found_target=False,
+                error_code=CatalogErrorCode.internal_error,
+                error_message='evidence target probe failed',
+                limit_val=limit,
+            )
+        found_target = target_row is not None
+
         try:
             rows = await self._store.match_evidence_links_for_target(
                 client.driver,
@@ -1730,7 +1795,7 @@ class CatalogService:
             )
             return _empty(
                 target_uuid=target_uuid,
-                found_target=False,
+                found_target=found_target,
                 error_code=CatalogErrorCode.internal_error,
                 error_message='evidence read failed',
                 limit_val=limit,
@@ -1746,7 +1811,7 @@ class CatalogService:
         except ValueError as exc:
             return _empty(
                 target_uuid=target_uuid,
-                found_target=True,
+                found_target=found_target,
                 error_code=CatalogErrorCode.validation_error,
                 error_message=str(exc)[:512],
                 limit_val=limit,
@@ -1792,7 +1857,7 @@ class CatalogService:
             target_uuid=target_uuid,
             target_graph_key=target_graph_key,
             target_edge_key=target_edge_key,
-            found_target=True,
+            found_target=found_target,
             offset=offset,
             limit=limit,
             total=total,
@@ -2042,6 +2107,19 @@ class CatalogService:
                     error_message='batch status not found',
                 )
 
+            # WR-04: batch verify requires committed terminal status only.
+            # Non-committed statuses fail closed without manifest/live reads.
+            status_val = str(status_row.get('status') or '').strip().lower()
+            if status_val != 'committed':
+                return VerifyCatalogBatchResponse(
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    found=False,
+                    require_provenance=request.require_provenance,
+                    error_code=CatalogErrorCode.validation_error,
+                    error_message=f'batch not committed (status={status_val or "unknown"})',
+                )
+
             # Status present: durable manifest is sole expected authority (VERI-01/05).
             try:
                 root, body = await self._load_committed_manifest_body(
@@ -2074,13 +2152,32 @@ class CatalogService:
                 )
 
             try:
-                expected_entities, expected_entity_hashes, expected_entity_uuids = (
+                expected_entities, expected_entity_hashes, manifest_entity_uuids = (
                     self._manifest_entity_expected(body)
                 )
-                expected_edges, expected_edge_hashes, expected_edge_uuids = (
+                expected_edges, expected_edge_hashes, manifest_edge_uuids = (
                     self._manifest_edge_expected(body)
                 )
                 evidence_members = self._manifest_evidence_expected(body)
+                # WR-03: server UUIDv5 is identity authority; bad manifest UUID fails closed.
+                expected_entity_uuids = {}
+                for ent in expected_entities:
+                    server_uuid = catalog_entity_uuid(
+                        namespace, request.group_id, ent.entity_type, ent.graph_key
+                    )
+                    manifest_uuid = manifest_entity_uuids.get(ent.graph_key)
+                    if manifest_uuid and manifest_uuid != server_uuid:
+                        raise ValueError(f'manifest_uuid_mismatch entity {ent.graph_key}')
+                    expected_entity_uuids[ent.graph_key] = server_uuid
+                expected_edge_uuids = {}
+                for edge in expected_edges:
+                    server_uuid = catalog_edge_uuid(
+                        namespace, request.group_id, edge.edge_type, edge.edge_key
+                    )
+                    manifest_uuid = manifest_edge_uuids.get(edge.edge_key)
+                    if manifest_uuid and manifest_uuid != server_uuid:
+                        raise ValueError(f'manifest_uuid_mismatch edge {edge.edge_key}')
+                    expected_edge_uuids[edge.edge_key] = server_uuid
             except ValueError as exc:
                 return VerifyCatalogBatchResponse(
                     group_id=request.group_id,
@@ -2152,6 +2249,10 @@ class CatalogService:
             report_extras=batch_expected_mode,
         )
 
+        # Explicit-key-only absences (not batch membership missing).
+        anomalies_explicit_entities: list[str] = []
+        anomalies_explicit_edges: list[str] = []
+
         # Batch+keys: diagnose request keys that are not in the manifest expected set.
         if batch_expected_mode and request.entities:
             expected_keys = {e.graph_key for e in expected_entities}
@@ -2160,13 +2261,15 @@ class CatalogService:
                 key = self._row_key(row)
                 if key:
                     by_key.setdefault(str(key), []).append(row)
+            # Explicit-key diagnostics are additive and separate from batch
+            # membership missing (CR-02). Only keys present live are diagnosed
+            # against observations; absent explicit keys surface via anomalies.
             for ent in request.entities:
                 if ent.graph_key in expected_keys:
                     continue
                 matches = by_key.get(ent.graph_key, [])
                 if not matches:
-                    if ent.graph_key not in entity_section.missing:
-                        entity_section.missing.append(ent.graph_key)
+                    anomalies_explicit_entities.append(ent.graph_key)
                     continue
                 # Key diagnostics only — do not inflate batch expected count.
                 self._diagnose_entity_matches(
@@ -2193,8 +2296,7 @@ class CatalogService:
                     continue
                 matches = by_edge.get(edge.edge_key, [])
                 if not matches:
-                    if edge.edge_key not in edge_section.missing:
-                        edge_section.missing.append(edge.edge_key)
+                    anomalies_explicit_edges.append(edge.edge_key)
                     continue
                 self._diagnose_edge_matches(
                     section=edge_section,
@@ -2213,6 +2315,7 @@ class CatalogService:
                 evidence_section = await self._verify_evidence_links(
                     client=client,
                     group_id=request.group_id,
+                    batch_id=request.batch_id,
                     members=evidence_members,
                 )
             except Exception as exc:
@@ -2277,6 +2380,10 @@ class CatalogService:
             anomalies.append({'kind': 'extra_evidence', 'uuid': key})
         for key in evidence_section.missing:
             anomalies.append({'kind': 'missing_evidence', 'uuid': key})
+        for key in anomalies_explicit_entities:
+            anomalies.append({'kind': 'explicit_key_missing', 'graph_key': key})
+        for key in anomalies_explicit_edges:
+            anomalies.append({'kind': 'explicit_key_missing', 'edge_key': key})
 
         missing_provenance: list[str] = []
         if request.require_provenance:
@@ -2696,20 +2803,28 @@ class CatalogService:
         *,
         client: Any,
         group_id: str,
+        batch_id: str | None,
         members: list[dict[str, Any]],
     ) -> VerifyEvidenceSection:
-        """Exact evidence MATCH by group_id + uuid (EVID-13); no link_key identity."""
+        """Exact evidence MATCH by group_id + uuid (EVID-13); no link_key identity.
+
+        Extras are group-scoped batch-authoritative observations (WR-01): live
+        CatalogEvidenceLink rows for the batch whose uuid is not in expected
+        membership. batch_id is observation scope only — never membership authority.
+        """
         section = VerifyEvidenceSection(expected=len(members))
-        if not members:
-            return section
         expected_by_uuid: dict[str, dict[str, Any]] = {
             str(m['uuid']): m for m in members if m.get('uuid')
         }
         uuids = list(expected_by_uuid.keys())
-        rows = await self._store.match_evidence_links_exact(
-            client.driver,
-            group_id=group_id,
-            uuids=uuids,
+        rows = (
+            await self._store.match_evidence_links_exact(
+                client.driver,
+                group_id=group_id,
+                uuids=uuids,
+            )
+            if uuids
+            else []
         )
         by_uuid: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
@@ -2730,10 +2845,21 @@ class CatalogService:
             ):
                 section.content_hash_mismatch.append(member_uuid)
 
-        # Live links for expected uuids only — extras require a broader scan which
-        # is out of scope without a batch-scoped evidence index. Distinct missing
-        # list covers absent expected members; duplicate physical rows for the same
-        # uuid surface via multi-match consistency failures above.
+        # WR-01: observe batch-scoped live links and report extras vs expected UUIDs.
+        if batch_id:
+            observed = await self._store.match_evidence_links_for_batch(
+                client.driver,
+                group_id=group_id,
+                batch_id=batch_id,
+            )
+            expected_uuid_set = set(expected_by_uuid.keys())
+            extras: set[str] = set()
+            for row in observed:
+                u = str(row.get('uuid') or '')
+                if u and u not in expected_uuid_set:
+                    extras.add(u)
+            section.extras = sorted(extras)
+
         section.missing = sorted(section.missing)
         section.extras = sorted(section.extras)
         return section
@@ -4948,15 +5074,50 @@ class CatalogService:
         evidence_all = _as_list('evidence_links')
 
         raw_counts = body.get('counts')
-        if isinstance(raw_counts, dict):
-            counts: dict[str, Any] = raw_counts
-        else:
-            # Fail closed on non-object counts: use durable list lengths only.
-            counts = {}
-        entity_count = int(counts.get('entities', len(entities_all)) or 0)
-        edge_count = int(counts.get('edges', len(edges_all)) or 0)
-        source_count = int(counts.get('sources', len(sources_all)) or 0)
-        evidence_count = int(counts.get('evidence_links', len(evidence_all)) or 0)
+        if not isinstance(raw_counts, dict):
+            # WR-05: non-object counts are not trusted; fail closed.
+            return _empty(
+                found=True,
+                error_code=CatalogErrorCode.manifest_mismatch,
+                error_message='manifest counts missing or invalid',
+                limit_val=limit,
+            )
+        try:
+            raw_entity_count = raw_counts.get('entities')
+            raw_edge_count = raw_counts.get('edges')
+            raw_source_count = raw_counts.get('sources')
+            raw_evidence_count = raw_counts.get('evidence_links')
+            if (
+                raw_entity_count is None
+                or raw_edge_count is None
+                or raw_source_count is None
+                or raw_evidence_count is None
+            ):
+                raise TypeError('manifest counts missing required category')
+            entity_count = int(raw_entity_count)
+            edge_count = int(raw_edge_count)
+            source_count = int(raw_source_count)
+            evidence_count = int(raw_evidence_count)
+        except (TypeError, ValueError):
+            return _empty(
+                found=True,
+                error_code=CatalogErrorCode.manifest_mismatch,
+                error_message='manifest counts missing or invalid',
+                limit_val=limit,
+            )
+        # WR-05: any category count vs durable list length mismatch fails closed.
+        if (
+            entity_count != len(entities_all)
+            or edge_count != len(edges_all)
+            or source_count != len(sources_all)
+            or evidence_count != len(evidence_all)
+        ):
+            return _empty(
+                found=True,
+                error_code=CatalogErrorCode.manifest_mismatch,
+                error_message='manifest counts disagree with membership lists',
+                limit_val=limit,
+            )
 
         try:
             entities_page, _ = page_members(

@@ -84,6 +84,21 @@ def _entity_request(**kwargs) -> GetCatalogEvidenceRequest:
     return GetCatalogEvidenceRequest.model_validate(payload)
 
 
+def _wire_target_probe(service: CatalogService, *, found: bool = True) -> None:
+    """WR-02: evidence path probes entity/edge existence independently of links."""
+
+    async def _entity(executor=None, **kwargs):
+        _ = executor, kwargs
+        return {'uuid': kwargs.get('uuid')} if found else None
+
+    async def _edge(executor=None, **kwargs):
+        _ = executor, kwargs
+        return {'uuid': kwargs.get('uuid')} if found else None
+
+    service._store.get_entity_by_uuid = AsyncMock(side_effect=_entity)  # type: ignore[method-assign]
+    service._store.get_edge_by_uuid = AsyncMock(side_effect=_edge)  # type: ignore[method-assign]
+
+
 def _link(i: int, *, excerpt: str | None = 'FULL SOURCE TEXT PAYLOAD') -> dict[str, Any]:
     return {
         'uuid': f'{i:08x}-0000-4000-8000-00000000000{i % 10}',
@@ -109,6 +124,7 @@ async def test_evidence_page_bounded():
     assert HARD_MAX_PAGE_SIZE == 500
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _wire_target_probe(service)
     rows = [_link(i) for i in range(5)]
     service._store.match_evidence_links_for_target = AsyncMock(return_value=rows)
     resp = await service.get_catalog_evidence(
@@ -143,6 +159,7 @@ async def test_compact_default():
     """EVID-12: compact default projection (no full source payload unless requested)."""
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _wire_target_probe(service)
     service._store.match_evidence_links_for_target = AsyncMock(
         return_value=[_link(1, excerpt='SECRET FULL SOURCE')]
     )
@@ -161,6 +178,7 @@ async def test_optional_excerpt_length_bound():
     """EVID-12: optional excerpt length is bounded fail-closed."""
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _wire_target_probe(service)
     huge = 'X' * (MAX_EVIDENCE_LENGTH + 500)
     service._store.match_evidence_links_for_target = AsyncMock(
         return_value=[_link(2, excerpt=huge)]
@@ -177,6 +195,7 @@ async def test_empty_links():
     """EVID-12 empty: zero links → empty page, total 0, still group-scoped."""
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _wire_target_probe(service)
     captured: dict[str, Any] = {}
 
     async def _match(executor=None, **kwargs):
@@ -198,6 +217,7 @@ async def test_adjacency_multi_link():
     """EVID-12 adjacency: multi-link same target returns distinct link rows (no collapse)."""
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _wire_target_probe(service)
     rows = [_link(1), _link(2), _link(3)]
     service._store.match_evidence_links_for_target = AsyncMock(return_value=rows)
     resp = await service.get_catalog_evidence(client=client, request=_entity_request())
@@ -211,6 +231,7 @@ async def test_ordering_stable():
     """EVID-12 ordering: stable ORDER BY uuid then offset/limit."""
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _wire_target_probe(service)
     # Store returns already uuid-ordered rows; service preserves that order.
     rows = [_link(i) for i in (1, 2, 3, 4)]
     service._store.match_evidence_links_for_target = AsyncMock(return_value=rows)
@@ -235,6 +256,7 @@ async def test_group_isolation():
     assert GROUP == 'oracle-catalog-tool-test'
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _wire_target_probe(service)
     captured: dict[str, Any] = {}
 
     async def _match(executor=None, **kwargs):
@@ -263,6 +285,7 @@ async def test_full_graph_key_on_target():
     """IDEN-08: target identity on evidence responses is full system-scoped graph_key."""
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _wire_target_probe(service)
     service._store.match_evidence_links_for_target = AsyncMock(return_value=[])
     resp = await service.get_catalog_evidence(client=client, request=_entity_request())
     assert resp.target_graph_key == GRAPH_KEY
@@ -293,3 +316,24 @@ def test_request_requires_exactly_one_target():
                 'identity_schema_version': 'catalog-v2',
             }
         )
+
+
+@pytest.mark.asyncio
+async def test_found_target_requires_probe():
+    """WR-02: unknown target found_target=false even if no links; real target true with no links."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_evidence_links_for_target = AsyncMock(return_value=[])
+
+    # missing target
+    _wire_target_probe(service, found=False)
+    missing = await service.get_catalog_evidence(client=client, request=_entity_request())
+    assert missing.found_target is False
+    assert missing.total == 0
+    assert missing.links == []
+
+    # present target, zero links still true
+    _wire_target_probe(service, found=True)
+    present = await service.get_catalog_evidence(client=client, request=_entity_request())
+    assert present.found_target is True
+    assert present.total == 0
