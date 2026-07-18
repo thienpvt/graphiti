@@ -295,7 +295,7 @@ def test_history_only_accepted_with_green_current(tmp_path: Path, monkeypatch: p
     assert ledger['ready_for_phase_4'] is False
     assert ledger['phase_3b_complete'] is False
     assert ledger['pre_live_only'] is True
-    assert ledger['manifests'] is False
+    assert ledger['manifests'] is True
     assert ledger['schema_version'] == gate.SCHEMA_VERSION
     assert ledger['schema_version'] == 'phase3b-gate-results.v2'
     assert ledger['historical_audit']['commit'] == 'a67789a'
@@ -347,9 +347,9 @@ def test_canonical_specs_shape_and_reject_shell_integration():
     assert 'manifest_scaffold' in ids
     assert 'recovery_scaffold' in ids
     assert 'concurrency_scaffold' in ids
-    assert 'manifests_feature_false' in ids
+    assert 'manifests_feature_true' in ids
     assert 'edge_resolution_complete' in ids
-    assert 'manifests_feature_true' not in ids
+    assert 'manifests_feature_false' not in ids
     assert 'manifests_feature_not_flipped' not in ids
     assert 'live_neo4j_atomic_proof' not in ids
 
@@ -630,7 +630,7 @@ def test_verify_ledger_accepts_truthful_history_current_green(
     ledger = gate.run_gate(root, ledger_path, require_neo4j=False)
     assert ledger['ready_for_phase_4'] is False
     assert ledger['oracle_catalog_v2_queried'] is True
-    assert ledger['manifests'] is False
+    assert ledger['manifests'] is True
     assert ledger['safety']['safety_checks_pass'] is True
     ver = gate.verify_ledger(root, ledger_path, require_neo4j=False)
     assert ver['ok'] is True, ver['errors']
@@ -661,7 +661,7 @@ def test_wave0_files_check_passes_after_scaffolds():
     gate.check_manifest_scaffold(root)
     gate.check_recovery_scaffold(root)
     gate.check_concurrency_scaffold(root)
-    gate.check_manifests_feature_false(root)
+    gate.check_manifests_feature_true(root)
     gate.check_edge_resolution_complete(root)
 
 
@@ -884,10 +884,32 @@ def test_verify_rejects_missing_phase_3b_complete(tmp_path: Path, monkeypatch: p
     assert any('phase_3b_complete missing' in e for e in ver['errors'])
 
 
-def test_product_sourced_manifests_false_blocks_ready_with_synthetic_live():
-    """Product-sourced manifests=False: synthetic live pass still ready false (pre-live)."""
+def test_product_sourced_manifests_true_allows_ready_with_synthetic_live():
+    """Product-sourced manifests=True after flip: synthetic live pass => ready true."""
     root = _root()
-    assert gate.read_manifests_feature(root) is False
+    assert gate.read_manifests_feature(root) is True
+    safety = _current_clean_safety()
+    live_pass = {
+        'live_neo4j_atomic_proof': 'pass',
+        'live_neo4j_atomic_proof_pass': True,
+        'skipped_or_failed': False,
+    }
+    assert (
+        gate.derive_ready_for_phase_4(
+            True,
+            live_pass,
+            safety,
+            manifests=gate.read_manifests_feature(root),
+            require_neo4j=True,
+        )
+        is True
+    )
+
+
+def test_synthetic_manifests_false_blocks_ready_with_live_pass(monkeypatch: pytest.MonkeyPatch):
+    """False still blocks readiness when injected via monkeypatch (not product source)."""
+    root = _root()
+    monkeypatch.setattr(gate, 'read_manifests_feature', lambda _r: False)
     safety = _current_clean_safety()
     live_pass = {
         'live_neo4j_atomic_proof': 'pass',
@@ -906,10 +928,10 @@ def test_product_sourced_manifests_false_blocks_ready_with_synthetic_live():
     )
 
 
-def test_require_neo4j_pass_product_manifests_false_ready_false(
+def test_require_neo4j_pass_product_manifests_true_ready_true(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Integration path: live green but product manifests False => ready false."""
+    """Integration path: live green + product manifests True => ready true."""
     root = _root()
     ledger_path = tmp_path / '03B-GATE-RESULTS.json'
 
@@ -937,7 +959,52 @@ def test_require_neo4j_pass_product_manifests_false_ready_false(
 
     monkeypatch.setattr(gate, 'run_argv', fake_run_argv)
     monkeypatch.setenv('CATALOG_PHASE3B_GATE_SKIP_SELF', '1')
-    # Do NOT patch read_manifests_feature — product source must remain False.
+    # Do NOT patch read_manifests_feature — product source must be True post-flip.
+
+    ledger = gate.run_gate(root, ledger_path, require_neo4j=True)
+    assert ledger['local_gate_pass'] is True
+    assert ledger['live_neo4j_atomic_proof_pass'] is True
+    assert ledger['manifests'] is True
+    assert ledger['ready_for_phase_4'] is True
+    assert ledger['phase_3b_complete'] is True
+    assert ledger['pre_live_only'] is False
+    assert ledger['oracle_catalog_v2_queried'] is True
+    assert ledger['safety']['safety_checks_pass'] is True
+    assert gate.derive_cli_exit_code(ledger, require_neo4j=True) == 0
+
+
+def test_require_neo4j_pass_synthetic_manifests_false_ready_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Integration path: live green but synthetic manifests False => ready false."""
+    root = _root()
+    ledger_path = tmp_path / '03B-GATE-RESULTS.json'
+
+    def fake_run_argv(argv, root_arg, timeout=1800):  # noqa: ARG001
+        joined = ' '.join(argv)
+        if 'test_catalog_commit_neo4j_int' in joined:
+            return {
+                'exit_code': 0,
+                'stdout': '7 passed',
+                'stderr': '',
+                'counts': {
+                    'passed': 7,
+                    'failed': 0,
+                    'skipped': 0,
+                    'deselected': 0,
+                    'errors': 0,
+                },
+            }
+        return {
+            'exit_code': 0,
+            'stdout': '1 passed',
+            'stderr': '',
+            'counts': {'passed': 1, 'failed': 0, 'skipped': 0, 'deselected': 0, 'errors': 0},
+        }
+
+    monkeypatch.setattr(gate, 'run_argv', fake_run_argv)
+    monkeypatch.setenv('CATALOG_PHASE3B_GATE_SKIP_SELF', '1')
+    monkeypatch.setattr(gate, 'read_manifests_feature', lambda _r: False)
 
     ledger = gate.run_gate(root, ledger_path, require_neo4j=True)
     assert ledger['local_gate_pass'] is True

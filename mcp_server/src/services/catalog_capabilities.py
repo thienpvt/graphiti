@@ -147,9 +147,9 @@ def build_catalog_capabilities(
             # D-29 / P22: true only after 03A-06 live immutable proof + re-test green.
             'prepare_commit': True,
             'explicit_evidence_links': True,
-            # D-33: remains False — 03B-06 blocked by historical oracle-catalog-v2 probe.
+            # D-33: True after accepted 03B-06 live preflip + coordinator final flip.
             # Runtime MUST NOT read .planning/* or 03B-GATE-RESULTS to decide this flag.
-            'manifests': False,
+            'manifests': True,
             # Phase 4: public manifest-backed verification remains disabled.
             'manifest_verification': False,
         },

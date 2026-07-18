@@ -353,22 +353,22 @@ def check_concurrency_scaffold(root: Path) -> None:
         )
 
 
-def check_manifests_feature_false(root: Path) -> None:
-    """Pre-live: static features.manifests=False; verification false; prepare_commit true.
+def check_manifests_feature_true(root: Path) -> None:
+    """Post-live flip: static features.manifests=True; verification false; prepare_commit true.
 
-    History audit does not permanently force this flag — it stays False until post-live flip.
+    Flip is source-static only after accepted live preflip + coordinator. Runtime must not
+    read planning ledgers to decide the flag.
     """
     capa = root / 'mcp_server/src/services/catalog_capabilities.py'
     if not capa.is_file():
         raise AssertionError('catalog_capabilities.py missing')
     src = capa.read_text(encoding='utf-8')
-    if "'manifests': True" in src or '"manifests": True' in src:
+    if "'manifests': True" not in src and '"manifests": True' not in src:
         raise AssertionError(
-            'features.manifests must remain False pre-live (D-33); flip only after '
-            'accepted live proof + coordinator; historical audit alone does not set True'
+            'features.manifests must be True after accepted live proof + coordinator flip (D-33)'
         )
-    if "'manifests': False" not in src and '"manifests": False' not in src:
-        raise AssertionError('features.manifests must be explicitly False pre-live')
+    if "'manifests': False" in src or '"manifests": False' in src:
+        raise AssertionError('features.manifests must not remain False after final flip')
     if "'manifest_verification': True" in src or '"manifest_verification": True' in src:
         raise AssertionError('features.manifest_verification must remain false (Phase 4)')
     if "'prepare_commit': True" not in src and '"prepare_commit": True' not in src:
@@ -493,7 +493,7 @@ CHECK_FUNCS = {
     'manifest_scaffold': check_manifest_scaffold,
     'recovery_scaffold': check_recovery_scaffold,
     'concurrency_scaffold': check_concurrency_scaffold,
-    'manifests_feature_false': check_manifests_feature_false,
+    'manifests_feature_true': check_manifests_feature_true,
     'edge_resolution_complete': check_edge_resolution_complete,
 }
 
@@ -646,8 +646,8 @@ def canonical_specs(root: Path, *, include_live: bool = False) -> list[dict[str,
             'kind': 'safety',
         },
         {
-            'id': 'manifests_feature_false',
-            'argv': _runner_check_argv('manifests_feature_false'),
+            'id': 'manifests_feature_true',
+            'argv': _runner_check_argv('manifests_feature_true'),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'structural',
@@ -1171,9 +1171,9 @@ def run_gate(
                 'aggregate historical v2 does not force nonzero; require-neo4j also '
                 'needs ready_for_phase_4. Non-live exit 0 is preflight only.'
             ),
-            'manifests_pre_live': (
-                'features.manifests False pre-live; not permanently blocked by history; '
-                'flip only after accepted live proof'
+            'manifests_post_flip': (
+                'features.manifests True after accepted live preflip + coordinator final flip; '
+                'static source only; no runtime GATE-RESULTS read; verification remains false'
             ),
         },
     }

@@ -224,10 +224,10 @@
       "category": "capability-flip",
       "plan": "03B-06",
       "requirement_id": "MANI-06",
-      "resolution": "features.manifests remains static False pre-live under authorized two-axis re-gate; no runtime GATE-RESULTS read; prepare_commit true; verification false; Phase 4 not opened until live+flip",
+      "resolution": "features.manifests static True after accepted live preflip + coordinator final flip; no runtime GATE-RESULTS read; prepare_commit true; verification false; Phase 4 public tools still not opened",
       "row_index": 22,
       "task": "03B-06-T02",
-      "test_or_backstop": "mcp_server/src/services/catalog_capabilities.py + test_catalog_capabilities.py + catalog_phase3b_gate_runner.check_manifests_feature_false",
+      "test_or_backstop": "mcp_server/src/services/catalog_capabilities.py + test_catalog_capabilities.py + catalog_phase3b_gate_runner.check_manifests_feature_true",
       "verification": "structural"
     },
     {
