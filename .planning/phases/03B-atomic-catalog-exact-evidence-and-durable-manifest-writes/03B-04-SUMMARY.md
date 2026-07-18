@@ -126,7 +126,7 @@ status: complete
 1. **Task 1: Shared atomic writer + fault injection GREEN** - `6893580` (feat)
 2. **Task 2: Wire upsert + prepared commit success path** - `36e9f66` (feat)
 
-**Plan metadata:**  (docs: complete plan)
+**Plan metadata:** `045c22b` (docs: complete plan; bind `e3f2fc9`)
 
 _Note: TDD RED suite lived in the same task-1 commit with GREEN product extraction (single worktree wave)._
 
