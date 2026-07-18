@@ -283,37 +283,70 @@ def _require_exact_fields(raw: Any, expected: set[str], path: str) -> dict[str, 
 
 
 def _validate_raw_field_sets(raw: dict[str, Any]) -> None:
+    """Historical raw-shape check (Cartesian inventory only; not hardened authority)."""
     _require_exact_fields(raw, ARTIFACT_FIELDS, '$')
     entities = raw.get('entities')
     edges = raw.get('edges')
     provenance = raw.get('provenance')
     if not isinstance(entities, list) or not isinstance(edges, list):
         raise RunnerError('invalid_shape', '$.entities and $.edges must be arrays')
+    if not isinstance(provenance, dict):
+        raise RunnerError('invalid_shape', '$.provenance must be an object')
     for index, item in enumerate(entities):
         _require_exact_fields(item, set(CatalogEntityItem.model_fields), f'$.entities[{index}]')
     for index, item in enumerate(edges):
         _require_exact_fields(item, set(CatalogEdgeItem.model_fields), f'$.edges[{index}]')
-    _require_exact_fields(provenance, set(NestedProvenancePayload.model_fields), '$.provenance')
+    # Historical inventory still carries entity_targets/edge_targets; current model
+    # NestedProvenancePayload only allows sources+evidence_links. Reject unknown
+    # beyond the historical inventory field set, not the live model field set.
+    historical_provenance_fields = {
+        'sources',
+        'entity_targets',
+        'edge_targets',
+        'evidence_links',
+    }
+    unknown = sorted(set(provenance) - historical_provenance_fields)
+    if unknown:
+        raise RunnerError('field_set_mismatch', f'$.provenance unknown fields: {unknown}')
     sources = provenance.get('sources')
     entity_targets = provenance.get('entity_targets')
     edge_targets = provenance.get('edge_targets')
-    if not all(isinstance(items, list) for items in (sources, entity_targets, edge_targets)):
-        raise RunnerError('invalid_shape', 'provenance collections must be arrays')
+    evidence_links = provenance.get('evidence_links')
+    if entity_targets is not None or edge_targets is not None:
+        if not all(isinstance(items, list) for items in (sources, entity_targets, edge_targets)):
+            raise RunnerError('invalid_shape', 'provenance collections must be arrays')
+        assert isinstance(sources, list)
+        assert isinstance(entity_targets, list)
+        assert isinstance(edge_targets, list)
+        for index, item in enumerate(sources):
+            _require_exact_fields(
+                item, set(CatalogSourceItem.model_fields), f'$.provenance.sources[{index}]'
+            )
+        for index, item in enumerate(entity_targets):
+            _require_exact_fields(
+                item,
+                set(CatalogProvenanceEntityTarget.model_fields),
+                f'$.provenance.entity_targets[{index}]',
+            )
+        for index, item in enumerate(edge_targets):
+            _require_exact_fields(
+                item,
+                set(CatalogProvenanceEdgeTarget.model_fields),
+                f'$.provenance.edge_targets[{index}]',
+            )
+        return
+    # catalog-v2 evidence_links shape
+    if not isinstance(sources, list) or not isinstance(evidence_links, list):
+        raise RunnerError('invalid_shape', 'provenance sources/evidence_links must be arrays')
     for index, item in enumerate(sources):
         _require_exact_fields(
             item, set(CatalogSourceItem.model_fields), f'$.provenance.sources[{index}]'
         )
-    for index, item in enumerate(entity_targets):
+    for index, item in enumerate(evidence_links):
         _require_exact_fields(
             item,
-            set(CatalogProvenanceEntityTarget.model_fields),
-            f'$.provenance.entity_targets[{index}]',
-        )
-    for index, item in enumerate(edge_targets):
-        _require_exact_fields(
-            item,
-            set(CatalogProvenanceEdgeTarget.model_fields),
-            f'$.provenance.edge_targets[{index}]',
+            set(CatalogEvidenceLink.model_fields),
+            f'$.provenance.evidence_links[{index}]',
         )
 
 
@@ -404,21 +437,26 @@ def _validate_identities_and_endpoints(request: UpsertCatalogBatchRequest) -> No
             )
 
     assert request.provenance is not None
+    # catalog-v2 NestedProvenancePayload: explicit evidence_links only (no Cartesian fields)
     provenance_entity_ids = [
-        (item.entity_type, item.graph_key) for item in request.provenance.entity_targets
+        (target.entity_type, target.graph_key)
+        for link in request.provenance.evidence_links
+        if (target := link.entity_target) is not None
     ]
     provenance_edge_ids = [
-        (item.edge_type, item.edge_key) for item in request.provenance.edge_targets
+        (target.edge_type, target.edge_key)
+        for link in request.provenance.evidence_links
+        if (target := link.edge_target) is not None
     ]
     if provenance_entity_ids != entity_ids:
         raise RunnerError(
             'provenance_entity_target_mismatch',
-            'provenance entity targets must exactly match artifact entities in order',
+            'evidence_links entity targets must exactly match artifact entities in order',
         )
     if provenance_edge_ids != edge_ids:
         raise RunnerError(
             'provenance_edge_target_mismatch',
-            'provenance edge targets must exactly match artifact edges in order',
+            'evidence_links edge targets must exactly match artifact edges in order',
         )
 
     source_keys = [item.source_key for item in request.provenance.sources]
@@ -456,10 +494,16 @@ def _validate_expected_batch(
     if Counter(item.edge_type for item in request.edges) != Counter(expected['edge_types']):
         raise RunnerError('edge_count_mismatch', 'edge type counts do not match approved batch')
     assert request.provenance is not None
+    entity_link_count = sum(
+        1 for link in request.provenance.evidence_links if link.entity_target is not None
+    )
+    edge_link_count = sum(
+        1 for link in request.provenance.evidence_links if link.edge_target is not None
+    )
     provenance_counts = (
         len(request.provenance.sources),
-        len(request.provenance.entity_targets),
-        len(request.provenance.edge_targets),
+        entity_link_count,
+        edge_link_count,
     )
     if provenance_counts != expected['provenance']:
         raise RunnerError(
@@ -1147,7 +1191,8 @@ def _validate_fact_search(structured: dict[str, Any], edge: CatalogEdgeItem) -> 
     for fact in facts:
         if not isinstance(fact, dict):
             continue
-        attributes = fact.get('attributes') if isinstance(fact.get('attributes'), dict) else {}
+        attributes_raw = fact.get('attributes')
+        attributes: dict[str, Any] = attributes_raw if isinstance(attributes_raw, dict) else {}
         if (
             fact.get('edge_key') == edge.edge_key
             or attributes.get('edge_key') == edge.edge_key
