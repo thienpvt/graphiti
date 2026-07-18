@@ -1180,15 +1180,29 @@ async def test_live_unchanged_membership_in_manifest(catalog_ctx):
 
 
 async def test_phase5_commit_zero_writes_outside_test_group(catalog_ctx):
-    """TEST-11: commit path never writes outside oracle-catalog-tool-test."""
-    import pytest
-
-    assert GROUP == 'oracle-catalog-tool-test'
-    pytest.fail('05 not implemented: TEST-11 commit zero outside-group writes')
+    """TEST-11: runtime-audited commit parameters use only the exact test group."""
+    ctx = catalog_ctx
+    _, commit, request = await _prepare_and_commit(
+        ctx, batch_id=f'{RUN_PREFIX}-phase5-scope', entities=[_entity(80)]
+    )
+    assert commit.error_code is None, commit.error_message
+    assert commit.state == 'COMMITTED'
+    assert request.group_id == GROUP == TEST_GROUP == 'oracle-catalog-tool-test'
+    assert ctx.driver.param_groups
+    assert set(ctx.driver.param_groups) == {TEST_GROUP}
+    assert ctx.driver.rejected is False
 
 
 async def test_phase5_commit_control_labels_not_in_entity_search(catalog_ctx):
-    """TEST-11 empty: control/plan labels excluded from entity search post-commit."""
-    import pytest
-
-    pytest.fail('05 not implemented: TEST-11 commit control labels vs entity search')
+    """TEST-11 empty: post-commit control labels never carry Entity."""
+    ctx = catalog_ctx
+    prepared, commit, request = await _prepare_and_commit(
+        ctx, batch_id=f'{RUN_PREFIX}-phase5-labels', entities=[_entity(81)]
+    )
+    assert commit.error_code is None, commit.error_message
+    assert commit.state == 'COMMITTED'
+    assert await _control_nodes_with_entity(ctx.driver) == 0
+    props = await _plan_props(ctx.driver, prepared.plan_uuid)
+    manifests = await _manifest_roots(ctx.driver, request.batch_id)
+    assert props is not None and 'Entity' not in set(props['_labels'])
+    assert manifests and all('Entity' not in set(item['_labels']) for item in manifests)

@@ -5,6 +5,7 @@ No test-framework fixtures, Neo4j drivers, sockets, network clients, or integrat
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 import uuid
@@ -16,23 +17,37 @@ _SRC = Path(__file__).resolve().parent.parent / 'src'
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from models.catalog_batch import NestedProvenancePayload, UpsertCatalogBatchRequest  # noqa: E402
-from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
-from models.catalog_entities import (  # noqa: E402
-    CatalogEntityItem,
-    ResolveEntityRef,
-    ResolveTypedEntitiesRequest,
-    UpsertTypedEntitiesRequest,
-    VerifyCatalogBatchRequest,
-    VerifyEdgeRef,
-    VerifyEntityRef,
+
+
+def _attr(module_name: str, symbol: str) -> Any:
+    value = getattr(importlib.import_module(module_name), symbol, None)
+    if value is None:
+        raise ImportError(f'{module_name}.{symbol} missing')
+    return value
+
+
+NestedProvenancePayload = _attr('models.catalog_batch', 'NestedProvenancePayload')
+UpsertCatalogBatchRequest = _attr('models.catalog_batch', 'UpsertCatalogBatchRequest')
+CatalogEdgeItem = _attr('models.catalog_edges', 'CatalogEdgeItem')
+UpsertTypedEdgesRequest = _attr('models.catalog_edges', 'UpsertTypedEdgesRequest')
+CatalogEntityItem = _attr('models.catalog_entities', 'CatalogEntityItem')
+ResolveEntityRef = _attr('models.catalog_entities', 'ResolveEntityRef')
+ResolveTypedEntitiesRequest = _attr('models.catalog_entities', 'ResolveTypedEntitiesRequest')
+UpsertTypedEntitiesRequest = _attr('models.catalog_entities', 'UpsertTypedEntitiesRequest')
+VerifyCatalogBatchRequest = _attr('models.catalog_entities', 'VerifyCatalogBatchRequest')
+VerifyEdgeRef = _attr('models.catalog_entities', 'VerifyEdgeRef')
+VerifyEntityRef = _attr('models.catalog_entities', 'VerifyEntityRef')
+CatalogEvidenceEdgeTarget = _attr('models.catalog_evidence', 'CatalogEvidenceEdgeTarget')
+CatalogEvidenceEntityTarget = _attr('models.catalog_evidence', 'CatalogEvidenceEntityTarget')
+CatalogEvidenceLink = _attr('models.catalog_evidence', 'CatalogEvidenceLink')
+CatalogProvenanceEdgeTarget = _attr(
+    'models.catalog_provenance', 'CatalogProvenanceEdgeTarget'
 )
-from models.catalog_provenance import (  # noqa: E402
-    CatalogProvenanceEdgeTarget,
-    CatalogProvenanceEntityTarget,
-    CatalogSourceItem,
-    UpsertProvenanceRequest,
+CatalogProvenanceEntityTarget = _attr(
+    'models.catalog_provenance', 'CatalogProvenanceEntityTarget'
 )
+CatalogSourceItem = _attr('models.catalog_provenance', 'CatalogSourceItem')
+UpsertProvenanceRequest = _attr('models.catalog_provenance', 'UpsertProvenanceRequest')
 
 GROUP = 'oracle-catalog-tool-test'
 FORBIDDEN_GROUP = 'oracle-catalog-v2'
@@ -43,6 +58,22 @@ ACCEPT_TAB_BATCH = 'accept-tab-batch-001'
 ACCEPT_TAB_FIXTURE = Path(__file__).parent / 'fixtures' / 'accept_tab_sanitized.json'
 SYSTEM_KEY = 'FE'
 IDENTITY_SCHEMA_VERSION = 'catalog-v2'
+_RUN_TOKEN = uuid.uuid4().hex[:10].upper()
+
+
+def _scope_accept_fixture(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _scope_accept_fixture(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_scope_accept_fixture(item) for item in value]
+    if isinstance(value, str):
+        return (
+            value.replace('ACCEPT_PARENT', f'ACCEPT_PARENT_{_RUN_TOKEN}')
+            .replace('ACCEPT_TAB', f'ACCEPT_TAB_{_RUN_TOKEN}')
+            .replace('accept_parent', f'accept_parent_{_RUN_TOKEN.lower()}')
+            .replace('accept_tab', f'accept_tab_{_RUN_TOKEN.lower()}')
+        )
+    return value
 
 
 def build_entity(
@@ -53,7 +84,7 @@ def build_entity(
     dqn: str,
     summary: str,
     **extra: Any,
-) -> CatalogEntityItem:
+) -> Any:
     data: dict[str, Any] = {
         'entity_type': entity_type,
         'graph_key': graph_key,
@@ -68,7 +99,7 @@ def build_entity(
     return CatalogEntityItem.model_validate(data)
 
 
-def build_six_entities() -> list[CatalogEntityItem]:
+def build_six_entities() -> list[Any]:
     return [
         build_entity(
             'Database', 'DATABASE::FE::ORCL', 'ORCL', 'orcl', 'ORCL', 'Oracle database'
@@ -113,13 +144,13 @@ def build_six_entities() -> list[CatalogEntityItem]:
 
 def build_extra_table(
     key: str = 'TABLE::FE::ORCL.HR.DEPARTMENTS',
-) -> CatalogEntityItem:
+) -> Any:
     body = key.split('::', 2)[-1]
     name = body.split('.')[-1]
     return build_entity('Table', key, name, name.lower(), body, f'Table {name}')
 
 
-def build_doc_entity() -> CatalogEntityItem:
+def build_doc_entity() -> Any:
     return build_entity(
         'DictionaryDocument',
         'DOC::FE::HR.EMPLOYEES',
@@ -139,7 +170,7 @@ def build_edge(
     target_entity_type: str,
     fact: str,
     **extra: Any,
-) -> CatalogEdgeItem:
+) -> Any:
     data: dict[str, Any] = {
         'edge_type': edge_type,
         'edge_key': edge_key,
@@ -154,7 +185,7 @@ def build_edge(
     return CatalogEdgeItem.model_validate(data)
 
 
-def build_structural_and_fk_edges() -> list[CatalogEdgeItem]:
+def build_structural_and_fk_edges() -> list[Any]:
     return [
         build_edge(
             'Contains',
@@ -218,11 +249,12 @@ def build_accept_tab_request(
     dry_run: bool = False,
     batch_id: str = ACCEPT_TAB_BATCH,
     group_id: str = GROUP,
-) -> UpsertCatalogBatchRequest:
+) -> Any:
     payload = json.loads(ACCEPT_TAB_FIXTURE.read_text(encoding='utf-8'))
     assert payload['batch_id'] == ACCEPT_TAB_BATCH
     assert payload['identity_schema_version'] == IDENTITY_SCHEMA_VERSION
     assert payload['system_key'] == SYSTEM_KEY
+    payload = _scope_accept_fixture(payload)
     return UpsertCatalogBatchRequest(
         identity_schema_version=IDENTITY_SCHEMA_VERSION,
         system_key=SYSTEM_KEY,
@@ -230,17 +262,32 @@ def build_accept_tab_request(
         batch_id=batch_id,
         entities=[CatalogEntityItem.model_validate(item) for item in payload['entities']],
         edges=[CatalogEdgeItem.model_validate(item) for item in payload['edges']],
+        catalog_sha256='a' * 64,
         provenance=NestedProvenancePayload(
             sources=[
                 CatalogSourceItem.model_validate(item)
                 for item in payload['provenance']['sources']
             ],
-            entity_targets=[
-                CatalogProvenanceEntityTarget.model_validate(item)
+            evidence_links=[
+                CatalogEvidenceLink(
+                    source_key=payload['provenance']['sources'][0]['source_key'],
+                    entity_target=CatalogEvidenceEntityTarget.model_validate(item),
+                    evidence_kind='ddl',
+                    extractor_name='accept-tab-fixture',
+                    extractor_version='1.0.0',
+                    confidence=1.0,
+                )
                 for item in payload['provenance']['entity_targets']
-            ],
-            edge_targets=[
-                CatalogProvenanceEdgeTarget.model_validate(item)
+            ]
+            + [
+                CatalogEvidenceLink(
+                    source_key=payload['provenance']['sources'][0]['source_key'],
+                    edge_target=CatalogEvidenceEdgeTarget.model_validate(item),
+                    evidence_kind='ddl',
+                    extractor_name='accept-tab-fixture',
+                    extractor_version='1.0.0',
+                    confidence=1.0,
+                )
                 for item in payload['provenance']['edge_targets']
             ],
         ),
@@ -249,12 +296,12 @@ def build_accept_tab_request(
 
 
 def build_upsert_entities_request(
-    entities: list[CatalogEntityItem],
+    entities: list[Any],
     *,
     batch_id: str = BATCH,
     dry_run: bool = False,
     group_id: str = GROUP,
-) -> UpsertTypedEntitiesRequest:
+) -> Any:
     return UpsertTypedEntitiesRequest(
         identity_schema_version=IDENTITY_SCHEMA_VERSION,
         system_key=SYSTEM_KEY,
@@ -267,12 +314,12 @@ def build_upsert_entities_request(
 
 
 def build_upsert_edges_request(
-    edges: list[CatalogEdgeItem],
+    edges: list[Any],
     *,
     batch_id: str = EDGE_BATCH,
     dry_run: bool = False,
     group_id: str = GROUP,
-) -> UpsertTypedEdgesRequest:
+) -> Any:
     return UpsertTypedEdgesRequest(
         identity_schema_version=IDENTITY_SCHEMA_VERSION,
         system_key=SYSTEM_KEY,
@@ -286,10 +333,10 @@ def build_upsert_edges_request(
 
 
 def build_resolve_entities_request(
-    refs: list[ResolveEntityRef],
+    refs: list[Any],
     *,
     group_id: str = GROUP,
-) -> ResolveTypedEntitiesRequest:
+) -> Any:
     return ResolveTypedEntitiesRequest(
         identity_schema_version=IDENTITY_SCHEMA_VERSION,
         system_key=SYSTEM_KEY,
@@ -301,10 +348,10 @@ def build_resolve_entities_request(
 def build_verify_batch_request(
     *,
     batch_id: str = BATCH,
-    entities: list[VerifyEntityRef] | None = None,
-    edges: list[VerifyEdgeRef] | None = None,
+    entities: list[Any] | None = None,
+    edges: list[Any] | None = None,
     group_id: str = GROUP,
-) -> VerifyCatalogBatchRequest:
+) -> Any:
     return VerifyCatalogBatchRequest(
         identity_schema_version=IDENTITY_SCHEMA_VERSION,
         system_key=SYSTEM_KEY,
@@ -317,12 +364,12 @@ def build_verify_batch_request(
 
 def build_provenance_request(
     *,
-    sources: list[CatalogSourceItem] | None = None,
-    entity_targets: list[CatalogProvenanceEntityTarget] | None = None,
-    edge_targets: list[CatalogProvenanceEdgeTarget] | None = None,
+    sources: list[Any] | None = None,
+    entity_targets: list[Any] | None = None,
+    edge_targets: list[Any] | None = None,
     batch_id: str = 'prov-batch-001',
     group_id: str = GROUP,
-) -> UpsertProvenanceRequest:
+) -> Any:
     return UpsertProvenanceRequest(
         identity_schema_version=IDENTITY_SCHEMA_VERSION,
         system_key=SYSTEM_KEY,
@@ -351,7 +398,7 @@ def build_provenance_request(
     )
 
 
-def build_conflicting_entity_pair() -> tuple[CatalogEntityItem, CatalogEntityItem]:
+def build_conflicting_entity_pair() -> tuple[Any, Any]:
     """Same deterministic identity, divergent raw/canonical/mutable payload."""
     winner = build_entity(
         'Table',
