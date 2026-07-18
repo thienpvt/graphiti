@@ -7,9 +7,12 @@ historical a67789a pointer preservation.
 
 from __future__ import annotations
 
+import importlib
 import re
 import sys
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -18,7 +21,13 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-import catalog_phase5_gate_runner as gate  # noqa: E402
+gate: ModuleType = importlib.import_module('catalog_phase5_gate_runner')
+
+
+def _runner_path() -> Path:
+    path = getattr(gate, '__file__', None)
+    assert isinstance(path, str) and path
+    return Path(path)
 
 
 def _root() -> Path:
@@ -193,7 +202,7 @@ def test_canary_executed_always_false():
         root,
     )
     assert safety['canary_executed'] is False
-    runner = Path(gate.__file__).read_text(encoding='utf-8')
+    runner = _runner_path().read_text(encoding='utf-8')
     # No argv that would shell the canary script.
     assert "scripts/run_catalog_canary_batch.py'" not in runner.replace('"', "'") or (
         'must not shell' in runner or 'never' in runner.lower()
@@ -313,7 +322,7 @@ def test_atomic_write_json_raises_when_replace_always_permission_error(
     dest = tmp_path / 'ledger.json'
     original = '{"keep": true}\n'
     dest.write_text(original, encoding='utf-8')
-    monkeypatch.setattr(gate.time, 'sleep', lambda _s: None)
+    monkeypatch.setattr(gate.time, 'sleep', lambda *_a: None)
     monkeypatch.setattr(
         gate.os,
         'replace',
@@ -332,7 +341,7 @@ def test_run_gate_wave0_ready_false(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     root = _root()
     ledger_path = tmp_path / '05-GATE-RESULTS.json'
 
-    def fake_run_argv(argv, root_arg, timeout=1800):  # noqa: ARG001
+    def fake_run_argv(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         return {
             'exit_code': 0,
             'stdout': '1 passed',
@@ -457,13 +466,13 @@ def test_scan_detects_synthetic_v2_param_without_source_literal():
     )
     assert assign_re.search(synthetic)
     # Runner itself must not contain contiguous group_id='<forbidden>'.
-    runner = Path(gate.__file__).read_text(encoding='utf-8')
+    runner = _runner_path().read_text(encoding='utf-8')
     contiguous = 'group_id=' + _q + gate.FORBIDDEN_GROUP + _q
     assert contiguous not in runner
 
 
 def test_no_neo4j_driver_import_in_runner():
-    runner = Path(gate.__file__).read_text(encoding='utf-8')
+    runner = _runner_path().read_text(encoding='utf-8')
     for line in runner.splitlines():
         if line.startswith('import ') or line.startswith('from '):
             assert not ('neo4j' in line.lower() and 'driver' in line.lower())
