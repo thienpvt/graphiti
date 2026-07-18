@@ -13,6 +13,10 @@ from typing import Any
 
 from models.catalog_common import IDENTITY_SCHEMA_VERSION, CatalogErrorCode
 
+# Single authority for version-tagged request hashing (HASH-07).
+CANONICALIZATION_VERSION = 'catalog-canonical-v1'
+CATALOG_SCHEMA_VERSION = 'catalog-schema-v1'
+
 
 def catalog_entity_uuid(
     namespace: uuid.UUID, group_id: str, entity_type: str, graph_key: str
@@ -201,3 +205,94 @@ def coalesce_byte_identical_evidence_links(links: list[Any]) -> list[Any]:
         if digest not in seen:
             seen[digest] = link
     return sorted(seen.values(), key=evidence_link_key)
+
+
+def entity_canonical_payload(item: Any) -> dict[str, Any]:
+    """Mutable canonical fields for entity content_sha256 (identity excluded)."""
+    source_refs = getattr(item, 'source_refs', None)
+    return {
+        'entity_type': item.entity_type,
+        'graph_key': item.graph_key,
+        'name_raw': item.name_raw,
+        'name_canonical': item.name_canonical,
+        'database_qualified_name': item.database_qualified_name,
+        'summary': item.summary,
+        'attributes': item.attributes,
+        'source_refs': (
+            [ref.model_dump(mode='json') for ref in source_refs]
+            if source_refs is not None
+            else None
+        ),
+        'confidence': item.confidence,
+    }
+
+
+def edge_canonical_payload(item: Any) -> dict[str, Any]:
+    """Mutable canonical fields for edge content_sha256 (identity excluded)."""
+    return {
+        'edge_type': item.edge_type,
+        'edge_key': item.edge_key,
+        'source_graph_key': item.source_graph_key,
+        'source_entity_type': item.source_entity_type,
+        'target_graph_key': item.target_graph_key,
+        'target_entity_type': item.target_entity_type,
+        'fact': item.fact,
+        'evidence': item.evidence,
+        'attributes': item.attributes,
+        'confidence': item.confidence,
+    }
+
+
+def source_canonical_payload(item: Any) -> dict[str, Any]:
+    """Mutable canonical fields for source content_sha256 (identity excluded)."""
+    return {
+        'source_key': item.source_key,
+        'reference_time': item.reference_time,
+        'attributes': item.attributes,
+        'metadata': item.metadata,
+    }
+
+
+def batch_request_canonical_payload(request: Any) -> dict[str, Any]:
+    """Full-domain versioned batch request payload for server request_sha256.
+
+    Included (HASH-02/A2): canonicalization_version, identity_schema_version,
+    system_key, group_id, batch_id, catalog_sha256, sorted entities/edges/sources/
+    evidence_links (post byte-identical coalesce for evidence).
+
+    Excluded transport/execution fields (HASH-03): dry_run, caller request_sha256,
+    generated timestamps, retry counters, plan tokens, correlation IDs.
+    """
+    provenance = getattr(request, 'provenance', None)
+    sources = list(getattr(provenance, 'sources', None) or [])
+    evidence_links = list(getattr(provenance, 'evidence_links', None) or [])
+    coalesced_links = coalesce_byte_identical_evidence_links(evidence_links)
+    return {
+        'canonicalization_version': CANONICALIZATION_VERSION,
+        'identity_schema_version': request.identity_schema_version,
+        'system_key': request.system_key,
+        'group_id': request.group_id,
+        'batch_id': request.batch_id,
+        'catalog_sha256': request.catalog_sha256,
+        'entities': sorted(
+            (entity_canonical_payload(item) for item in request.entities),
+            key=lambda d: (d['entity_type'], d['graph_key']),
+        ),
+        'edges': sorted(
+            (edge_canonical_payload(item) for item in request.edges),
+            key=lambda d: (d['edge_type'], d['edge_key']),
+        ),
+        'sources': sorted(
+            (source_canonical_payload(item) for item in sources),
+            key=lambda d: d['source_key'],
+        ),
+        'evidence_links': [
+            evidence_canonical_payload(link)
+            for link in sorted(coalesced_links, key=evidence_link_key)
+        ],
+    }
+
+
+def batch_request_sha256(request: Any) -> str:
+    """Server-authoritative request digest from the pure full-domain recipe."""
+    return canonical_sha256(batch_request_canonical_payload(request))

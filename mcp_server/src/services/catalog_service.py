@@ -15,9 +15,8 @@ from typing import Any
 
 from config.schema import CatalogConfig
 from models.catalog_batch import GetCatalogIngestStatusRequest, UpsertCatalogBatchRequest
-from models.catalog_common import CatalogErrorCode
+from models.catalog_common import IDENTITY_SCHEMA_VERSION, CatalogErrorCode
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest
-from models.catalog_topology import validate_edge_endpoint_pair
 from models.catalog_entities import (
     CatalogEntityItem,
     ResolveEntityRef,
@@ -38,14 +37,29 @@ from models.catalog_responses import (
     VerifyEdgeSection,
     VerifyEntitySection,
 )
+from models.catalog_topology import validate_edge_endpoint_pair
 from services.catalog_identity import (
+    CANONICALIZATION_VERSION,
     assert_optional_client_hash,
+    batch_request_canonical_payload,
     canonical_sha256,
     catalog_batch_uuid,
     catalog_edge_uuid,
     catalog_entity_uuid,
     catalog_mentions_uuid,
     catalog_source_uuid,
+)
+from services.catalog_identity import (
+    batch_request_sha256 as pure_batch_request_sha256,
+)
+from services.catalog_identity import (
+    edge_canonical_payload as pure_edge_canonical_payload,
+)
+from services.catalog_identity import (
+    entity_canonical_payload as pure_entity_canonical_payload,
+)
+from services.catalog_identity import (
+    source_canonical_payload as pure_source_canonical_payload,
 )
 from services.catalog_store import CatalogNeo4jStore, CatalogStoreError
 
@@ -124,37 +138,12 @@ class CatalogService:
     @staticmethod
     def entity_canonical_payload(item: CatalogEntityItem) -> dict[str, Any]:
         """Mutable canonical fields used for content_sha256 (identity excluded)."""
-        return {
-            'entity_type': item.entity_type,
-            'graph_key': item.graph_key,
-            'name_raw': item.name_raw,
-            'name_canonical': item.name_canonical,
-            'database_qualified_name': item.database_qualified_name,
-            'summary': item.summary,
-            'attributes': item.attributes,
-            'source_refs': (
-                [ref.model_dump(mode='json') for ref in item.source_refs]
-                if item.source_refs is not None
-                else None
-            ),
-            'confidence': item.confidence,
-        }
+        return pure_entity_canonical_payload(item)
 
     @staticmethod
     def edge_canonical_payload(item: CatalogEdgeItem) -> dict[str, Any]:
         """Mutable canonical fields used for edge content_sha256 (identity excluded)."""
-        return {
-            'edge_type': item.edge_type,
-            'edge_key': item.edge_key,
-            'source_graph_key': item.source_graph_key,
-            'source_entity_type': item.source_entity_type,
-            'target_graph_key': item.target_graph_key,
-            'target_entity_type': item.target_entity_type,
-            'fact': item.fact,
-            'evidence': item.evidence,
-            'attributes': item.attributes,
-            'confidence': item.confidence,
-        }
+        return pure_edge_canonical_payload(item)
 
     def _namespace(self) -> uuid.UUID | None:
         ns = self.catalog_config.uuid_namespace
@@ -737,9 +726,7 @@ class CatalogService:
                             graph_key=prep.item.graph_key,
                             entity_type=prep.item.entity_type,
                             error_code=row_err,
-                            error_message=(
-                                f'entity under-lock conflict: {row_err.value}'
-                            ),
+                            error_message=(f'entity under-lock conflict: {row_err.value}'),
                         )
                         for ci in prep.coalesced_indices:
                             written[ci] = CatalogItemResult(
@@ -749,9 +736,7 @@ class CatalogService:
                                 graph_key=request.entities[ci].graph_key,
                                 entity_type=request.entities[ci].entity_type,
                                 error_code=row_err,
-                                error_message=(
-                                    f'entity under-lock conflict: {row_err.value}'
-                                ),
+                                error_message=(f'entity under-lock conflict: {row_err.value}'),
                             )
                         continue
                     status = self._write_status_from_row(row, prep.projected_status)
@@ -2667,12 +2652,7 @@ class CatalogService:
     @staticmethod
     def source_canonical_payload(item: CatalogSourceItem) -> dict[str, Any]:
         """Mutable canonical fields for source content_sha256 (identity excluded)."""
-        return {
-            'source_key': item.source_key,
-            'reference_time': item.reference_time,
-            'attributes': item.attributes,
-            'metadata': item.metadata,
-        }
+        return pure_source_canonical_payload(item)
 
     def _provenance_gate_errors(
         self,
@@ -3593,36 +3573,26 @@ class CatalogService:
 
     @staticmethod
     def _batch_canonical_payload(request: UpsertCatalogBatchRequest) -> dict[str, Any]:
-        """Canonical nested request without caller hashes or execution flags."""
-        provenance = request.provenance
-        return {
-            'group_id': request.group_id,
-            'batch_id': request.batch_id,
-            'entities': [
-                CatalogService.entity_canonical_payload(item) for item in request.entities
-            ],
-            'edges': [CatalogService.edge_canonical_payload(item) for item in request.edges],
-            'provenance': (
-                {
-                    'sources': [
-                        CatalogService.source_canonical_payload(item) for item in provenance.sources
-                    ],
-                    'entity_targets': [
-                        target.model_dump(mode='json') for target in provenance.entity_targets
-                    ],
-                    'edge_targets': [
-                        target.model_dump(mode='json') for target in provenance.edge_targets
-                    ],
-                }
-                if provenance is not None
-                else None
-            ),
-        }
+        """Delegate to pure full-domain recipe (no parallel legacy Cartesian path)."""
+        return batch_request_canonical_payload(request)
 
     @staticmethod
     def batch_request_sha256(request: UpsertCatalogBatchRequest) -> str:
         """Server-authoritative hash for batch-idempotency checks."""
-        return canonical_sha256(CatalogService._batch_canonical_payload(request))
+        return pure_batch_request_sha256(request)
+
+    @staticmethod
+    def _batch_hash_echo_fields(
+        request: UpsertCatalogBatchRequest,
+        server_hash: str | None = None,
+    ) -> dict[str, Any]:
+        """Authoritative identity/hash fields echoed on every derivable batch response."""
+        return {
+            'identity_schema_version': IDENTITY_SCHEMA_VERSION,
+            'canonicalization_version': CANONICALIZATION_VERSION,
+            'request_sha256': server_hash,
+            'catalog_sha256': request.catalog_sha256,
+        }
 
     def _batch_gate_error(
         self,
@@ -3636,6 +3606,9 @@ class CatalogService:
         provider = getattr(getattr(client, 'driver', None), 'provider', None)
         if getattr(provider, 'value', provider) != 'neo4j':
             return CatalogErrorCode.backend_unavailable, 'catalog writes require Neo4j backend'
+        provenance_link_count = (
+            len(request.provenance.evidence_links) if request.provenance is not None else 0
+        )
         limits = (
             (
                 len(request.entities),
@@ -3644,15 +3617,7 @@ class CatalogService:
             ),
             (len(request.edges), self.catalog_config.max_edges_per_batch, 'edges'),
             (
-                (
-                    len(request.provenance.sources)
-                    * (
-                        len(request.provenance.entity_targets)
-                        + len(request.provenance.edge_targets)
-                    )
-                    if request.provenance is not None
-                    else 0
-                ),
+                provenance_link_count,
                 self.catalog_config.max_provenance_links_per_batch,
                 'provenance links',
             ),
@@ -3731,10 +3696,13 @@ class CatalogService:
                 failed=max(len(request.entities) + len(request.edges), 1),
                 error_code=code,
                 error_message=message,
+                identity_schema_version=IDENTITY_SCHEMA_VERSION,
+                catalog_sha256=request.catalog_sha256,
             )
         assert namespace is not None and batch_uuid is not None
 
         server_hash = self.batch_request_sha256(request)
+        hash_echo = self._batch_hash_echo_fields(request, server_hash)
         try:
             assert_optional_client_hash(request.request_sha256, server_hash)
         except ValueError as exc:
@@ -3747,6 +3715,7 @@ class CatalogService:
                 failed=max(len(request.entities) + len(request.edges), 1),
                 error_code=CatalogErrorCode.content_hash_mismatch,
                 error_message=str(exc),
+                **hash_echo,
             )
         effective_hash = server_hash
 
@@ -3771,6 +3740,7 @@ class CatalogService:
                 failed=max(len(request.entities) + len(request.edges), 1),
                 error_code=CatalogErrorCode.internal_error,
                 error_message='batch status pre-read failed',
+                **hash_echo,
             )
         if prior_status is not None and prior_status.get('status') == 'committed':
             if prior_status.get('request_sha256') == effective_hash:
@@ -3785,6 +3755,7 @@ class CatalogService:
                     provenance_unchanged=(
                         len(request.provenance.sources) if request.provenance is not None else 0
                     ),
+                    **hash_echo,
                 )
             return CatalogBatchWriteResponse(
                 group_id=request.group_id,
@@ -3795,6 +3766,7 @@ class CatalogService:
                 failed=max(len(request.entities) + len(request.edges), 1),
                 error_code=CatalogErrorCode.batch_conflict,
                 error_message='committed batch_id has different request_sha256',
+                **hash_echo,
             )
 
         entity_prepared: list[_PreparedEntity] = []
@@ -4114,95 +4086,135 @@ class CatalogService:
         provenance = request.provenance
         if provenance is not None:
             invalid_uuids = {result.uuid for result in errors if result.uuid}
-            provenance_entity_uuids: list[str] = []
-            provenance_edge_uuids: list[str] = []
+            # Per-source target sets derived from explicit evidence_links (non-Cartesian).
+            source_entity_targets: dict[str, list[tuple[str, str, str]]] = {}
+            source_edge_targets: dict[str, list[tuple[str, str, str]]] = {}
+            for link in provenance.evidence_links:
+                if link.entity_target is not None:
+                    source_entity_targets.setdefault(link.source_key, []).append(
+                        (
+                            link.entity_target.entity_type,
+                            link.entity_target.graph_key,
+                            catalog_entity_uuid(
+                                namespace,
+                                request.group_id,
+                                link.entity_target.entity_type,
+                                link.entity_target.graph_key,
+                            ),
+                        )
+                    )
+                elif link.edge_target is not None:
+                    source_edge_targets.setdefault(link.source_key, []).append(
+                        (
+                            link.edge_target.edge_type,
+                            link.edge_target.edge_key,
+                            catalog_edge_uuid(
+                                namespace,
+                                request.group_id,
+                                link.edge_target.edge_type,
+                                link.edge_target.edge_key,
+                            ),
+                        )
+                    )
 
-            for target in provenance.entity_targets:
-                target_uuid = catalog_entity_uuid(
-                    namespace, request.group_id, target.entity_type, target.graph_key
-                )
-                row = None
-                code: str | None = None
-                if target_uuid not in invalid_uuids:
-                    if (target.entity_type, target.graph_key) in request_entity_uuids:
-                        row = {'uuid': target_uuid}
+            # Resolve unique entity/edge targets referenced by evidence_links.
+            resolved_entity_ok: set[str] = set()
+            resolved_edge_ok: set[str] = set()
+            seen_entity_targets: set[tuple[str, str]] = set()
+            seen_edge_targets: set[tuple[str, str]] = set()
+            for targets in source_entity_targets.values():
+                for entity_type, graph_key, target_uuid in targets:
+                    key = (entity_type, graph_key)
+                    if key in seen_entity_targets:
+                        continue
+                    seen_entity_targets.add(key)
+                    row = None
+                    code: str | None = None
+                    if target_uuid not in invalid_uuids:
+                        if (entity_type, graph_key) in request_entity_uuids:
+                            row = {'uuid': target_uuid}
+                        else:
+                            try:
+                                code, row = await self._store.resolve_endpoint_typed(
+                                    client.driver,
+                                    group_id=request.group_id,
+                                    graph_key=graph_key,
+                                    entity_type=entity_type,
+                                    expected_uuid=target_uuid,
+                                )
+                            except Exception as exc:
+                                code = 'internal_error'
+                                logger.error(
+                                    'catalog batch provenance_target_read_failed batch_id=%s kind=entity reason=%s',
+                                    request.batch_id,
+                                    type(exc).__name__,
+                                )
+                    if code is not None or row is None or str(row.get('uuid')) != target_uuid:
+                        errors.append(
+                            CatalogItemResult(
+                                index=len(request.entities) + len(request.edges),
+                                status='error',
+                                uuid=target_uuid,
+                                graph_key=graph_key,
+                                entity_type=entity_type,
+                                error_code=CatalogErrorCode.provenance_target_missing,
+                                error_message=(
+                                    'provenance entity target missing or mistyped: '
+                                    f'{code or "missing"}'
+                                ),
+                                details={'kind': 'provenance'},
+                            )
+                        )
+                    else:
+                        resolved_entity_ok.add(target_uuid)
+
+            for targets in source_edge_targets.values():
+                for edge_type, edge_key, target_uuid in targets:
+                    key = (edge_type, edge_key)
+                    if key in seen_edge_targets:
+                        continue
+                    seen_edge_targets.add(key)
+                    request_edge = edge_by_uuid.get(target_uuid)
+                    if target_uuid in invalid_uuids:
+                        row = None
+                    elif request_edge is not None:
+                        row = {
+                            'uuid': target_uuid,
+                            'name': edge_type,
+                            'edge_key': edge_key,
+                        }
                     else:
                         try:
-                            code, row = await self._store.resolve_endpoint_typed(
-                                client.driver,
-                                group_id=request.group_id,
-                                graph_key=target.graph_key,
-                                entity_type=target.entity_type,
-                                expected_uuid=target_uuid,
+                            row = await self._store.get_edge_by_uuid(
+                                client.driver, uuid=target_uuid, group_id=request.group_id
                             )
                         except Exception as exc:
-                            code = 'internal_error'
+                            row = None
                             logger.error(
-                                'catalog batch provenance_target_read_failed batch_id=%s kind=entity reason=%s',
+                                'catalog batch provenance_target_read_failed batch_id=%s kind=edge reason=%s',
                                 request.batch_id,
                                 type(exc).__name__,
                             )
-                if code is not None or row is None or str(row.get('uuid')) != target_uuid:
-                    errors.append(
-                        CatalogItemResult(
-                            index=len(request.entities) + len(request.edges),
-                            status='error',
-                            uuid=target_uuid,
-                            graph_key=target.graph_key,
-                            entity_type=target.entity_type,
-                            error_code=CatalogErrorCode.provenance_target_missing,
-                            error_message=f'provenance entity target missing or mistyped: {code or "missing"}',
-                            details={'kind': 'provenance'},
+                    if (
+                        row is None
+                        or str(row.get('uuid') or '') != target_uuid
+                        or row.get('name') not in (None, edge_type)
+                        or row.get('edge_key') not in (None, edge_key)
+                    ):
+                        errors.append(
+                            CatalogItemResult(
+                                index=len(request.entities) + len(request.edges),
+                                status='error',
+                                uuid=target_uuid,
+                                edge_key=edge_key,
+                                edge_type=edge_type,
+                                error_code=CatalogErrorCode.provenance_target_missing,
+                                error_message='provenance edge target missing or mistyped',
+                                details={'kind': 'provenance'},
+                            )
                         )
-                    )
-                else:
-                    provenance_entity_uuids.append(target_uuid)
-
-            for target in provenance.edge_targets:
-                target_uuid = catalog_edge_uuid(
-                    namespace, request.group_id, target.edge_type, target.edge_key
-                )
-                request_edge = edge_by_uuid.get(target_uuid)
-                if target_uuid in invalid_uuids:
-                    row = None
-                elif request_edge is not None:
-                    row = {
-                        'uuid': target_uuid,
-                        'name': target.edge_type,
-                        'edge_key': target.edge_key,
-                    }
-                else:
-                    try:
-                        row = await self._store.get_edge_by_uuid(
-                            client.driver, uuid=target_uuid, group_id=request.group_id
-                        )
-                    except Exception as exc:
-                        row = None
-                        logger.error(
-                            'catalog batch provenance_target_read_failed batch_id=%s kind=edge reason=%s',
-                            request.batch_id,
-                            type(exc).__name__,
-                        )
-                if (
-                    row is None
-                    or str(row.get('uuid') or '') != target_uuid
-                    or row.get('name') not in (None, target.edge_type)
-                    or row.get('edge_key') not in (None, target.edge_key)
-                ):
-                    errors.append(
-                        CatalogItemResult(
-                            index=len(request.entities) + len(request.edges),
-                            status='error',
-                            uuid=target_uuid,
-                            edge_key=target.edge_key,
-                            edge_type=target.edge_type,
-                            error_code=CatalogErrorCode.provenance_target_missing,
-                            error_message='provenance edge target missing or mistyped',
-                            details={'kind': 'provenance'},
-                        )
-                    )
-                else:
-                    provenance_edge_uuids.append(target_uuid)
+                    else:
+                        resolved_edge_ok.add(target_uuid)
 
             for index, source in enumerate(provenance.sources):
                 result_index = len(request.entities) + len(request.edges) + index
@@ -4315,6 +4327,19 @@ class CatalogService:
                         )
                     )
                     continue
+                entity_uuids = [
+                    uuid_
+                    for _et, _gk, uuid_ in source_entity_targets.get(source.source_key, [])
+                    if uuid_ in resolved_entity_ok
+                ]
+                # Stable unique order
+                entity_uuids = list(dict.fromkeys(entity_uuids))
+                edge_uuids = [
+                    uuid_
+                    for _et, _ek, uuid_ in source_edge_targets.get(source.source_key, [])
+                    if uuid_ in resolved_edge_ok
+                ]
+                edge_uuids = list(dict.fromkeys(edge_uuids))
                 prep = _PreparedSource(
                     index=index,
                     item=source,
@@ -4335,8 +4360,8 @@ class CatalogService:
                             'unchanged' if existing.get('content_sha256') == digest else 'updated'
                         )
                     ),
-                    entity_uuids=list(provenance_entity_uuids),
-                    edge_uuids=list(provenance_edge_uuids),
+                    entity_uuids=entity_uuids,
+                    edge_uuids=edge_uuids,
                 )
                 prep.mentions_uuids = [
                     catalog_mentions_uuid(namespace, request.group_id, source_uuid, entity_uuid)
@@ -4429,6 +4454,7 @@ class CatalogService:
                     else errors[0].error_code
                 ),
                 error_message='batch preflight failed',
+                **hash_echo,
             )
 
         if request.dry_run:
@@ -4486,6 +4512,7 @@ class CatalogService:
                 provenance_unchanged=sum(
                     result.status == 'unchanged' for result in provenance_results
                 ),
+                **hash_echo,
             )
 
         entity_to_write = [prep for prep in entity_prepared if prep.projected_status != 'unchanged']
@@ -4516,6 +4543,7 @@ class CatalogService:
                 failed=max(len(request.entities) + len(request.edges), 1),
                 error_code=CatalogErrorCode.embedding_failed,
                 error_message='embedding generation failed',
+                **hash_echo,
             )
 
         try:
@@ -4534,6 +4562,7 @@ class CatalogService:
                 failed=max(len(request.entities) + len(request.edges), 1),
                 error_code=CatalogErrorCode.neo4j_transaction_failed,
                 error_message='catalog schema initialization failed',
+                **hash_echo,
             )
 
         request_ts = datetime.now(timezone.utc)
@@ -4799,6 +4828,7 @@ class CatalogService:
                     entity_unchanged=len(request.entities),
                     edge_unchanged=len(request.edges),
                     provenance_unchanged=len(provenance_sources),
+                    **hash_echo,
                 )
             return CatalogBatchWriteResponse(
                 group_id=request.group_id,
@@ -4808,6 +4838,7 @@ class CatalogService:
                 failed=max(len(request.entities) + len(request.edges) + len(provenance_sources), 1),
                 error_code=CatalogErrorCode.batch_conflict,
                 error_message='batch_id has different request_sha256',
+                **hash_echo,
             )
         except self._EntityInvariantRace as exc:
             logger.error(
@@ -4825,6 +4856,7 @@ class CatalogService:
                 rolled_back=len(entity_results) + len(edge_results) + len(provenance_results),
                 error_code=exc.code,
                 error_message=f'entity under-lock conflict: {exc.code.value}',
+                **hash_echo,
             )
         except self._ProvenanceInvariantRace as exc:
             logger.error(
@@ -4842,6 +4874,7 @@ class CatalogService:
                 rolled_back=len(entity_results) + len(edge_results) + len(provenance_results),
                 error_code=exc.code,
                 error_message='provenance invariant changed in write transaction',
+                **hash_echo,
             )
         except Exception as exc:
             logger.error(
@@ -4862,6 +4895,7 @@ class CatalogService:
                 rolled_back=len(entity_results) + len(edge_results) + len(provenance_results),
                 error_code=CatalogErrorCode.neo4j_transaction_failed,
                 error_message='neo4j transaction failed',
+                **hash_echo,
             )
 
         results = sorted(
@@ -4883,6 +4917,7 @@ class CatalogService:
             provenance_created=sum(result.status == 'created' for result in provenance_results),
             provenance_updated=sum(result.status == 'updated' for result in provenance_results),
             provenance_unchanged=sum(result.status == 'unchanged' for result in provenance_results),
+            **hash_echo,
         )
         logger.info(
             'catalog upsert_catalog_batch committed batch_id=%s entities=%s edges=%s provenance=%s',

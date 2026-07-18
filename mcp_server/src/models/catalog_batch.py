@@ -83,7 +83,7 @@ class UpsertCatalogBatchRequest(CatalogStrictModel):
     edges: list[CatalogEdgeItem] = Field(default_factory=list, max_length=HARD_MAX_EDGES_PER_BATCH)
     provenance: NestedProvenancePayload | None = None
     request_sha256: str | None = None
-    catalog_sha256: str | None = None
+    catalog_sha256: str = Field(..., min_length=64, max_length=64)
     dry_run: bool = False
     atomic: StrictTrue = True
 
@@ -95,13 +95,21 @@ class UpsertCatalogBatchRequest(CatalogStrictModel):
         _validate_group_id(v)
         return v
 
-    @field_validator('request_sha256', 'catalog_sha256')
+    @field_validator('request_sha256')
     @classmethod
-    def _sha256_format(cls, v: str | None) -> str | None:
+    def _request_sha256_format(cls, v: str | None) -> str | None:
         if v is None:
             return v
         if not re.fullmatch(SHA256_HEX_RE, v):
             raise ValueError('hash must be 64 lowercase hex characters')
+        return v
+
+    @field_validator('catalog_sha256')
+    @classmethod
+    def _catalog_sha256_format(cls, v: str) -> str:
+        # HASH-01: required lowercase 64-hex including dry-run; None/wrong case/length fail.
+        if not isinstance(v, str) or not re.fullmatch(SHA256_HEX_RE, v):
+            raise ValueError('catalog_sha256 must be 64 lowercase hex characters')
         return v
 
     @model_validator(mode='after')

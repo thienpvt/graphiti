@@ -159,6 +159,11 @@ class CatalogBatchWriteResponse(BaseModel):
     dry_run: bool = False
     atomic: bool = True
     status: CatalogIngestStatus | None = None
+    # HASH-05 authoritative identity/hash echo (derivable after parse)
+    identity_schema_version: str | None = None
+    canonicalization_version: str | None = None
+    request_sha256: str | None = None
+    catalog_sha256: str | None = None
     results: list[CatalogItemResult] = Field(default_factory=list)
     entity_created: int = 0
     entity_updated: int = 0

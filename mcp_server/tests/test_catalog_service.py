@@ -2462,14 +2462,19 @@ async def test_batch_topology_disallowed_edge_skips_resolve_embed_write():
         provenance=None,
         dry_run=False,
         request_sha256=None,
+        catalog_sha256='a' * 64,
     )
 
     resp = await service.upsert_catalog_batch(client=client, request=request)
 
     assert resp.status == 'failed'
-    assert any(
-        r.error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed for r in (resp.results or [])
-    ) or resp.error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
+    assert (
+        any(
+            r.error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
+            for r in (resp.results or [])
+        )
+        or resp.error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
+    )
     service._store.resolve_endpoint_typed.assert_not_awaited()
     client.embedder.create.assert_not_awaited()
     client.embedder.create_batch.assert_not_awaited()
@@ -2718,6 +2723,7 @@ async def test_mcp_tool_upsert_typed_edges_registered():
 # Provenance service (Phase 2 PROV-01, PROV-03..06)
 # ---------------------------------------------------------------------------
 
+from models.catalog_evidence import CatalogEvidenceLink  # noqa: E402
 from models.catalog_provenance import (  # noqa: E402
     CatalogProvenanceEdgeTarget,
     CatalogProvenanceEntityTarget,
@@ -2725,6 +2731,22 @@ from models.catalog_provenance import (  # noqa: E402
     UpsertProvenanceRequest,
 )
 from services.catalog_identity import catalog_mentions_uuid, catalog_source_uuid  # noqa: E402
+
+
+def _evidence_link(**overrides) -> CatalogEvidenceLink:
+    data = {
+        'source_key': 'SRC::ddl.sql#employees',
+        'entity_target': {
+            'entity_type': 'Table',
+            'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+        },
+        'evidence_kind': 'ddl',
+        'extractor_name': 'oracle-ddl-extractor',
+        'extractor_version': '1.0.0',
+        'excerpt': 'CREATE TABLE employees',
+    }
+    data.update(overrides)
+    return CatalogEvidenceLink.model_validate(data)
 
 
 def _source(**overrides) -> CatalogSourceItem:
@@ -3341,6 +3363,7 @@ def _batch_request(
     provenance: NestedProvenancePayload | None = None,
     dry_run: bool = False,
     request_sha256: str | None = None,
+    catalog_sha256: str = 'a' * 64,
 ) -> UpsertCatalogBatchRequest:
     return UpsertCatalogBatchRequest(
         identity_schema_version='catalog-v2',
@@ -3352,6 +3375,7 @@ def _batch_request(
         provenance=provenance,
         dry_run=dry_run,
         request_sha256=request_sha256,
+        catalog_sha256=catalog_sha256,
     )
 
 
@@ -3506,9 +3530,12 @@ async def test_batch_dry_run_resolves_missing_provenance_target_before_side_effe
     service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
     provenance = NestedProvenancePayload(
         sources=[_source()],
-        entity_targets=[
-            CatalogProvenanceEntityTarget(
-                entity_type='Table', graph_key='TABLE::FE::ORCL.HR.MISSING'
+        evidence_links=[
+            _evidence_link(
+                entity_target={
+                    'entity_type': 'Table',
+                    'graph_key': 'TABLE::FE::ORCL.HR.MISSING',
+                }
             )
         ],
     )
@@ -3590,9 +3617,13 @@ async def test_batch_unchanged_provenance_link_read_failure_is_structured(read_n
     employee = _entity()
     provenance_kwargs = {
         'sources': [source],
-        'entity_targets': [
-            CatalogProvenanceEntityTarget(
-                entity_type=employee.entity_type, graph_key=employee.graph_key
+        'evidence_links': [
+            _evidence_link(
+                source_key=source.source_key,
+                entity_target={
+                    'entity_type': employee.entity_type,
+                    'graph_key': employee.graph_key,
+                },
             )
         ],
     }
@@ -3600,8 +3631,20 @@ async def test_batch_unchanged_provenance_link_read_failure_is_structured(read_n
         service._store.get_mentions_link = AsyncMock(side_effect=TimeoutError('timed out'))
     else:
         edge = _edge()
-        provenance_kwargs['edge_targets'] = [
-            CatalogProvenanceEdgeTarget(edge_type=edge.edge_type, edge_key=edge.edge_key)
+        provenance_kwargs['evidence_links'] = [
+            CatalogEvidenceLink.model_validate(
+                {
+                    'source_key': source.source_key,
+                    'edge_target': {
+                        'edge_type': edge.edge_type,
+                        'edge_key': edge.edge_key,
+                    },
+                    'evidence_kind': 'ddl',
+                    'extractor_name': 'oracle-ddl-extractor',
+                    'extractor_version': '1.0.0',
+                    'excerpt': 'fk evidence',
+                }
+            )
         ]
         service._store.get_edge_by_uuid = AsyncMock(
             side_effect=[
@@ -4011,10 +4054,13 @@ async def test_batch_atomic_cas_or_locked_link_drift_aborts_before_link_mutation
     )
     provenance = NestedProvenancePayload(
         sources=[source],
-        entity_targets=[
-            CatalogProvenanceEntityTarget(
-                entity_type=employee.entity_type,
-                graph_key=employee.graph_key,
+        evidence_links=[
+            _evidence_link(
+                source_key=source.source_key,
+                entity_target={
+                    'entity_type': employee.entity_type,
+                    'graph_key': employee.graph_key,
+                },
             )
         ],
     )
@@ -4113,10 +4159,19 @@ async def test_batch_writes_edges_before_provenance_append_in_same_transaction()
     )
     provenance = NestedProvenancePayload(
         sources=[_source()],
-        edge_targets=[
-            CatalogProvenanceEdgeTarget(
-                edge_type='ForeignKeyTo',
-                edge_key='FK::HR.EMPLOYEES->HR.DEPARTMENTS',
+        evidence_links=[
+            CatalogEvidenceLink.model_validate(
+                {
+                    'source_key': 'SRC::ddl.sql#employees',
+                    'edge_target': {
+                        'edge_type': 'ForeignKeyTo',
+                        'edge_key': 'FK::HR.EMPLOYEES->HR.DEPARTMENTS',
+                    },
+                    'evidence_kind': 'ddl',
+                    'extractor_name': 'oracle-ddl-extractor',
+                    'extractor_version': '1.0.0',
+                    'excerpt': 'fk evidence',
+                }
             )
         ],
     )
@@ -4268,7 +4323,7 @@ def _v2_request_payload(tool_name: str, **overrides):
     elif tool_name == 'get_catalog_ingest_status':
         payload = {'group_id': GROUP, 'batch_id': 'cont07-status'}
     elif tool_name == 'upsert_catalog_batch':
-        payload = {**base, 'entities': [_minimal_entity_dict()]}
+        payload = {**base, 'entities': [_minimal_entity_dict()], 'catalog_sha256': 'a' * 64}
     else:
         raise AssertionError(f'unknown tool {tool_name}')
     payload.update(overrides)
@@ -4929,10 +4984,18 @@ def _fastmcp_graph_key_mismatch_cases():
                 'entities': [],
                 'provenance': {
                     'sources': [_minimal_source_dict()],
-                    'entity_targets': [provenance_target_bo],
+                    'evidence_links': [
+                        {
+                            'source_key': 'DOC::HR.PDF#p12',
+                            'entity_target': provenance_target_bo,
+                            'evidence_kind': 'ddl',
+                            'extractor_name': 'oracle-ddl-extractor',
+                            'extractor_version': '1.0.0',
+                        }
+                    ],
                 },
             },
-            'provenance.entity_targets.0.graph_key',
+            'provenance.evidence_links.0.entity_target.graph_key',
         ),
     ]
 
@@ -5183,10 +5246,18 @@ def _gap_wr01_fastmcp_malformed_cases():
                 'entities': [],
                 'provenance': {
                     'sources': [_minimal_source_dict()],
-                    'entity_targets': [bad_target],
+                    'evidence_links': [
+                        {
+                            'source_key': 'DOC::HR.PDF#p12',
+                            'entity_target': bad_target,
+                            'evidence_kind': 'ddl',
+                            'extractor_name': 'oracle-ddl-extractor',
+                            'extractor_version': '1.0.0',
+                        }
+                    ],
                 },
             },
-            'provenance.entity_targets.0.graph_key',
+            'provenance.evidence_links.0.entity_target.graph_key',
             bad,
         ),
     ]
@@ -5639,6 +5710,7 @@ async def test_gap_cr01_combined_batch_rolls_back_and_returns_typed_conflict():
         group_id=GROUP,
         batch_id='batch-race',
         entities=[loser],
+        catalog_sha256='a' * 64,
     )
     resp = await service.upsert_catalog_batch(client=client, request=batch_req)
     assert resp.status == 'failed'
