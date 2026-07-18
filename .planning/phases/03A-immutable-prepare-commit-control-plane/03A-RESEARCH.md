@@ -335,7 +335,7 @@ Phase 3B later replaces step 8 body with domain co-commit ending COMMITTED.
 - `max_active_plans_per_group`
 - `prepared_chunk_bytes` (optional config; else constant)
 
-**Capabilities:** replace zeros; set `features.prepare_commit=True` only when tools registered **and** Phase 3A contract tests green (gate-controlled). Keep `manifests=False`.
+**Capabilities:** replace zeros in Wave 4 with tools registered but `features.prepare_commit=False`; set `True` only in Wave 5 **after** required live immutable-artifact proof + re-test on final HEAD (gate-controlled). Keep `manifests=False`.
 
 **MCP tools (additive):**
 
@@ -629,23 +629,22 @@ Never: `plan_token`, token digest (optional allow digest prefix for support — 
 | Shared preflight extraction risks upsert regression | Extract with characterization tests first; do not fork second authority |
 | Phase 3B domain write accidentally in 3A | Block merge; D-23 |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Discarded token error code mapping**  
-   - What we know: only four prepared_plan_* codes exist.  
-   - Recommendation: discarded → `prepared_plan_not_found` (less oracle); document. Consumed → `prepared_plan_already_consumed`.
+1. **Discarded token error code mapping** — **RESOLVED**
+   - Selected: discarded → `prepared_plan_not_found` (reduces token-validity oracle). Consumed → `prepared_plan_already_consumed`. Document in service error map and tests.
 
-2. **Re-prepare same plan_id while PREPARED**  
-   - Recommendation: always `prepared_plan_conflict`; never re-issue token.
+2. **Re-prepare same plan_id while PREPARED** — **RESOLVED**
+   - Selected: always `prepared_plan_conflict`; never re-issue token for an existing plan identity in any state.
 
-3. **Whether commit Phase 3A response includes full membership**  
-   - Recommendation: counts + hashes + state only (no embeddings/payload) to match prepare receipt hygiene.
+3. **Whether commit Phase 3A response includes full membership** — **RESOLVED**
+   - Selected: counts + hashes + state only (no membership list, embeddings, or payload) to match prepare receipt hygiene.
 
-4. **Pagination hard limits**  
-   - Still 0 from Phase 2; leave for Phase 4 unless capabilities schema requires non-zero — keep 0 until read tools need them.
+4. **Pagination hard limits** — **RESOLVED**
+   - Selected: stay **0** until Phase 4 read tools need them; capabilities continue to expose hard/configured page size as 0.
 
-5. **Live Neo4j availability in CI**  
-   - Same as existing int tests: skip unless up; gate can require for final Phase 3A readiness.
+5. **Live Neo4j availability in CI** — **RESOLVED**
+   - Selected: ordinary live suite may `pytest.skip` when Neo4j is unavailable. **Final Phase 3A readiness does not waive live proof**: skip or fail of the required immutable-artifact proof keeps `ready_for_phase_3b=false` and `features.prepare_commit=false`. No readiness waiver.
 
 ## Environment Availability
 
