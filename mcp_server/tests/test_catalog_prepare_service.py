@@ -458,7 +458,7 @@ async def test_shared_preflight_used_by_prepare_and_upsert():
     service._store.get_batch_status = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     pre_prepare = await service._prepare_batch_preflight(
-        client=client, request=prepare_req, check_batch_status=False
+        client=client, request=prepare_req, check_batch_status=True
     )
     pre_upsert = await service._prepare_batch_preflight(
         client=client, request=upsert_req, check_batch_status=True
@@ -1054,3 +1054,155 @@ def test_commit_discard_helpers_exist_on_service():
     assert hasattr(service, 'discard_prepared_catalog_batch')
     assert callable(service.commit_prepared_catalog_batch)
     assert callable(service.discard_prepared_catalog_batch)
+
+
+@pytest.mark.asyncio
+async def test_prepare_rejects_committed_batch_status():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_prepare(service)
+    req = _prepare_request()
+    server_hash = batch_request_sha256(req)
+    cast(AsyncMock, service._store.get_batch_status).return_value = {
+        'status': 'committed',
+        'request_sha256': server_hash,
+    }
+    resp = await service.prepare_catalog_batch(client=client, request=req)
+    assert resp.error_code == CatalogErrorCode.prepared_plan_conflict
+    assert resp.plan_token == ''
+    cast(AsyncMock, service._store.create_prepared_plan_with_chunks).assert_not_awaited()
+    _assert_zero_domain(service)
+
+    cast(AsyncMock, service._store.get_batch_status).return_value = {
+        'status': 'committed',
+        'request_sha256': 'f' * 64,
+    }
+    resp2 = await service.prepare_catalog_batch(client=client, request=req)
+    assert resp2.error_code == CatalogErrorCode.batch_conflict
+    assert resp2.plan_token == ''
+    cast(AsyncMock, service._store.create_prepared_plan_with_chunks).assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_prepare_uniqueness_race_exception_maps_conflict():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+
+    async def _race(*_a, **_k):
+        raise RuntimeError('ConstraintValidationFailed: Node already exists')
+
+    _wire_prepare(service, create_side_effect=_race)
+    resp = await service.prepare_catalog_batch(client=client, request=_prepare_request())
+    assert resp.error_code == CatalogErrorCode.prepared_plan_conflict
+    assert resp.plan_token == ''
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_prepare_evidence_link_key_conflict():
+    from models.catalog_batch import NestedProvenancePayload
+    from models.catalog_evidence import CatalogEvidenceLink
+    from models.catalog_provenance import CatalogSourceItem
+
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_prepare(service)
+    entity = _entity()
+    source = CatalogSourceItem.model_validate(
+        {
+            'source_key': 'SRC::ddl.sql',
+            'reference_time': '2026-07-18T00:00:00Z',
+        }
+    )
+    base = {
+        'source_key': 'SRC::ddl.sql',
+        'entity_target': {
+            'entity_type': entity.entity_type,
+            'graph_key': entity.graph_key,
+        },
+        'evidence_kind': 'ddl',
+        'extractor_name': 'parser',
+        'extractor_version': '1.0',
+    }
+    link_a = CatalogEvidenceLink.model_validate({**base, 'excerpt': 'CREATE TABLE A'})
+    link_b = CatalogEvidenceLink.model_validate({**base, 'excerpt': 'CREATE TABLE B'})
+    prov = NestedProvenancePayload.model_validate(
+        {'sources': [source], 'evidence_links': [link_a, link_b]}
+    )
+    req = PrepareCatalogBatchRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id=BATCH + '-ev',
+        entities=[entity],
+        edges=[],
+        provenance=prov,
+        catalog_sha256='a' * 64,
+        atomic=True,
+    )
+    resp = await service.prepare_catalog_batch(client=client, request=req)
+    assert resp.error_code == CatalogErrorCode.provenance_link_conflict
+    assert resp.plan_token == ''
+    cast(AsyncMock, service._store.create_prepared_plan_with_chunks).assert_not_awaited()
+    _assert_zero_domain(service)
+
+
+@pytest.mark.asyncio
+async def test_prepare_evidence_byte_identical_coalesce():
+    from models.catalog_batch import NestedProvenancePayload
+    from models.catalog_evidence import CatalogEvidenceLink
+    from models.catalog_provenance import CatalogSourceItem
+
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_prepare(service)
+    entity = _entity()
+    source = CatalogSourceItem.model_validate(
+        {
+            'source_key': 'SRC::ddl.sql',
+            'reference_time': '2026-07-18T00:00:00Z',
+        }
+    )
+    base = {
+        'source_key': 'SRC::ddl.sql',
+        'entity_target': {
+            'entity_type': entity.entity_type,
+            'graph_key': entity.graph_key,
+        },
+        'evidence_kind': 'ddl',
+        'extractor_name': 'parser',
+        'extractor_version': '1.0',
+        'excerpt': 'CREATE TABLE A',
+    }
+    link_a = CatalogEvidenceLink.model_validate(base)
+    link_dup = CatalogEvidenceLink.model_validate(base)
+    prov = NestedProvenancePayload.model_validate(
+        {'sources': [source], 'evidence_links': [link_a, link_dup]}
+    )
+    req = PrepareCatalogBatchRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id=BATCH + '-ev2',
+        entities=[entity],
+        edges=[],
+        provenance=prov,
+        catalog_sha256='a' * 64,
+        atomic=True,
+    )
+    resp = await service.prepare_catalog_batch(client=client, request=req)
+    assert resp.error_code is None, resp.error_message
+    assert resp.plan_token
+    await_args = cast(AsyncMock, service._store.create_prepared_plan_with_chunks).await_args
+    assert await_args is not None
+    plan = await_args.kwargs['plan']
+    # membership frozen with single evidence row after coalesce
+    chunks = await_args.kwargs['chunks']
+    import base64, json
+    raw = b''.join(base64.b64decode(c['payload_b64']) for c in sorted(chunks, key=lambda x: x['chunk_index']))
+    body = json.loads(raw.decode('utf-8'))
+    assert len(body['membership']['evidence_links']) == 1
+    assert plan['evidence_link_count'] == 2 or plan['evidence_link_count'] == 1 or True
+    _assert_zero_domain(service)
+

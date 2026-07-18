@@ -68,6 +68,7 @@ from services.catalog_identity import (
     catalog_prepared_plan_chunk_uuid,
     catalog_prepared_plan_uuid,
     catalog_source_uuid,
+    coalesce_byte_identical_evidence_links,
     evidence_canonical_payload,
     evidence_link_key,
     mint_plan_token,
@@ -5133,7 +5134,7 @@ class CatalogService:
         pre = await self._prepare_batch_preflight(
             client=client,
             request=request,
-            check_batch_status=False,
+            check_batch_status=True,
             log_label='prepare_catalog_batch',
         )
         server_hash = pre.server_hash
@@ -5174,6 +5175,17 @@ class CatalogService:
             return _fail(
                 pre.early_code or CatalogErrorCode.validation_error,
                 pre.early_message or 'prepare preflight failed',
+            )
+        if pre.early_kind == 'committed_same':
+            # Already-committed same hash: reject new token (no domain/status writes).
+            return _fail(
+                CatalogErrorCode.prepared_plan_conflict,
+                'batch already committed with matching request_sha256',
+            )
+        if pre.early_kind == 'committed_conflict':
+            return _fail(
+                pre.early_code or CatalogErrorCode.batch_conflict,
+                pre.early_message or 'committed batch_id has different request_sha256',
             )
         if pre.early_kind == 'preflight_failed':
             return _fail(
@@ -5273,16 +5285,34 @@ class CatalogService:
             for prep in sorted(provenance_sources, key=lambda p: p.item.source_key)
         ]
         evidence_links_raw = list(getattr(request.provenance, 'evidence_links', None) or [])
+        # Byte-identical coalesce first (same authority as request hash); then reject
+        # same link_key with divergent content before freezing membership.
+        evidence_links_coalesced = coalesce_byte_identical_evidence_links(evidence_links_raw)
         membership_evidence = []
-        for link in evidence_links_raw:
+        seen_link_content: dict[str, str] = {}
+        for link in evidence_links_coalesced:
             link_key = evidence_link_key(link)
-            membership_evidence.append(
-                {
-                    'uuid': catalog_evidence_link_uuid(namespace, request.group_id, link_key),
-                    'link_key': link_key,
-                    'content_sha256': canonical_sha256(evidence_canonical_payload(link)),
-                }
-            )
+            content_sha = canonical_sha256(evidence_canonical_payload(link))
+            prior_sha = seen_link_content.get(link_key)
+            if prior_sha is not None and prior_sha != content_sha:
+                return _fail(
+                    CatalogErrorCode.provenance_link_conflict,
+                    'evidence links share identity key with divergent content',
+                    projected_created=projected_created,
+                    projected_updated=projected_updated,
+                    projected_unchanged=projected_unchanged,
+                )
+            if prior_sha is None:
+                seen_link_content[link_key] = content_sha
+                membership_evidence.append(
+                    {
+                        'uuid': catalog_evidence_link_uuid(
+                            namespace, request.group_id, link_key
+                        ),
+                        'link_key': link_key,
+                        'content_sha256': content_sha,
+                    }
+                )
         membership_evidence.sort(key=lambda d: d['link_key'])
 
         plan_id = f'{request.batch_id}|{server_hash}'
@@ -5460,6 +5490,23 @@ class CatalogService:
                 projected_unchanged=projected_unchanged,
             )
         except Exception as exc:
+            if self._store._is_uniqueness_constraint_race(exc):
+                logger.info(
+                    'catalog prepare_catalog_batch uniqueness_race batch_id=%s plan_uuid=%s reason=%s',
+                    request.batch_id,
+                    plan_uuid,
+                    type(exc).__name__,
+                )
+                return _fail(
+                    CatalogErrorCode.prepared_plan_conflict,
+                    'prepared plan identity already exists',
+                    plan_uuid=plan_uuid,
+                    artifact_sha=art_sha,
+                    expires_at=expires_at_str,
+                    projected_created=projected_created,
+                    projected_updated=projected_updated,
+                    projected_unchanged=projected_unchanged,
+                )
             logger.error(
                 'catalog prepare_catalog_batch neo4j_transaction_failed batch_id=%s plan_uuid=%s reason=%s',
                 request.batch_id,
