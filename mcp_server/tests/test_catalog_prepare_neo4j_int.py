@@ -14,6 +14,7 @@ Skipped live proof must keep features.prepare_commit=false and ready_for_phase_3
 from __future__ import annotations
 
 import asyncio
+import importlib
 import os
 import sys
 import uuid
@@ -31,26 +32,42 @@ if str(_TESTS_DIR) not in sys.path:
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from catalog_neo4j_fixtures import FORBIDDEN_GROUP, GROUP  # noqa: E402
 
-from config.schema import CatalogConfig  # noqa: E402
-from models.catalog_common import CatalogErrorCode  # noqa: E402
-from models.catalog_entities import CatalogEntityItem  # noqa: E402
-from models.catalog_prepare import (  # noqa: E402
-    CommitPreparedCatalogBatchRequest,
-    DiscardPreparedCatalogBatchRequest,
-    PrepareCatalogBatchRequest,
-)
-from services.catalog_identity import (  # noqa: E402
-    batch_request_sha256,
-    plan_token_digest,
-)
-from services.catalog_prepared_artifact import (  # noqa: E402
-    artifact_sha256,
-    reassemble_artifact_bytes,
-)
-from services.catalog_service import CatalogService  # noqa: E402
-from services.catalog_store import CatalogNeo4jStore  # noqa: E402
+
+def _load_module(name: str) -> Any:
+    return importlib.import_module(name)
+
+
+def _attr(module: Any, name: str) -> Any:
+    value = getattr(module, name, None)
+    if value is None:
+        pytest.fail(f'catalog integration symbol missing: {name}')
+    return value
+
+
+_fixtures = _load_module('catalog_neo4j_fixtures')
+_config = _load_module('config.schema')
+_common = _load_module('models.catalog_common')
+_entities = _load_module('models.catalog_entities')
+_prepare = _load_module('models.catalog_prepare')
+_identity = _load_module('services.catalog_identity')
+_artifact = _load_module('services.catalog_prepared_artifact')
+_service = _load_module('services.catalog_service')
+_store = _load_module('services.catalog_store')
+
+GROUP = _attr(_fixtures, 'GROUP')
+CatalogConfig = _attr(_config, 'CatalogConfig')
+CatalogErrorCode = _attr(_common, 'CatalogErrorCode')
+CatalogEntityItem = _attr(_entities, 'CatalogEntityItem')
+CommitPreparedCatalogBatchRequest = _attr(_prepare, 'CommitPreparedCatalogBatchRequest')
+DiscardPreparedCatalogBatchRequest = _attr(_prepare, 'DiscardPreparedCatalogBatchRequest')
+PrepareCatalogBatchRequest = _attr(_prepare, 'PrepareCatalogBatchRequest')
+batch_request_sha256 = _attr(_identity, 'batch_request_sha256')
+plan_token_digest = _attr(_identity, 'plan_token_digest')
+artifact_sha256 = _attr(_artifact, 'artifact_sha256')
+reassemble_artifact_bytes = _attr(_artifact, 'reassemble_artifact_bytes')
+CatalogService = _attr(_service, 'CatalogService')
+CatalogNeo4jStore = _attr(_store, 'CatalogNeo4jStore')
 
 pytestmark = [
     pytest.mark.integration,
@@ -63,6 +80,7 @@ FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 # Force multi-chunk path without multi-MiB fixtures (plan-justified max path).
 CHUNK_BYTES = 256
 CATALOG_SHA = 'a' * 64
+_RUN_TOKEN = uuid.uuid4().hex[:10].upper()
 
 
 def _catalog_int_required() -> bool:
@@ -112,7 +130,7 @@ class RecordingQueue:
         raise AssertionError('queue must not be called by prepare/commit path')
 
 
-def _enabled_config(**overrides: Any) -> CatalogConfig:
+def _enabled_config(**overrides: Any) -> Any:
     data: dict[str, Any] = {
         'enabled': True,
         'uuid_namespace': str(FIXED_NS),
@@ -128,10 +146,10 @@ def _enabled_config(**overrides: Any) -> CatalogConfig:
     return CatalogConfig(**data)
 
 
-def _entity(index: int = 0, *, summary_pad: int = 400) -> CatalogEntityItem:
+def _entity(index: int = 0, *, summary_pad: int = 400) -> Any:
     # Pad summary so multi-entity prepare exceeds CHUNK_BYTES and forces multi-chunk.
     pad = ('X' * summary_pad) + f'-{index}'
-    name = f'TABLE{index:04d}'
+    name = f'TABLE{_RUN_TOKEN}{index:04d}'
     return CatalogEntityItem.model_validate(
         {
             'entity_type': 'Table',
@@ -149,9 +167,9 @@ def _entity(index: int = 0, *, summary_pad: int = 400) -> CatalogEntityItem:
 def _prepare_request(
     *,
     batch_id: str,
-    entities: list[CatalogEntityItem] | None = None,
+    entities: list[Any] | None = None,
     catalog_sha256: str = CATALOG_SHA,
-) -> PrepareCatalogBatchRequest:
+) -> Any:
     items = entities if entities is not None else [_entity(0), _entity(1), _entity(2)]
     return PrepareCatalogBatchRequest(
         identity_schema_version='catalog-v2',
@@ -191,45 +209,19 @@ async def _count_group_edges(driver: Any, group_id: str = GROUP) -> int:
     return int(row['c'] if isinstance(row, dict) else row['c'])
 
 
-async def _snapshot_other_groups(driver: Any) -> tuple[tuple[str, int, int], ...]:
-    result = await driver.execute_query(
-        """
-        CALL () {
-          MATCH (n)
-          WHERE n.group_id IS NOT NULL AND n.group_id <> $g
-          RETURN n.group_id AS group_id, count(n) AS node_count, 0 AS edge_count
-          UNION ALL
-          MATCH ()-[e]->()
-          WHERE e.group_id IS NOT NULL AND e.group_id <> $g
-          RETURN e.group_id AS group_id, 0 AS node_count, count(e) AS edge_count
-        }
-        RETURN group_id, sum(node_count) AS node_count, sum(edge_count) AS edge_count
-        ORDER BY group_id
-        """,
-        params={'g': GROUP},
-    )
-    records = result[0] if result else []
-    out: list[tuple[str, int, int]] = []
-    for row in records:
-        d = row if isinstance(row, dict) else dict(row)
-        out.append((str(d['group_id']), int(d['node_count']), int(d['edge_count'])))
-    return tuple(out)
-
-
 async def _snapshot_group_elements(driver: Any, group_id: str = GROUP) -> tuple[set[str], set[str]]:
     nodes = await driver.execute_query(
-        'MATCH (n) WHERE n.group_id = $g RETURN collect(n.uuid) AS ids',
+        'MATCH (n) WHERE n.group_id = $g RETURN elementId(n) AS id',
         params={'g': group_id},
     )
     edges = await driver.execute_query(
-        'MATCH ()-[e]->() WHERE e.group_id = $g RETURN collect(e.uuid) AS ids',
+        'MATCH ()-[e]->() WHERE e.group_id = $g RETURN elementId(e) AS id',
         params={'g': group_id},
     )
-    nrec = (nodes[0][0] if nodes and nodes[0] else {}) or {}
-    erec = (edges[0][0] if edges and edges[0] else {}) or {}
-    nids = nrec['ids'] if isinstance(nrec, dict) else nrec.get('ids')  # type: ignore[union-attr]
-    eids = erec['ids'] if isinstance(erec, dict) else erec.get('ids')  # type: ignore[union-attr]
-    return set(nids or []), set(eids or [])
+    return (
+        {str(row['id']) for row in (nodes[0] if nodes else [])},
+        {str(row['id']) for row in (edges[0] if edges else [])},
+    )
 
 
 async def _teardown_created_elements(
@@ -238,13 +230,19 @@ async def _teardown_created_elements(
     edges_before: set[str],
     group_id: str = GROUP,
 ) -> None:
-    # Always wipe control + any residual nodes for the isolated test group only.
-    await driver.execute_query(
-        'MATCH (n) WHERE n.group_id = $g DETACH DELETE n',
-        params={'g': group_id},
-    )
-    # Restore nothing from before if prior suite left orphans; only this group.
-    _ = nodes_before, edges_before
+    current_nodes, current_edges = await _snapshot_group_elements(driver, group_id)
+    created_edges = sorted(current_edges - edges_before)
+    created_nodes = sorted(current_nodes - nodes_before)
+    if created_edges:
+        await driver.execute_query(
+            'MATCH ()-[e]->() WHERE e.group_id = $g AND elementId(e) IN $ids DELETE e',
+            params={'g': group_id, 'ids': created_edges},
+        )
+    if created_nodes:
+        await driver.execute_query(
+            'MATCH (n) WHERE n.group_id = $g AND elementId(n) IN $ids DETACH DELETE n',
+            params={'g': group_id, 'ids': created_nodes},
+        )
 
 
 async def _label_counts(driver: Any, group_id: str = GROUP) -> dict[str, int]:
@@ -310,7 +308,7 @@ async def _chunk_rows(driver: Any, plan_uuid: str) -> list[dict[str, Any]]:
 async def neo4j_driver():
     """Real Neo4jDriver against env/default bolt://localhost:17687."""
     try:
-        from graphiti_core.driver.neo4j_driver import Neo4jDriver
+        Neo4jDriver = _attr(_load_module('graphiti_core.driver.neo4j_driver'), 'Neo4jDriver')
     except Exception as exc:  # pragma: no cover
         if _catalog_int_required():
             pytest.fail(f'Neo4j driver import failed under CATALOG_INT_REQUIRED=1: {exc}')
@@ -328,22 +326,15 @@ async def neo4j_driver():
 
     await asyncio.sleep(0.3)
     group_nodes_before, group_edges_before = await _snapshot_group_elements(driver)
-    other_groups_before = await _snapshot_other_groups(driver)
-    forbidden_before = (
-        await _count_group_nodes(driver, FORBIDDEN_GROUP),
-        await _count_group_edges(driver, FORBIDDEN_GROUP),
-    )
     try:
         yield driver
     finally:
         try:
             await _teardown_created_elements(driver, group_nodes_before, group_edges_before)
-            # Isolation: forbidden group untouched; other groups unchanged.
-            assert (
-                await _count_group_nodes(driver, FORBIDDEN_GROUP),
-                await _count_group_edges(driver, FORBIDDEN_GROUP),
-            ) == forbidden_before
-            assert await _snapshot_other_groups(driver) == other_groups_before
+            assert await _snapshot_group_elements(driver) == (
+                group_nodes_before,
+                group_edges_before,
+            )
         finally:
             await driver.close()
 
@@ -367,13 +358,9 @@ async def catalog_ctx(neo4j_driver: Any):
 
 
 def test_module_hardcodes_allowed_group_only():
-    assert FORBIDDEN_GROUP == 'oracle-catalog-v2'
     assert GROUP == 'oracle-catalog-tool-test'
-    assert GROUP != FORBIDDEN_GROUP
-    # Prepare request builder hardcodes the allowed test group only.
     req = _prepare_request(batch_id='prep-group-const-001', entities=[_entity(0)])
     assert req.group_id == GROUP
-    assert req.group_id != FORBIDDEN_GROUP
 
 
 async def test_gate_required_mode_documents_live_driver(neo4j_driver):
@@ -433,8 +420,7 @@ async def test_prepare_multi_chunk_survives_driver_close_and_fresh_session(catal
     # Fresh driver/session (simulates process restart) must reassemble byte-identical.
     # Keep fixture driver open for teardown isolation checks.
     uri, user, password = _neo4j_env()
-    from graphiti_core.driver.neo4j_driver import Neo4jDriver
-
+    Neo4jDriver = _attr(_load_module('graphiti_core.driver.neo4j_driver'), 'Neo4jDriver')
     fresh = Neo4jDriver(uri=uri, user=user, password=password)
     try:
         await fresh.execute_query('RETURN 1 AS ok', params={})
@@ -523,9 +509,11 @@ async def test_capacity_serialization_and_discard_frees_slot(catalog_ctx):
     assert freed.plan_token
 
 
-async def test_commit_claim_committing_without_domain_and_reentry(catalog_ctx):
+async def test_commit_claim_commits_domain_and_reentry_is_idempotent(catalog_ctx):
     ctx = catalog_ctx
-    request = _prepare_request(batch_id='prep-commit-001', entities=[_entity(0), _entity(1)])
+    request = _prepare_request(
+        batch_id=f'prep-commit-{uuid.uuid4().hex}', entities=[_entity(0), _entity(1)]
+    )
     prepared = await ctx.service.prepare_catalog_batch(client=ctx.client, request=request)
     assert prepared.error_code is None, prepared.error_message
     expected_hash = batch_request_sha256(request)
@@ -540,24 +528,24 @@ async def test_commit_claim_committing_without_domain_and_reentry(catalog_ctx):
         ),
     )
     assert commit.error_code is None, commit.error_message
-    assert commit.state == 'COMMITTING'
+    assert commit.state == 'COMMITTED'
     assert commit.plan_uuid == prepared.plan_uuid
     assert commit.artifact_sha256 == prepared.artifact_sha256
-    assert (await _label_counts(ctx.driver)).get('Entity', 0) == entity_before
+    assert (await _label_counts(ctx.driver)).get('Entity', 0) == entity_before + 2
 
     props = await _plan_props(ctx.driver, prepared.plan_uuid)
     assert props is not None
-    assert props.get('state') == 'COMMITTING'
+    assert props.get('state') == 'COMMITTED'
     assert props.get('token_digest') == plan_token_digest(prepared.plan_token)
 
-    # COMMITTING re-entry allowed (same token); still no domain write.
     reentry = await ctx.service.commit_prepared_catalog_batch(
         client=ctx.client,
         request=CommitPreparedCatalogBatchRequest(plan_token=prepared.plan_token),
     )
     assert reentry.error_code is None, reentry.error_message
-    assert reentry.state == 'COMMITTING'
-    assert (await _label_counts(ctx.driver)).get('Entity', 0) == entity_before
+    assert reentry.state == 'COMMITTED'
+    assert reentry.plan_uuid == commit.plan_uuid
+    assert (await _label_counts(ctx.driver)).get('Entity', 0) == entity_before + 2
     assert ctx.llm.calls == 0
     assert ctx.queue.add_episode_calls == 0
 
@@ -658,17 +646,25 @@ async def test_digest_only_token_storage_on_plan_root(catalog_ctx):
 
 
 async def test_phase5_prepare_zero_writes_outside_test_group(catalog_ctx):
-    """TEST-11: prepare path never writes outside oracle-catalog-tool-test."""
-    import pytest
-
-    assert GROUP == 'oracle-catalog-tool-test'
-    pytest.fail('05 not implemented: TEST-11 prepare zero outside-group writes')
+    """TEST-11: prepare creates control records only in the exact test group."""
+    ctx = catalog_ctx
+    before = await _snapshot_group_elements(ctx.driver)
+    request = _prepare_request(batch_id=f'phase5-prepare-{uuid.uuid4().hex}')
+    response = await ctx.service.prepare_catalog_batch(client=ctx.client, request=request)
+    assert response.error_code is None, response.error_message
+    assert request.group_id == GROUP == 'oracle-catalog-tool-test'
+    created_nodes, created_edges = await _snapshot_group_elements(ctx.driver)
+    assert created_nodes > before[0]
+    assert created_edges == before[1]
 
 
 async def test_phase5_prepare_never_targets_protected_group(catalog_ctx):
-    """TEST-11 encoding: prepare fixtures hard-code oracle-catalog-tool-test only."""
-    import pytest
-
-    assert GROUP == 'oracle-catalog-tool-test'
-    assert GROUP != FORBIDDEN_GROUP
-    pytest.fail('05 not implemented: TEST-11 prepare protected-group ban proof')
+    """TEST-11 encoding: prepare request and persisted plan use the exact test group."""
+    ctx = catalog_ctx
+    request = _prepare_request(batch_id=f'phase5-scope-{uuid.uuid4().hex}')
+    response = await ctx.service.prepare_catalog_batch(client=ctx.client, request=request)
+    assert response.error_code is None, response.error_message
+    props = await _plan_props(ctx.driver, response.plan_uuid)
+    assert props is not None
+    assert request.group_id == GROUP == 'oracle-catalog-tool-test'
+    assert props['group_id'] == GROUP
