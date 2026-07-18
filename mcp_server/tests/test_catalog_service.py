@@ -5816,9 +5816,10 @@ class _RaceEntityStore:
 
     async def claim_batch_status(self, tx: Any, *, params: dict[str, Any]) -> dict[str, Any]:
         _ = tx
+        # WR-03 reclaimable claim status is writing|failed; unknown collapses batch path.
         return {
             'uuid': params['uuid'],
-            'status': 'running',
+            'status': 'writing',
             'request_sha256': params['request_sha256'],
         }
 

@@ -5961,6 +5961,27 @@ class CatalogService:
                 error_message=f'edge under-lock conflict: {exc.code.value}',
                 **hash_echo,
             )
+        except CatalogStoreError as exc:
+            # Store-boundary typed codes (batch_conflict, embedding_failed, ...) must not
+            # collapse to neo4j_transaction_failed.
+            mapped = self._map_store_error_code(exc)
+            logger.error(
+                'catalog upsert_catalog_batch store_error batch_id=%s code=%s',
+                request.batch_id,
+                mapped.value,
+            )
+            await _record_failed_status(mapped.value)
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges) + len(provenance_sources), 1),
+                rolled_back=len(entity_results) + len(edge_results) + len(provenance_results),
+                error_code=mapped,
+                error_message=str(exc) or mapped.value,
+                **hash_echo,
+            )
         except Exception as exc:
             logger.error(
                 'catalog upsert_catalog_batch neo4j_transaction_failed batch_id=%s entities=%s edges=%s provenance=%s reason=%s',
