@@ -637,6 +637,16 @@ async def test_write_manifest_same_hash_idempotent():
                     'payload_bytes': root['payload_bytes'],
                 }
             ],
+            # WR-05: idempotent root path verifies ordered chunk completeness/hashes
+            [
+                {
+                    'uuid': chunks[0]['uuid'],
+                    'manifest_uuid': root['uuid'],
+                    'chunk_index': 0,
+                    'chunk_count': 1,
+                    'chunk_sha256': chunks[0]['chunk_sha256'],
+                }
+            ],
         ]
     )
     out = await store.write_manifest_root_and_chunks(tx, root=root, chunks=chunks)
@@ -644,6 +654,7 @@ async def test_write_manifest_same_hash_idempotent():
     assert out.get('idempotent') is True
     joined = _all_cypher(tx)
     assert joined.count('CREATE (m:CatalogBatchManifest') == 0
+    assert 'CatalogBatchManifestChunk' in joined
 
 
 async def test_write_manifest_chunk_order():
@@ -887,3 +898,67 @@ def test_evidence_write_cypher_group_scoped_params_only():
     assert '$content_sha256' in cypher
     assert '${' not in cypher
     assert '+ $label' not in cypher
+
+
+async def test_wr05_manifest_idempotent_incomplete_chunks_conflict():
+    """Root-only same-hash hit without complete chunks must fail closed."""
+    store = CatalogNeo4jStore()
+    root = store.prepare_manifest_root_params(**_manifest_root())
+    chunks = [store.prepare_manifest_chunk_params(**_manifest_chunk())]
+    tx = _CaptureTx(
+        responses=[
+            [
+                {
+                    'uuid': root['uuid'],
+                    'group_id': GROUP,
+                    'manifest_sha256': root['manifest_sha256'],
+                    'request_sha256': root['request_sha256'],
+                    'catalog_sha256': root['catalog_sha256'],
+                    'artifact_sha256': root['artifact_sha256'],
+                    'batch_id': root['batch_id'],
+                    'chunk_count': 1,
+                    'payload_bytes': root['payload_bytes'],
+                }
+            ],
+            [],  # no chunks present
+        ]
+    )
+    with pytest.raises(CatalogStoreError) as ei:
+        await store.write_manifest_root_and_chunks(tx, root=root, chunks=chunks)
+    assert ei.value.code == 'batch_conflict'
+    assert 'chunk' in str(ei.value).lower()
+
+
+async def test_wr05_manifest_idempotent_chunk_hash_mismatch_conflict():
+    store = CatalogNeo4jStore()
+    root = store.prepare_manifest_root_params(**_manifest_root())
+    chunks = [store.prepare_manifest_chunk_params(**_manifest_chunk())]
+    tx = _CaptureTx(
+        responses=[
+            [
+                {
+                    'uuid': root['uuid'],
+                    'group_id': GROUP,
+                    'manifest_sha256': root['manifest_sha256'],
+                    'request_sha256': root['request_sha256'],
+                    'catalog_sha256': root['catalog_sha256'],
+                    'artifact_sha256': root['artifact_sha256'],
+                    'batch_id': root['batch_id'],
+                    'chunk_count': 1,
+                    'payload_bytes': root['payload_bytes'],
+                }
+            ],
+            [
+                {
+                    'uuid': chunks[0]['uuid'],
+                    'manifest_uuid': root['uuid'],
+                    'chunk_index': 0,
+                    'chunk_count': 1,
+                    'chunk_sha256': SHA_B,
+                }
+            ],
+        ]
+    )
+    with pytest.raises(CatalogStoreError) as ei:
+        await store.write_manifest_root_and_chunks(tx, root=root, chunks=chunks)
+    assert ei.value.code == 'batch_conflict'

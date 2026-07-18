@@ -481,6 +481,9 @@ def test_build_edge_upsert_cypher_uses_relates_to_and_param_name():
     assert '_catalog_create_token' in cypher
     assert 'REMOVE e._catalog_create_token' in cypher
     assert '$create_token' in cypher
+    # WR-04: under-lock identity arbitration mirrors entity pattern
+    assert 'edge_identity_conflict' in cypher
+    assert 'error_code' in cypher
 
 
 def test_edge_on_create_and_changed_match_include_batch_id():
@@ -1208,6 +1211,9 @@ def test_batch_status_claim_and_terminal_write_are_conflict_guarded():
     assert 'MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})' in claim
     assert "b.status = 'writing'" in claim
     assert 'b.request_sha256 = $request_sha256' in claim
+    # WR-03: CAS reclaim only from writing|failed; never blind rewrite committed/unknown.
+    assert 'ON MATCH SET' in claim
+    assert "b.status IN ['writing', 'failed']" in claim
     assert "coalesce(b.status, '') = 'committed' AS already_committed" in terminal
     assert 'b.request_sha256 <> $request_sha256 AS hash_conflict' in terminal
     assert 'NOT already_committed AND NOT hash_conflict' in terminal
@@ -1441,3 +1447,37 @@ def test_gap_cr01_entity_upsert_type_contract_covers_label_mismatch_cases():
     assert 'n.labels' in cypher
     assert ':Table' in cypher
     assert 'deterministic_uuid_conflict' in cypher
+
+
+# --- 03B REVIEW WR focused unit contracts ---
+
+
+def test_wr03_claim_cypher_reclaims_writing_failed_only():
+    store = CatalogNeo4jStore()
+    claim = store.build_batch_status_claim_cypher()
+    assert 'ON CREATE SET' in claim
+    assert 'ON MATCH SET' in claim
+    assert "b.status IN ['writing', 'failed']" in claim
+    # committed path must not be rewritten to writing
+    assert "THEN 'writing'" in claim
+    assert 'b.request_sha256 = $request_sha256' in claim
+
+
+def test_wr04_edge_upsert_returns_error_code_on_identity_drift():
+    store = CatalogNeo4jStore()
+    cypher = store.build_edge_upsert_cypher()
+    assert "THEN 'edge_identity_conflict'" in cypher
+    assert 'error_code' in cypher
+    # mutable SET / vector only when status is not error
+    assert "WHEN error_code IS NOT NULL THEN 'error'" in cypher
+    assert "status IN ['created', 'updated']" in cypher
+
+
+def test_wr05_list_manifest_chunks_cypher_group_scoped():
+    store = CatalogNeo4jStore()
+    cypher = store.build_list_manifest_chunks_cypher()
+    assert 'CatalogBatchManifestChunk' in cypher
+    assert 'manifest_uuid: $manifest_uuid' in cypher
+    assert 'group_id: $group_id' in cypher
+    assert 'ORDER BY c.chunk_index ASC' in cypher
+    assert ':Entity' not in cypher

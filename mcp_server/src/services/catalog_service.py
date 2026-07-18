@@ -716,6 +716,25 @@ class CatalogService:
                             graph_key=request.entities[ci].graph_key,
                             entity_type=request.entities[ci].entity_type,
                         )
+        except CatalogStoreError as exc:
+            if getattr(exc, 'code', None) == 'embedding_failed':
+                trigger = current_prep or (to_write[0] if to_write else None)
+                trigger_idx = trigger.index if trigger is not None else 0
+                early_errors[trigger_idx] = CatalogItemResult(
+                    index=trigger_idx,
+                    status='error',
+                    uuid=trigger.entity_uuid if trigger is not None else None,
+                    graph_key=trigger.item.graph_key if trigger is not None else None,
+                    entity_type=trigger.item.entity_type if trigger is not None else None,
+                    error_code=CatalogErrorCode.embedding_failed,
+                    error_message='embedding generation failed',
+                )
+                return self._atomic_fail_response(
+                    request,
+                    early_errors,
+                    trigger_indices={trigger_idx},
+                )
+            raise
         except self._EntityInvariantRace as exc:
             trigger = current_prep or (to_write[0] if to_write else None)
             trigger_idx = trigger.index if trigger is not None else 0
@@ -860,6 +879,29 @@ class CatalogService:
                             graph_key=request.entities[ci].graph_key,
                             entity_type=request.entities[ci].entity_type,
                         )
+            except CatalogStoreError as exc:
+                if getattr(exc, 'code', None) == 'embedding_failed':
+                    written[prep.index] = CatalogItemResult(
+                        index=prep.index,
+                        status='error',
+                        uuid=prep.entity_uuid,
+                        graph_key=prep.item.graph_key,
+                        entity_type=prep.item.entity_type,
+                        error_code=CatalogErrorCode.embedding_failed,
+                        error_message='embedding generation failed',
+                    )
+                    for ci in prep.coalesced_indices:
+                        written[ci] = CatalogItemResult(
+                            index=ci,
+                            status='error',
+                            uuid=prep.entity_uuid,
+                            graph_key=request.entities[ci].graph_key,
+                            entity_type=request.entities[ci].entity_type,
+                            error_code=CatalogErrorCode.embedding_failed,
+                            error_message='embedding generation failed',
+                        )
+                    continue
+                raise
             except self._EntityInvariantRace as exc:
                 written[prep.index] = CatalogItemResult(
                     index=prep.index,
@@ -932,6 +974,8 @@ class CatalogService:
             return CatalogErrorCode.deterministic_uuid_conflict
         if error_code == CatalogErrorCode.entity_type_conflict.value:
             return CatalogErrorCode.entity_type_conflict
+        if error_code == CatalogErrorCode.edge_identity_conflict.value:
+            return CatalogErrorCode.edge_identity_conflict
         if error_code == CatalogErrorCode.batch_conflict.value:
             return CatalogErrorCode.batch_conflict
         # Unknown error_code with status=error fails closed.
@@ -944,6 +988,12 @@ class CatalogService:
         if code is None:
             return
         raise self._EntityInvariantRace(code)
+
+    def _raise_edge_row_error(self, row: dict[str, Any]) -> None:
+        code = self._row_error_code(row)
+        if code is None:
+            return
+        raise self._EdgeEndpointRace(code)
 
     @staticmethod
     def _write_status_from_row(row: dict[str, Any], projected: str) -> str:
@@ -1037,7 +1087,13 @@ class CatalogService:
         request_ts: datetime,
     ) -> dict[str, Any]:
         item = prep.item
-        embedding = prep.name_embedding or []
+        # Fail closed: typed non-unchanged writes must never send empty vectors.
+        if not prep.name_embedding:
+            raise CatalogStoreError(
+                'name_embedding missing for non-unchanged entity',
+                code='embedding_failed',
+            )
+        embedding = list(prep.name_embedding)
         return self._store.prepare_entity_params(
             entity_type=item.entity_type,
             uuid=prep.entity_uuid,
@@ -2304,7 +2360,13 @@ class CatalogService:
         request_ts: datetime,
     ) -> dict[str, Any]:
         item = prep.item
-        embedding = prep.fact_embedding or []
+        # Fail closed: typed non-unchanged writes must never send empty vectors.
+        if not prep.fact_embedding:
+            raise CatalogStoreError(
+                'fact_embedding missing for non-unchanged edge',
+                code='embedding_failed',
+            )
+        embedding = list(prep.fact_embedding)
         return self._store.prepare_edge_params(
             edge_type=item.edge_type,
             uuid=prep.edge_uuid,
@@ -2578,7 +2640,12 @@ class CatalogService:
                     row = await self._store.upsert_edge_item(tx, params=params)
                     if not row or not row.get('uuid'):
                         raise RuntimeError('edge upsert empty row')
+                    self._raise_edge_row_error(row)
                     status = self._write_status_from_row(row, prep.projected_status)
+                    if status == 'error':
+                        raise self._EdgeEndpointRace(
+                            self._row_error_code(row) or CatalogErrorCode.internal_error
+                        )
                     result = CatalogItemResult(
                         index=prep.index,
                         status=status,  # type: ignore[arg-type]
@@ -2597,6 +2664,24 @@ class CatalogService:
                             edge_key=request.edges[ci].edge_key,
                             edge_type=request.edges[ci].edge_type,
                         )
+        except CatalogStoreError as exc:
+            # Fail-closed embedding / store errors must not collapse to neo4j_transaction_failed.
+            if getattr(exc, 'code', None) == 'embedding_failed':
+                trigger = current_prep or (to_write[0] if to_write else None)
+                trigger_idx = trigger.index if trigger is not None else 0
+                early_errors[trigger_idx] = CatalogItemResult(
+                    index=trigger_idx,
+                    status='error',
+                    uuid=trigger.edge_uuid if trigger is not None else None,
+                    edge_key=trigger.item.edge_key if trigger is not None else None,
+                    edge_type=trigger.item.edge_type if trigger is not None else None,
+                    error_code=CatalogErrorCode.embedding_failed,
+                    error_message='embedding generation failed',
+                )
+                return self._edge_atomic_fail_response(
+                    request, early_errors, trigger_indices={trigger_idx}
+                )
+            raise
         except self._EdgeEndpointRace as exc:
             trigger = current_prep or (to_write[0] if to_write else None)
             trigger_idx = trigger.index if trigger is not None else 0
@@ -2690,7 +2775,12 @@ class CatalogService:
                     row = await self._store.upsert_edge_item(tx, params=params)
                     if not row or not row.get('uuid'):
                         raise RuntimeError('edge upsert empty row')
+                    self._raise_edge_row_error(row)
                     status = self._write_status_from_row(row, prep.projected_status)
+                    if status == 'error':
+                        raise self._EdgeEndpointRace(
+                            self._row_error_code(row) or CatalogErrorCode.internal_error
+                        )
                     written[prep.index] = CatalogItemResult(
                         index=prep.index,
                         status=status,  # type: ignore[arg-type]
@@ -2708,6 +2798,49 @@ class CatalogService:
                             edge_key=request.edges[ci].edge_key,
                             edge_type=request.edges[ci].edge_type,
                         )
+            except CatalogStoreError as exc:
+                if getattr(exc, 'code', None) == 'embedding_failed':
+                    written[prep.index] = CatalogItemResult(
+                        index=prep.index,
+                        status='error',
+                        uuid=prep.edge_uuid,
+                        edge_key=prep.item.edge_key,
+                        edge_type=prep.item.edge_type,
+                        error_code=CatalogErrorCode.embedding_failed,
+                        error_message='embedding generation failed',
+                    )
+                    for ci in prep.coalesced_indices:
+                        written[ci] = CatalogItemResult(
+                            index=ci,
+                            status='error',
+                            uuid=prep.edge_uuid,
+                            edge_key=request.edges[ci].edge_key,
+                            edge_type=request.edges[ci].edge_type,
+                            error_code=CatalogErrorCode.embedding_failed,
+                            error_message='embedding generation failed',
+                        )
+                    continue
+                raise
+            except self._EdgeEndpointRace as exc:
+                written[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.edge_uuid,
+                    edge_key=prep.item.edge_key,
+                    edge_type=prep.item.edge_type,
+                    error_code=exc.code,
+                    error_message=f'endpoint race in write transaction: {exc.code.value}',
+                )
+                for ci in prep.coalesced_indices:
+                    written[ci] = CatalogItemResult(
+                        index=ci,
+                        status='error',
+                        uuid=prep.edge_uuid,
+                        edge_key=request.edges[ci].edge_key,
+                        edge_type=request.edges[ci].edge_type,
+                        error_code=exc.code,
+                        error_message=f'endpoint race in write transaction: {exc.code.value}',
+                    )
             except Exception as exc:
                 logger.error(
                     'catalog neo4j_transaction_failed batch_id=%s index=%s',
@@ -5168,12 +5301,21 @@ class CatalogService:
             },
         )
         claimed_hash = claim.get('request_sha256')
-        claimed_status = claim.get('status')
+        claimed_status = str(claim.get('status') or '')
         if claimed_hash != effective_hash:
             raise self._BatchStatusConflict('different_hash')
-        if claimed_status == 'committed' and projection.plan is None:
-            # Direct upsert already-committed same hash short-circuit via conflict path.
-            raise self._BatchStatusConflict('already_committed')
+        if claimed_status == 'committed':
+            # Same-hash committed: plan path may short-circuit via terminal agreement;
+            # direct upsert short-circuits via conflict path.
+            if projection.plan is None:
+                raise self._BatchStatusConflict('already_committed')
+            # Plan path continues into terminal agreement matrix below.
+        elif claimed_status not in ('writing', 'failed'):
+            # Unknown/non-reclaimable statuses fail closed (no concurrent rewrite).
+            raise CatalogStoreError(
+                f'batch status claim rejected for status={claimed_status!r}',
+                code='batch_conflict',
+            )
 
         # Recovery matrix (D-07..D-11, D-23): classify durable terminal evidence.
         # Never CAS COMMITTING→PREPARED; never repair partial terminals.
@@ -5246,6 +5388,11 @@ class CatalogService:
                 if status == 'unchanged' and existing.get('content_sha256') != prep.content_sha256:
                     raise self._EntityInvariantRace(CatalogErrorCode.batch_conflict)
             if status != 'unchanged':
+                if not prep.name_embedding:
+                    raise CatalogStoreError(
+                        'frozen name_embedding missing for non-unchanged entity',
+                        code='embedding_failed',
+                    )
                 row = await self._store.upsert_entity_item(
                     tx,
                     entity_type=prep.item.entity_type,
@@ -5262,7 +5409,7 @@ class CatalogService:
                         content_sha256=prep.content_sha256,
                         created_at=request_ts,
                         updated_at=request_ts,
-                        name_embedding=prep.name_embedding or [],
+                        name_embedding=list(prep.name_embedding),
                         attributes=prep.item.attributes,
                         source_refs=prep.item.source_refs,
                         confidence=prep.item.confidence,
@@ -5299,6 +5446,11 @@ class CatalogService:
                 if existing.get('content_sha256') != prep.content_sha256:
                     raise self._EdgeEndpointRace(CatalogErrorCode.batch_conflict)
             else:
+                if not prep.fact_embedding:
+                    raise CatalogStoreError(
+                        'frozen fact_embedding missing for non-unchanged edge',
+                        code='embedding_failed',
+                    )
                 row = await self._store.upsert_edge_item(
                     tx,
                     params=self._store.prepare_edge_params(
@@ -5314,12 +5466,18 @@ class CatalogService:
                         content_sha256=prep.content_sha256,
                         created_at=request_ts,
                         updated_at=request_ts,
-                        fact_embedding=prep.fact_embedding or [],
+                        fact_embedding=list(prep.fact_embedding),
                         attributes=prep.item.attributes,
                         confidence=prep.item.confidence,
                     ),
                 )
+                self._raise_edge_row_error(row)
                 status = self._write_status_from_row(row, prep.projected_status)
+                if status == 'error':
+                    raise CatalogStoreError(
+                        'edge write returned error without raise',
+                        code='neo4j_transaction_failed',
+                    )
             result_index = (
                 prep.batch_result_index
                 if prep.batch_result_index is not None
@@ -5785,6 +5943,24 @@ class CatalogService:
                 error_message='provenance invariant changed in write transaction',
                 **hash_echo,
             )
+        except self._EdgeEndpointRace as exc:
+            logger.error(
+                'catalog upsert_catalog_batch edge_endpoint_race batch_id=%s code=%s',
+                request.batch_id,
+                exc.code.value,
+            )
+            await _record_failed_status(exc.code.value)
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges) + len(provenance_sources), 1),
+                rolled_back=len(entity_results) + len(edge_results) + len(provenance_results),
+                error_code=exc.code,
+                error_message=f'edge under-lock conflict: {exc.code.value}',
+                **hash_echo,
+            )
         except Exception as exc:
             logger.error(
                 'catalog upsert_catalog_batch neo4j_transaction_failed batch_id=%s entities=%s edges=%s provenance=%s reason=%s',
@@ -6030,6 +6206,8 @@ class CatalogService:
                     }
                 )
         membership_evidence.sort(key=lambda d: d['link_key'])
+        # Coalesced membership is count authority for plan/artifact/response/manifest.
+        coalesced_evidence_count = len(membership_evidence)
 
         plan_id = f'{request.batch_id}|{server_hash}'
         plan_uuid = catalog_prepared_plan_uuid(namespace, request.group_id, plan_id)
@@ -6055,9 +6233,7 @@ class CatalogService:
                 'entities': len(request.entities),
                 'edges': len(request.edges),
                 'sources': len(request.provenance.sources) if request.provenance else 0,
-                'evidence_links': (
-                    len(request.provenance.evidence_links) if request.provenance else 0
-                ),
+                'evidence_links': coalesced_evidence_count,
                 'created': projected_created,
                 'updated': projected_updated,
                 'unchanged': projected_unchanged,
@@ -6143,9 +6319,7 @@ class CatalogService:
             'entity_count': len(request.entities),
             'edge_count': len(request.edges),
             'source_count': len(request.provenance.sources) if request.provenance else 0,
-            'evidence_link_count': (
-                len(request.provenance.evidence_links) if request.provenance else 0
-            ),
+            'evidence_link_count': coalesced_evidence_count,
             'created_count': projected_created,
             'updated_count': projected_updated,
             'unchanged_count': projected_unchanged,
@@ -6259,9 +6433,7 @@ class CatalogService:
             entity_count=len(request.entities),
             edge_count=len(request.edges),
             source_count=len(request.provenance.sources) if request.provenance else 0,
-            evidence_link_count=(
-                len(request.provenance.evidence_links) if request.provenance else 0
-            ),
+            evidence_link_count=coalesced_evidence_count,
             projected_created=projected_created,
             projected_updated=projected_updated,
             projected_unchanged=projected_unchanged,

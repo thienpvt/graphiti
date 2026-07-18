@@ -1418,7 +1418,12 @@ class CatalogNeo4jStore:
             """
 
     def build_batch_status_claim_cypher(self) -> str:
-        """Create/recheck a transaction-local batch claim before domain writes."""
+        """CAS-style create/reclaim of batch claim before domain writes.
+
+        ON CREATE seeds status=writing. ON MATCH with same request_sha256 reclaims
+        only from writing|failed by re-stamping status=writing. Committed and
+        unknown statuses are returned unchanged for caller fail-closed handling.
+        """
         return """
             MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})
             ON CREATE SET
@@ -1429,6 +1434,19 @@ class CatalogNeo4jStore:
                 b.status = 'writing',
                 b.created_at = $created_at,
                 b.updated_at = $updated_at
+            ON MATCH SET
+                b.updated_at = CASE
+                    WHEN b.request_sha256 = $request_sha256
+                         AND b.status IN ['writing', 'failed']
+                    THEN $updated_at
+                    ELSE b.updated_at
+                END,
+                b.status = CASE
+                    WHEN b.request_sha256 = $request_sha256
+                         AND b.status IN ['writing', 'failed']
+                    THEN 'writing'
+                    ELSE b.status
+                END
             RETURN b.uuid AS uuid,
                    b.status AS status,
                    b.request_sha256 AS request_sha256
@@ -1723,20 +1741,30 @@ class CatalogNeo4jStore:
                 // Empty list so stock EntityEdge/search hydration never sees episodes=None.
                 e.episodes = $episodes,
                 e._catalog_create_token = $create_token
-            WITH e,
-                 coalesce(e._catalog_create_token, '') = $create_token AS created,
-                 e.content_sha256 = $content_sha256 AS same
-            WITH e, created, same,
+            WITH e, coalesce(e._catalog_create_token, '') = $create_token AS created
+            SET e.uuid = e.uuid
+            WITH e, created,
                  CASE
+                   WHEN NOT created AND (
+                     e.name IS NULL OR e.name <> $name
+                     OR e.edge_key IS NULL OR e.edge_key <> $edge_key
+                     OR e.source_node_uuid IS NULL OR e.source_node_uuid <> $source_node_uuid
+                     OR e.target_node_uuid IS NULL OR e.target_node_uuid <> $target_node_uuid
+                   ) THEN 'edge_identity_conflict'
+                   ELSE null
+                 END AS error_code
+            WITH e, created, error_code,
+                 CASE
+                   WHEN error_code IS NOT NULL THEN 'error'
                    WHEN created THEN 'created'
-                   WHEN same THEN 'unchanged'
+                   WHEN e.content_sha256 = $content_sha256 THEN 'unchanged'
                    ELSE 'updated'
                  END AS status
             FOREACH (_ IN CASE WHEN status = 'updated' THEN [1] ELSE [] END |
               SET {updated_set}
             )
             REMOVE e._catalog_create_token
-            WITH e, status
+            WITH e, status, error_code
             CALL {{
               WITH e, status
               WITH e, status WHERE status IN ['created', 'updated']
@@ -1744,7 +1772,7 @@ class CatalogNeo4jStore:
               RETURN 1 AS _
               UNION
               WITH e, status
-              WITH e, status WHERE status = 'unchanged'
+              WITH e, status WHERE NOT status IN ['created', 'updated']
               RETURN 0 AS _
             }}
             RETURN e.uuid AS uuid,
@@ -1756,7 +1784,8 @@ class CatalogNeo4jStore:
                    e.edge_key AS edge_key,
                    e.source_node_uuid AS source_uuid,
                    e.target_node_uuid AS target_uuid,
-                   status
+                   status,
+                   error_code
             """
 
     def build_get_edge_by_uuid_cypher(self) -> str:
@@ -3256,6 +3285,18 @@ class CatalogNeo4jStore:
                    m.payload_bytes AS payload_bytes
             """
 
+    def build_list_manifest_chunks_cypher(self) -> str:
+        """Load ordered chunk metadata for idempotent root verification."""
+        return """
+            MATCH (c:CatalogBatchManifestChunk {manifest_uuid: $manifest_uuid, group_id: $group_id})
+            RETURN c.uuid AS uuid,
+                   c.manifest_uuid AS manifest_uuid,
+                   c.chunk_index AS chunk_index,
+                   c.chunk_count AS chunk_count,
+                   c.chunk_sha256 AS chunk_sha256
+            ORDER BY c.chunk_index ASC
+            """
+
     def build_create_manifest_root_cypher(self) -> str:
         """CREATE-once CatalogBatchManifest root (never Entity)."""
         return """
@@ -3568,6 +3609,45 @@ class CatalogNeo4jStore:
                     'manifest identity already exists with divergent binding',
                     code='batch_conflict',
                 )
+            # Verify complete ordered chunks before accepting root-only idempotent hit.
+            expected_chunks = sorted(
+                (
+                    ch
+                    if 'chunk_sha256' in ch and 'manifest_uuid' in ch
+                    else self.prepare_manifest_chunk_params(**ch)
+                    for ch in chunks
+                ),
+                key=lambda c: int(c['chunk_index']),
+            )
+            chunk_res = await tx.run(
+                self.build_list_manifest_chunks_cypher(),
+                manifest_uuid=root_params['uuid'],
+                group_id=group_id,
+            )
+            if chunk_res is None:
+                existing_chunks: list[dict[str, Any]] = []
+            elif hasattr(chunk_res, 'data'):
+                existing_chunks = list(await chunk_res.data())
+            else:
+                existing_chunks = []
+            expected_count = int(root_params['chunk_count'])
+            if len(existing_chunks) != expected_count:
+                raise CatalogStoreError(
+                    'manifest root exists but chunk set incomplete',
+                    code='batch_conflict',
+                )
+            for idx, ch in enumerate(expected_chunks):
+                row = existing_chunks[idx]
+                if int(row['chunk_index'] if row.get('chunk_index') is not None else -1) != int(ch['chunk_index']):
+                    raise CatalogStoreError(
+                        'manifest chunk order mismatch on idempotent path',
+                        code='batch_conflict',
+                    )
+                if str(row.get('chunk_sha256') or '') != str(ch['chunk_sha256']):
+                    raise CatalogStoreError(
+                        'manifest chunk hash mismatch on idempotent path',
+                        code='batch_conflict',
+                    )
             return {
                 'uuid': existing.get('uuid'),
                 'group_id': existing.get('group_id'),
