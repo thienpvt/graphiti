@@ -87,6 +87,20 @@ ready_for_phase_2=false
 resolved=53
 unresolved=0
 
+local_gate_pass=false
+
+nyquist_compliant=false
+
+independent_code_review=pending
+
+independent_goal_verification=pending
+
+independent_nyquist_audit=pending
+
+independent_security_audit=pending
+
+availability_probed=false
+
 ## Scope Stop
 
 Plan 01-08's green ledger is superseded as current authorization. Plans 01-09 and 01-10 must close CR-02/WR-01 and CR-01/WR-02 respectively; Plan 01-11 alone may reconsider local readiness. Independent audits remain mandatory, so Phase 2 stays blocked.
