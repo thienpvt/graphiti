@@ -30,6 +30,8 @@ IndexReadiness = Literal['ready', 'unknown', 'n/a']
 HARD_MAX_PREPARED_PAYLOAD_BYTES = 0
 HARD_MAX_ACTIVE_PLANS = 0
 HARD_PLAN_TTL_SECONDS = 0
+# Pagination not configured in Phase 2; expose explicit zero authority for CAPA-06.
+HARD_MAX_PAGE_SIZE = 0
 
 
 def namespace_fingerprint(namespace: uuid.UUID | None) -> str | None:
@@ -115,6 +117,7 @@ def build_catalog_capabilities(
                 'max_entities_per_batch': config.max_entities_per_batch,
                 'max_edges_per_batch': config.max_edges_per_batch,
                 'max_provenance_links_per_batch': config.max_provenance_links_per_batch,
+                'max_page_size': getattr(config, 'max_page_size', HARD_MAX_PAGE_SIZE),
             },
             'hard': {
                 'max_entities_per_batch': HARD_MAX_ENTITIES_PER_BATCH,
@@ -123,6 +126,7 @@ def build_catalog_capabilities(
                 'max_prepared_payload_bytes': HARD_MAX_PREPARED_PAYLOAD_BYTES,
                 'max_active_plans': HARD_MAX_ACTIVE_PLANS,
                 'plan_ttl_seconds': HARD_PLAN_TTL_SECONDS,
+                'max_page_size': HARD_MAX_PAGE_SIZE,
             },
         },
         embeddings=embeddings,

@@ -110,6 +110,7 @@ def test_build_capabilities_limits_configured_and_hard():
         'max_entities_per_batch': 100,
         'max_edges_per_batch': 200,
         'max_provenance_links_per_batch': 300,
+        'max_page_size': 0,
     }
     assert caps.limits['hard'] == {
         'max_entities_per_batch': HARD_MAX_ENTITIES_PER_BATCH,
@@ -118,7 +119,21 @@ def test_build_capabilities_limits_configured_and_hard():
         'max_prepared_payload_bytes': 0,
         'max_active_plans': 0,
         'plan_ttl_seconds': 0,
+        'max_page_size': 0,
     }
+    assert 'max_page_size' in caps.limits['configured']
+    assert 'max_page_size' in caps.limits['hard']
+
+
+def test_build_capabilities_exposes_pagination_limits():
+    from services.catalog_capabilities import HARD_MAX_PAGE_SIZE, build_catalog_capabilities
+
+    caps = build_catalog_capabilities(
+        config=CatalogConfig(enabled=False, uuid_namespace=None),
+        client=None,
+    )
+    assert caps.limits['configured']['max_page_size'] == HARD_MAX_PAGE_SIZE
+    assert caps.limits['hard']['max_page_size'] == HARD_MAX_PAGE_SIZE
 
 
 def test_build_capabilities_features_phase_truthful():
