@@ -313,3 +313,92 @@ def test_discard_response_state_discarded():
         state='DISCARDED',
     )
     assert resp.state == 'DISCARDED'
+
+
+# ---------------------------------------------------------------------------
+# PLAN-08 — HARD_* ceilings + CatalogConfig clamps
+# ---------------------------------------------------------------------------
+
+
+def test_hard_plan_ceiling_constants():
+    from models.catalog_common import (
+        DEFAULT_MAX_ACTIVE_PLANS_PER_GROUP,
+        DEFAULT_PLAN_TTL_SECONDS,
+        DEFAULT_PREPARED_CHUNK_BYTES,
+        DEFAULT_PREPARED_PAYLOAD_BYTES,
+        HARD_MAX_ACTIVE_PLANS_PER_GROUP,
+        HARD_MAX_CHUNKS_PER_PLAN,
+        HARD_MAX_PREPARED_PAYLOAD_BYTES,
+        HARD_PLAN_TTL_SECONDS,
+        HARD_PREPARED_CHUNK_BYTES,
+        PLAN_STATE_COMMITTING,
+        PLAN_STATE_COMMITTED,
+        PLAN_STATE_DISCARDED,
+        PLAN_STATE_EXPIRED,
+        PLAN_STATE_PREPARED,
+    )
+
+    assert HARD_PLAN_TTL_SECONDS == 86400
+    assert DEFAULT_PLAN_TTL_SECONDS == 3600
+    assert HARD_MAX_PREPARED_PAYLOAD_BYTES == 16_777_216
+    assert DEFAULT_PREPARED_PAYLOAD_BYTES == 4_194_304
+    assert HARD_PREPARED_CHUNK_BYTES == 262_144
+    assert DEFAULT_PREPARED_CHUNK_BYTES == 131_072
+    assert HARD_MAX_CHUNKS_PER_PLAN == 128
+    assert HARD_MAX_ACTIVE_PLANS_PER_GROUP == 32
+    assert DEFAULT_MAX_ACTIVE_PLANS_PER_GROUP == 8
+    assert PLAN_STATE_PREPARED == 'PREPARED'
+    assert PLAN_STATE_COMMITTING == 'COMMITTING'
+    assert PLAN_STATE_COMMITTED == 'COMMITTED'
+    assert PLAN_STATE_DISCARDED == 'DISCARDED'
+    assert PLAN_STATE_EXPIRED == 'EXPIRED'
+
+
+def test_catalog_config_plan_ttl_defaults_and_clamps():
+    from config.schema import CatalogConfig
+    from models.catalog_common import HARD_PLAN_TTL_SECONDS
+
+    cfg = CatalogConfig()
+    assert cfg.plan_ttl_seconds == 3600
+    cfg_max = CatalogConfig(plan_ttl_seconds=HARD_PLAN_TTL_SECONDS)
+    assert cfg_max.plan_ttl_seconds == HARD_PLAN_TTL_SECONDS
+    with pytest.raises(ValidationError):
+        CatalogConfig(plan_ttl_seconds=HARD_PLAN_TTL_SECONDS + 1)
+    with pytest.raises(ValidationError):
+        CatalogConfig(plan_ttl_seconds=0)
+
+
+def test_catalog_config_prepared_payload_clamps():
+    from config.schema import CatalogConfig
+    from models.catalog_common import HARD_MAX_PREPARED_PAYLOAD_BYTES
+
+    cfg = CatalogConfig()
+    assert cfg.max_prepared_payload_bytes == 4_194_304
+    cfg_max = CatalogConfig(max_prepared_payload_bytes=HARD_MAX_PREPARED_PAYLOAD_BYTES)
+    assert cfg_max.max_prepared_payload_bytes == HARD_MAX_PREPARED_PAYLOAD_BYTES
+    with pytest.raises(ValidationError):
+        CatalogConfig(max_prepared_payload_bytes=HARD_MAX_PREPARED_PAYLOAD_BYTES + 1)
+
+
+def test_catalog_config_prepared_chunk_clamps():
+    from config.schema import CatalogConfig
+    from models.catalog_common import HARD_PREPARED_CHUNK_BYTES
+
+    cfg = CatalogConfig()
+    assert cfg.prepared_chunk_bytes == 131_072
+    cfg_max = CatalogConfig(prepared_chunk_bytes=HARD_PREPARED_CHUNK_BYTES)
+    assert cfg_max.prepared_chunk_bytes == HARD_PREPARED_CHUNK_BYTES
+    with pytest.raises(ValidationError):
+        CatalogConfig(prepared_chunk_bytes=HARD_PREPARED_CHUNK_BYTES + 1)
+
+
+def test_catalog_config_active_plans_clamps():
+    from config.schema import CatalogConfig
+    from models.catalog_common import HARD_MAX_ACTIVE_PLANS_PER_GROUP
+
+    cfg = CatalogConfig()
+    assert cfg.max_active_plans_per_group == 8
+    cfg_max = CatalogConfig(max_active_plans_per_group=HARD_MAX_ACTIVE_PLANS_PER_GROUP)
+    assert cfg_max.max_active_plans_per_group == HARD_MAX_ACTIVE_PLANS_PER_GROUP
+    with pytest.raises(ValidationError):
+        CatalogConfig(max_active_plans_per_group=HARD_MAX_ACTIVE_PLANS_PER_GROUP + 1)

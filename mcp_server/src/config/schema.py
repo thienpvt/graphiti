@@ -16,9 +16,17 @@ from pydantic_settings import (
 )
 
 from models.catalog_common import (
+    DEFAULT_MAX_ACTIVE_PLANS_PER_GROUP,
+    DEFAULT_PLAN_TTL_SECONDS,
+    DEFAULT_PREPARED_CHUNK_BYTES,
+    DEFAULT_PREPARED_PAYLOAD_BYTES,
+    HARD_MAX_ACTIVE_PLANS_PER_GROUP,
     HARD_MAX_EDGES_PER_BATCH,
     HARD_MAX_ENTITIES_PER_BATCH,
+    HARD_MAX_PREPARED_PAYLOAD_BYTES,
     HARD_MAX_PROVENANCE_LINKS_PER_BATCH,
+    HARD_PLAN_TTL_SECONDS,
+    HARD_PREPARED_CHUNK_BYTES,
 )
 
 
@@ -303,6 +311,18 @@ class CatalogConfig(BaseModel):
     max_edges_per_batch: int = Field(default=2000, ge=1, le=HARD_MAX_EDGES_PER_BATCH)
     max_provenance_links_per_batch: int = Field(
         default=5000, ge=1, le=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
+    )
+    plan_ttl_seconds: int = Field(
+        default=DEFAULT_PLAN_TTL_SECONDS, ge=1, le=HARD_PLAN_TTL_SECONDS
+    )
+    max_prepared_payload_bytes: int = Field(
+        default=DEFAULT_PREPARED_PAYLOAD_BYTES, ge=1, le=HARD_MAX_PREPARED_PAYLOAD_BYTES
+    )
+    max_active_plans_per_group: int = Field(
+        default=DEFAULT_MAX_ACTIVE_PLANS_PER_GROUP, ge=1, le=HARD_MAX_ACTIVE_PLANS_PER_GROUP
+    )
+    prepared_chunk_bytes: int = Field(
+        default=DEFAULT_PREPARED_CHUNK_BYTES, ge=1, le=HARD_PREPARED_CHUNK_BYTES
     )
 
     @model_validator(mode='before')
