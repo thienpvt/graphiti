@@ -175,7 +175,7 @@ Plans:
   4. Manifest membership is exact for created, updated, and unchanged objects and is never inferred from `entity.batch_id` / `edge.batch_id`
   5. Search interoperability for catalog entities/edges remains; fault injection between persistence steps leaves neither a partial graph nor a partial manifest
 
-**Plans:** 4/6 plans executed
+**Plans:** 5/6 plans executed
 
 Plans:
 **Wave 1**
@@ -196,7 +196,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4)*
 
-- [ ] 03B-05-PLAN.md — Stranded COMMITTING recovery, stable replay, concurrency arbitration
+- [x] 03B-05-PLAN.md — Stranded COMMITTING recovery, stable replay, concurrency arbitration
 
 **Wave 6** *(blocked on Wave 3–5)*
 
