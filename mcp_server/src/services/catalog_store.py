@@ -2749,6 +2749,45 @@ class CatalogNeo4jStore:
             unchanged_count=outcome_unchanged,
         )
         if not row or not row.get('uuid'):
+            # CR-01 residual: TOCTOU after initial load — winner moved PREPARED→COMMITTING
+            # (or COMMITTED) before raw CAS. Reload under same tx and classify.
+            if to_state == PLAN_STATE_COMMITTING:
+                live = await self.load_prepared_plan_by_token_digest(
+                    None, token_digest=token_digest, tx=tx
+                )
+                if live is None:
+                    raise CatalogStoreError(
+                        'prepared plan not found',
+                        code='prepared_plan_not_found',
+                    )
+                live_state = str(live.get('state') or '')
+                if live_state == PLAN_STATE_COMMITTING:
+                    return {
+                        'uuid': live.get('uuid'),
+                        'group_id': live.get('group_id'),
+                        'token_digest': live.get('token_digest'),
+                        'state': PLAN_STATE_COMMITTING,
+                        'artifact_sha256': live.get('artifact_sha256'),
+                        'expires_at': live.get('expires_at'),
+                        'updated_at': live.get('updated_at'),
+                        'committing_started_at': live.get('committing_started_at'),
+                        'reentry': True,
+                    }
+                if live_state == PLAN_STATE_COMMITTED:
+                    raise CatalogStoreError(
+                        'prepared plan already consumed',
+                        code='prepared_plan_already_consumed',
+                    )
+                if live_state == PLAN_STATE_EXPIRED:
+                    raise CatalogStoreError(
+                        'prepared plan expired',
+                        code='prepared_plan_expired',
+                    )
+                if live_state == PLAN_STATE_DISCARDED:
+                    raise CatalogStoreError(
+                        'prepared plan not found',
+                        code='prepared_plan_not_found',
+                    )
             raise CatalogStoreError(
                 'plan CAS returned no row',
                 code='prepared_plan_conflict',

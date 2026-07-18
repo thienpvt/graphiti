@@ -953,3 +953,76 @@ async def test_first_and_replay_counts_match_durable_outcomes():
     assert replay.committed_updated == first.committed_updated
     assert replay.committed_unchanged == first.committed_unchanged
     assert counters2['entity_writes'] == 0
+
+
+@pytest.mark.asyncio
+async def test_zero_created_nonzero_updated_replay_preserves_zeros():
+    """WR-02 residual: durable created=0 must not fall through projected non-zero via `or`."""
+    token = mint_plan_token()
+    root, chunks, art_sha = _make_root(
+        token=token,
+        state=PLAN_STATE_COMMITTED,
+        # Prepare projection leftover — must not override durable zeros.
+        overrides={'created_count': 7, 'updated_count': 0, 'unchanged_count': 0},
+    )
+    expected_manifest = _expected_manifest_sha(root, art_sha)
+    snapshot = {
+        'plan_state': PLAN_STATE_COMMITTED,
+        'batch_status': 'committed',
+        'manifest_sha256': expected_manifest,
+        'request_sha256': root['request_sha256'],
+        'catalog_sha256': root['catalog_sha256'],
+        'artifact_sha256': art_sha,
+        'identity_schema_version': IDENTITY_SCHEMA_VERSION,
+        'batch_id': root['batch_id'],
+        'group_id': root['group_id'],
+        # Durable authority: zero created, nonzero updated.
+        'plan_created_count': 0,
+        'plan_updated_count': 3,
+        'plan_unchanged_count': 1,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    counters = _wire_recovery_store(
+        service, root=root, chunks=chunks, agree=False, snapshot=snapshot
+    )
+
+    async def _agrees(tx, *, projection: dict[str, Any]) -> bool:
+        _ = tx
+        for key in (
+            'manifest_sha256',
+            'request_sha256',
+            'catalog_sha256',
+            'identity_schema_version',
+        ):
+            if str(snapshot.get(key) or '') != str(projection.get(key) or ''):
+                return False
+        return (
+            snapshot['plan_state'] == PLAN_STATE_COMMITTED
+            and snapshot['batch_status'] == 'committed'
+            and str(snapshot.get('artifact_sha256') or '')
+            == str(projection.get('artifact_sha256') or '')
+        )
+
+    service._store.terminal_commit_agrees = AsyncMock(side_effect=_agrees)
+
+    r1 = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+    r2 = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert r1.error_code is None, r1.error_message
+    assert r2.error_code is None, r2.error_message
+    assert r1.committed_created == 0
+    assert r1.committed_updated == 3
+    assert r1.committed_unchanged == 1
+    assert r2.committed_created == 0
+    assert r2.committed_updated == 3
+    assert r2.committed_unchanged == 1
+    assert r1.model_dump() == r2.model_dump()
+    assert counters['entity_writes'] == 0
+    assert counters['manifest_writes'] == 0

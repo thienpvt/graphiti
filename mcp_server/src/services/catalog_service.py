@@ -5199,7 +5199,17 @@ class CatalogService:
                 batch_uuid=batch_uuid,
             )
             if await self._store.terminal_commit_agrees(tx, projection=agree_projection):
-                # WR-02: durable plan outcome counts authority for short-circuit receipt.
+                # WR-02: durable plan outcome counts authority; preserve legitimate zeros.
+                snap = snapshot or {}
+                plan = projection.plan or {}
+
+                def _count(snap_key: str, plan_key: str) -> int:
+                    if snap.get(snap_key) is not None:
+                        return int(snap.get(snap_key) or 0)
+                    if plan.get(plan_key) is not None:
+                        return int(plan.get(plan_key) or 0)
+                    return 0
+
                 return {
                     'short_circuit': True,
                     'manifest_sha256': digest_preview,
@@ -5207,21 +5217,9 @@ class CatalogService:
                     'edge_results': [],
                     'provenance_results': [],
                     'batch_uuid': batch_uuid,
-                    'committed_created': int(
-                        (snapshot or {}).get('plan_created_count')
-                        or (projection.plan or {}).get('created_count')
-                        or 0
-                    ),
-                    'committed_updated': int(
-                        (snapshot or {}).get('plan_updated_count')
-                        or (projection.plan or {}).get('updated_count')
-                        or 0
-                    ),
-                    'committed_unchanged': int(
-                        (snapshot or {}).get('plan_unchanged_count')
-                        or (projection.plan or {}).get('unchanged_count')
-                        or 0
-                    ),
+                    'committed_created': _count('plan_created_count', 'created_count'),
+                    'committed_updated': _count('plan_updated_count', 'updated_count'),
+                    'committed_unchanged': _count('plan_unchanged_count', 'unchanged_count'),
                 }
             self._raise_if_partial_terminal(
                 snapshot=snapshot,

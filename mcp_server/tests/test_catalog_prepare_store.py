@@ -538,6 +538,35 @@ class _CasTx:
         return _Rows([])
 
 
+class _ToctouCasTx:
+    """Production-store TOCTOU: initial load PREPARED, raw CAS zero-row, reload live state.
+
+    Models real Neo4j race where winner advances between load and SET MATCH.
+    """
+
+    def __init__(
+        self,
+        *,
+        initial: dict[str, Any],
+        after_race: dict[str, Any],
+    ) -> None:
+        self.initial = initial
+        self.after_race = after_race
+        self.load_n = 0
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def run(self, cypher: str, **params: Any) -> _Rows:
+        self.calls.append((cypher, params))
+        if 'token_digest: $token_digest' in cypher and 'SET p.state' not in cypher:
+            self.load_n += 1
+            row = self.initial if self.load_n == 1 else self.after_race
+            return _Rows([row] if row else [])
+        if 'SET p.state' in cypher:
+            # Winner already moved state; zero-row CAS.
+            return _Rows([])
+        return _Rows([])
+
+
 def test_cas_cypher_no_committing_to_prepared_path():
     store = CatalogNeo4jStore()
     cypher = store.build_cas_plan_state_cypher()
@@ -635,6 +664,50 @@ async def test_cas_stale_prepared_expected_live_committing_reentry():
     assert row['state'] == PLAN_STATE_COMMITTING
     assert row.get('reentry') is True
     assert not any('SET p.state' in c for c, _ in tx.calls)
+
+
+@pytest.mark.asyncio
+async def test_cas_zero_row_reload_live_committing_reentry():
+    """CR-01 residual: raw CAS zero-row after PREPARED load; reload live COMMITTING → reentry."""
+    store = CatalogNeo4jStore()
+    initial = _root(state=PLAN_STATE_PREPARED)
+    after = _root(state=PLAN_STATE_COMMITTING, committing_started_at=FIXED_TS)
+    tx = _ToctouCasTx(initial=initial, after_race=after)
+    row = await store.cas_plan_state(
+        tx,
+        token_digest=TOKEN_DIGEST,
+        expected_from=PLAN_STATE_PREPARED,
+        to_state=PLAN_STATE_COMMITTING,
+        updated_at=FIXED_TS,
+        now=FIXED_TS,
+        require_not_expired=True,
+    )
+    assert row['state'] == PLAN_STATE_COMMITTING
+    assert row.get('reentry') is True
+    assert any('SET p.state' in c for c, _ in tx.calls)
+    assert tx.load_n >= 2
+
+
+@pytest.mark.asyncio
+async def test_cas_zero_row_reload_live_committed_already_consumed():
+    """CR-01 residual: raw CAS zero-row; reload live COMMITTED → already_consumed."""
+    store = CatalogNeo4jStore()
+    initial = _root(state=PLAN_STATE_PREPARED)
+    after = _root(state=PLAN_STATE_COMMITTED)
+    tx = _ToctouCasTx(initial=initial, after_race=after)
+    with pytest.raises(CatalogStoreError) as exc:
+        await store.cas_plan_state(
+            tx,
+            token_digest=TOKEN_DIGEST,
+            expected_from=PLAN_STATE_PREPARED,
+            to_state=PLAN_STATE_COMMITTING,
+            updated_at=FIXED_TS,
+            now=FIXED_TS,
+            require_not_expired=True,
+        )
+    assert exc.value.code == 'prepared_plan_already_consumed'
+    assert any('SET p.state' in c for c, _ in tx.calls)
+    assert tx.load_n >= 2
 
 
 @pytest.mark.asyncio

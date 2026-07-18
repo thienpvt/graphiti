@@ -630,6 +630,33 @@ async def test_terminal_agree_short_circuits_without_rewrite():
 
 
 @pytest.mark.asyncio
+async def test_short_circuit_preserves_zero_created_count():
+    """WR-02 residual: plan_created_count=0 must not fall through projected counts."""
+    store = _RecordingStore()
+    service = _service_with_store(store)
+    store.agree = True
+    store.snapshot = {
+        'plan_state': 'COMMITTED',
+        'batch_status': 'committed',
+        'plan_created_count': 0,
+        'plan_updated_count': 2,
+        'plan_unchanged_count': 1,
+    }
+    proj = _projection(with_plan=True)
+    # Projected leftover would wrongly win under `or 0` fallback.
+    assert proj.plan is not None
+    proj.plan['created_count'] = 9
+    proj.plan['updated_count'] = 0
+    proj.plan['unchanged_count'] = 0
+    outcome = await _run_writer(service, store, proj)
+    assert outcome is not None
+    assert outcome.get('short_circuit') is True
+    assert outcome.get('committed_created') == 0
+    assert outcome.get('committed_updated') == 2
+    assert outcome.get('committed_unchanged') == 1
+
+
+@pytest.mark.asyncio
 async def test_plan_cas_only_when_projection_plan_present():
     store = _RecordingStore()
     service = _service_with_store(store)
