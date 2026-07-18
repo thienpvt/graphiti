@@ -357,7 +357,11 @@ def check_control_plane_present(root: Path) -> None:
         if not re.search(rf'\basync\s+def\s+{re.escape(sym)}\b', service):
             raise AssertionError(f'missing control-plane method: {sym}')
     store = (root / 'mcp_server/src/services/catalog_store.py').read_text(encoding='utf-8')
-    for sym in ('create_prepared_plan', 'load_prepared_plan', 'cas_plan_state'):
+    for sym in (
+        'create_prepared_plan_with_chunks',
+        'load_prepared_plan_by_token_digest',
+        'cas_plan_state',
+    ):
         if not re.search(rf'\basync\s+def\s+{re.escape(sym)}\b', store):
             raise AssertionError(f'missing store method: {sym}')
 
