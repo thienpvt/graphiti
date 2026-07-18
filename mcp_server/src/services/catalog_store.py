@@ -912,6 +912,7 @@ class CatalogNeo4jStore:
                    e.name AS edge_type,
                    e.edge_key AS edge_key,
                    e.batch_id AS batch_id,
+                   e.content_sha256 AS content_sha256,
                    e.fact_embedding IS NOT NULL AS has_fact_embedding,
                    s.uuid AS source_uuid,
                    s.name AS source_name,
@@ -934,6 +935,7 @@ class CatalogNeo4jStore:
                    e.name AS edge_type,
                    e.edge_key AS edge_key,
                    e.batch_id AS batch_id,
+                   e.content_sha256 AS content_sha256,
                    e.fact_embedding IS NOT NULL AS has_fact_embedding,
                    s.uuid AS source_uuid,
                    s.name AS source_name,
@@ -1018,6 +1020,50 @@ class CatalogNeo4jStore:
             return []
         cypher = self.build_match_provenance_presence_cypher()
         params = {'group_id': group_id, 'target_uuids': list(target_uuids)}
+        return await self._read_many(executor, cypher, params, tx=tx)
+
+    def build_match_evidence_links_exact_cypher(self) -> str:
+        """Exact CatalogEvidenceLink MATCH by group_id + uuid (EVID-13).
+
+        Identity authority is uuid+group_id only. link_key/content_sha256 are
+        consistency properties returned for comparison — never alternate identity.
+        """
+        return """
+            UNWIND $uuids AS link_uuid
+            MATCH (n:CatalogEvidenceLink {uuid: link_uuid, group_id: $group_id})
+            RETURN n.uuid AS uuid,
+                   n.group_id AS group_id,
+                   n.link_key AS link_key,
+                   n.content_sha256 AS content_sha256,
+                   n.batch_id AS batch_id,
+                   n.source_uuid AS source_uuid,
+                   n.target_kind AS target_kind,
+                   n.target_uuid AS target_uuid
+            """
+
+    async def match_evidence_links_exact(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        uuids: list[str],
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read-only exact evidence-link MATCH by group_id + uuid; no writes."""
+        if not uuids:
+            return []
+        # Preserve order-stable unique uuid list; never invent identity from link_key.
+        seen: set[str] = set()
+        uniq: list[str] = []
+        for u in uuids:
+            s = str(u or '')
+            if s and s not in seen:
+                seen.add(s)
+                uniq.append(s)
+        if not uniq:
+            return []
+        cypher = self.build_match_evidence_links_exact_cypher()
+        params = {'group_id': group_id, 'uuids': uniq}
         return await self._read_many(executor, cypher, params, tx=tx)
 
     # ------------------------------------------------------------------
@@ -3657,7 +3703,9 @@ class CatalogNeo4jStore:
                 )
             for idx, ch in enumerate(expected_chunks):
                 row = existing_chunks[idx]
-                if int(row['chunk_index'] if row.get('chunk_index') is not None else -1) != int(ch['chunk_index']):
+                if int(row['chunk_index'] if row.get('chunk_index') is not None else -1) != int(
+                    ch['chunk_index']
+                ):
                     raise CatalogStoreError(
                         'manifest chunk order mismatch on idempotent path',
                         code='batch_conflict',

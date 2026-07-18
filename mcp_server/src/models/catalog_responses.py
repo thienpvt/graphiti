@@ -85,11 +85,13 @@ class VerifyEntitySection(BaseModel):
     expected: int = 0
     found: int = 0
     missing: list[str] = Field(default_factory=list)
+    extras: list[str] = Field(default_factory=list)
     wrong_type: list[str] = Field(default_factory=list)
     generic_duplicate: list[str] = Field(default_factory=list)
     typed_duplicate: list[str] = Field(default_factory=list)
     uuid_mismatch: list[str] = Field(default_factory=list)
     missing_embedding: list[str] = Field(default_factory=list)
+    content_hash_mismatch: list[str] = Field(default_factory=list)
 
 
 class VerifyEdgeSection(BaseModel):
@@ -98,11 +100,24 @@ class VerifyEdgeSection(BaseModel):
     expected: int = 0
     found: int = 0
     missing: list[str] = Field(default_factory=list)
+    extras: list[str] = Field(default_factory=list)
     duplicate_edge_key: list[str] = Field(default_factory=list)
     edge_type_mismatch: list[str] = Field(default_factory=list)
     endpoint_mismatch: list[str] = Field(default_factory=list)
     uuid_mismatch: list[str] = Field(default_factory=list)
     missing_embedding: list[str] = Field(default_factory=list)
+    content_hash_mismatch: list[str] = Field(default_factory=list)
+
+
+class VerifyEvidenceSection(BaseModel):
+    """Evidence-link verification vs durable manifest (EVID-13)."""
+
+    expected: int = 0
+    found: int = 0
+    missing: list[str] = Field(default_factory=list)
+    extras: list[str] = Field(default_factory=list)
+    link_key_mismatch: list[str] = Field(default_factory=list)
+    content_hash_mismatch: list[str] = Field(default_factory=list)
 
 
 class VerifyCatalogBatchResponse(BaseModel):
@@ -110,13 +125,18 @@ class VerifyCatalogBatchResponse(BaseModel):
 
     group_id: str
     batch_id: str | None = None
+    # GATE-05 style absence for missing batch status on batch-scoped verify.
+    found: bool = True
     results: list[CatalogItemResult] = Field(default_factory=list)
     entities: VerifyEntitySection = Field(default_factory=VerifyEntitySection)
     edges: VerifyEdgeSection = Field(default_factory=VerifyEdgeSection)
+    evidence: VerifyEvidenceSection = Field(default_factory=VerifyEvidenceSection)
     missing: list[str] = Field(default_factory=list)
+    extras: list[str] = Field(default_factory=list)
     anomalies: list[dict[str, Any]] = Field(default_factory=list)
     require_provenance: bool = False
     missing_provenance: list[str] = Field(default_factory=list)
+    manifest_sha256: str | None = None
     error_code: CatalogErrorCode | None = None
     error_message: str | None = None
 

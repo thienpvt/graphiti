@@ -60,6 +60,7 @@ from models.catalog_responses import (
     VerifyCatalogBatchResponse,
     VerifyEdgeSection,
     VerifyEntitySection,
+    VerifyEvidenceSection,
 )
 from models.catalog_topology import validate_edge_endpoint_pair
 from services.catalog_capabilities import HARD_MAX_PAGE_SIZE
@@ -1554,7 +1555,12 @@ class CatalogService:
         client: Any,
         request: VerifyCatalogBatchRequest,
     ) -> VerifyCatalogBatchResponse:
-        """Read-only batch verification (VERI-01..05). No writes, no embeddings."""
+        """Read-only batch verification (VERI-01..06, EVID-13). No writes/embeddings.
+
+        When batch_id is present, expected membership/counts come only from the
+        committed durable manifest. Live rows are observations (missing vs extras).
+        Keys-only (no batch_id) keeps request keys as expected authority.
+        """
         entity_count = len(request.entities)
         edge_count = len(request.edges)
         gate = self._read_gate(
@@ -1572,6 +1578,7 @@ class CatalogService:
             return VerifyCatalogBatchResponse(
                 group_id=request.group_id,
                 batch_id=request.batch_id,
+                found=False,
                 require_provenance=request.require_provenance,
                 error_code=code,
                 error_message=message,
@@ -1591,8 +1598,111 @@ class CatalogService:
         namespace = self._namespace()
         assert namespace is not None
 
-        graph_keys = [e.graph_key for e in request.entities]
-        edge_keys = [e.edge_key for e in request.edges]
+        expected_entities: list[Any] = list(request.entities)
+        expected_edges: list[Any] = list(request.edges)
+        expected_entity_hashes: dict[str, str] = {}
+        expected_edge_hashes: dict[str, str] = {}
+        expected_edge_uuids: dict[str, str] = {}
+        expected_entity_uuids: dict[str, str] = {}
+        evidence_members: list[dict[str, Any]] = []
+        manifest_sha: str | None = None
+        batch_expected_mode = False
+
+        if request.batch_id:
+            # Q3: missing status → found=false (not manifest_mismatch).
+            batch_uuid = catalog_batch_uuid(namespace, request.group_id, request.batch_id)
+            try:
+                status_row = await self._store.get_batch_status(
+                    client.driver,
+                    uuid=batch_uuid,
+                    group_id=request.group_id,
+                )
+            except Exception as exc:
+                logger.error(
+                    'catalog verify_catalog_batch status_read_failed batch_id=%s reason=%s',
+                    request.batch_id,
+                    type(exc).__name__,
+                )
+                return VerifyCatalogBatchResponse(
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    found=False,
+                    require_provenance=request.require_provenance,
+                    error_code=CatalogErrorCode.internal_error,
+                    error_message='verify status read failed',
+                )
+            if status_row is None:
+                return VerifyCatalogBatchResponse(
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    found=False,
+                    require_provenance=request.require_provenance,
+                    error_code=None,
+                    error_message='batch status not found',
+                )
+
+            # Status present: durable manifest is sole expected authority (VERI-01/05).
+            try:
+                root, body = await self._load_committed_manifest_body(
+                    client=client,
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                )
+            except self._ManifestLoadError as exc:
+                return VerifyCatalogBatchResponse(
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    found=exc.found,
+                    require_provenance=request.require_provenance,
+                    error_code=exc.code,
+                    error_message=exc.message,
+                )
+            except Exception as exc:
+                logger.error(
+                    'catalog verify_catalog_batch manifest_load_failed batch_id=%s reason=%s',
+                    request.batch_id,
+                    type(exc).__name__,
+                )
+                return VerifyCatalogBatchResponse(
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    found=False,
+                    require_provenance=request.require_provenance,
+                    error_code=CatalogErrorCode.internal_error,
+                    error_message='verify manifest load failed',
+                )
+
+            try:
+                expected_entities, expected_entity_hashes, expected_entity_uuids = (
+                    self._manifest_entity_expected(body)
+                )
+                expected_edges, expected_edge_hashes, expected_edge_uuids = (
+                    self._manifest_edge_expected(body)
+                )
+                evidence_members = self._manifest_evidence_expected(body)
+            except ValueError as exc:
+                return VerifyCatalogBatchResponse(
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    found=True,
+                    require_provenance=request.require_provenance,
+                    error_code=CatalogErrorCode.manifest_mismatch,
+                    error_message=str(exc) or 'invalid manifest membership',
+                )
+            manifest_sha = str(root.get('manifest_sha256') or '') or None
+            batch_expected_mode = True
+
+        graph_keys = [e.graph_key for e in expected_entities]
+        # Batch+keys: also observe request keys so key diagnostics still apply.
+        if request.batch_id and request.entities:
+            for ent in request.entities:
+                if ent.graph_key not in graph_keys:
+                    graph_keys.append(ent.graph_key)
+        edge_keys = [e.edge_key for e in expected_edges]
+        if request.batch_id and request.edges:
+            for edge in request.edges:
+                if edge.edge_key not in edge_keys:
+                    edge_keys.append(edge.edge_key)
 
         try:
             entity_rows = await self._store.match_entities_for_verify(
@@ -1616,6 +1726,7 @@ class CatalogService:
             return VerifyCatalogBatchResponse(
                 group_id=request.group_id,
                 batch_id=request.batch_id,
+                found=True,
                 require_provenance=request.require_provenance,
                 error_code=CatalogErrorCode.internal_error,
                 error_message='verify read failed',
@@ -1624,17 +1735,110 @@ class CatalogService:
         entity_section = self._verify_entities(
             namespace=namespace,
             group_id=request.group_id,
-            expected=request.entities,
+            expected=expected_entities,
             rows=entity_rows,
+            expected_hashes=expected_entity_hashes or None,
+            expected_uuids=expected_entity_uuids or None,
+            report_extras=batch_expected_mode,
         )
         edge_section = self._verify_edges(
             namespace=namespace,
             group_id=request.group_id,
-            expected=request.edges,
+            expected=expected_edges,
             rows=edge_rows,
+            expected_hashes=expected_edge_hashes or None,
+            expected_uuids=expected_edge_uuids or None,
+            report_extras=batch_expected_mode,
         )
 
-        missing = list(entity_section.missing) + list(edge_section.missing)
+        # Batch+keys: diagnose request keys that are not in the manifest expected set.
+        if batch_expected_mode and request.entities:
+            expected_keys = {e.graph_key for e in expected_entities}
+            by_key: dict[str, list[dict[str, Any]]] = {}
+            for row in entity_rows:
+                key = self._row_key(row)
+                if key:
+                    by_key.setdefault(str(key), []).append(row)
+            for ent in request.entities:
+                if ent.graph_key in expected_keys:
+                    continue
+                matches = by_key.get(ent.graph_key, [])
+                if not matches:
+                    if ent.graph_key not in entity_section.missing:
+                        entity_section.missing.append(ent.graph_key)
+                    continue
+                # Key diagnostics only — do not inflate batch expected count.
+                self._diagnose_entity_matches(
+                    section=entity_section,
+                    graph_key=ent.graph_key,
+                    entity_type=ent.entity_type,
+                    matches=matches,
+                    expected_uuid=catalog_entity_uuid(
+                        namespace, request.group_id, ent.entity_type, ent.graph_key
+                    ),
+                    expected_hash=None,
+                    count_found=False,
+                )
+
+        if batch_expected_mode and request.edges:
+            expected_edge_key_set = {e.edge_key for e in expected_edges}
+            by_edge: dict[str, list[dict[str, Any]]] = {}
+            for row in edge_rows:
+                key = row.get('edge_key')
+                if key:
+                    by_edge.setdefault(str(key), []).append(row)
+            for edge in request.edges:
+                if edge.edge_key in expected_edge_key_set:
+                    continue
+                matches = by_edge.get(edge.edge_key, [])
+                if not matches:
+                    if edge.edge_key not in edge_section.missing:
+                        edge_section.missing.append(edge.edge_key)
+                    continue
+                self._diagnose_edge_matches(
+                    section=edge_section,
+                    edge=edge,
+                    matches=matches,
+                    expected_uuid=catalog_edge_uuid(
+                        namespace, request.group_id, edge.edge_type, edge.edge_key
+                    ),
+                    expected_hash=None,
+                    count_found=False,
+                )
+
+        evidence_section = VerifyEvidenceSection()
+        if batch_expected_mode:
+            try:
+                evidence_section = await self._verify_evidence_links(
+                    client=client,
+                    group_id=request.group_id,
+                    members=evidence_members,
+                )
+            except Exception as exc:
+                logger.error(
+                    'catalog verify_catalog_batch evidence_read_failed batch_id=%s reason=%s',
+                    request.batch_id,
+                    type(exc).__name__,
+                )
+                return VerifyCatalogBatchResponse(
+                    group_id=request.group_id,
+                    batch_id=request.batch_id,
+                    found=True,
+                    entities=entity_section,
+                    edges=edge_section,
+                    require_provenance=request.require_provenance,
+                    error_code=CatalogErrorCode.internal_error,
+                    error_message='verify evidence read failed',
+                )
+
+        missing = (
+            list(entity_section.missing)
+            + list(edge_section.missing)
+            + list(evidence_section.missing)
+        )
+        extras = (
+            list(entity_section.extras) + list(edge_section.extras) + list(evidence_section.extras)
+        )
         anomalies: list[dict[str, Any]] = []
         for key in entity_section.wrong_type:
             anomalies.append({'kind': 'wrong_type', 'graph_key': key})
@@ -1646,6 +1850,10 @@ class CatalogService:
             anomalies.append({'kind': 'uuid_mismatch', 'graph_key': key})
         for key in entity_section.missing_embedding:
             anomalies.append({'kind': 'missing_embedding', 'graph_key': key})
+        for key in entity_section.content_hash_mismatch:
+            anomalies.append({'kind': 'content_hash_mismatch', 'graph_key': key})
+        for key in entity_section.extras:
+            anomalies.append({'kind': 'extra', 'graph_key': key})
         for key in edge_section.duplicate_edge_key:
             anomalies.append({'kind': 'duplicate_edge_key', 'edge_key': key})
         for key in edge_section.edge_type_mismatch:
@@ -1656,6 +1864,18 @@ class CatalogService:
             anomalies.append({'kind': 'uuid_mismatch', 'edge_key': key})
         for key in edge_section.missing_embedding:
             anomalies.append({'kind': 'missing_embedding', 'edge_key': key})
+        for key in edge_section.content_hash_mismatch:
+            anomalies.append({'kind': 'content_hash_mismatch', 'edge_key': key})
+        for key in edge_section.extras:
+            anomalies.append({'kind': 'extra', 'edge_key': key})
+        for key in evidence_section.link_key_mismatch:
+            anomalies.append({'kind': 'link_key_mismatch', 'uuid': key})
+        for key in evidence_section.content_hash_mismatch:
+            anomalies.append({'kind': 'content_hash_mismatch', 'uuid': key})
+        for key in evidence_section.extras:
+            anomalies.append({'kind': 'extra_evidence', 'uuid': key})
+        for key in evidence_section.missing:
+            anomalies.append({'kind': 'missing_evidence', 'uuid': key})
 
         missing_provenance: list[str] = []
         if request.require_provenance:
@@ -1668,16 +1888,18 @@ class CatalogService:
                 u = row.get('uuid')
                 if u:
                     target_uuids.append(str(u))
-            # Also include expected deterministic UUIDs for missing targets
-            for ent in request.entities:
+            for ent in expected_entities:
                 target_uuids.append(
-                    catalog_entity_uuid(namespace, request.group_id, ent.entity_type, ent.graph_key)
+                    expected_entity_uuids.get(ent.graph_key)
+                    or catalog_entity_uuid(
+                        namespace, request.group_id, ent.entity_type, ent.graph_key
+                    )
                 )
-            for edge in request.edges:
+            for edge in expected_edges:
                 target_uuids.append(
-                    catalog_edge_uuid(namespace, request.group_id, edge.edge_type, edge.edge_key)
+                    expected_edge_uuids.get(edge.edge_key)
+                    or catalog_edge_uuid(namespace, request.group_id, edge.edge_type, edge.edge_key)
                 )
-            # de-dupe preserve order
             seen_u: set[str] = set()
             uniq_targets: list[str] = []
             for u in target_uuids:
@@ -1699,11 +1921,15 @@ class CatalogService:
                 return VerifyCatalogBatchResponse(
                     group_id=request.group_id,
                     batch_id=request.batch_id,
+                    found=True,
                     entities=entity_section,
                     edges=edge_section,
+                    evidence=evidence_section,
                     missing=missing,
+                    extras=extras,
                     anomalies=anomalies,
                     require_provenance=True,
+                    manifest_sha256=manifest_sha,
                     error_code=CatalogErrorCode.internal_error,
                     error_message='verify provenance read failed',
                 )
@@ -1721,13 +1947,242 @@ class CatalogService:
         return VerifyCatalogBatchResponse(
             group_id=request.group_id,
             batch_id=request.batch_id,
+            found=True,
             entities=entity_section,
             edges=edge_section,
+            evidence=evidence_section,
             missing=missing,
+            extras=extras,
             anomalies=anomalies,
             require_provenance=request.require_provenance,
             missing_provenance=missing_provenance,
+            manifest_sha256=manifest_sha,
         )
+
+    @staticmethod
+    def _manifest_entity_expected(
+        body: dict[str, Any],
+    ) -> tuple[list[Any], dict[str, str], dict[str, str]]:
+        """Build expected entity refs + hash/uuid maps from durable manifest body."""
+        from models.catalog_entities import VerifyEntityRef
+
+        raw = body.get('entities')
+        if raw is None:
+            raw = []
+        if not isinstance(raw, list):
+            raise ValueError('manifest entities must be a list')
+        expected: list[Any] = []
+        hashes: dict[str, str] = {}
+        uuids: dict[str, str] = {}
+        for item in raw:
+            if not isinstance(item, dict):
+                raise ValueError('manifest entity member must be an object')
+            graph_key = item.get('graph_key')
+            entity_type = item.get('entity_type')
+            content_sha = item.get('content_sha256')
+            member_uuid = item.get('uuid')
+            if not isinstance(graph_key, str) or not graph_key:
+                raise ValueError('manifest entity missing graph_key')
+            if not isinstance(entity_type, str) or not entity_type:
+                raise ValueError('manifest entity missing entity_type')
+            if not isinstance(content_sha, str) or not content_sha:
+                raise ValueError('manifest entity missing content_sha256')
+            if not isinstance(member_uuid, str) or not member_uuid:
+                raise ValueError('manifest entity missing uuid')
+            expected.append(VerifyEntityRef(entity_type=entity_type, graph_key=graph_key))
+            hashes[graph_key] = content_sha
+            uuids[graph_key] = member_uuid
+        return expected, hashes, uuids
+
+    @staticmethod
+    def _manifest_edge_expected(
+        body: dict[str, Any],
+    ) -> tuple[list[Any], dict[str, str], dict[str, str]]:
+        """Build expected edge refs + hash/uuid maps from durable manifest body."""
+        from models.catalog_entities import VerifyEdgeRef
+
+        raw = body.get('edges')
+        if raw is None:
+            raw = []
+        if not isinstance(raw, list):
+            raise ValueError('manifest edges must be a list')
+        expected: list[Any] = []
+        hashes: dict[str, str] = {}
+        uuids: dict[str, str] = {}
+        for item in raw:
+            if not isinstance(item, dict):
+                raise ValueError('manifest edge member must be an object')
+            edge_key = item.get('edge_key')
+            edge_type = item.get('edge_type')
+            content_sha = item.get('content_sha256')
+            member_uuid = item.get('uuid')
+            if not isinstance(edge_key, str) or not edge_key:
+                raise ValueError('manifest edge missing edge_key')
+            if not isinstance(edge_type, str) or not edge_type:
+                raise ValueError('manifest edge missing edge_type')
+            if not isinstance(content_sha, str) or not content_sha:
+                raise ValueError('manifest edge missing content_sha256')
+            if not isinstance(member_uuid, str) or not member_uuid:
+                raise ValueError('manifest edge missing uuid')
+            expected.append(VerifyEdgeRef(edge_type=edge_type, edge_key=edge_key))
+            hashes[edge_key] = content_sha
+            uuids[edge_key] = member_uuid
+        return expected, hashes, uuids
+
+    @staticmethod
+    def _manifest_evidence_expected(body: dict[str, Any]) -> list[dict[str, Any]]:
+        """Extract evidence-link members; fail closed if uuid missing (EVID-13)."""
+        raw = body.get('evidence_links')
+        if raw is None:
+            raw = []
+        if not isinstance(raw, list):
+            raise ValueError('manifest evidence_links must be a list')
+        out: list[dict[str, Any]] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                raise ValueError('manifest evidence member must be an object')
+            member_uuid = item.get('uuid')
+            link_key = item.get('link_key')
+            content_sha = item.get('content_sha256')
+            if not isinstance(member_uuid, str) or not member_uuid:
+                raise ValueError('manifest evidence member missing uuid')
+            if not isinstance(link_key, str) or not link_key:
+                raise ValueError('manifest evidence member missing link_key')
+            if not isinstance(content_sha, str) or not content_sha:
+                raise ValueError('manifest evidence member missing content_sha256')
+            out.append(
+                {
+                    'uuid': member_uuid,
+                    'link_key': link_key,
+                    'content_sha256': content_sha,
+                }
+            )
+        return out
+
+    def _diagnose_entity_matches(
+        self,
+        *,
+        section: VerifyEntitySection,
+        graph_key: str,
+        entity_type: str,
+        matches: list[dict[str, Any]],
+        expected_uuid: str,
+        expected_hash: str | None,
+        count_found: bool,
+    ) -> None:
+        typed: list[dict[str, Any]] = []
+        generic: list[dict[str, Any]] = []
+        wrong: list[dict[str, Any]] = []
+        for row in matches:
+            labels = self._node_labels(row)
+            custom = self._custom_labels(labels)
+            if not custom:
+                generic.append(row)
+            elif set(custom) == {entity_type}:
+                typed.append(row)
+            else:
+                wrong.append(row)
+        if generic and graph_key not in section.generic_duplicate:
+            section.generic_duplicate.append(graph_key)
+        if wrong and graph_key not in section.wrong_type:
+            section.wrong_type.append(graph_key)
+        if len(typed) > 1 and graph_key not in section.typed_duplicate:
+            section.typed_duplicate.append(graph_key)
+        primary = typed or wrong or generic
+        if primary and count_found:
+            section.found += 1
+        if typed:
+            if (
+                any(str(row.get('uuid')) != expected_uuid for row in typed)
+                and graph_key not in section.uuid_mismatch
+            ):
+                section.uuid_mismatch.append(graph_key)
+            if (
+                any(not row.get('has_name_embedding') for row in typed)
+                and graph_key not in section.missing_embedding
+            ):
+                section.missing_embedding.append(graph_key)
+            if (
+                expected_hash is not None
+                and any(str(row.get('content_sha256') or '') != expected_hash for row in typed)
+                and graph_key not in section.content_hash_mismatch
+            ):
+                section.content_hash_mismatch.append(graph_key)
+        elif wrong or generic:
+            # Prefer wrong-type rows when both buckets present (partitioned in practice).
+            candidate_rows = wrong if wrong else generic
+            if (
+                any(not row.get('has_name_embedding') for row in candidate_rows)
+                and graph_key not in section.missing_embedding
+            ):
+                section.missing_embedding.append(graph_key)
+
+    def _diagnose_edge_matches(
+        self,
+        *,
+        section: VerifyEdgeSection,
+        edge: Any,
+        matches: list[dict[str, Any]],
+        expected_uuid: str,
+        expected_hash: str | None,
+        count_found: bool,
+        require_endpoints: bool = False,
+    ) -> None:
+        if count_found:
+            section.found += 1
+        if len(matches) > 1 and edge.edge_key not in section.duplicate_edge_key:
+            section.duplicate_edge_key.append(edge.edge_key)
+        if (
+            any(str(row.get('uuid')) != expected_uuid for row in matches)
+            and edge.edge_key not in section.uuid_mismatch
+        ):
+            section.uuid_mismatch.append(edge.edge_key)
+        if (
+            any(
+                not (row.get('edge_type') or row.get('name'))
+                or (row.get('edge_type') or row.get('name')) != edge.edge_type
+                for row in matches
+            )
+            and edge.edge_key not in section.edge_type_mismatch
+        ):
+            section.edge_type_mismatch.append(edge.edge_key)
+        expected_source = getattr(edge, 'expected_source_uuid', None)
+        expected_target = getattr(edge, 'expected_target_uuid', None)
+        if (
+            any(
+                any(
+                    exp is not None and str(row.get(actual_field)) != exp
+                    for exp, actual_field in (
+                        (expected_source, 'source_uuid'),
+                        (expected_target, 'target_uuid'),
+                    )
+                )
+                for row in matches
+            )
+            and edge.edge_key not in section.endpoint_mismatch
+        ):
+            section.endpoint_mismatch.append(edge.edge_key)
+        # VERI-04: null endpoints fail closed under manifest-backed verify (require_endpoints)
+        # or when caller asserts expected endpoint UUIDs.
+        if (
+            (require_endpoints or expected_source is not None or expected_target is not None)
+            and any(
+                row.get('source_uuid') is None or row.get('target_uuid') is None for row in matches
+            )
+            and edge.edge_key not in section.endpoint_mismatch
+        ):
+            section.endpoint_mismatch.append(edge.edge_key)
+        if (
+            any(not row.get('has_fact_embedding') for row in matches)
+            and edge.edge_key not in section.missing_embedding
+        ):
+            section.missing_embedding.append(edge.edge_key)
+        if (
+            expected_hash is not None
+            and any(str(row.get('content_sha256') or '') != expected_hash for row in matches)
+            and edge.edge_key not in section.content_hash_mismatch
+        ):
+            section.content_hash_mismatch.append(edge.edge_key)
 
     def _verify_entities(
         self,
@@ -1736,71 +2191,51 @@ class CatalogService:
         group_id: str,
         expected: list[Any],
         rows: list[dict[str, Any]],
+        expected_hashes: dict[str, str] | None = None,
+        expected_uuids: dict[str, str] | None = None,
+        report_extras: bool = False,
     ) -> VerifyEntitySection:
-        # batch_id scoping is enforced by store match_entities_for_verify.
-        section = VerifyEntitySection(expected=len(expected))
+        """Diff live entity observations against expected membership.
 
+        Never sets expected from len(rows). When report_extras, live keys not in
+        expected membership are recorded as extras (VERI-03).
+        """
+        section = VerifyEntitySection(expected=len(expected))
         by_key: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             key = self._row_key(row)
             if key:
                 by_key.setdefault(str(key), []).append(row)
 
-        if expected:
-            found_count = 0
-            for ent in expected:
-                matches = by_key.get(ent.graph_key, [])
-                expected_uuid = catalog_entity_uuid(
-                    namespace, group_id, ent.entity_type, ent.graph_key
-                )
-                if not matches:
-                    section.missing.append(ent.graph_key)
-                    continue
-                typed = []
-                generic = []
-                wrong = []
-                for row in matches:
-                    labels = self._node_labels(row)
-                    custom = self._custom_labels(labels)
-                    if not custom:
-                        generic.append(row)
-                    elif set(custom) == {ent.entity_type}:
-                        typed.append(row)
-                    else:
-                        wrong.append(row)
-                if generic:
-                    section.generic_duplicate.append(ent.graph_key)
-                if wrong:
-                    section.wrong_type.append(ent.graph_key)
-                if len(typed) > 1:
-                    section.typed_duplicate.append(ent.graph_key)
-                if typed:
-                    found_count += 1
-                    if any(str(row.get('uuid')) != expected_uuid for row in typed):
-                        section.uuid_mismatch.append(ent.graph_key)
-                    if any(not row.get('has_name_embedding') for row in typed):
-                        section.missing_embedding.append(ent.graph_key)
-                elif wrong:
-                    found_count += 1
-                    if any(not row.get('has_name_embedding') for row in wrong):
-                        section.missing_embedding.append(ent.graph_key)
-                elif generic:
-                    found_count += 1
-                    if any(not row.get('has_name_embedding') for row in generic):
-                        section.missing_embedding.append(ent.graph_key)
-            section.found = found_count
-        else:
-            # batch-scoped only: report rows under batch without per-key expected list
-            section.expected = len(rows)
-            section.found = len(rows)
-            for row in rows:
-                key = self._row_key(row) or str(row.get('uuid') or '')
-                labels = self._node_labels(row)
-                custom = self._custom_labels(labels)
-                if not custom and key:
-                    section.generic_duplicate.append(str(key))
-                if not row.get('has_name_embedding') and key:
-                    section.missing_embedding.append(str(key))
+        expected_key_set: set[str] = set()
+        for ent in expected:
+            expected_key_set.add(ent.graph_key)
+            matches = by_key.get(ent.graph_key, [])
+            expected_uuid = (expected_uuids or {}).get(ent.graph_key) or catalog_entity_uuid(
+                namespace, group_id, ent.entity_type, ent.graph_key
+            )
+            if not matches:
+                section.missing.append(ent.graph_key)
+                continue
+            self._diagnose_entity_matches(
+                section=section,
+                graph_key=ent.graph_key,
+                entity_type=ent.entity_type,
+                matches=matches,
+                expected_uuid=expected_uuid,
+                expected_hash=(expected_hashes or {}).get(ent.graph_key),
+                count_found=True,
+            )
+
+        if report_extras:
+            for key, matches in by_key.items():
+                if key not in expected_key_set:
+                    section.extras.append(key)
+                    if len(matches) > 1 and key not in section.typed_duplicate:
+                        # Extra live twins still surface as duplicate anomaly.
+                        section.typed_duplicate.append(key)
+            section.extras = sorted(section.extras)
+            section.missing = sorted(section.missing)
         return section
 
     def _verify_edges(
@@ -1810,8 +2245,14 @@ class CatalogService:
         group_id: str,
         expected: list[Any],
         rows: list[dict[str, Any]],
+        expected_hashes: dict[str, str] | None = None,
+        expected_uuids: dict[str, str] | None = None,
+        report_extras: bool = False,
     ) -> VerifyEdgeSection:
-        # batch_id scoping is enforced by store match_edges_for_verify.
+        """Diff live edge observations against expected membership.
+
+        Never sets expected from len(rows).
+        """
         section = VerifyEdgeSection(expected=len(expected))
         by_key: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
@@ -1819,53 +2260,81 @@ class CatalogService:
             if key:
                 by_key.setdefault(str(key), []).append(row)
 
-        if expected:
-            found_count = 0
-            for edge in expected:
-                matches = by_key.get(edge.edge_key, [])
-                expected_uuid = catalog_edge_uuid(
-                    namespace, group_id, edge.edge_type, edge.edge_key
-                )
-                if not matches:
-                    section.missing.append(edge.edge_key)
-                    continue
-                found_count += 1
-                if len(matches) > 1:
-                    section.duplicate_edge_key.append(edge.edge_key)
-                if any(str(row.get('uuid')) != expected_uuid for row in matches):
-                    section.uuid_mismatch.append(edge.edge_key)
-                if any(
-                    not (row.get('edge_type') or row.get('name'))
-                    or (row.get('edge_type') or row.get('name')) != edge.edge_type
-                    for row in matches
-                ):
-                    section.edge_type_mismatch.append(edge.edge_key)
-                if any(
-                    any(
-                        expected is not None and str(row.get(actual_field)) != expected
-                        for expected, actual_field in (
-                            (edge.expected_source_uuid, 'source_uuid'),
-                            (edge.expected_target_uuid, 'target_uuid'),
-                        )
-                    )
-                    for row in matches
-                ):
-                    section.endpoint_mismatch.append(edge.edge_key)
-                if any(not row.get('has_fact_embedding') for row in matches):
-                    section.missing_embedding.append(edge.edge_key)
-            section.found = found_count
-        else:
-            section.expected = len(rows)
-            section.found = len(rows)
-            seen_keys: dict[str, int] = {}
-            for row in rows:
-                key = str(row.get('edge_key') or row.get('uuid') or '')
-                seen_keys[key] = seen_keys.get(key, 0) + 1
-                if not row.get('has_fact_embedding') and key:
-                    section.missing_embedding.append(key)
-            for key, count in seen_keys.items():
-                if count > 1 and key:
-                    section.duplicate_edge_key.append(key)
+        expected_key_set: set[str] = set()
+        for edge in expected:
+            expected_key_set.add(edge.edge_key)
+            matches = by_key.get(edge.edge_key, [])
+            expected_uuid = (expected_uuids or {}).get(edge.edge_key) or catalog_edge_uuid(
+                namespace, group_id, edge.edge_type, edge.edge_key
+            )
+            if not matches:
+                section.missing.append(edge.edge_key)
+                continue
+            self._diagnose_edge_matches(
+                section=section,
+                edge=edge,
+                matches=matches,
+                expected_uuid=expected_uuid,
+                expected_hash=(expected_hashes or {}).get(edge.edge_key),
+                count_found=True,
+                require_endpoints=report_extras,
+            )
+
+        if report_extras:
+            for key, matches in by_key.items():
+                if key not in expected_key_set:
+                    section.extras.append(key)
+                    if len(matches) > 1 and key not in section.duplicate_edge_key:
+                        section.duplicate_edge_key.append(key)
+            section.extras = sorted(section.extras)
+            section.missing = sorted(section.missing)
+        return section
+
+    async def _verify_evidence_links(
+        self,
+        *,
+        client: Any,
+        group_id: str,
+        members: list[dict[str, Any]],
+    ) -> VerifyEvidenceSection:
+        """Exact evidence MATCH by group_id + uuid (EVID-13); no link_key identity."""
+        section = VerifyEvidenceSection(expected=len(members))
+        if not members:
+            return section
+        expected_by_uuid: dict[str, dict[str, Any]] = {
+            str(m['uuid']): m for m in members if m.get('uuid')
+        }
+        uuids = list(expected_by_uuid.keys())
+        rows = await self._store.match_evidence_links_exact(
+            client.driver,
+            group_id=group_id,
+            uuids=uuids,
+        )
+        by_uuid: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            u = str(row.get('uuid') or '')
+            if u:
+                by_uuid.setdefault(u, []).append(row)
+
+        for member_uuid, member in expected_by_uuid.items():
+            matches = by_uuid.get(member_uuid, [])
+            if not matches:
+                section.missing.append(member_uuid)
+                continue
+            section.found += 1
+            if any(str(row.get('link_key') or '') != member['link_key'] for row in matches):
+                section.link_key_mismatch.append(member_uuid)
+            if any(
+                str(row.get('content_sha256') or '') != member['content_sha256'] for row in matches
+            ):
+                section.content_hash_mismatch.append(member_uuid)
+
+        # Live links for expected uuids only — extras require a broader scan which
+        # is out of scope without a batch-scoped evidence index. Distinct missing
+        # list covers absent expected members; duplicate physical rows for the same
+        # uuid surface via multi-match consistency failures above.
+        section.missing = sorted(section.missing)
+        section.extras = sorted(section.extras)
         return section
 
     # ------------------------------------------------------------------
