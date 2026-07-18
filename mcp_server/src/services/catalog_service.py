@@ -3760,7 +3760,9 @@ class CatalogService:
                     entity_unchanged=len(request.entities),
                     edge_unchanged=len(request.edges),
                     provenance_unchanged=(
-                        len(request.provenance.sources) if request.provenance is not None else 0
+                        (len(request.provenance.sources) + len(request.provenance.evidence_links))
+                        if request.provenance is not None
+                        else 0
                     ),
                     **hash_echo,
                 )

@@ -3507,6 +3507,33 @@ async def test_batch_committed_same_hash_returns_unchanged_short_circuit():
 
 
 @pytest.mark.asyncio
+async def test_batch_committed_same_hash_counts_evidence_links_as_unchanged():
+    """Committed replay counts sources + evidence_links as provenance_unchanged."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    provenance = NestedProvenancePayload(
+        sources=[],
+        evidence_links=[_evidence_link()],
+    )
+    request = _batch_request(entities=[], provenance=provenance)
+    expected_hash = CatalogService.batch_request_sha256(request)
+    service._store.get_batch_status = AsyncMock(  # type: ignore[method-assign]
+        return_value={'status': 'committed', 'request_sha256': expected_hash}
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.status == 'committed'
+    assert resp.error_code is None
+    assert resp.provenance_unchanged == 1
+    assert resp.entity_unchanged == 0
+    assert resp.edge_unchanged == 0
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
 async def test_batch_dry_run_rejects_bad_nested_source_hash_before_side_effects():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
