@@ -178,3 +178,15 @@ def test_compare_digest_behavior_matches_hmac():
     # behavioral equivalence with hmac.compare_digest on digests
     assert hmac.compare_digest(plan_token_digest(token), digest) is True
     assert plan_token_matches(token, digest) is True
+
+def test_plan_token_matches_malformed_stored_digest_returns_false():
+    token = mint_plan_token()
+    # Wrong length / non-hex / empty must never raise; fail closed as False.
+    assert plan_token_matches(token, 'abc') is False
+    assert plan_token_matches(token, '0' * 63) is False
+    assert plan_token_matches(token, '0' * 65) is False
+    assert plan_token_matches(token, '') is False
+    assert plan_token_matches(token, None) is False  # type: ignore[arg-type]
+    assert plan_token_matches(token, 123) is False  # type: ignore[arg-type]
+    assert plan_token_matches('', 'a' * 64) is False
+

@@ -115,14 +115,18 @@ def plan_token_digest(token: str) -> str:
 
 
 def plan_token_matches(token: str, stored_digest: str) -> bool:
-    """Timing-safe compare of supplied token against stored digest (PLAN-07)."""
+    """Timing-safe compare of supplied token against stored digest (PLAN-07).
+
+    Malformed/corrupt stored digests (wrong length, non-str) return False and
+    never raise — fail closed without leaking exception paths to MCP wrappers.
+    """
     if not isinstance(stored_digest, str) or not stored_digest:
         return False
     try:
         actual = plan_token_digest(token)
-    except ValueError:
+        return hmac.compare_digest(actual, stored_digest.lower())
+    except (ValueError, TypeError):
         return False
-    return hmac.compare_digest(actual, stored_digest.lower())
 
 
 def plan_binding_fields(
