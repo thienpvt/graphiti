@@ -9,7 +9,7 @@ created: 2026-07-18
 
 # Phase 1 — Security
 
-> ASVS L1 verification of Phase 1 Plans 01-01 through 01-08. Blocking threshold: high. Closure requires executable or structural evidence; no user approval is asserted.
+> ASVS L1 verification of Phase 1 Plans 01-01 through 01-11. Blocking threshold: high. Closure requires executable or structural evidence; no user approval is asserted. Plans 01-09/01-10 close CR-02/WR-01/CR-01/WR-02; Plan 01-11 owns gate-ledger integrity.
 
 ## Trust Boundaries
 
@@ -67,6 +67,12 @@ created: 2026-07-18
 | T-01-08-05 | Spoofing | `ready_for_phase_2` | high | mitigate | Sentinel proves nonzero propagation; all real checks aggregate fail closed. | `01-PHASE1-GATE.md` runner and Gate Contract | closed |
 | T-01-08-06 | Information Disclosure | Gate/security artifacts | medium | mitigate | Bounded outputs exclude payloads, source text, credentials, and raw tokens. | `01-PHASE1-GATE.md`; this ledger | closed |
 | T-01-SC | Tampering | Package installation | high | mitigate | Non-applicable: no package installation task ran and no dependency/lockfile changed. The existing lockfile environment only was used. | Task diffs; `git diff 8a55b6e -- pyproject.toml mcp_server/pyproject.toml uv.lock mcp_server/uv.lock` is empty | closed |
+| T-01-09-01 | Tampering | Provenance reference_time | high | mitigate | ISO-8601 model validation preserves exact accepted strings; malformed fails at `('reference_time',)` without parser leakage. | `test_catalog_models.py::test_gap_cr02_*`; `test_catalog_service.py::test_gap_cr02_fastmcp_malformed_reference_time_no_leak_no_side_effect`; commits `f3843e9`/`7f5b156` | closed |
+| T-01-09-02 | Spoofing | Nested graph-key locations | high | mitigate | Located grammar helper reports exact nested field paths; shell mismatch retains `invalid_system_key`. | `test_catalog_models.py::test_gap_wr01_*`; `test_catalog_service.py::test_gap_wr01_fastmcp_*`; commits `f3843e9`/`7f5b156` | closed |
+| T-01-10-01 | Tampering | Concurrent entity immutable race | high | mitigate | Lock-retained entity MERGE arbitrates immutable names/types under lock and returns `deterministic_uuid_conflict` before mutation. | `test_catalog_store_unit.py::test_gap_cr01_*`; `test_catalog_service.py::test_gap_cr01_*`; commits `fd4c65f`/`3f3d173` | closed |
+| T-01-10-02 | Tampering | Stale integration fixtures | medium | mitigate | Pure offline catalog-v2 FE fixtures; live race defined but never imported/collected/probed by Phase 1 gate. | `test_catalog_neo4j_fixtures.py::test_gap_wr02_*`; integration skip/no-probe | closed |
+| T-01-11-01 | Spoofing | Review-gap silent drop | high | mitigate | Exact four-key CR/WR set equality with commit hashes and node IDs. | `01-REVIEW-GAPS.md` | closed |
+| T-01-11-02 | Tampering | Gate ledger readiness | critical | mitigate | Tracked stdlib runner derives local_gate_pass; verified apply keeps final readiness false while independent audits pending. | `mcp_server/tests/catalog_phase1_gate_runner.py`; `01-GATE-RESULTS.json` | closed |
 
 ## Accepted Risks Log
 
@@ -78,13 +84,14 @@ T-01-SC is non-applicable, not a residual acceptance: no installation task ran.
 
 ## Security Audit Trail
 
-threats_total: 41
-threats_closed: 41
+threats_total: 47
+threats_closed: 47
 threats_open: 0
 
 | Audit Date | ASVS Level | Threats Total | Closed | Open | Basis |
 |------------|------------|---------------|--------|------|-------|
-| 2026-07-18 | L1 | 41 | 41 | 0 | Phase 1 plans, focused tests, structural validators, final runner |
+| 2026-07-18 | L1 | 41 | 41 | 0 | Phase 1 plans 01-01..01-08 historical |
+| 2026-07-18 | L1 | 47 | 47 | 0 | Plans 01-09/01-10/01-11 CR/WR + gate ledger rows added |
 
 ## Sign-Off
 

@@ -126,14 +126,15 @@ status: complete
 
 ## Task Commits
 
-1. **Task 1: Invalidate stale Phase 1 readiness** - `ea5cd93` (docs)
-2. **Task 2: Add failing CR-02 and WR-01 contract tests** - `9f5599c` (test RED)
-3. **Task 3: Implement safe timestamp validation and exact graph-key locations** - `72deb07` (feat GREEN)
-4. **Follow-up: Drop over-strict space-separator timestamp case** - `f63a663` (test)
+Integrated worktree HEAD ancestry (primary base `401d814`):
 
-**Plan metadata:** `253e87e` (docs: complete plan)
+1. **Task 1: Invalidate stale Phase 1 readiness** - `291b6e1` (docs)
+2. **Task 2: Add failing CR-02 and WR-01 contract tests** - `f3843e9` (test RED)
+3. **Task 3: Implement safe timestamp validation and exact graph-key locations** - `7f5b156` (feat GREEN)
+4. **Follow-up: Drop over-strict space-separator timestamp case** - `02f4c99` (test)
+5. **Plan metadata** - `b441307` / final hash note `0f5f692`
 
-_Note: RED commit `9f5599c` preserved independently; not amended into GREEN._
+_Note: RED commit `f3843e9` preserved independently; not amended into GREEN. Pre-integration hashes `ea5cd93`/`9f5599c`/`72deb07`/`f63a663`/`253e87e` are historical only._
 
 ## Files Created/Modified
 
@@ -201,8 +202,16 @@ _Note: RED commit `9f5599c` preserved independently; not amended into GREEN._
 - Local readiness reconsideration → Plan **01-11** only after 01-09 and 01-10 pass
 - Independent audits remain mandatory; Phase 2 blocked
 
+## JSON argv outcomes (Plan 01-11 refresh)
+
+| Check | argv summary | Exit |
+|-------|--------------|-----:|
+| focused CR-02/WR-01 | `pytest ... -k "gap_cr02 or gap_wr01"` | 0 (historical 38 passed) |
+| two-file regression | models + service full | 0 (historical 430 passed) |
+| ruff / MCP pyright | scoped product+test files | 0 |
+
 ## Self-Check: PASSED
 
 - FOUND: production and test files listed above
-- FOUND: commits `ea5cd93`, `9f5599c`, `72deb07`, `f63a663`
-- FOUND: readiness flags false in VALIDATION/PHASE1-GATE
+- FOUND: commits `291b6e1`, `f3843e9`, `7f5b156`, `02f4c99`, `b441307`, `0f5f692`
+- FOUND: readiness flags false pending Plan 01-11 apply

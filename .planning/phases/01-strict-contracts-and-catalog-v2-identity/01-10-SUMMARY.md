@@ -116,12 +116,13 @@ status: complete
 
 ## Task Commits
 
-1. **Task 1: Add failing locked-race, service-routing, and fixture-construction tests** - `0bfe925` (test)
-2. **Task 2: Make the locking MERGE authoritative and route conflict results** - `49c58a8` (feat)
+Integrated worktree HEAD ancestry (primary base `401d814`):
 
-**Plan metadata:** pending final docs commit
+1. **Task 1: Add failing locked-race, service-routing, and fixture-construction tests** - `fd4c65f` (test RED)
+2. **Task 2: Make the locking MERGE authoritative and route conflict results** - `3f3d173` (feat GREEN)
+3. **Plan metadata** - `401d814` (docs: complete plan)
 
-_Note: TDD RED preserved as distinct ancestry commit before GREEN._
+_Note: TDD RED preserved as distinct ancestry commit before GREEN. Pre-integration hashes `0bfe925`/`49c58a8`/`4c702cc` are historical only._
 
 ## Files Created/Modified
 
@@ -194,9 +195,18 @@ _Note: TDD RED preserved as distinct ancestry commit before GREEN._
 
 ## TDD Gate Compliance
 
-- RED commit: `0bfe925` `test(01-10): add failing entity race and fixture coverage`
-- GREEN commit: `49c58a8` `feat(01-10): enforce locked entity conflicts and migrate fixtures`
+- RED commit: `fd4c65f` `test(01-10): add failing entity race and fixture coverage`
+- GREEN commit: `3f3d173` `feat(01-10): enforce locked entity conflicts and migrate fixtures`
 - RED ancestry preserved (not amended)
+
+## JSON argv outcomes (Plan 01-11 refresh)
+
+| Check | argv summary | Exit |
+|-------|--------------|-----:|
+| focused CR-01/WR-02 | `pytest ... -k "gap_cr01 or gap_wr02"` (no int module) | 0 (10 passed) |
+| pure fixtures | `pytest ... test_catalog_neo4j_fixtures.py` | 0 |
+| full local regression | unit matrix | 0 (537 passed) |
+| ruff / MCP pyright | scoped product+test files | 0 |
 
 ## Known Stubs
 
@@ -229,5 +239,7 @@ None remaining. Integration module intentionally unexecuted.
 - FOUND: `mcp_server/src/services/catalog_service.py`
 - FOUND: `mcp_server/tests/catalog_neo4j_fixtures.py`
 - FOUND: `mcp_server/tests/test_catalog_neo4j_fixtures.py`
-- FOUND: `0bfe925`
-- FOUND: `49c58a8`
+- FOUND: `fd4c65f`
+- FOUND: `3f3d173`
+- FOUND: `401d814`
+

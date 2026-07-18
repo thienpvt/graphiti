@@ -59,7 +59,7 @@
       "category": "ordering",
       "status": "resolved",
       "verification": "explicit",
-      "resolution": "Nested loc paths ordered by ValidationError loc segments; accepted lists preserve order. Anchor: plan 01-01 Task1/2 + CONT-01 order test.",
+      "resolution": "Nested loc paths ordered by ValidationError loc segments; accepted lists preserve order. Plan 01-09 WR-01 exact malformed graph-key locations via validate_entity_graph_key_at. Anchor: plan 01-01 + test_gap_wr01_*.",
       "reason": null,
       "probe": "When elements compare equal, is output order specified and stable?"
     },
@@ -86,7 +86,7 @@
       "category": "empty",
       "status": "resolved",
       "verification": "explicit",
-      "resolution": "Empty/whitespace-only source_key and reference_time fail emptiness check after strip; non-empty with trailing space accepted. Anchor: plan 01-01 Task1/2 trailing-space tests.",
+      "resolution": "Empty/whitespace-only source_key and reference_time fail emptiness check after strip; non-empty with trailing space accepted. Plan 01-09 CR-02 adds ISO-8601 reference_time acceptance with exact-string preservation and malformed fail at (reference_time,). Anchor: plan 01-01 trailing-space + test_gap_cr02_*.",
       "reason": null,
       "probe": "What is the result for empty, single-element, or null input?"
     },
@@ -473,7 +473,7 @@
       "category": "unclassified",
       "status": "resolved",
       "verification": "explicit",
-      "resolution": "Identity goldens FE/BO/overload/version/purity suite automated; focused identity tests in Phase 1 gate. Anchor: plan 01-03 Task1/2 + plan 01-05 gate coverage map.",
+      "resolution": "Identity goldens FE/BO/overload/version/purity suite automated; focused identity tests in Phase 1 gate. Plan 01-10 CR-01 lock-authoritative entity conflict + WR-02 offline FE catalog-v2 fixtures. Anchor: plan 01-03/01-05 + test_gap_cr01_* + test_gap_wr02_*.",
       "reason": null,
       "probe": "unclassified — review manually"
     }
