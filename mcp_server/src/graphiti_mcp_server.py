@@ -39,12 +39,20 @@ from models.catalog_entities import (
     UpsertTypedEntitiesRequest,
     VerifyCatalogBatchRequest,
 )
+from models.catalog_prepare import (
+    CommitPreparedCatalogBatchRequest,
+    DiscardPreparedCatalogBatchRequest,
+    PrepareCatalogBatchRequest,
+)
 from models.catalog_provenance import UpsertProvenanceRequest
 from models.catalog_responses import (
     CatalogBatchWriteResponse,
     CatalogCapabilitiesResponse,
     CatalogIngestStatusResponse,
     CatalogWriteResponse,
+    CommitPreparedCatalogBatchResponse,
+    DiscardPreparedCatalogBatchResponse,
+    PrepareCatalogBatchResponse,
     ResolveTypedEntitiesResponse,
     VerifyCatalogBatchResponse,
 )
@@ -205,6 +213,7 @@ allowed_hosts_raw = os.getenv(
 allowed_hosts = json.loads(allowed_hosts_raw)
 
 # Frozen catalog tool names (CONT-07 / SAFE-08 structured validation boundary)
+# Phase 03A adds prepare/commit/discard (PLAN-20); keep get_catalog_capabilities in set.
 CATALOG_TOOL_NAMES: frozenset[str] = frozenset(
     {
         'upsert_typed_entities',
@@ -214,6 +223,10 @@ CATALOG_TOOL_NAMES: frozenset[str] = frozenset(
         'upsert_provenance',
         'get_catalog_ingest_status',
         'upsert_catalog_batch',
+        'get_catalog_capabilities',
+        'prepare_catalog_batch',
+        'commit_prepared_catalog_batch',
+        'discard_prepared_catalog_batch',
     }
 )
 
@@ -222,9 +235,10 @@ class CatalogSafeFastMCP(FastMCP):
     """FastMCP subclass: SAFE-08 structured ToolError for catalog tools only.
 
     FastMCP Tool.run wraps ValidationError as ToolError(str(exc)) with cause.
-    For the seven catalog tools, rewrite that into a fresh ToolError whose message
-    is catalog_validation_error_to_structured JSON — no ValidationError in the
-    client-facing exception chain. Legacy tools keep framework ToolError behavior.
+    For catalog tools in CATALOG_TOOL_NAMES, rewrite that into a fresh ToolError
+    whose message is catalog_validation_error_to_structured JSON — no
+    ValidationError in the client-facing exception chain. Legacy tools keep
+    framework ToolError behavior.
     """
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -1487,6 +1501,88 @@ async def upsert_catalog_batch(
             type(e).__name__,
         )
         return ErrorResponse(error='catalog upsert_catalog_batch failed')
+
+
+@mcp.tool()
+async def prepare_catalog_batch(
+    request: PrepareCatalogBatchRequest,
+) -> PrepareCatalogBatchResponse | ErrorResponse:
+    """Prepare an immutable catalog plan (control-plane only; no domain writes).
+
+    Validates/hashes/projects/embeds, then freezes membership+embeddings into a
+    prepared-plan root and chunks. Returns one-time plan_token. Domain co-commit
+    is a separate commit_prepared_catalog_batch step (Phase 3B body later).
+    """
+    global graphiti_service, catalog_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+
+    try:
+        client = await graphiti_service.get_client()
+        return await catalog_service.prepare_catalog_batch(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'prepare_catalog_batch failed batch_id=%s entities=%s edges=%s reason=%s',
+            getattr(request, 'batch_id', None),
+            len(getattr(request, 'entities', []) or []),
+            len(getattr(request, 'edges', []) or []),
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog prepare_catalog_batch failed')
+
+
+@mcp.tool()
+async def commit_prepared_catalog_batch(
+    request: CommitPreparedCatalogBatchRequest,
+) -> CommitPreparedCatalogBatchResponse | ErrorResponse:
+    """Token-only claim of a prepared plan (CAS to COMMITTING; no domain body yet).
+
+    Accepts plan_token and optional expected_request_sha256 only. Loads/reassembles
+    frozen artifact, verifies binding/expiry, then claims COMMITTING. Phase 3A
+    stops before Entity/evidence/manifest writes.
+    """
+    global graphiti_service, catalog_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+
+    try:
+        client = await graphiti_service.get_client()
+        return await catalog_service.commit_prepared_catalog_batch(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'commit_prepared_catalog_batch failed reason=%s',
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog commit_prepared_catalog_batch failed')
+
+
+@mcp.tool()
+async def discard_prepared_catalog_batch(
+    request: DiscardPreparedCatalogBatchRequest,
+) -> DiscardPreparedCatalogBatchResponse | ErrorResponse:
+    """Token-only discard of a prepared plan (PREPARED→DISCARDED; no domain deletes)."""
+    global graphiti_service, catalog_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+
+    try:
+        client = await graphiti_service.get_client()
+        return await catalog_service.discard_prepared_catalog_batch(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'discard_prepared_catalog_batch failed reason=%s',
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog discard_prepared_catalog_batch failed')
 
 
 @mcp.tool()
