@@ -616,16 +616,21 @@ async def test_expiry_access_path_marks_expired(catalog_ctx):
         request=CommitPreparedCatalogBatchRequest(plan_token=prepared.plan_token),
     )
     assert expired.error_code == CatalogErrorCode.prepared_plan_expired
-    props = await _plan_props(ctx.driver, prepared.plan_uuid)
-    assert props is not None
-    assert props.get('state') in ('EXPIRED', 'PREPARED')
-    # Prefer CAS-expired; if race leaves PREPARED still due, second attempt must expire.
-    if props.get('state') == 'PREPARED':
+    # Require terminal EXPIRED (retry-bound). Soft PREPARED allowance is forbidden.
+    state = None
+    for _ in range(5):
+        props = await _plan_props(ctx.driver, prepared.plan_uuid)
+        assert props is not None
+        state = props.get('state')
+        if state == 'EXPIRED':
+            break
         again = await ctx.service.commit_prepared_catalog_batch(
             client=ctx.client,
             request=CommitPreparedCatalogBatchRequest(plan_token=prepared.plan_token),
         )
         assert again.error_code == CatalogErrorCode.prepared_plan_expired
+        await asyncio.sleep(0.05)
+    assert state == 'EXPIRED', f'expected EXPIRED after access-path expire, got {state!r}'
 
 
 async def test_digest_only_token_storage_on_plan_root(catalog_ctx):
