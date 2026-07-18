@@ -147,7 +147,10 @@ def build_catalog_capabilities(
             # D-29 / P22: true only after 03A-06 live immutable proof + re-test green.
             'prepare_commit': True,
             'explicit_evidence_links': True,
-            'manifests': False,
+            # D-33: static True only after 03B-06 live atomic co-commit + gate proof.
+            # Runtime MUST NOT read .planning/* or 03B-GATE-RESULTS to decide this flag.
+            'manifests': True,
+            # Phase 4: public manifest-backed verification remains disabled.
             'manifest_verification': False,
         },
     )

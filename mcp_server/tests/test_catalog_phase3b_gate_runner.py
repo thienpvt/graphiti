@@ -123,7 +123,9 @@ def test_canonical_specs_shape_and_reject_shell_integration():
     assert 'manifest_scaffold' in ids
     assert 'recovery_scaffold' in ids
     assert 'concurrency_scaffold' in ids
-    assert 'manifests_feature_not_flipped' in ids
+    assert 'manifests_feature_true' in ids
+    assert 'edge_resolution_complete' in ids
+    assert 'manifests_feature_not_flipped' not in ids
     assert 'live_neo4j_atomic_proof' not in ids
 
     focused = next(s for s in specs if s['id'] == 'focused_pytest')
@@ -397,7 +399,8 @@ def test_wave0_files_check_passes_after_scaffolds():
     gate.check_manifest_scaffold(root)
     gate.check_recovery_scaffold(root)
     gate.check_concurrency_scaffold(root)
-    gate.check_manifests_feature_not_flipped(root)
+    gate.check_manifests_feature_true(root)
+    gate.check_edge_resolution_complete(root)
 
 
 def test_default_ready_for_phase_4_constant_contract():

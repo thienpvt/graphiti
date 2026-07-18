@@ -310,16 +310,65 @@ def check_concurrency_scaffold(root: Path) -> None:
         raise AssertionError('missing concurrency case: test_same_token_concurrent_one_logical_commit')
 
 
-def check_manifests_feature_not_flipped(root: Path) -> None:
-    """Wave 0 / pre-gate: features.manifests must remain False until 03B-06 proof."""
+def check_manifests_feature_true(root: Path) -> None:
+    """Post 03B-06 proof: static features.manifests=True; verification remains False (D-33)."""
     capa = root / 'mcp_server/src/services/catalog_capabilities.py'
     if not capa.is_file():
         raise AssertionError('catalog_capabilities.py missing')
     src = capa.read_text(encoding='utf-8')
-    if "'manifests': True" in src or '"manifests": True' in src:
+    found = "'manifests': True" in src or '"manifests": True' in src
+    if not found:
         raise AssertionError(
-            'features.manifests must remain false until Phase 3B live gate proof (D-33)'
+            'features.manifests must be True after Phase 3B live gate proof (D-33)'
         )
+    if "'manifest_verification': True" in src or '"manifest_verification": True' in src:
+        raise AssertionError('features.manifest_verification must remain false (Phase 4)')
+    if "'prepare_commit': True" not in src and '"prepare_commit": True' not in src:
+        raise AssertionError('features.prepare_commit must remain True')
+    # Runtime must not open planning ledgers to decide the flag (code only; comments ok).
+    code_lines = [
+        ln
+        for ln in src.splitlines()
+        if ln.strip() and not ln.lstrip().startswith('#')
+    ]
+    code = '\n'.join(code_lines)
+    for forbidden in (
+        'GATE-RESULTS',
+        '03B-GATE',
+        '.planning/phases',
+        'ready_for_phase_4',
+    ):
+        if forbidden in code:
+            raise AssertionError(
+                f'catalog_capabilities must not read planning ledger ({forbidden})'
+            )
+
+
+def check_edge_resolution_complete(root: Path) -> None:
+    """24/24 edge probe resolution map present and fully resolved."""
+    path = root / DEFAULT_RESOLUTION_REL
+    if not path.is_file():
+        raise AssertionError('03B-EDGE-PROBE-RESOLUTION.json missing')
+    raw = json.loads(path.read_text(encoding='utf-8'))
+    if raw.get('schema_version') != RESOLUTION_SCHEMA_VERSION:
+        raise AssertionError('edge resolution schema_version mismatch')
+    if int(raw.get('raw_item_count') or 0) != EXPECTED_PROBE_COUNT:
+        raise AssertionError('edge resolution raw_item_count must be 24')
+    entries = raw.get('entries')
+    if not isinstance(entries, list) or len(entries) != EXPECTED_PROBE_COUNT:
+        raise AssertionError('edge resolution entries must cover 24 rows')
+    indices = sorted(int(e.get('row_index', -1)) for e in entries if isinstance(e, dict))
+    if indices != list(range(EXPECTED_PROBE_COUNT)):
+        raise AssertionError(f'edge resolution row_index set incomplete: {indices}')
+    for e in entries:
+        if not isinstance(e, dict):
+            raise AssertionError('edge resolution entry must be object')
+        if e.get('verification') not in ('explicit', 'live', 'unit', 'structural'):
+            raise AssertionError(f'entry {e.get("row_index")} missing verification')
+        if e.get('resolution') in (None, '', 'unresolved', 'silent'):
+            raise AssertionError(f'entry {e.get("row_index")} unresolved')
+    if raw.get('no_silent_drop') is not True:
+        raise AssertionError('no_silent_drop must be true')
 
 
 CHECK_FUNCS = {
@@ -330,7 +379,8 @@ CHECK_FUNCS = {
     'manifest_scaffold': check_manifest_scaffold,
     'recovery_scaffold': check_recovery_scaffold,
     'concurrency_scaffold': check_concurrency_scaffold,
-    'manifests_feature_not_flipped': check_manifests_feature_not_flipped,
+    'manifests_feature_true': check_manifests_feature_true,
+    'edge_resolution_complete': check_edge_resolution_complete,
 }
 
 
@@ -482,8 +532,15 @@ def canonical_specs(root: Path, *, include_live: bool = False) -> list[dict[str,
             'kind': 'safety',
         },
         {
-            'id': 'manifests_feature_not_flipped',
-            'argv': _runner_check_argv('manifests_feature_not_flipped'),
+            'id': 'manifests_feature_true',
+            'argv': _runner_check_argv('manifests_feature_true'),
+            'expected_exit': 0,
+            'mandatory': True,
+            'kind': 'structural',
+        },
+        {
+            'id': 'edge_resolution_complete',
+            'argv': _runner_check_argv('edge_resolution_complete'),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'structural',

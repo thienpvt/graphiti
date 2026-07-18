@@ -464,7 +464,7 @@ async def neo4j_driver():
     """Real Neo4jDriver against env/default bolt://localhost:17687."""
     try:
         neo4j_mod = importlib.import_module('graphiti_core.driver.neo4j_driver')
-        Neo4jDriver = getattr(neo4j_mod, 'Neo4jDriver')
+        Neo4jDriver = _attr(neo4j_mod, 'Neo4jDriver')
     except Exception as exc:  # pragma: no cover
         if _catalog_int_required():
             pytest.fail(f'Neo4j driver import failed under CATALOG_INT_REQUIRED=1: {exc}')
