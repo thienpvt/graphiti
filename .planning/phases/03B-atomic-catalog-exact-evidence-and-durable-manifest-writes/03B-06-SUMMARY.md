@@ -122,7 +122,7 @@ Structural check: `check_manifests_feature_true` / `manifests_feature_true` (rep
 | `ready_for_phase_4` / `phase_3b_complete` | **true** / **true** |
 | `pre_live_only` | false |
 | CLI exit under `--require-neo4j` | **0** |
-| `verify_ledger` | **ok** (`head_reason=exact` at product flip HEAD `6c83909`) |
+| `verify_ledger` | **ok** as **ledger-only-child** after final docs rebind (product flip evaluated_head `6c83909`; docs HEAD is ledger-only child) |
 | `schema_version` | `phase3b-gate-results.v2` |
 | historical_audit class/scope/commit | `test_policy` / `local_neo4j_no_corresponding_data` / `a67789a` |
 | TrackingDriver rejects | none observed |
@@ -168,7 +168,7 @@ Initial live suite at `a67789a` performed read-only group-count probes against `
 **2. [Rule 3 - Blocking] Final gate ledger path written outside worktree**
 - **Found during:** Final `--require-neo4j` run after product flip
 - **Issue:** Invoked with `--ledger ../.planning/...` from `mcp_server/` so relative path joined under worktree resolved to sibling `.claude/worktrees/.planning/...` outside agent worktree.
-- **Fix:** Copied green ledger into worktree path; deleted stray outside file. No live re-run. `verify_ledger` ok exact at `6c83909`.
+- **Fix:** Copied green ledger into worktree path; deleted stray outside file. No live re-run. `verify_ledger` ok as ledger-only-child after docs rebind (evaluated_head product flip `6c83909`).
 - **Files modified:** `03B-GATE-RESULTS.json` (worktree)
 
 ## Known Stubs
@@ -187,7 +187,8 @@ None. Product manifests True; verification remains intentionally False until Pha
 - FOUND: `check_manifests_feature_true` / `manifests_feature_true` in gate runner
 - FOUND: SUMMARY `status: complete`
 - FOUND: edge row 22 post-flip True wording
-- FOUND: final ledger ready/complete/manifests true; live 10/1; verify ok exact; CLI 0
-- FOUND: HEAD product flip `6c83909`; historical audit retained
+- FOUND: final ledger ready/complete/manifests true; live 10/1; verify ok ledger-only-child; CLI 0
+- FOUND: product flip evaluated_head `6c83909`; docs rebind as ledger-only-child; historical audit retained
 - No Phase 4 / canary / deploy / push / primary merge
 - No shared STATE.md / ROADMAP.md updates (orchestrator-owned; stop after Phase 3B)
+- Plan execution complete; Nyquist audit still pending (`nyquist_compliant: false`)

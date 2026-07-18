@@ -85,6 +85,7 @@ RUFF_PATHS = (
     'mcp_server/tests/test_catalog_commit_neo4j_int.py',
     'mcp_server/tests/catalog_phase3b_gate_runner.py',
     'mcp_server/tests/test_catalog_phase3b_gate_runner.py',
+    'mcp_server/src/services/catalog_capabilities.py',
 )
 
 PYRIGHT_PATHS = RUFF_PATHS

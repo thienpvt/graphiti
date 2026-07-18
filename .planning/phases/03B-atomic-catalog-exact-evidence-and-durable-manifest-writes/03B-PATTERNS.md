@@ -130,7 +130,7 @@ No new tool names. Preserve token-only commit request and thin safe wrapper. Res
 | `test_catalog_concurrency.py` | prepare CAS tests | same-token and same-batch arbitration |
 | `test_catalog_commit_neo4j_int.py` | `test_catalog_prepare_neo4j_int.py` | live atomicity/rollback/replay/search/control/isolation |
 | Phase 3B gate runner | Phase 3A gate runner | HEAD/content/spec/live fail-closed ledger |
-| capabilities extension | existing file | manifests false (pre-live), verification false |
+| capabilities extension | existing file | manifests true (post-flip), verification false |
 
 Fault injection monkeypatches each store boundary and proves no partial Entity/edge/evidence/manifest/committed status/plan COMMITTED survives.
 
