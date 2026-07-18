@@ -18,6 +18,7 @@ from models.catalog_common import (
     HARD_MAX_PROVENANCE_LINKS_PER_BATCH,
     IDENTITY_SCHEMA_VERSION,
 )
+from models.catalog_responses import CatalogCapabilitiesResponse
 from models.catalog_topology import endpoint_map_export
 from services.catalog_identity import CANONICALIZATION_VERSION, CATALOG_SCHEMA_VERSION
 
@@ -241,8 +242,8 @@ async def test_get_catalog_capabilities_works_when_writes_disabled(monkeypatch):
     monkeypatch.setattr(server, 'graphiti_service', mock_service)
 
     result = await server.get_catalog_capabilities()
-    assert not isinstance(result, dict) or 'error' not in result
-    dumped = result.model_dump() if hasattr(result, 'model_dump') else dict(result)
+    assert isinstance(result, CatalogCapabilitiesResponse)
+    dumped = result.model_dump()
     assert dumped['catalog_writes_enabled'] is False
     assert dumped['uuid_namespace_configured'] is False
     assert dumped['namespace_fingerprint'] is None
@@ -271,7 +272,8 @@ async def test_get_catalog_capabilities_zero_mutation_spies(monkeypatch):
     monkeypatch.setattr(server, 'graphiti_service', mock_service)
 
     result = await server.get_catalog_capabilities()
-    dumped = result.model_dump() if hasattr(result, 'model_dump') else dict(result)
+    assert isinstance(result, CatalogCapabilitiesResponse)
+    dumped = result.model_dump()
     assert dumped['catalog_writes_enabled'] is True
     assert dumped['namespace_fingerprint'] is not None
     # Optional get_client for non-mutating context is allowed; write paths forbidden.
