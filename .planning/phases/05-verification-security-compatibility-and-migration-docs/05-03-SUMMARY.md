@@ -132,8 +132,9 @@ Each task was committed atomically:
 1. **Task 1: Inventory history; build sanitized hardened fixture, manifest, receipts, and checkpoint** - `cb73da8` (feat)
 2. **Task 2: Runner pure prepare/commit sequence (never execute live)** - `dcac2b4` (feat)
 3. **Follow-up typing guard** - `3917965` (fix)
+4. **Project-scoped Pyright hard-gate fix** - `6de5441` (fix)
 
-**Plan metadata:** (this commit)
+**Plan metadata:** (docs commits for SUMMARY)
 
 _Note: TDD RED scaffolds from Wave 0 replaced by GREEN offline assertions in Task 1/2 suite rewrite._
 
@@ -170,6 +171,13 @@ _Note: TDD RED scaffolds from Wave 0 replaced by GREEN offline assertions in Tas
 - **Files modified:** `scripts/run_catalog_canary_batch.py`
 - **Commit:** `3917965`
 
+**3. [Rule 1 - Bug] Project-scoped Pyright 8 errors on historical Cartesian fields**
+- **Found during:** Hard-gate recheck (`pyright --project mcp_server/pyproject.toml`)
+- **Issue:** Historical validators accessed removed `entity_targets`/`edge_targets` on `NestedProvenancePayload`; optional `.get` on un-narrowed provenance/attributes
+- **Fix:** Narrow provenance dict; inventory Cartesian shape separately; map `evidence_links` for catalog-v2 counts/targets; narrow fact `attributes` dict
+- **Files modified:** `scripts/run_catalog_canary_batch.py`
+- **Commit:** `6de5441`
+
 ## Threat Flags
 
 None new beyond plan mitigations (T-05-CANARY, T-05-HIST, T-05-ISO). Offline pure path only; no live boundary crossed.
@@ -190,6 +198,18 @@ None that block plan goals. Historical `execute()` still contains live MCP path 
 uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini \
   mcp_server/tests/test_catalog_canary_scripts.py -q --tb=line
 # 23 passed
+
+uv run --project mcp_server pyright --project mcp_server/pyproject.toml \
+  scripts/build_catalog_canary_requests.py \
+  scripts/run_catalog_canary_batch.py \
+  mcp_server/tests/test_catalog_canary_scripts.py
+# 0 errors
+
+uv run --project mcp_server ruff check \
+  scripts/build_catalog_canary_requests.py \
+  scripts/run_catalog_canary_batch.py \
+  mcp_server/tests/test_catalog_canary_scripts.py
+# All checks passed
 ```
 
 ## Self-Check: PASSED
@@ -198,6 +218,7 @@ uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini \
 - FOUND: `catalog/canary-v2-requests-hardened/offline-prepare.receipt.json`
 - FOUND: `catalog/canary-v2-requests-hardened/offline-commit.receipt.json`
 - FOUND: `catalog/canary-v2-requests-hardened/offline-checkpoint.json`
-- FOUND: commits `cb73da8`, `dcac2b4`, `3917965`
+- FOUND: commits `cb73da8`, `dcac2b4`, `3917965`, `6de5441`
 - Historical checkpoint digest `b367e7f395782d13e72671e1b66d36b24432cb2c1b48c7fa45974d232039ace4` unchanged
 - canary_attempt_count hardened = 0; historical attempts length = 2
+- Project-scoped Pyright: 0 errors
