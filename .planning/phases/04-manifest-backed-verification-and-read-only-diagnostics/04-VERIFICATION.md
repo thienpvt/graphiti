@@ -14,12 +14,12 @@ gaps: []
 
 **Phase Goal:** Operators can inspect committed membership, evidence, and edges and verify batches from durable manifests while catalog mutation is disabled.
 
-**Verified:** 2026-07-18T20:25:21Z  
-**Status:** passed  
-**Re-verification:** No — initial verification after review fixes, Nyquist, security, and Phase 3B regression fix.  
-**HEAD:** `f927c62caf64549b9e595f82a85c1b12daa7ba08` (`f927c62`)  
-**Branch / worktree:** `worktree-agent-a8587c865c8cb5a08`  
-**Tip commit:** `chore: merge Phase 3B regression fix (worktree-agent-a647f42751e7165ea)`  
+**Verified:** 2026-07-18T20:25:21Z
+**Status:** passed
+**Re-verification:** No — initial verification after review fixes, Nyquist, security, and Phase 3B regression fix.
+**HEAD:** `f927c62caf64549b9e595f82a85c1b12daa7ba08` (`f927c62`)
+**Branch / worktree:** `worktree-agent-a8587c865c8cb5a08`
+**Tip commit:** `chore: merge Phase 3B regression fix (worktree-agent-a647f42751e7165ea)`
 **Main-line parent tip context:** merge of forward-compatible Phase 3B gate (`e319c80 fix(03B): accept Phase 4 manifest_verification True in gate check`)
 
 ## Goal Achievement
@@ -177,5 +177,5 @@ No gaps. Goal achieved: operators can inspect committed membership/evidence/edge
 
 ---
 
-_Verified: 2026-07-18T20:25:21Z_  
+_Verified: 2026-07-18T20:25:21Z_
 _Verifier: Claude (gsd-verifier)_
