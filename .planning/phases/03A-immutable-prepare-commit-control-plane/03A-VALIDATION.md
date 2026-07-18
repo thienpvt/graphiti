@@ -114,16 +114,115 @@ Neo4j rejection, corruption, unsafe capacity races, control-label search contami
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verification or explicit Wave 0 dependencies.
-- [ ] Sampling continuity: no three consecutive tasks without automated verification.
-- [ ] Wave 0 covers every missing test/gate artifact.
-- [ ] No watch-mode flags.
-- [ ] Unit feedback latency <180 seconds.
-- [ ] Full focused pytest passes.
-- [ ] Scoped Ruff passes.
-- [ ] Scoped Pyright passes or baseline-only failures are truthfully isolated.
-- [ ] Required Neo4j immutable-artifact proof passes; skip does not authorize Phase 3B.
-- [ ] Safety ledger proves no canary, no `oracle-catalog-v2`, no `clear_graph`, no deploy/remote mutation.
-- [ ] `nyquist_compliant: true` and `wave_0_complete: true` set only after evidence exists.
+- [x] All tasks have `<automated>` verification or explicit Wave 0 dependencies.
+- [x] Sampling continuity: no three consecutive tasks without automated verification.
+- [x] Wave 0 covers every missing test/gate artifact.
+- [x] No watch-mode flags.
+- [x] Unit feedback latency <180 seconds.
+- [x] Full focused pytest passes.
+- [x] Scoped Ruff passes.
+- [x] Scoped Pyright passes or baseline-only failures are truthfully isolated.
+- [x] Required Neo4j immutable-artifact proof passes; skip does not authorize Phase 3B.
+- [x] Safety ledger proves no canary, no `oracle-catalog-v2`, no `clear_graph`, no deploy/remote mutation.
+- [x] `nyquist_compliant: true` and `wave_0_complete: true` set only after evidence exists.
 
-**Approval:** pending Phase 3A execution and hard-gate evidence
+**Approval:** Phase 3A hard-gate evidence accepted (see Nyquist audit 2026-07-18)
+
+---
+
+## Nyquist Audit — 2026-07-18
+
+**Auditor:** adversarial Nyquist coverage (primary checkout `C:\Users\thien\PyCharmMiscProject\graphiti`)
+**Git HEAD at audit:** `99a517b64e6935ffb7218b664a2bfd94f8246beb` (docs-only rebind after clean review)
+**Ledger `evaluated_head`:** `6bcfc13da707daeba5424e5bcd99ff0b8067f066` (ancestor; files since evaluated: `03A-GATE-RESULTS.json` only → ledger-only-child)
+
+### Outcome
+
+| Field | Value |
+|-------|-------|
+| `status` | `validated` (retained) |
+| `nyquist_compliant` | `true` (retained — all 18 Phase-3A requirement IDs automated + green) |
+| Gaps filled this audit | 0 new tests (coverage already present) |
+| Escalations | none |
+| Implementation edits | none |
+
+### Requirement coverage map (18 IDs)
+
+| Req | Classification | Automated evidence |
+|-----|----------------|--------------------|
+| PLAN-01 | COVERED | `test_catalog_prepare_models.py` (full shell / extra-field / dry_run reject) |
+| PLAN-02 | COVERED | `test_catalog_prepare_service.py` preflight + `test_catalog_service.py` dry_run regression |
+| PLAN-03 | COVERED | service zero-domain spies + `test_catalog_prepare_neo4j_int.py::test_prepare_zero_domain_and_status_contamination` |
+| PLAN-04 | COVERED | `test_catalog_prepared_artifact.py` full membership+embeddings serialize |
+| PLAN-05 | COVERED | artifact chunk/reassemble unit + live multi-chunk restart (`neo4j_int`) |
+| PLAN-06 | COVERED | token mint one-time + prepare receipt fields (service) |
+| PLAN-07 | COVERED | `test_catalog_token.py` digest/`compare_digest` + live digest-only root props |
+| PLAN-08 | COVERED | model HARD clamps + capabilities plan limits |
+| PLAN-09 | COVERED | store CREATE fixed labels + live non-Entity assert |
+| PLAN-10 | COVERED | commit/discard token-only models |
+| PLAN-11 | COVERED | service commit load/CAS reject matrix + store CAS |
+| PLAN-12 | COVERED | commit zero external spies (embedder/LLM/queue/HTTP) |
+| PLAN-17 | COVERED | token binding helpers + post-load `plan_token_matches` |
+| PLAN-18 | COVERED | terminal no-revive unit + live discard/expiry |
+| PLAN-19 | COVERED | discard idempotent service + live |
+| PLAN-20 | COVERED | upsert dry_run retained; additive prepare/commit/discard tools |
+| SAFE-11 | COVERED | embed-before-plan; embed failure zero writes; commit no external |
+| TEST-05 | COVERED | suite + gate runner + live 9/9 + 34/34 probes |
+
+### Probe resolution equality
+
+- `03A-EDGE-PROBE-RESOLUTION.json`: **34** entries, `row_index` 0..33 unique, no silent drop
+- verification: **32 explicit**, **2 backstop** (`SAFE-log`, `PLAN-schema`) — both still point at real test files
+- gate check `edge_probe_resolution`: **pass** (ledger)
+
+### Review fix tests (WR-01..07)
+
+| WR | Test evidence |
+|----|---------------|
+| WR-01 | `test_plan_token_matches_malformed_stored_digest_returns_false` |
+| WR-02 | store schema SHOW/fail-closed `neo4j_schema_failed` |
+| WR-03 | prepare `check_batch_status=True` + committed conflict paths |
+| WR-04 | coalesce + `provenance_link_conflict` service tests (membership length assert real; plan count line has vacuous `or True` — INFO residual IN-R03, not requirement gap) |
+| WR-05 | default `CANONICALIZATION_VERSION` store test |
+| WR-06 | uniqueness race → `prepared_plan_conflict` |
+| WR-07 | live expiry requires terminal `EXPIRED` |
+
+### Gate ledger (authoritative)
+
+From `03A-GATE-RESULTS.json` (not re-applied this audit):
+
+| Check | Status |
+|-------|--------|
+| runner_self_tests | pass 12 |
+| focused_pytest | pass 388 |
+| scoped_ruff / scoped_pyright | pass |
+| wave0_files / edge_probe_resolution / summary_presence | pass |
+| prepare_commit_true | pass (`prepare_commit=true`) |
+| safety_no_probe | pass (`canary_executed=false`, `oracle_catalog_v2_queried=false`, `clear_graph_called=false`) |
+| control_plane_present | pass |
+| live_neo4j_immutable_proof | pass **9/9** |
+| `ready_for_phase_3b` | true |
+| `local_gate_pass` | true |
+| `nyquist_compliant` | true |
+
+### Fresh verification this audit
+
+```text
+uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini \
+  mcp_server/tests/test_catalog_prepare_models.py \
+  mcp_server/tests/test_catalog_prepared_artifact.py \
+  mcp_server/tests/test_catalog_token.py \
+  mcp_server/tests/test_catalog_prepare_store.py \
+  mcp_server/tests/test_catalog_prepare_service.py \
+  mcp_server/tests/test_catalog_capabilities.py \
+  mcp_server/tests/test_catalog_phase3a_gate_runner.py \
+  -q --tb=line
+# → 178 passed in 1.76s
+```
+
+Live Neo4j not re-run (ledger already 9/9; safety: no canary / no `oracle-catalog-v2` / no `clear_graph`).
+
+### Residuals (non-blocking)
+
+- IN-R03 vacuous `or True` on plan `evidence_link_count` assert — test still proves membership coalesce via artifact body length.
+- REQUIREMENTS.md checkboxes for PLAN-01..12/17..20/SAFE-11/TEST-05 still show pending in the global tracker (doc lag vs phase gate; not a test gap).
