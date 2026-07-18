@@ -1471,3 +1471,13 @@ def test_wr04_edge_upsert_returns_error_code_on_identity_drift():
     # mutable SET / vector only when status is not error
     assert "WHEN error_code IS NOT NULL THEN 'error'" in cypher
     assert "status IN ['created', 'updated']" in cypher
+
+
+def test_wr05_list_manifest_chunks_cypher_group_scoped():
+    store = CatalogNeo4jStore()
+    cypher = store.build_list_manifest_chunks_cypher()
+    assert 'CatalogBatchManifestChunk' in cypher
+    assert 'manifest_uuid: $manifest_uuid' in cypher
+    assert 'group_id: $group_id' in cypher
+    assert 'ORDER BY c.chunk_index ASC' in cypher
+    assert ':Entity' not in cypher

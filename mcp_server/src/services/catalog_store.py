@@ -3285,6 +3285,18 @@ class CatalogNeo4jStore:
                    m.payload_bytes AS payload_bytes
             """
 
+    def build_list_manifest_chunks_cypher(self) -> str:
+        """Load ordered chunk metadata for idempotent root verification."""
+        return """
+            MATCH (c:CatalogBatchManifestChunk {manifest_uuid: $manifest_uuid, group_id: $group_id})
+            RETURN c.uuid AS uuid,
+                   c.manifest_uuid AS manifest_uuid,
+                   c.chunk_index AS chunk_index,
+                   c.chunk_count AS chunk_count,
+                   c.chunk_sha256 AS chunk_sha256
+            ORDER BY c.chunk_index ASC
+            """
+
     def build_create_manifest_root_cypher(self) -> str:
         """CREATE-once CatalogBatchManifest root (never Entity)."""
         return """
@@ -3597,6 +3609,47 @@ class CatalogNeo4jStore:
                     'manifest identity already exists with divergent binding',
                     code='batch_conflict',
                 )
+            # Verify complete ordered chunks before accepting root-only idempotent hit.
+            expected_chunks = sorted(
+                (
+                    ch
+                    if 'chunk_sha256' in ch and 'manifest_uuid' in ch
+                    else self.prepare_manifest_chunk_params(**ch)
+                    for ch in chunks
+                ),
+                key=lambda c: int(c['chunk_index']),
+            )
+            chunk_res = await tx.run(
+                self.build_list_manifest_chunks_cypher(),
+                manifest_uuid=root_params['uuid'],
+                group_id=group_id,
+            )
+            if chunk_res is None:
+                existing_chunks: list[dict[str, Any]] = []
+            elif hasattr(chunk_res, 'data'):
+                existing_chunks = list(await chunk_res.data())
+            else:
+                existing_chunks = []
+            expected_count = int(root_params['chunk_count'])
+            if len(existing_chunks) != expected_count:
+                raise CatalogStoreError(
+                    'manifest root exists but chunk set incomplete',
+                    code='batch_conflict',
+                )
+            for idx, ch in enumerate(expected_chunks):
+                row = existing_chunks[idx]
+                if int(
+                    row['chunk_index'] if row.get('chunk_index') is not None else -1
+                ) != int(ch['chunk_index']):
+                    raise CatalogStoreError(
+                        'manifest chunk order mismatch on idempotent path',
+                        code='batch_conflict',
+                    )
+                if str(row.get('chunk_sha256') or '') != str(ch['chunk_sha256']):
+                    raise CatalogStoreError(
+                        'manifest chunk hash mismatch on idempotent path',
+                        code='batch_conflict',
+                    )
             return {
                 'uuid': existing.get('uuid'),
                 'group_id': existing.get('group_id'),
