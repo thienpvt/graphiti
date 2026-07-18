@@ -481,6 +481,9 @@ def test_build_edge_upsert_cypher_uses_relates_to_and_param_name():
     assert '_catalog_create_token' in cypher
     assert 'REMOVE e._catalog_create_token' in cypher
     assert '$create_token' in cypher
+    # WR-04: under-lock identity arbitration mirrors entity pattern
+    assert 'edge_identity_conflict' in cypher
+    assert 'error_code' in cypher
 
 
 def test_edge_on_create_and_changed_match_include_batch_id():
@@ -1458,3 +1461,13 @@ def test_wr03_claim_cypher_reclaims_writing_failed_only():
     # committed path must not be rewritten to writing
     assert "THEN 'writing'" in claim
     assert 'b.request_sha256 = $request_sha256' in claim
+
+
+def test_wr04_edge_upsert_returns_error_code_on_identity_drift():
+    store = CatalogNeo4jStore()
+    cypher = store.build_edge_upsert_cypher()
+    assert "THEN 'edge_identity_conflict'" in cypher
+    assert 'error_code' in cypher
+    # mutable SET / vector only when status is not error
+    assert "WHEN error_code IS NOT NULL THEN 'error'" in cypher
+    assert "status IN ['created', 'updated']" in cypher

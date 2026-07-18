@@ -932,6 +932,8 @@ class CatalogService:
             return CatalogErrorCode.deterministic_uuid_conflict
         if error_code == CatalogErrorCode.entity_type_conflict.value:
             return CatalogErrorCode.entity_type_conflict
+        if error_code == CatalogErrorCode.edge_identity_conflict.value:
+            return CatalogErrorCode.edge_identity_conflict
         if error_code == CatalogErrorCode.batch_conflict.value:
             return CatalogErrorCode.batch_conflict
         # Unknown error_code with status=error fails closed.
@@ -944,6 +946,12 @@ class CatalogService:
         if code is None:
             return
         raise self._EntityInvariantRace(code)
+
+    def _raise_edge_row_error(self, row: dict[str, Any]) -> None:
+        code = self._row_error_code(row)
+        if code is None:
+            return
+        raise self._EdgeEndpointRace(code)
 
     @staticmethod
     def _write_status_from_row(row: dict[str, Any], projected: str) -> str:
@@ -5338,7 +5346,13 @@ class CatalogService:
                         confidence=prep.item.confidence,
                     ),
                 )
+                self._raise_edge_row_error(row)
                 status = self._write_status_from_row(row, prep.projected_status)
+                if status == 'error':
+                    raise CatalogStoreError(
+                        'edge write returned error without raise',
+                        code='neo4j_transaction_failed',
+                    )
             result_index = (
                 prep.batch_result_index
                 if prep.batch_result_index is not None

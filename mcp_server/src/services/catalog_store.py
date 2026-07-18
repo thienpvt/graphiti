@@ -1741,20 +1741,30 @@ class CatalogNeo4jStore:
                 // Empty list so stock EntityEdge/search hydration never sees episodes=None.
                 e.episodes = $episodes,
                 e._catalog_create_token = $create_token
-            WITH e,
-                 coalesce(e._catalog_create_token, '') = $create_token AS created,
-                 e.content_sha256 = $content_sha256 AS same
-            WITH e, created, same,
+            WITH e, coalesce(e._catalog_create_token, '') = $create_token AS created
+            SET e.uuid = e.uuid
+            WITH e, created,
                  CASE
+                   WHEN NOT created AND (
+                     e.name IS NULL OR e.name <> $name
+                     OR e.edge_key IS NULL OR e.edge_key <> $edge_key
+                     OR e.source_node_uuid IS NULL OR e.source_node_uuid <> $source_node_uuid
+                     OR e.target_node_uuid IS NULL OR e.target_node_uuid <> $target_node_uuid
+                   ) THEN 'edge_identity_conflict'
+                   ELSE null
+                 END AS error_code
+            WITH e, created, error_code,
+                 CASE
+                   WHEN error_code IS NOT NULL THEN 'error'
                    WHEN created THEN 'created'
-                   WHEN same THEN 'unchanged'
+                   WHEN e.content_sha256 = $content_sha256 THEN 'unchanged'
                    ELSE 'updated'
                  END AS status
             FOREACH (_ IN CASE WHEN status = 'updated' THEN [1] ELSE [] END |
               SET {updated_set}
             )
             REMOVE e._catalog_create_token
-            WITH e, status
+            WITH e, status, error_code
             CALL {{
               WITH e, status
               WITH e, status WHERE status IN ['created', 'updated']
@@ -1762,7 +1772,7 @@ class CatalogNeo4jStore:
               RETURN 1 AS _
               UNION
               WITH e, status
-              WITH e, status WHERE status = 'unchanged'
+              WITH e, status WHERE NOT status IN ['created', 'updated']
               RETURN 0 AS _
             }}
             RETURN e.uuid AS uuid,
@@ -1774,7 +1784,8 @@ class CatalogNeo4jStore:
                    e.edge_key AS edge_key,
                    e.source_node_uuid AS source_uuid,
                    e.target_node_uuid AS target_uuid,
-                   status
+                   status,
+                   error_code
             """
 
     def build_get_edge_by_uuid_cypher(self) -> str:
