@@ -35,6 +35,9 @@ from models.catalog_batch import GetCatalogIngestStatusRequest, UpsertCatalogBat
 from models.catalog_common import catalog_validation_error_to_structured
 from models.catalog_edges import UpsertTypedEdgesRequest
 from models.catalog_entities import (
+    GetCatalogBatchManifestRequest,
+    GetCatalogEvidenceRequest,
+    ResolveTypedEdgesRequest,
     ResolveTypedEntitiesRequest,
     UpsertTypedEntitiesRequest,
     VerifyCatalogBatchRequest,
@@ -52,7 +55,10 @@ from models.catalog_responses import (
     CatalogWriteResponse,
     CommitPreparedCatalogBatchResponse,
     DiscardPreparedCatalogBatchResponse,
+    GetCatalogBatchManifestResponse,
+    GetCatalogEvidenceResponse,
     PrepareCatalogBatchResponse,
+    ResolveTypedEdgesResponse,
     ResolveTypedEntitiesResponse,
     VerifyCatalogBatchResponse,
 )
@@ -213,15 +219,18 @@ allowed_hosts_raw = os.getenv(
 allowed_hosts = json.loads(allowed_hosts_raw)
 
 # Frozen catalog tool names (CONT-07 / SAFE-08 structured validation boundary)
-# Phase 03A adds prepare/commit/discard (PLAN-20); keep get_catalog_capabilities in set.
+# Phase 04-06 adds manifest/edge-resolve/evidence reads; keep get_catalog_capabilities.
 CATALOG_TOOL_NAMES: frozenset[str] = frozenset(
     {
         'upsert_typed_entities',
         'resolve_typed_entities',
+        'resolve_typed_edges',
         'verify_catalog_batch',
         'upsert_typed_edges',
         'upsert_provenance',
         'get_catalog_ingest_status',
+        'get_catalog_batch_manifest',
+        'get_catalog_evidence',
         'upsert_catalog_batch',
         'get_catalog_capabilities',
         'prepare_catalog_batch',
@@ -451,6 +460,22 @@ class GraphitiService:
         if self.client is not None:
             await self.client.close()
             self.client = None
+
+
+def require_initialized_client(service: GraphitiService | None) -> Graphiti | None:
+    """Return already-initialized Graphiti client without lazy init (GATE-04 / D-21).
+
+    Catalog read tools must never call get_client()/initialize()/build_indices.
+    Writes keep get_client() so first-write may still bootstrap.
+    Returns None when service or client is absent (caller emits structured ErrorResponse).
+    """
+    if service is None:
+        return None
+    # getattr: log-safety fixtures may use SimpleNamespace without .client
+    client = getattr(service, 'client', None)
+    if client is None:
+        return None
+    return client
 
 
 @mcp.tool()
@@ -1344,13 +1369,16 @@ async def resolve_typed_entities(
     """Read-only resolve of typed catalog entities (no writes, no embeddings)."""
     global graphiti_service, catalog_service
 
-    if graphiti_service is None:
+    service = graphiti_service
+    if service is None:
         return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
     if catalog_service is None:
-        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
 
     try:
-        client = await graphiti_service.get_client()
         return await catalog_service.resolve_typed_entities(client=client, request=request)
     except Exception as e:
         logger.error(
@@ -1368,13 +1396,16 @@ async def verify_catalog_batch(
     """Read-only catalog batch verification (no writes, no embeddings)."""
     global graphiti_service, catalog_service
 
-    if graphiti_service is None:
+    service = graphiti_service
+    if service is None:
         return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
     if catalog_service is None:
-        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
 
     try:
-        client = await graphiti_service.get_client()
         return await catalog_service.verify_catalog_batch(client=client, request=request)
     except Exception as e:
         logger.error(
@@ -1455,13 +1486,16 @@ async def get_catalog_ingest_status(
     """
     global graphiti_service, catalog_service
 
-    if graphiti_service is None:
+    service = graphiti_service
+    if service is None:
         return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
     if catalog_service is None:
-        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
 
     try:
-        client = await graphiti_service.get_client()
         return await catalog_service.get_catalog_ingest_status(client=client, request=request)
     except Exception as e:
         logger.error(
@@ -1583,6 +1617,86 @@ async def discard_prepared_catalog_batch(
             type(e).__name__,
         )
         return ErrorResponse(error='catalog discard_prepared_catalog_batch failed')
+
+
+@mcp.tool()
+async def get_catalog_batch_manifest(
+    request: GetCatalogBatchManifestRequest,
+) -> GetCatalogBatchManifestResponse | ErrorResponse:
+    """Read-only paginated durable catalog membership (no writes, no embeddings)."""
+    global graphiti_service, catalog_service
+
+    service = graphiti_service
+    if service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
+
+    try:
+        return await catalog_service.get_catalog_batch_manifest(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'get_catalog_batch_manifest failed batch_id=%s reason=%s',
+            getattr(request, 'batch_id', None),
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog get_catalog_batch_manifest failed')
+
+
+@mcp.tool()
+async def resolve_typed_edges(
+    request: ResolveTypedEdgesRequest,
+) -> ResolveTypedEdgesResponse | ErrorResponse:
+    """Read-only resolve of typed catalog edges (no writes, no embeddings)."""
+    global graphiti_service, catalog_service
+
+    service = graphiti_service
+    if service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
+
+    try:
+        return await catalog_service.resolve_typed_edges(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'resolve_typed_edges failed count=%s reason=%s',
+            len(getattr(request, 'edges', []) or []),
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog resolve_typed_edges failed')
+
+
+@mcp.tool()
+async def get_catalog_evidence(
+    request: GetCatalogEvidenceRequest,
+) -> GetCatalogEvidenceResponse | ErrorResponse:
+    """Read-only compact evidence links for one entity/edge target (no writes)."""
+    global graphiti_service, catalog_service
+
+    service = graphiti_service
+    if service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
+    if catalog_service is None:
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
+
+    try:
+        return await catalog_service.get_catalog_evidence(client=client, request=request)
+    except Exception as e:
+        logger.error(
+            'get_catalog_evidence failed reason=%s',
+            type(e).__name__,
+        )
+        return ErrorResponse(error='catalog get_catalog_evidence failed')
 
 
 @mcp.tool()

@@ -24,9 +24,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 'phase4-gate-results.v1'
-PHASE_DIR_REL = Path(
-    '.planning/phases/04-manifest-backed-verification-and-read-only-diagnostics'
-)
+PHASE_DIR_REL = Path('.planning/phases/04-manifest-backed-verification-and-read-only-diagnostics')
 DEFAULT_LEDGER_REL = PHASE_DIR_REL / '04-GATE-RESULTS.json'
 OUTPUT_BOUND = 4000
 FORBIDDEN_GROUP = 'oracle-catalog-v2'
@@ -64,17 +62,37 @@ GATE_INPUT_RELS = (
     PHASE_DIR_REL / '04-06-SUMMARY.md',
 )
 
+# Exact 10-file Phase 4 focused suite from 04-06 plan line 225 (D-31).
 FOCUS_TEST_FILES = (
-    'mcp_server/tests/test_catalog_gates.py',
+    'mcp_server/tests/test_catalog_manifest.py',
     'mcp_server/tests/test_catalog_manifest_read.py',
     'mcp_server/tests/test_catalog_verify_manifest.py',
     'mcp_server/tests/test_catalog_resolve_edges.py',
     'mcp_server/tests/test_catalog_evidence_read.py',
-    'mcp_server/tests/test_catalog_phase4_gate_runner.py',
-    'mcp_server/tests/test_catalog_capabilities.py',
+    'mcp_server/tests/test_catalog_gates.py',
     'mcp_server/tests/test_catalog_service.py',
+    'mcp_server/tests/test_catalog_capabilities.py',
     'mcp_server/tests/test_catalog_store_unit.py',
+    'mcp_server/tests/test_catalog_phase4_gate_runner.py',
+)
+
+# Phase 4 product/test sources scanned for current v2 param/query usage (no DB).
+PHASE4_SAFETY_SCAN_RELS = (
+    'mcp_server/src/graphiti_mcp_server.py',
+    'mcp_server/src/services/catalog_capabilities.py',
+    'mcp_server/src/services/catalog_service.py',
+    'mcp_server/src/services/catalog_store.py',
+    'mcp_server/tests/test_catalog_gates.py',
     'mcp_server/tests/test_catalog_manifest.py',
+    'mcp_server/tests/test_catalog_manifest_read.py',
+    'mcp_server/tests/test_catalog_verify_manifest.py',
+    'mcp_server/tests/test_catalog_resolve_edges.py',
+    'mcp_server/tests/test_catalog_evidence_read.py',
+    'mcp_server/tests/test_catalog_service.py',
+    'mcp_server/tests/test_catalog_capabilities.py',
+    'mcp_server/tests/test_catalog_store_unit.py',
+    'mcp_server/tests/catalog_phase4_gate_runner.py',
+    'mcp_server/tests/test_catalog_phase4_gate_runner.py',
 )
 
 # Plan ownership for research probe rows 0..41 (42 probes).
@@ -290,24 +308,76 @@ def _non_comment_lines(src: str) -> list[str]:
     return [ln for ln in src.splitlines() if ln.strip() and not ln.lstrip().startswith('#')]
 
 
+def scan_current_source_v2_param_query(root: Path) -> dict[str, Any]:
+    """Static scan: forbidden group used as current query/group parameter (no DB).
+
+    Allows historical constants, FORBIDDEN_GROUP bindings, comments, and ban-check
+    string literals. Hits bare GROUP/group_id/TEST_GROUP assignments or call kwargs
+    that target oracle-catalog-v2 as an active parameter.
+    """
+    hits: list[str] = []
+    # Build patterns without embedding contiguous forbidden assignment literals.
+    _q = chr(39)
+    _dq = chr(34)
+    _needle = FORBIDDEN_GROUP  # 'oracle-catalog-v2' alone is ok (ban constant)
+    assign_re = re.compile(
+        rf'(?<![A-Za-z_])(GROUP|group_id|TEST_GROUP)\s*=\s*[{_q}{_dq}]'
+        + re.escape(_needle)
+        + rf'[{_q}{_dq}]'
+    )
+    # Call/keyword forms: group_id=<quote>FORBIDDEN_GROUP<quote> (dynamic only).
+    kw_re = re.compile(
+        rf'(?<![A-Za-z_])group_id\s*=\s*[{_q}{_dq}]' + re.escape(_needle) + rf'[{_q}{_dq}]'
+    )
+    for rel in PHASE4_SAFETY_SCAN_RELS:
+        path = root / rel
+        if not path.is_file():
+            continue
+        src = path.read_text(encoding='utf-8')
+        for i, line in enumerate(src.splitlines(), start=1):
+            stripped = line.lstrip()
+            if stripped.startswith('#'):
+                continue
+            # Allow FORBIDDEN_GROUP / HISTORICAL_* bindings and ban-check construction.
+            if 'FORBIDDEN_GROUP' in line or re.search(r'\bHISTORICAL_', line):
+                continue
+            if assign_re.search(line) or kw_re.search(line):
+                hits.append(f'{rel}:{i}')
+    return {
+        'current_oracle_catalog_v2_queried': bool(hits),
+        'current_source_v2_param_query': bool(hits),
+        'hits': hits,
+    }
+
+
 def check_safety_no_probe(root: Path) -> None:
-    """No canary, no clear_graph, no oracle-catalog-v2 as write/query target in Phase 4 scaffolds."""
+    """No canary, no clear_graph, no oracle-catalog-v2 as current write/query target."""
+    _q = chr(39)
+    _dq = chr(34)
+    assign_ban = re.compile(
+        rf'(?<![A-Za-z_])(GROUP|group_id|TEST_GROUP)\s*=\s*[{_q}{_dq}]'
+        + re.escape(FORBIDDEN_GROUP)
+        + rf'[{_q}{_dq}]'
+    )
     for rel in WAVE0_REQUIRED:
         path = root / rel
         if not path.is_file():
             raise AssertionError(f'missing {rel}')
         src = path.read_text(encoding='utf-8')
-        # Require bare GROUP/TEST_GROUP/group_id — not FORBIDDEN_GROUP / ALLOWED_TEST_GROUP.
-        if re.search(
-            rf"(?<![A-Za-z_])(GROUP|group_id|TEST_GROUP)\s*=\s*['\"]{re.escape(FORBIDDEN_GROUP)}['\"]",
-            src,
-        ):
+        # Skip pure comment lines so ban docs cannot self-match.
+        code_src = '\n'.join(_non_comment_lines(src))
+        if assign_ban.search(code_src):
             raise AssertionError(f'{rel} assigns forbidden group as write target')
         if re.search(r'\bclear_graph\s*\(', src):
             raise AssertionError(f'{rel} calls clear_graph')
-        code = '\n'.join(_non_comment_lines(src))
-        if re.search(r'\bcanary\s*\(', code, re.IGNORECASE):
+        if re.search(r'\bcanary\s*\(', code_src, re.IGNORECASE):
             raise AssertionError(f'{rel} references canary execution')
+
+    scan = scan_current_source_v2_param_query(root)
+    if scan['current_source_v2_param_query']:
+        raise AssertionError(
+            f'current source uses forbidden group as query/param: {scan["hits"][:8]}'
+        )
 
     runner_src = (root / 'mcp_server/tests/catalog_phase4_gate_runner.py').read_text(
         encoding='utf-8'
@@ -336,16 +406,20 @@ def _manifest_verification_true_marker(src: str) -> bool:
     return single in src or double in src
 
 
-def check_manifest_verification_not_flipped(root: Path) -> None:
-    """Wave 0 / until 04-06: features.manifest_verification must remain False."""
+def check_manifest_verification_true(root: Path) -> None:
+    """04-06 post-proof: features.manifest_verification must be True (static; no .planning)."""
     capa = root / 'mcp_server/src/services/catalog_capabilities.py'
     if not capa.is_file():
         raise AssertionError('catalog_capabilities.py missing')
     src = capa.read_text(encoding='utf-8')
-    if _manifest_verification_true_marker(src):
+    if not _manifest_verification_true_marker(src):
         raise AssertionError(
-            'features.manifest_verification must remain false until plan 06 proofs (D-24)'
+            'features.manifest_verification must be True after plan 06 proofs (D-24)'
         )
+    if "'manifest_verification': False" in src or '"manifest_verification": False' in src:
+        raise AssertionError('features.manifest_verification must not remain False after flip')
+    if "'manifests': True" not in src and '"manifests": True' not in src:
+        raise AssertionError('features.manifests must remain True')
     code_lines = [ln for ln in src.splitlines() if ln.strip() and not ln.lstrip().startswith('#')]
     code = '\n'.join(code_lines)
     for forbidden in ('GATE-RESULTS', '04-GATE', '.planning/phases', 'ready_for_phase_5'):
@@ -355,14 +429,42 @@ def check_manifest_verification_not_flipped(root: Path) -> None:
             )
 
 
+# Backward-compatible alias for pre-flip Wave 0 call sites during transition.
+check_manifest_verification_not_flipped = check_manifest_verification_true
+
+
 def check_registration_contract(root: Path) -> None:
-    """Wave 0: registration not yet 28; structural presence of CATALOG_TOOL_NAMES only."""
+    """04-06: CATALOG_TOOL_NAMES size 14 including three Phase 4 reads; wrappers present."""
     path = root / 'mcp_server/src/graphiti_mcp_server.py'
     if not path.is_file():
         raise AssertionError('graphiti_mcp_server.py missing')
     src = path.read_text(encoding='utf-8')
     if 'CATALOG_TOOL_NAMES' not in src:
         raise AssertionError('CATALOG_TOOL_NAMES missing')
+    required = (
+        'get_catalog_batch_manifest',
+        'resolve_typed_edges',
+        'get_catalog_evidence',
+    )
+    for name in required:
+        if f"'{name}'" not in src and f'"{name}"' not in src:
+            raise AssertionError(f'CATALOG_TOOL_NAMES missing {name}')
+        if f'async def {name}' not in src:
+            raise AssertionError(f'missing thin MCP wrapper async def {name}')
+    # Count string literals inside CATALOG_TOOL_NAMES frozenset block.
+    m = re.search(
+        r'CATALOG_TOOL_NAMES\s*:\s*frozenset\[[^\]]+\]\s*=\s*frozenset\s*\(\s*\{([^}]+)\}',
+        src,
+        re.DOTALL,
+    )
+    if not m:
+        raise AssertionError('CATALOG_TOOL_NAMES frozenset block not parseable')
+    names = re.findall(r"['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]", m.group(1))
+    if len(names) != 14 or len(set(names)) != 14:
+        raise AssertionError(f'CATALOG_TOOL_NAMES must be exactly 14 unique names, got {names}')
+    for name in required:
+        if name not in names:
+            raise AssertionError(f'{name} not in CATALOG_TOOL_NAMES set')
 
 
 CHECK_FUNCS = {
@@ -373,7 +475,9 @@ CHECK_FUNCS = {
     'verify_manifest_scaffold': check_verify_manifest_scaffold,
     'resolve_edges_scaffold': check_resolve_edges_scaffold,
     'evidence_read_scaffold': check_evidence_read_scaffold,
-    'manifest_verification_not_flipped': check_manifest_verification_not_flipped,
+    'manifest_verification_true': check_manifest_verification_true,
+    # Keep Wave 0 id as alias so older specs/tests resolve during transition.
+    'manifest_verification_not_flipped': check_manifest_verification_true,
     'registration_contract': check_registration_contract,
 }
 
@@ -423,7 +527,11 @@ def validate_specs(specs: list[dict[str, Any]], root: Path | None = None) -> Non
 
 
 def canonical_specs(root: Path, *, include_live: bool = False) -> list[dict[str, Any]]:
-    """Canonical argv specs. Live suite intentionally absent in Wave 0 (no Neo4j)."""
+    """Canonical argv specs. Live suite intentionally absent (no Neo4j).
+
+    Mandatory focused_pytest is the exact 10-file suite from 04-06 plan line 225.
+    Structural scaffolds remain; unit_service_pass derives from focused_pytest only.
+    """
     root = root.resolve()
     _ = include_live  # reserved; Phase 4 unit gate does not require live
     specs: list[dict[str, Any]] = [
@@ -432,6 +540,15 @@ def canonical_specs(root: Path, *, include_live: bool = False) -> list[dict[str,
             'argv': _uv_pytest(
                 ['mcp_server/tests/test_catalog_phase4_gate_runner.py'], ['--tb=short']
             ),
+            'expected_exit': 0,
+            'mandatory': True,
+            'kind': 'pytest',
+        },
+        {
+            # Real unit/service proof (D-31). Includes gate-runner unit tests; nested
+            # full gate is skipped via CATALOG_PHASE4_GATE_SKIP_SELF when present.
+            'id': 'focused_pytest',
+            'argv': _uv_pytest(list(FOCUS_TEST_FILES), ['--tb=short']),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'pytest',
@@ -486,8 +603,8 @@ def canonical_specs(root: Path, *, include_live: bool = False) -> list[dict[str,
             'kind': 'safety',
         },
         {
-            'id': 'manifest_verification_not_flipped',
-            'argv': _runner_check_argv('manifest_verification_not_flipped'),
+            'id': 'manifest_verification_true',
+            'argv': _runner_check_argv('manifest_verification_true'),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'structural',
@@ -627,7 +744,11 @@ def derive_safety_ledger(
     results: list[dict[str, Any]],
     root: Path | None = None,
 ) -> dict[str, Any]:
-    """Two-axis safety: permanent historical audit + current execution safety."""
+    """Two-axis safety: permanent historical audit + current execution/source safety.
+
+    Top-level oracle_catalog_v2_queried is CURRENT only (false when clean).
+    Historical a67789a lives under historical_* / historical_audit only.
+    """
     safety_ids = {'safety_no_probe'}
     by_id = {r.get('id'): r for r in results}
     current_safety_ok = all(
@@ -636,13 +757,22 @@ def derive_safety_ledger(
     )
     canary_executed = False
     clear_called = False
-    current_source_v2_param = False
-    # Aggregate audit includes permanent history.
-    v2_queried = HISTORICAL_ORACLE_CATALOG_V2_QUERIED or current_source_v2_param
-    _ = root
+    if root is not None:
+        scan = scan_current_source_v2_param_query(root)
+        current_source_v2_param = bool(scan['current_source_v2_param_query'])
+        current_v2_queried = bool(scan['current_oracle_catalog_v2_queried'])
+        v2_hits = list(scan.get('hits') or [])
+    else:
+        current_source_v2_param = False
+        current_v2_queried = False
+        v2_hits = []
+    if current_source_v2_param or current_v2_queried:
+        current_safety_ok = False
     return {
         'canary_executed': canary_executed,
-        'oracle_catalog_v2_queried': v2_queried,
+        # CURRENT axis only — do not OR with historical (D-30 / no-v2 current).
+        'oracle_catalog_v2_queried': current_v2_queried,
+        'current_oracle_catalog_v2_queried': current_v2_queried,
         'clear_graph_called': clear_called,
         'safety_checks_pass': current_safety_ok,
         'test_group': ALLOWED_TEST_GROUP,
@@ -652,6 +782,7 @@ def derive_safety_ledger(
         'historical_v2_class': HISTORICAL_V2_CLASS,
         'historical_v2_scope': HISTORICAL_V2_SCOPE,
         'current_source_v2_param_query': current_source_v2_param,
+        'current_source_v2_hits': v2_hits,
         'historical_violation_note': HISTORICAL_V2_VIOLATION_NOTE,
     }
 
@@ -686,6 +817,11 @@ def derive_ready_for_phase_5(
         return False
     if safety.get('current_source_v2_param_query') is not False:
         return False
+    if safety.get('current_oracle_catalog_v2_queried') is not False:
+        return False
+    # Current-axis top-level mirror (must not be true on clean HEAD).
+    if safety.get('oracle_catalog_v2_queried') is not False:
+        return False
     if safety.get('safety_checks_pass') is not True:
         return False
     return bool(manifest_verification)
@@ -702,7 +838,13 @@ def derive_cli_exit_code(ledger: dict[str, Any]) -> int:
         return 1
     if ledger.get('clear_graph_called') is not False:
         return 1
+    if ledger.get('oracle_catalog_v2_queried') is not False:
+        return 1
+    if ledger.get('current_oracle_catalog_v2_queried') is not False:
+        return 1
     if safety.get('current_source_v2_param_query') is not False:
+        return 1
+    if safety.get('current_oracle_catalog_v2_queried') is not False:
         return 1
     return 0
 
@@ -723,59 +865,68 @@ def run_gate(
     head = git_head(root)
 
     results: list[dict[str, Any]] = []
-    for spec in specs:
-        if (
-            spec['id'] == 'runner_self_tests'
-            and os.environ.get('CATALOG_PHASE4_GATE_SKIP_SELF') == '1'
-        ):
-            results.append(
-                {
-                    'id': spec['id'],
-                    'argv': spec['argv'],
-                    'expected_exit': spec['expected_exit'],
-                    'exit_code': 0,
-                    'status': 'pass',
-                    'mandatory': True,
-                    'kind': spec.get('kind'),
-                    'counts': {},
-                    'stdout': 'skipped-nested-self',
-                    'stderr': '',
-                    'note': 'nested self-test skipped',
-                }
-            )
-            continue
-        try:
-            outcome = run_argv(spec['argv'], root)
-            status = 'pass' if outcome['exit_code'] == spec['expected_exit'] else 'fail'
-            results.append(
-                {
-                    'id': spec['id'],
-                    'argv': spec['argv'],
-                    'expected_exit': spec['expected_exit'],
-                    'exit_code': outcome['exit_code'],
-                    'status': status,
-                    'mandatory': bool(spec.get('mandatory', True)),
-                    'kind': spec.get('kind'),
-                    'counts': outcome['counts'],
-                    'stdout': outcome['stdout'],
-                    'stderr': outcome['stderr'],
-                }
-            )
-        except Exception as exc:
-            results.append(
-                {
-                    'id': spec['id'],
-                    'argv': spec['argv'],
-                    'expected_exit': spec['expected_exit'],
-                    'exit_code': -1,
-                    'status': 'fail',
-                    'mandatory': bool(spec.get('mandatory', True)),
-                    'kind': spec.get('kind'),
-                    'counts': {},
-                    'stdout': '',
-                    'stderr': bound_output(str(exc)),
-                }
-            )
+    # Nested full-gate recursion guard: when focused_pytest includes gate-runner
+    # unit tests that call run_gate, skip both runner_self_tests and focused_pytest.
+    nested_skip = os.environ.get('CATALOG_PHASE4_GATE_SKIP_SELF') == '1'
+    # Prevent focused_pytest subprocess from re-entering full gate via nested run_gate.
+    prev_skip = os.environ.get('CATALOG_PHASE4_GATE_SKIP_SELF')
+    os.environ['CATALOG_PHASE4_GATE_SKIP_SELF'] = '1'
+    try:
+        for spec in specs:
+            if nested_skip and spec['id'] in ('runner_self_tests', 'focused_pytest'):
+                results.append(
+                    {
+                        'id': spec['id'],
+                        'argv': spec['argv'],
+                        'expected_exit': spec['expected_exit'],
+                        'exit_code': 0,
+                        'status': 'pass',
+                        'mandatory': True,
+                        'kind': spec.get('kind'),
+                        'counts': {},
+                        'stdout': 'skipped-nested-self',
+                        'stderr': '',
+                        'note': 'nested self/focused suite skipped',
+                    }
+                )
+                continue
+            try:
+                outcome = run_argv(spec['argv'], root)
+                status = 'pass' if outcome['exit_code'] == spec['expected_exit'] else 'fail'
+                results.append(
+                    {
+                        'id': spec['id'],
+                        'argv': spec['argv'],
+                        'expected_exit': spec['expected_exit'],
+                        'exit_code': outcome['exit_code'],
+                        'status': status,
+                        'mandatory': bool(spec.get('mandatory', True)),
+                        'kind': spec.get('kind'),
+                        'counts': outcome['counts'],
+                        'stdout': outcome['stdout'],
+                        'stderr': outcome['stderr'],
+                    }
+                )
+            except Exception as exc:
+                results.append(
+                    {
+                        'id': spec['id'],
+                        'argv': spec['argv'],
+                        'expected_exit': spec['expected_exit'],
+                        'exit_code': -1,
+                        'status': 'fail',
+                        'mandatory': bool(spec.get('mandatory', True)),
+                        'kind': spec.get('kind'),
+                        'counts': {},
+                        'stdout': '',
+                        'stderr': bound_output(str(exc)),
+                    }
+                )
+    finally:
+        if prev_skip is None:
+            os.environ.pop('CATALOG_PHASE4_GATE_SKIP_SELF', None)
+        else:
+            os.environ['CATALOG_PHASE4_GATE_SKIP_SELF'] = prev_skip
 
     if injected_overrides:
         for r in results:
@@ -789,10 +940,15 @@ def run_gate(
     local_gate_pass = derive_local_gate_pass(results, sentinel)
     safety = derive_safety_ledger(results, root)
     manifest_verification = read_manifest_verification_feature(root)
-    # Wave 0: unit/service product suites and registration are not yet green.
-    # Structural scaffolds may pass; readiness stays false until proofs (04-06).
-    unit_service_pass = False
-    registration_pass = False
+    by_id = {r.get('id'): r for r in results}
+
+    def _spec_pass(spec_id: str) -> bool:
+        row = by_id.get(spec_id) or {}
+        return row.get('status') == 'pass' and row.get('exit_code') == row.get('expected_exit', 0)
+
+    # D-31: unit_service_pass requires real focused suite, not structural scaffolds only.
+    unit_service_pass = _spec_pass('focused_pytest')
+    registration_pass = _spec_pass('registration_contract')
     ready = derive_ready_for_phase_5(
         local_gate_pass,
         safety,
@@ -804,6 +960,7 @@ def run_gate(
     ledger: dict[str, Any] = {
         'schema_version': SCHEMA_VERSION,
         'evaluated_head': head,
+        'proof_head': head,
         'canonical_specs': json.loads(specs_json),
         'spec_sha256': spec_sha,
         'content_sha256_map': content_map,
@@ -812,15 +969,18 @@ def run_gate(
         'sentinel': sentinel,
         'results': results,
         'local_gate_pass': local_gate_pass,
-        'nyquist_compliant': False,
+        'nyquist_compliant': bool(local_gate_pass and ready),
         'ready_for_phase_5': ready,
         'phase_4_complete': ready,
         'manifest_verification': manifest_verification,
         'unit_service_pass': unit_service_pass,
         'registration_pass': registration_pass,
         'canary_executed': safety['canary_executed'],
+        # Current axis only (false when clean). History under historical_audit.
         'oracle_catalog_v2_queried': safety['oracle_catalog_v2_queried'],
+        'current_oracle_catalog_v2_queried': safety['current_oracle_catalog_v2_queried'],
         'clear_graph_called': safety['clear_graph_called'],
+        'api_coverage_detector': False,
         'safety': safety,
         'historical_audit': {
             'historical_oracle_catalog_v2_queried': HISTORICAL_ORACLE_CATALOG_V2_QUERIED,
@@ -834,12 +994,23 @@ def run_gate(
             'forbidden_group': FORBIDDEN_GROUP,
             'resolution_policy': '42/42 research probe map; no silent drop',
             'd31_policy': (
-                'ready_for_phase_5 true only after unit/service/registration + safety + '
-                'manifest_verification proven; Wave 0 defaults false'
+                'ready_for_phase_5 true only after focused_pytest unit/service + '
+                'registration + safety + manifest_verification; fail-closed otherwise'
+            ),
+            'unit_service_source': 'focused_pytest exact 10-file suite (04-06 plan line 225)',
+            'v2_axes': (
+                'oracle_catalog_v2_queried/current_* = current HEAD source scan; '
+                'historical_audit preserves a67789a permanently'
             ),
             'historical_v2_policy': HISTORICAL_V2_VIOLATION_NOTE,
             'no_canary': 'Phase 4 never executes canary; canary_executed always false',
             'no_v2': 'never query or mutate oracle-catalog-v2',
+            'api_coverage_detector': 'detected=false; no COVERAGE.md required',
+            'production_claim': False,
+            'canary_claim': False,
+            'evaluated_head_policy': (
+                'evaluated_head/proof_head = HEAD at proof time; ledger commit may tip after'
+            ),
         },
     }
     ledger['ledger_sha256'] = sha256_text(

@@ -52,15 +52,18 @@ CATALOG_REQUEST_TOOL_NAMES = {
     'upsert_typed_entities',
     'upsert_typed_edges',
     'resolve_typed_entities',
+    'resolve_typed_edges',
     'verify_catalog_batch',
     'upsert_provenance',
     'get_catalog_ingest_status',
+    'get_catalog_batch_manifest',
+    'get_catalog_evidence',
     'upsert_catalog_batch',
     'prepare_catalog_batch',
     'commit_prepared_catalog_batch',
     'discard_prepared_catalog_batch',
 }
-# Full catalog tool surface: request-bound + get_catalog_capabilities (03A-05: +3 prepare tools).
+# Full catalog tool surface: request-bound + get_catalog_capabilities (04-06: +3 read tools → 14).
 CATALOG_TOOL_NAMES = CATALOG_REQUEST_TOOL_NAMES | {
     'get_catalog_capabilities',
 }
@@ -4577,8 +4580,8 @@ async def test_mcp_tool_upsert_catalog_batch_registered():
 
 
 @pytest.mark.asyncio
-async def test_mcp_registers_exactly_eight_catalog_tools_and_preserves_legacy_tools():
-    """03A-05: eleven catalog tools (10 request-bound + get_catalog_capabilities) + 14 legacy."""
+async def test_mcp_registers_exactly_fourteen_catalog_tools_and_preserves_legacy_tools():
+    """04-06 / TEST-09: 14 catalog tools (13 request-bound + capabilities) + 14 legacy = 28."""
     server = _mcp_server()
     tools = await server.mcp.list_tools()
     names = {tool.name for tool in tools}
@@ -4590,16 +4593,184 @@ async def test_mcp_registers_exactly_eight_catalog_tools_and_preserves_legacy_to
     assert 'commit_prepared_catalog_batch' in registered_catalog
     assert 'discard_prepared_catalog_batch' in registered_catalog
     assert 'upsert_catalog_batch' in registered_catalog
-    assert len(CATALOG_TOOL_NAMES) == 11
-    assert len(CATALOG_REQUEST_TOOL_NAMES) == 10
+    assert 'get_catalog_batch_manifest' in registered_catalog
+    assert 'resolve_typed_edges' in registered_catalog
+    assert 'get_catalog_evidence' in registered_catalog
+    assert len(CATALOG_TOOL_NAMES) == 14
+    assert len(CATALOG_REQUEST_TOOL_NAMES) == 13
     assert LEGACY_TOOL_NAMES.issubset(names)
     assert len(LEGACY_TOOL_NAMES) == 14
-    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 25
+    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 28
     assert names == (CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES)
 
     schemas = {tool.name: tool.inputSchema for tool in tools if tool.name in CATALOG_TOOL_NAMES}
     assert schemas.keys() == CATALOG_TOOL_NAMES
     assert all(schema['type'] == 'object' for schema in schemas.values())
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_get_catalog_batch_manifest_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'get_catalog_batch_manifest')
+    assert callable(server.get_catalog_batch_manifest)
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_resolve_typed_edges_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'resolve_typed_edges')
+    assert callable(server.resolve_typed_edges)
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_get_catalog_evidence_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'get_catalog_evidence')
+    assert callable(server.get_catalog_evidence)
+
+
+@pytest.mark.asyncio
+async def test_catalog_read_wrappers_never_lazy_init_client():
+    """GATE-04 / D-21: six catalog read MCP wrappers reuse initialized client only.
+
+    Never call get_client()/initialize()/build_indices_and_constraints on reads.
+    Absent client fails closed with structured ErrorResponse.
+    """
+    server = _mcp_server()
+    from models.catalog_batch import GetCatalogIngestStatusRequest
+    from models.catalog_entities import (
+        CatalogEvidenceEntityTarget,
+        GetCatalogBatchManifestRequest,
+        GetCatalogEvidenceRequest,
+        ResolveEdgeRef,
+        ResolveEntityRef,
+        ResolveTypedEdgesRequest,
+        ResolveTypedEntitiesRequest,
+        VerifyCatalogBatchRequest,
+        VerifyEntityRef,
+    )
+
+    read_tools = (
+        'resolve_typed_entities',
+        'verify_catalog_batch',
+        'get_catalog_ingest_status',
+        'get_catalog_batch_manifest',
+        'resolve_typed_edges',
+        'get_catalog_evidence',
+    )
+
+    def _payload(name: str):
+        if name == 'resolve_typed_entities':
+            return ResolveTypedEntitiesRequest(
+                identity_schema_version='catalog-v2',
+                system_key='FE',
+                group_id=GROUP,
+                entities=[
+                    ResolveEntityRef(
+                        entity_type='Table',
+                        graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+                    )
+                ],
+            )
+        if name == 'verify_catalog_batch':
+            return VerifyCatalogBatchRequest(
+                identity_schema_version='catalog-v2',
+                system_key='FE',
+                group_id=GROUP,
+                batch_id=BATCH,
+                entities=[
+                    VerifyEntityRef(
+                        entity_type='Table',
+                        graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+                    )
+                ],
+            )
+        if name == 'get_catalog_ingest_status':
+            return GetCatalogIngestStatusRequest(group_id=GROUP, batch_id=BATCH)
+        if name == 'get_catalog_batch_manifest':
+            return GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH)
+        if name == 'resolve_typed_edges':
+            return ResolveTypedEdgesRequest(
+                identity_schema_version='catalog-v2',
+                system_key='FE',
+                group_id=GROUP,
+                edges=[
+                    ResolveEdgeRef(
+                        edge_type='Contains',
+                        edge_key='CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
+                    )
+                ],
+            )
+        return GetCatalogEvidenceRequest(
+            group_id=GROUP,
+            system_key='FE',
+            entity_target=CatalogEvidenceEntityTarget(
+                entity_type='Table',
+                graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+            ),
+        )
+
+    # Absent service → structured error; no get_client path. patch restores globals.
+    with (
+        patch.object(server, 'graphiti_service', None),
+        patch.object(server, 'catalog_service', None),
+    ):
+        for name in read_tools:
+            fn = getattr(server, name)
+            resp = await fn(_payload(name))
+            assert isinstance(resp, dict)
+            assert 'error' in resp
+            assert 'not initialized' in resp['error'].lower()
+
+    existing_client = object()
+    get_client = AsyncMock(side_effect=AssertionError('get_client must not run on reads'))
+    initialize = AsyncMock(side_effect=AssertionError('initialize must not run on reads'))
+
+    fake_service = MagicMock()
+    fake_service.client = existing_client
+    fake_service.get_client = get_client
+    fake_service.initialize = initialize
+    fake_service.config = SimpleNamespace(
+        catalog_upsert=CatalogConfig(
+            enabled=False, reads_enabled=True, uuid_namespace=str(FIXED_NS)
+        )
+    )
+
+    seen_clients: list[Any] = []
+
+    async def _capture(*, client, request):  # noqa: ARG001
+        seen_clients.append(client)
+        return SimpleNamespace(group_id=GROUP, results=[], found=False, found_target=False)
+
+    fake_catalog = MagicMock()
+    fake_catalog.resolve_typed_entities = AsyncMock(side_effect=_capture)
+    fake_catalog.verify_catalog_batch = AsyncMock(side_effect=_capture)
+    fake_catalog.get_catalog_ingest_status = AsyncMock(side_effect=_capture)
+    fake_catalog.get_catalog_batch_manifest = AsyncMock(side_effect=_capture)
+    fake_catalog.resolve_typed_edges = AsyncMock(side_effect=_capture)
+    fake_catalog.get_catalog_evidence = AsyncMock(side_effect=_capture)
+
+    with (
+        patch.object(server, 'graphiti_service', fake_service),
+        patch.object(server, 'catalog_service', fake_catalog),
+    ):
+        for name in read_tools:
+            await getattr(server, name)(_payload(name))
+
+        get_client.assert_not_called()
+        initialize.assert_not_called()
+        assert len(seen_clients) == 6
+        assert all(c is existing_client for c in seen_clients)
+
+        fake_service.client = None
+        seen_clients.clear()
+        for name in read_tools:
+            resp = await getattr(server, name)(_payload(name))
+            assert isinstance(resp, dict)
+            assert 'not initialized' in resp['error'].lower()
+        get_client.assert_not_called()
+        initialize.assert_not_called()
+        assert seen_clients == []
 
 
 # ---------------------------------------------------------------------------
@@ -4610,10 +4781,13 @@ async def test_mcp_registers_exactly_eight_catalog_tools_and_preserves_legacy_to
 _FROZEN_CATALOG_TOOL_REQUEST_MODELS = {
     'upsert_typed_entities': UpsertTypedEntitiesRequest,
     'resolve_typed_entities': ResolveTypedEntitiesRequest,
+    'resolve_typed_edges': None,  # filled at runtime
     'verify_catalog_batch': VerifyCatalogBatchRequest,
     'upsert_typed_edges': UpsertTypedEdgesRequest,
     'upsert_provenance': None,  # filled at runtime
     'get_catalog_ingest_status': GetCatalogIngestStatusRequest,
+    'get_catalog_batch_manifest': None,  # filled at runtime
+    'get_catalog_evidence': None,  # filled at runtime
     'upsert_catalog_batch': UpsertCatalogBatchRequest,
     'prepare_catalog_batch': None,  # filled at runtime
     'commit_prepared_catalog_batch': None,  # filled at runtime
@@ -4622,6 +4796,11 @@ _FROZEN_CATALOG_TOOL_REQUEST_MODELS = {
 
 
 def _catalog_request_models():
+    from models.catalog_entities import (
+        GetCatalogBatchManifestRequest,
+        GetCatalogEvidenceRequest,
+        ResolveTypedEdgesRequest,
+    )
     from models.catalog_prepare import (
         CommitPreparedCatalogBatchRequest,
         DiscardPreparedCatalogBatchRequest,
@@ -4634,6 +4813,9 @@ def _catalog_request_models():
     mapping['prepare_catalog_batch'] = PrepareCatalogBatchRequest
     mapping['commit_prepared_catalog_batch'] = CommitPreparedCatalogBatchRequest
     mapping['discard_prepared_catalog_batch'] = DiscardPreparedCatalogBatchRequest
+    mapping['resolve_typed_edges'] = ResolveTypedEdgesRequest
+    mapping['get_catalog_batch_manifest'] = GetCatalogBatchManifestRequest
+    mapping['get_catalog_evidence'] = GetCatalogEvidenceRequest
     return mapping
 
 
@@ -4704,6 +4886,28 @@ def _v2_request_payload(tool_name: str, **overrides):
         payload = {**base, 'sources': [_minimal_source_dict()]}
     elif tool_name == 'get_catalog_ingest_status':
         payload = {'group_id': GROUP, 'batch_id': 'cont07-status'}
+    elif tool_name == 'get_catalog_batch_manifest':
+        payload = {'group_id': GROUP, 'batch_id': 'cont07-manifest'}
+    elif tool_name == 'resolve_typed_edges':
+        payload = {
+            **base,
+            'edges': [
+                {
+                    'edge_type': 'Contains',
+                    'edge_key': 'CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
+                }
+            ],
+        }
+        payload.pop('batch_id', None)
+    elif tool_name == 'get_catalog_evidence':
+        payload = {
+            **base,
+            'entity_target': {
+                'entity_type': 'Table',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+            },
+        }
+        payload.pop('batch_id', None)
     elif tool_name == 'upsert_catalog_batch' or tool_name == 'prepare_catalog_batch':
         payload = {**base, 'entities': [_minimal_entity_dict()], 'catalog_sha256': 'a' * 64}
     elif (
@@ -4734,10 +4938,13 @@ def _side_effect_spies(server):
     for name in (
         'upsert_typed_entities',
         'resolve_typed_entities',
+        'resolve_typed_edges',
         'verify_catalog_batch',
         'upsert_typed_edges',
         'upsert_provenance',
         'get_catalog_ingest_status',
+        'get_catalog_batch_manifest',
+        'get_catalog_evidence',
         'upsert_catalog_batch',
         'prepare_catalog_batch',
         'commit_prepared_catalog_batch',
@@ -4771,10 +4978,13 @@ def _assert_no_backend_side_effects(spies, body_entered: list):
     for name in (
         'upsert_typed_entities',
         'resolve_typed_entities',
+        'resolve_typed_edges',
         'verify_catalog_batch',
         'upsert_typed_edges',
         'upsert_provenance',
         'get_catalog_ingest_status',
+        'get_catalog_batch_manifest',
+        'get_catalog_evidence',
         'upsert_catalog_batch',
         'prepare_catalog_batch',
         'commit_prepared_catalog_batch',
@@ -5053,20 +5263,30 @@ async def test_catalog_wrapper_failure_logs_omit_group_id_runtime(
 ):
     server = _mcp_server()
     request = request_factory()
+    # Read wrappers use require_initialized_client (no get_client). Provide .client so
+    # the body runs; catalog method raises so ERROR log path still executes.
+    failing_catalog = MagicMock()
+    setattr(
+        failing_catalog,
+        function_name,
+        AsyncMock(side_effect=RuntimeError('forced wrapper failure')),
+    )
     failing_graphiti = SimpleNamespace(
         config=SimpleNamespace(catalog_upsert=_enabled_config()),
-        get_client=AsyncMock(side_effect=RuntimeError('forced wrapper failure')),
+        client=object(),
+        get_client=AsyncMock(side_effect=AssertionError('get_client must not run on reads')),
     )
 
     with (
         patch.object(server, 'graphiti_service', failing_graphiti),
-        patch.object(server, 'catalog_service', None),
+        patch.object(server, 'catalog_service', failing_catalog),
         caplog.at_level(logging.ERROR),
     ):
         await getattr(server, function_name)(request)
 
     records = [record for record in caplog.records if function_name in record.getMessage()]
     _assert_group_id_absent(records)
+    failing_graphiti.get_client.assert_not_called()
 
 
 @pytest.mark.asyncio
