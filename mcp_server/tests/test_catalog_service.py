@@ -47,7 +47,8 @@ from services.catalog_service import CatalogService  # noqa: E402
 FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 GROUP = 'oracle-catalog-tool-test'
 BATCH = 'batch-entity-001'
-CATALOG_TOOL_NAMES = {
+# Request-bound catalog tools (SAFE-08 / CONT-07 typed request models).
+CATALOG_REQUEST_TOOL_NAMES = {
     'upsert_typed_entities',
     'upsert_typed_edges',
     'resolve_typed_entities',
@@ -55,6 +56,10 @@ CATALOG_TOOL_NAMES = {
     'upsert_provenance',
     'get_catalog_ingest_status',
     'upsert_catalog_batch',
+}
+# Full catalog tool surface after Phase 2 CAPA-01: + read-only get_catalog_capabilities.
+CATALOG_TOOL_NAMES = CATALOG_REQUEST_TOOL_NAMES | {
+    'get_catalog_capabilities',
 }
 LEGACY_TOOL_NAMES = {
     'add_memory',
@@ -4216,15 +4221,21 @@ async def test_mcp_tool_upsert_catalog_batch_registered():
 
 
 @pytest.mark.asyncio
-async def test_mcp_registers_exactly_seven_catalog_tools_and_preserves_legacy_tools():
+async def test_mcp_registers_exactly_eight_catalog_tools_and_preserves_legacy_tools():
+    """Phase 2 CAPA-01: eight catalog tools (seven request-bound + get_catalog_capabilities)."""
     server = _mcp_server()
     tools = await server.mcp.list_tools()
     names = {tool.name for tool in tools}
     registered_catalog = {name for name in names if name in CATALOG_TOOL_NAMES}
 
     assert registered_catalog == CATALOG_TOOL_NAMES
+    assert 'get_catalog_capabilities' in registered_catalog
+    assert len(CATALOG_TOOL_NAMES) == 8
+    assert len(CATALOG_REQUEST_TOOL_NAMES) == 7
     assert LEGACY_TOOL_NAMES.issubset(names)
-    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 21
+    assert len(LEGACY_TOOL_NAMES) == 14
+    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 22
+    assert names == (CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES)
 
     schemas = {tool.name: tool.inputSchema for tool in tools if tool.name in CATALOG_TOOL_NAMES}
     assert schemas.keys() == CATALOG_TOOL_NAMES
@@ -4395,14 +4406,17 @@ def _assert_no_backend_side_effects(spies, body_entered: list):
 
 @pytest.mark.asyncio
 async def test_catalog_tools_bind_typed_pydantic_request_models():
-    """Production CONT-07: all seven tools bind typed Pydantic request models."""
+    """Production CONT-07: all seven request-bound tools bind typed Pydantic request models."""
     import typing
 
     server = _mcp_server()
     tools = await server.mcp.list_tools()
     by_name = {t.name: t for t in tools}
     models = _catalog_request_models()
-    assert set(models) == CATALOG_TOOL_NAMES
+    assert set(models) == CATALOG_REQUEST_TOOL_NAMES
+    # Read-only capabilities has no request body (CAPA-01); exclude from request-model contract.
+    assert 'get_catalog_capabilities' not in models
+    assert 'get_catalog_capabilities' in by_name
 
     for name, expected_model in models.items():
         assert name in by_name, f'missing registered tool {name}'
