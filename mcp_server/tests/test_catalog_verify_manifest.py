@@ -218,6 +218,11 @@ def _wire_store(
         calls.append(f'match_evidence:{group_id}:{len(uuids)}')
         return list(evidence_rows or [])
 
+    async def match_evidence_batch(executor, *, group_id, batch_id, tx=None):
+        calls.append(f'match_evidence_batch:{group_id}:{batch_id}')
+        # Observation scope for extras: same fixture rows by default.
+        return list(evidence_rows or [])
+
     async def match_prov(executor, *, group_id, target_uuids, tx=None):
         calls.append(f'match_prov:{group_id}:{len(target_uuids)}')
         return []
@@ -232,6 +237,7 @@ def _wire_store(
     service._store.match_entities_for_verify = match_entities  # type: ignore[method-assign]
     service._store.match_edges_for_verify = match_edges  # type: ignore[method-assign]
     service._store.match_evidence_links_exact = match_evidence  # type: ignore[method-assign]
+    service._store.match_evidence_links_for_batch = match_evidence_batch  # type: ignore[method-assign]
     service._store.match_provenance_presence = match_prov  # type: ignore[method-assign]
     for name in (
         'ensure_evidence_manifest_schema',
@@ -565,7 +571,8 @@ async def test_batch_and_keys_both_apply():
             }
         ],
     )
-    # Extra request key not in manifest → diagnosed as missing (not live).
+    # Explicit request key not in manifest and not live → separate key diagnostic.
+    # Membership missing remains manifest-only (CR-02).
     req = _verify_request(
         entities=[VerifyEntityRef(entity_type='Table', graph_key=extra_key)],
         edges=[],
@@ -574,7 +581,11 @@ async def test_batch_and_keys_both_apply():
     assert resp.error_code is None
     # Batch expected still from manifest (2 entities)
     assert resp.entities.expected == 2
-    assert extra_key in resp.entities.missing
+    assert extra_key not in resp.entities.missing
+    assert any(
+        a.get('kind') == 'explicit_key_missing' and a.get('graph_key') == extra_key
+        for a in resp.anomalies
+    )
     assert resp.manifest_sha256 is not None
 
 
@@ -898,3 +909,158 @@ async def test_concurrent_verify_stable():
     assert r1.entities.missing == r2.entities.missing
     assert r1.manifest_sha256 == r2.manifest_sha256
     client.embedder.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_explicit_key_missing_not_in_membership():
+    """CR-02: manifest {A,B} + requested C + live A,B => membership missing excludes C."""
+    root, chunks, _ = _build_committed_fixture()
+    service = _service()
+    client = _neo4j_client()
+    _wire_store(
+        service,
+        root=root,
+        chunks=chunks,
+        entity_rows=[
+            _entity_row(ENTITY_A, content_sha='a' * 64),
+            _entity_row(ENTITY_B, content_sha='b' * 64),
+        ],
+        edge_rows=[_edge_row(EDGE_A, content_sha='d' * 64)],
+        evidence_rows=[
+            {
+                'uuid': EVID_UUID,
+                'group_id': GROUP,
+                'link_key': EVID_KEY,
+                'content_sha256': '1' * 64,
+            }
+        ],
+    )
+    req = _verify_request(
+        entities=[VerifyEntityRef(entity_type='Table', graph_key=ENTITY_C)],
+        edges=[],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert resp.error_code is None
+    assert ENTITY_C not in resp.entities.missing
+    assert ENTITY_C not in resp.missing
+    assert any(
+        a.get('kind') == 'explicit_key_missing' and a.get('graph_key') == ENTITY_C
+        for a in resp.anomalies
+    )
+
+
+@pytest.mark.asyncio
+async def test_evidence_extras_from_batch_observation():
+    """WR-01: extras come from batch-scoped observation, not expected-only scan."""
+    root, chunks, _ = _build_committed_fixture()
+    service = _service()
+    client = _neo4j_client()
+    expected_rows = [
+        {
+            'uuid': EVID_UUID,
+            'group_id': GROUP,
+            'link_key': EVID_KEY,
+            'content_sha256': '1' * 64,
+        }
+    ]
+    extra_uuid = 'evidence-extra-uuid'
+    batch_rows = expected_rows + [
+        {
+            'uuid': extra_uuid,
+            'group_id': GROUP,
+            'link_key': 'EXTRA::link',
+            'content_sha256': '2' * 64,
+            'batch_id': BATCH,
+        }
+    ]
+    _wire_store(
+        service,
+        root=root,
+        chunks=chunks,
+        entity_rows=[
+            _entity_row(ENTITY_A, content_sha='a' * 64),
+            _entity_row(ENTITY_B, content_sha='b' * 64),
+        ],
+        edge_rows=[_edge_row(EDGE_A, content_sha='d' * 64)],
+        evidence_rows=expected_rows,
+    )
+
+    async def match_batch(executor, *, group_id, batch_id, tx=None):
+        assert group_id == GROUP
+        assert batch_id == BATCH
+        return list(batch_rows)
+
+    service._store.match_evidence_links_for_batch = match_batch  # type: ignore[method-assign]
+    resp = await service.verify_catalog_batch(client=client, request=_verify_request())
+    assert resp.error_code is None
+    assert extra_uuid in resp.evidence.extras
+    assert any(
+        a.get('kind') == 'extra_evidence' and a.get('uuid') == extra_uuid for a in resp.anomalies
+    )
+
+
+@pytest.mark.asyncio
+async def test_manifest_uuid_mismatch_fails_closed():
+    """WR-03: manifest UUID disagreement fails closed; server UUIDv5 is authority."""
+    membership = _membership(
+        entities=[
+            {
+                'uuid': '00000000-0000-4000-8000-000000000099',
+                'entity_type': 'Table',
+                'graph_key': ENTITY_A,
+                'content_sha256': 'a' * 64,
+                'projected_status': 'created',
+            }
+        ],
+        edges=[],
+        evidence_links=[],
+    )
+    root, chunks, _ = _build_committed_fixture(membership)
+    service = _service()
+    client = _neo4j_client()
+    _wire_store(service, root=root, chunks=chunks, entity_rows=[], edge_rows=[], evidence_rows=[])
+    resp = await service.verify_catalog_batch(client=client, request=_verify_request())
+    assert resp.error_code == CatalogErrorCode.manifest_mismatch
+    assert 'manifest_uuid_mismatch' in (resp.error_message or '')
+
+    membership_e = _membership(
+        entities=[],
+        edges=[
+            {
+                'uuid': '00000000-0000-4000-8000-000000000088',
+                'edge_type': 'ForeignKeyTo',
+                'edge_key': EDGE_A,
+                'content_sha256': 'd' * 64,
+                'projected_status': 'created',
+            }
+        ],
+        evidence_links=[],
+    )
+    root, chunks, _ = _build_committed_fixture(membership_e)
+    _wire_store(service, root=root, chunks=chunks, entity_rows=[], edge_rows=[], evidence_rows=[])
+    resp = await service.verify_catalog_batch(client=client, request=_verify_request())
+    assert resp.error_code == CatalogErrorCode.manifest_mismatch
+    assert 'manifest_uuid_mismatch' in (resp.error_message or '')
+
+
+@pytest.mark.asyncio
+async def test_noncommitted_status_fails_closed():
+    """WR-04: non-committed batch status fails closed without manifest/live reads."""
+    service = _service()
+    client = _neo4j_client()
+    for status in ('failed', 'writing', 'planned', 'validating', 'embedding'):
+        calls = _wire_store(
+            service,
+            status=_status_row(status=status),
+            root={'should': 'not-load'},
+            chunks=[{'should': 'not-load'}],
+            entity_rows=[_entity_row(ENTITY_A)],
+            edge_rows=[],
+            evidence_rows=[],
+        )
+        resp = await service.verify_catalog_batch(client=client, request=_verify_request())
+        assert resp.found is False
+        assert resp.error_code == CatalogErrorCode.validation_error
+        assert 'not committed' in (resp.error_message or '')
+        assert not any(c.startswith('read_root:') for c in calls)
+        assert not any(c.startswith('match_entities:') for c in calls)

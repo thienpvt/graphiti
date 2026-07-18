@@ -215,9 +215,7 @@ async def test_manifest_page_stable_order():
     _wire_store(service, root=root, chunks=chunks)
     client = _neo4j_client()
 
-    req = GetCatalogBatchManifestRequest(
-        group_id=GROUP, batch_id=BATCH, offset=0, limit=10
-    )
+    req = GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=0, limit=10)
     r1 = await service.get_catalog_batch_manifest(client=client, request=req)
     r2 = await service.get_catalog_batch_manifest(client=client, request=req)
 
@@ -244,9 +242,7 @@ async def test_empty_categories_legal():
     _wire_store(service, root=root, chunks=chunks)
     resp = await service.get_catalog_batch_manifest(
         client=_neo4j_client(),
-        request=GetCatalogBatchManifestRequest(
-            group_id=GROUP, batch_id=BATCH, offset=0, limit=10
-        ),
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=0, limit=10),
     )
     assert resp.found is True
     assert resp.error_code is None
@@ -297,21 +293,15 @@ async def test_adjacency_equal_keys_distinct():
 
     p0 = await service.get_catalog_batch_manifest(
         client=client,
-        request=GetCatalogBatchManifestRequest(
-            group_id=GROUP, batch_id=BATCH, offset=0, limit=1
-        ),
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=0, limit=1),
     )
     p1 = await service.get_catalog_batch_manifest(
         client=client,
-        request=GetCatalogBatchManifestRequest(
-            group_id=GROUP, batch_id=BATCH, offset=1, limit=1
-        ),
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=1, limit=1),
     )
     p2 = await service.get_catalog_batch_manifest(
         client=client,
-        request=GetCatalogBatchManifestRequest(
-            group_id=GROUP, batch_id=BATCH, offset=2, limit=1
-        ),
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=2, limit=1),
     )
     assert p0.entity_count == 3
     assert len(p0.entities) == 1 and len(p1.entities) == 1 and len(p2.entities) == 1
@@ -353,9 +343,7 @@ async def test_missing_incomplete_hash_mismatch_fail_closed():
     _wire_store(service, root=None, chunks=[])
     missing = await service.get_catalog_batch_manifest(
         client=client,
-        request=GetCatalogBatchManifestRequest(
-            group_id=GROUP, batch_id=BATCH, offset=0, limit=10
-        ),
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=0, limit=10),
     )
     assert missing.found is False
     assert missing.error_code == CatalogErrorCode.manifest_mismatch
@@ -368,9 +356,7 @@ async def test_missing_incomplete_hash_mismatch_fail_closed():
     _wire_store(service, root=root, chunks=[])
     incomplete = await service.get_catalog_batch_manifest(
         client=client,
-        request=GetCatalogBatchManifestRequest(
-            group_id=GROUP, batch_id=BATCH, offset=0, limit=10
-        ),
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=0, limit=10),
     )
     assert incomplete.error_code == CatalogErrorCode.manifest_mismatch
     assert incomplete.entities == []
@@ -380,9 +366,7 @@ async def test_missing_incomplete_hash_mismatch_fail_closed():
     _wire_store(service, root=root_bad, chunks=chunks_bad)
     mismatch = await service.get_catalog_batch_manifest(
         client=client,
-        request=GetCatalogBatchManifestRequest(
-            group_id=GROUP, batch_id=BATCH, offset=0, limit=10
-        ),
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=0, limit=10),
     )
     assert mismatch.error_code == CatalogErrorCode.manifest_mismatch
     assert mismatch.entities == []
@@ -402,9 +386,7 @@ async def test_compact_projection_no_embeddings_payload_source():
     _wire_store(service, root=root, chunks=chunks)
     resp = await service.get_catalog_batch_manifest(
         client=_neo4j_client(),
-        request=GetCatalogBatchManifestRequest(
-            group_id=GROUP, batch_id=BATCH, offset=0, limit=50
-        ),
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=0, limit=50),
     )
     assert resp.found is True
     dumped = resp.model_dump()
@@ -441,9 +423,7 @@ async def test_graph_key_complete():
     _wire_store(service, root=root, chunks=chunks)
     resp = await service.get_catalog_batch_manifest(
         client=_neo4j_client(),
-        request=GetCatalogBatchManifestRequest(
-            group_id=GROUP, batch_id=BATCH, offset=0, limit=50
-        ),
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=0, limit=50),
     )
     assert resp.found is True
     assert resp.entities
@@ -468,9 +448,7 @@ async def test_unchanged_shared_entities_remain_members():
     _wire_store(service, root=root, chunks=chunks)
     resp = await service.get_catalog_batch_manifest(
         client=_neo4j_client(),
-        request=GetCatalogBatchManifestRequest(
-            group_id=GROUP, batch_id=BATCH, offset=0, limit=50
-        ),
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=0, limit=50),
     )
     statuses = {e.graph_key: e.projected_status for e in resp.entities}
     for row in unchanged:
@@ -488,9 +466,7 @@ async def test_concurrent_same_params_identical_page():
     service = _service()
     _wire_store(service, root=root, chunks=chunks)
     client = _neo4j_client()
-    req = GetCatalogBatchManifestRequest(
-        group_id=GROUP, batch_id=BATCH, offset=0, limit=2
-    )
+    req = GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH, offset=0, limit=2)
 
     results = await asyncio.gather(
         service.get_catalog_batch_manifest(client=client, request=req),
@@ -515,3 +491,70 @@ def test_page_members_pure_helper():
         page_members(items, offset=0, limit=0)
     with pytest.raises(ValueError):
         page_members(items, offset=0, limit=HARD_MAX_PAGE_SIZE + 1, hard_max=HARD_MAX_PAGE_SIZE)
+
+
+@pytest.mark.asyncio
+async def test_counts_list_length_mismatch_fail_closed():
+    """WR-05: any of four category counts disagreeing list length => manifest_mismatch."""
+    service = _service()
+    client = _neo4j_client()
+    membership = _four_membership()
+    body = build_manifest_body_from_membership(
+        group_id=GROUP,
+        batch_id=BATCH,
+        request_sha256='r' * 64,
+        catalog_sha256='c' * 64,
+        membership=membership,
+        artifact_sha256='a' * 64,
+    )
+    body = dict(body)
+    counts = dict(body['counts'])
+    counts['entities'] = counts['entities'] + 1
+    body['counts'] = counts
+    raw = serialize_manifest_body(body)
+    digest = pure_manifest_sha256(raw)
+    payload_b64 = base64.b64encode(raw).decode('ascii')
+    chunk_sha = hashlib.sha256(raw).hexdigest()
+    root = {
+        'uuid': 'manifest-uuid-counts',
+        'group_id': GROUP,
+        'batch_id': BATCH,
+        'manifest_sha256': digest,
+        'request_sha256': 'r' * 64,
+        'catalog_sha256': 'c' * 64,
+        'artifact_sha256': 'a' * 64,
+        'identity_schema_version': 'catalog-v2',
+        'chunk_count': 1,
+        'payload_bytes': len(raw),
+    }
+    chunks = [
+        {
+            'uuid': 'chunk-0',
+            'group_id': GROUP,
+            'manifest_uuid': root['uuid'],
+            'chunk_index': 0,
+            'chunk_count': 1,
+            'byte_offset': 0,
+            'byte_length': len(raw),
+            'chunk_sha256': chunk_sha,
+            'payload_b64': payload_b64,
+        }
+    ]
+
+    async def read_root(executor, *, group_id, batch_id, tx=None):
+        return root
+
+    async def load_chunks(executor, *, manifest_uuid, group_id, tx=None):
+        return list(chunks)
+
+    service._store.read_manifest_root_for_recovery = read_root  # type: ignore[method-assign]
+    service._store.load_manifest_chunks_with_payload = load_chunks  # type: ignore[method-assign]
+    req = GetCatalogBatchManifestRequest(
+        group_id=GROUP,
+        batch_id=BATCH,
+        offset=0,
+        limit=10,
+    )
+    resp = await service.get_catalog_batch_manifest(client=client, request=req)
+    assert resp.error_code == CatalogErrorCode.manifest_mismatch
+    assert 'counts' in (resp.error_message or '')

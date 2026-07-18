@@ -327,3 +327,86 @@ async def test_no_repair():
     assert 'transaction' not in client.call_order
     client.embedder.create.assert_not_awaited()
     client.embedder.create_batch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edge_batch_limit_uses_max_edges():
+    """CR-01: resolve_typed_edges uses max_edges_per_batch, not entity max."""
+    client = _make_client()
+    # Entity max 500, edge max 2: 2 refs ok, 3 exceeds.
+    service = CatalogService(
+        catalog_config=CatalogConfig(
+            enabled=False,
+            reads_enabled=True,
+            uuid_namespace=str(FIXED_NS),
+            max_entities_per_batch=500,
+            max_edges_per_batch=2,
+        )
+    )
+    service._store.match_edges_for_resolve = AsyncMock(return_value=[])
+
+    ok_refs = [ResolveEdgeRef(edge_type='Contains', edge_key=f'{EDGE_KEY}::{i}') for i in range(2)]
+    ok = await service.resolve_typed_edges(client=client, request=_request(ok_refs))
+    assert all(r.error_code is None for r in ok.results)
+
+    over_refs = [
+        ResolveEdgeRef(edge_type='Contains', edge_key=f'{EDGE_KEY}::{i}') for i in range(3)
+    ]
+    over = await service.resolve_typed_edges(client=client, request=_request(over_refs))
+    assert all(r.error_code == CatalogErrorCode.batch_limit_exceeded for r in over.results)
+    assert all('max_edges_per_batch' in (r.error_message or '') for r in over.results)
+
+    # 501 edges allowed when max_edges=2000 (entity max must not clamp).
+    service_wide = CatalogService(
+        catalog_config=CatalogConfig(
+            enabled=False,
+            reads_enabled=True,
+            uuid_namespace=str(FIXED_NS),
+            max_entities_per_batch=500,
+            max_edges_per_batch=2000,
+        )
+    )
+    service_wide._store.match_edges_for_resolve = AsyncMock(return_value=[])
+    many = [
+        ResolveEdgeRef(edge_type='Contains', edge_key=f'{EDGE_KEY}::many::{i}') for i in range(501)
+    ]
+    many_resp = await service_wide.resolve_typed_edges(client=client, request=_request(many))
+    assert all(r.error_code is None for r in many_resp.results)
+
+
+@pytest.mark.asyncio
+async def test_edge_status_mirrors_primary_anomaly():
+    """WR-06: edge status is primary anomaly, not tautological found."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    twins = [
+        _row(
+            edge_uuid='wrong-1',
+            edge_type='ForeignKeyTo',
+            content_sha256=None,
+            has_fact_embedding=False,
+            source_uuid=None,
+            target_uuid='t1',
+            source_labels=['Entity', 'Table'],
+            target_labels=['Entity', 'Table'],
+            element_id='rel-a',
+        ),
+        _row(
+            edge_uuid='wrong-2',
+            edge_type='ForeignKeyTo',
+            content_sha256=None,
+            has_fact_embedding=False,
+            source_uuid='s1',
+            target_uuid=None,
+            source_labels=['Entity', 'Table'],
+            target_labels=['Entity', 'Table'],
+            element_id='rel-b',
+        ),
+    ]
+    service._store.match_edges_for_resolve = AsyncMock(return_value=twins)
+    resp = await service.resolve_typed_edges(client=client, request=_request())
+    r = resp.results[0]
+    assert r.status == 'duplicate_edge_key'
+    assert 'duplicate_edge_key' in r.anomalies
+    assert 'edge_type_mismatch' in r.anomalies
+    assert r.found is True

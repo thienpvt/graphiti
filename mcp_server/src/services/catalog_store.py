@@ -1156,6 +1156,42 @@ class CatalogNeo4jStore:
         }
         return await self._read_many(executor, cypher, params, tx=tx)
 
+    def build_match_evidence_links_for_batch_cypher(self) -> str:
+        """MATCH CatalogEvidenceLink by group_id + batch_id (EVID-13 extras).
+
+        batch_id scopes live observations only — never membership authority.
+        Fixed Cypher; parameterized group_id/batch_id.
+        """
+        return """
+            MATCH (n:CatalogEvidenceLink)
+            WHERE n.group_id = $group_id
+              AND n.batch_id = $batch_id
+            RETURN n.uuid AS uuid,
+                   n.group_id AS group_id,
+                   n.link_key AS link_key,
+                   n.content_sha256 AS content_sha256,
+                   n.batch_id AS batch_id,
+                   n.source_uuid AS source_uuid,
+                   n.target_kind AS target_kind,
+                   n.target_uuid AS target_uuid
+            ORDER BY n.uuid ASC
+            """
+
+    async def match_evidence_links_for_batch(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        batch_id: str,
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read-only evidence MATCH by group_id + batch_id; observation only."""
+        if not group_id or not batch_id:
+            return []
+        cypher = self.build_match_evidence_links_for_batch_cypher()
+        params = {'group_id': group_id, 'batch_id': str(batch_id)}
+        return await self._read_many(executor, cypher, params, tx=tx)
+
     # ------------------------------------------------------------------
     # Provenance: Episodic sources, MENTIONS, RELATES_TO.episodes append
     # ------------------------------------------------------------------
