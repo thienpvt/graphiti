@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-current_phase: 1
-current_phase_name: Strict Contracts and Catalog-v2 Identity
-status: phase1_complete
+current_phase: 2
+current_phase_name: Topology Authority, Evidence Contract, Hashes, and Capabilities
+status: executing
 stopped_at: Completed 01-12-PLAN.md
-last_updated: "2026-07-18T02:00:00.000Z"
+last_updated: "2026-07-18T02:41:57.766Z"
 last_activity: 2026-07-18
-last_activity_desc: Phase 1 final readiness after four independent audits; stop-after-phase-1
+last_activity_desc: Phase 2 execution started
 progress:
-  total_phases: 7
+  total_phases: 3
   completed_phases: 2
-  total_plans: 14
+  total_plans: 19
   completed_plans: 14
-  percent: 29
+  percent: 67
 ---
 
 # Project State
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 1 complete — stop-after-phase-1 session policy (no Phase 2 this session)
+**Current focus:** Phase 2 — Topology Authority, Evidence Contract, Hashes, and Capabilities
 
 ## Current Position
 
-Phase: 1 of 7 (Strict Contracts and Catalog-v2 Identity) — COMPLETE
-Plan: 12 of 12 complete; `ready_for_phase_2=true`
-Status: local_gate_pass=true; nyquist_compliant=true; four independent audits pass; WR-R01/WR-R02 accepted residuals
-Last activity: 2026-07-18 — Plan 01-12 final readiness; session stops after Phase 1
+Phase: 2 (Topology Authority, Evidence Contract, Hashes, and Capabilities) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 2
+Last activity: 2026-07-18 — Phase 2 execution started
 
 Progress: Phase 0+1 complete; remaining phases deferred by stop-after-phase-1
 

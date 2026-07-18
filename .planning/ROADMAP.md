@@ -114,17 +114,17 @@ Plans:
   4. `upsert_catalog_batch` results (including dry-run) return `identity_schema_version`, server `request_sha256`, `catalog_sha256`, and `batch_uuid` with zero dry-run writes
   5. `get_catalog_capabilities` works after server init even when writes are disabled and returns versions, gates, non-reversible namespace fingerprint, registries, endpoint map, limits, and feature flags without secrets
 
-**Plans**: 5 plans
+**Plans**: 3/5 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Wave 1: Server-owned EDGE_ENDPOINT_MAP + model/service preflight + exhaustive TEST-02 matrix
-- [ ] 02-02-PLAN.md — Wave 1: CatalogEvidenceLink contract + pure identity + catalog-v2 Cartesian rejection (no service edits)
+- [x] 02-01-PLAN.md — Wave 1: Server-owned EDGE_ENDPOINT_MAP + model/service preflight + exhaustive TEST-02 matrix
+- [x] 02-02-PLAN.md — Wave 1: CatalogEvidenceLink contract + pure identity + catalog-v2 Cartesian rejection (no service edits)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-03-PLAN.md — Wave 2 (after 01+02): Required catalog_sha256 + versioned request hash recipe + evidence_links service counters + dry-run hash echo
+- [x] 02-03-PLAN.md — Wave 2 (after 01+02): Required catalog_sha256 + versioned request hash recipe + evidence_links service counters + dry-run hash echo
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
