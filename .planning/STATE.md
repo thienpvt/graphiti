@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 2
 current_phase_name: Topology Authority, Evidence Contract, Hashes, and Capabilities
-status: executing
-stopped_at: Completed 01-12-PLAN.md
-last_updated: "2026-07-18T02:41:57.766Z"
+status: phase_complete
+stopped_at: Completed 02-05-PLAN.md
+last_updated: "2026-07-18T04:30:00.000Z"
 last_activity: 2026-07-18
-last_activity_desc: Phase 2 execution started
+last_activity_desc: Phase 2 gate complete; ready_for_phase_3a=true
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 19
-  completed_plans: 14
-  percent: 67
+  completed_plans: 19
+  percent: 100
 ---
 
 # Project State
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 
 ## Current Position
 
-Phase: 2 (Topology Authority, Evidence Contract, Hashes, and Capabilities) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 2
-Last activity: 2026-07-18 — Phase 2 execution started
+Phase: 2 (Topology Authority, Evidence Contract, Hashes, and Capabilities) — COMPLETE (local gate)
+Plan: 5 of 5
+Status: Phase 2 local gate green; ready_for_phase_3a=true
+Last activity: 2026-07-18 — Completed 02-05 gate runner + 68/68 resolution
 
-Progress: Phase 0+1 complete; remaining phases deferred by stop-after-phase-1
+Progress: Phase 0+1+2 complete at local gate; Phase 3A unblocked for planning/execution
 
 ## Performance Metrics
 
@@ -72,10 +72,13 @@ Recent decisions affecting current work:
 - [Phase 1]: WR-R01/WR-R02 accepted residuals (edge lock parity; status default polish) — not hard blockers
 - [Phase 1]: Plan 01-12 final readiness after goal PASSED, security SECURED, Nyquist COMPLIANT, code CLEAR_WITH_RESIDUALS
 - [Session]: stop-after-phase-1 — do not discuss/plan/execute Phase 2 this session
+- [Phase 2]: Plan 02-05 tracked stdlib gate runner is sole local_gate_pass / ready_for_phase_3a authority
+- [Phase 2]: raw 02-EDGE-PROBE.json byte-stable; resolution is separate 68/68 map
+- [Phase 2]: ready_for_phase_3a true only with local_gate_pass + safety (no canary, no oracle-catalog-v2, no prepare write path)
 
 ### Pending Todos
 
-Session stop after Phase 1. Later (separate session): Phase 2+ under milestone policy; local Ollama E2E before cleanup; milestone audit/completion; explicit cleanup confirmation.
+Phase 2 local gate complete. Next: Phase 3A prepare/control-plane under separate plans; local Ollama E2E before cleanup; milestone audit/completion; explicit cleanup confirmation.
 
 ### Blockers/Concerns
 
@@ -108,6 +111,6 @@ Session stop after Phase 1. Later (separate session): Phase 2+ under milestone p
 ## Session Continuity
 
 Last session: 2026-07-18
-Stopped at: Completed 01-12-PLAN.md (Phase 1 final readiness)
+Stopped at: Completed 02-05-PLAN.md (Phase 2 local gate; ready_for_phase_3a=true)
 Resume file: None
-Next: Later session — Phase 2 only under new authorization; this session ends after Phase 1
+Next: Phase 3A prepare/control-plane planning under separate authorization
