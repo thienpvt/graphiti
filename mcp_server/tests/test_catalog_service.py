@@ -1133,6 +1133,19 @@ async def test_verify_expected_plus_extra_label_is_wrong_type():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
+    _stub_batch_manifest_for_verify(
+        service,
+        entities=[
+            {
+                'uuid': catalog_entity_uuid(FIXED_NS, GROUP, 'Table', key),
+                'entity_type': 'Table',
+                'graph_key': key,
+                'content_sha256': 'a' * 64,
+                'projected_status': 'created',
+            }
+        ],
+        edges=[],
+    )
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
             {
@@ -1254,6 +1267,102 @@ def _verify_request(**kwargs):
     return VerifyCatalogBatchRequest.model_validate(data)
 
 
+def _stub_batch_manifest_for_verify(
+    service: CatalogService,
+    *,
+    entities: list[dict[str, Any]] | None = None,
+    edges: list[dict[str, Any]] | None = None,
+    evidence_links: list[dict[str, Any]] | None = None,
+) -> None:
+    """Stub status + durable manifest so batch_id verify uses request-shaped membership.
+
+    Existing unit tests that pass request keys under batch_id need a committed
+    status row and a valid manifest body; otherwise verify fail-closes on
+    missing status/manifest (04-04 VERI-01/05).
+    """
+    import base64
+    import hashlib
+
+    from services.catalog_manifest import (
+        build_manifest_body_from_membership,
+        serialize_manifest_body,
+    )
+    from services.catalog_manifest import (
+        manifest_sha256 as pure_manifest_sha256,
+    )
+
+    if entities is None:
+        entities = [
+            {
+                'uuid': catalog_entity_uuid(
+                    FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'
+                ),
+                'entity_type': 'Table',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'content_sha256': 'a' * 64,
+                'projected_status': 'created',
+            }
+        ]
+    if edges is None:
+        edges = [
+            {
+                'uuid': catalog_edge_uuid(
+                    FIXED_NS, GROUP, 'Contains', 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+                ),
+                'edge_type': 'Contains',
+                'edge_key': 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES',
+                'content_sha256': 'd' * 64,
+                'projected_status': 'created',
+            }
+        ]
+    if evidence_links is None:
+        evidence_links = []
+    body = build_manifest_body_from_membership(
+        group_id=GROUP,
+        batch_id=BATCH,
+        request_sha256='r' * 64,
+        catalog_sha256='c' * 64,
+        membership={
+            'entities': entities,
+            'edges': edges,
+            'sources': [],
+            'evidence_links': evidence_links,
+        },
+    )
+    raw = serialize_manifest_body(body)
+    digest = pure_manifest_sha256(raw)
+    root = {
+        'uuid': 'manifest-uuid-stub',
+        'group_id': GROUP,
+        'batch_id': BATCH,
+        'manifest_sha256': digest,
+        'chunk_count': 1,
+        'payload_bytes': len(raw),
+    }
+    chunks = [
+        {
+            'uuid': 'chunk-0',
+            'chunk_index': 0,
+            'chunk_count': 1,
+            'byte_offset': 0,
+            'byte_length': len(raw),
+            'chunk_sha256': hashlib.sha256(raw).hexdigest(),
+            'payload_b64': base64.b64encode(raw).decode('ascii'),
+        }
+    ]
+    service._store.get_batch_status = AsyncMock(
+        return_value={
+            'uuid': 'batch-uuid-stub',
+            'group_id': GROUP,
+            'batch_id': BATCH,
+            'status': 'committed',
+        }
+    )
+    service._store.read_manifest_root_for_recovery = AsyncMock(return_value=root)
+    service._store.load_manifest_chunks_with_payload = AsyncMock(return_value=chunks)
+    service._store.match_evidence_links_exact = AsyncMock(return_value=[])
+
+
 @pytest.mark.asyncio
 async def test_verify_feature_disabled_no_write_no_embed():
     # GATE-03: reads gated by reads_enabled (not write enabled).
@@ -1287,6 +1396,7 @@ async def test_verify_non_neo4j_backend_unavailable():
 async def test_verify_batch_scoped_match_uses_group_and_batch_id():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _stub_batch_manifest_for_verify(service)
     ent_call: dict = {}
     edge_call: dict = {}
 
@@ -1320,6 +1430,7 @@ async def test_verify_entity_counts_and_anomaly_lists():
     ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    # Keys-only: request keys remain expected authority (VERI-06).
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
             {
@@ -1346,6 +1457,7 @@ async def test_verify_entity_counts_and_anomaly_lists():
     )
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
     req = _verify_request(
+        batch_id=None,
         entities=[
             VerifyEntityRef(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'),
             VerifyEntityRef(entity_type='View', graph_key='VIEW::FE::ORCL.HR.V1'),
@@ -1375,6 +1487,7 @@ async def test_verify_graph_key_echo_exact_full_system_scoped_key_iden08():
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
     req = _verify_request(
+        batch_id=None,
         entities=[
             VerifyEntityRef(entity_type='Table', graph_key=full_key),
             VerifyEntityRef(entity_type='View', graph_key=missing_key),
@@ -1493,6 +1606,7 @@ async def test_verify_edge_counts_and_anomaly_lists():
         ]
     )
     req = _verify_request(
+        batch_id=None,
         entities=[],
         edges=[
             VerifyEdgeRef(edge_type='Contains', edge_key='CONTAINS::HR.SCHEMA->HR.EMPLOYEES'),
@@ -1669,6 +1783,7 @@ async def test_verify_edge_aggregates_anomalies_across_all_duplicate_rows_once()
 async def test_verify_provenance_read_failure_is_internal_error_not_missing():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _stub_batch_manifest_for_verify(service, entities=[], edges=[])
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
     service._store.match_provenance_presence = AsyncMock(side_effect=RuntimeError('db down'))
@@ -1686,6 +1801,7 @@ async def test_verify_require_provenance_report_only_no_write():
     ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    # Keys-only path: request keys are expected authority.
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
             {
@@ -1706,7 +1822,8 @@ async def test_verify_require_provenance_report_only_no_write():
     )
     service._store.upsert_entity_item = AsyncMock()
     resp = await service.verify_catalog_batch(
-        client=client, request=_verify_request(require_provenance=True, edges=[])
+        client=client,
+        request=_verify_request(batch_id=None, require_provenance=True, edges=[]),
     )
     assert resp.require_provenance is True
     assert ent_uuid in resp.missing_provenance
@@ -1720,6 +1837,7 @@ async def test_verify_require_provenance_report_only_no_write():
 async def test_verify_never_embeds_or_writes():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _stub_batch_manifest_for_verify(service)
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
     service._store.upsert_entity_item = AsyncMock()
@@ -2757,6 +2875,7 @@ async def test_verify_edge_uuid_mismatch_reported():
         ]
     )
     req = _verify_request(
+        batch_id=None,
         entities=[],
         edges=[VerifyEdgeRef(edge_type='Contains', edge_key=edge_key)],
     )
