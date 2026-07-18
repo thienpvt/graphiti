@@ -134,6 +134,7 @@ Each task was committed atomically:
 1. **Task 1 RED: Pure manifest contract tests** - `ca20a5c` (test)
 2. **Task 1 GREEN: Pure manifest body/hash/chunk + chunk UUID** - `0830860` (feat)
 3. **Task 2: Additive commit response fields** - `6be79b6` (feat)
+4. **Diagnostic fix: Wave 0 dynamic test imports** - `1061552` (fix)
 
 **Plan metadata:** (this SUMMARY commit)
 
@@ -174,14 +175,23 @@ _Note: TDD RED→GREEN for Task 1; Task 2 model extension with default-safe cons
 - **Verification:** `pyright --project mcp_server/pyproject.toml` 0 errors/warnings
 - **Committed in:** `0830860`
 
+**3. [Rule 3 - Blocking] Wave 0 dynamic imports for test product symbols**
+- **Found during:** Coordinator merge gate (IDE diagnostics on test static imports)
+- **Issue:** Static `from services.*` / `from models.*` in `test_catalog_manifest.py` fail when IDE uses workspace root without `mcp_server` `extraPaths=["src"]`
+- **Fix:** Module-level `importlib.import_module` + `getattr` loads (`reassemble_artifact_bytes`, `catalog_manifest_chunk_uuid`, `CommitPreparedCatalogBatchResponse`); zero static product imports; leave production `from models.catalog_common` convention unchanged
+- **Files modified:** `mcp_server/tests/test_catalog_manifest.py`
+- **Verification:** project + IDE-equivalent Pyright → 0 errors/warnings; 15/15 + prepare-models 65 pass
+- **Committed in:** `1061552`
+
 ---
 
-**Total deviations:** 2 auto-fixed (Rule 2 ×2)
+**Total deviations:** 3 auto-fixed (Rule 2 ×2, Rule 3 ×1)
 **Impact on plan:** Correctness/tooling only; contracts and bounds preserved. No scope creep.
 
 ## Issues Encountered
 
 - Ruff isort repeatedly split multi-name aliased imports; resolved by using public constant names without aliases and using HARD_CHUNK_BYTES in a real guard.
+- IDE diagnostics flagged static `from services.*` / `from models.*` imports in tests (workspace root misses `mcp_server/pyproject.toml` `extraPaths=["src"]`). Project Pyright was already clean; tests now load product symbols once at module level via importlib/getattr so IDE and project both stay zero-diag without churning production import conventions.
 
 ## User Setup Required
 
@@ -218,7 +228,28 @@ None - pure utilities + additive response fields only. No new network endpoints,
 - FOUND: commit `ca20a5c`
 - FOUND: commit `0830860`
 - FOUND: commit `6be79b6`
-- Verify: manifest suite 15 passed; prepare-models regression included (65 total); ruff/pyright clean on changed files
+- FOUND: commit `1061552`
+- Exact project Pyright (all changed files):
+  ```
+  uv run --project mcp_server pyright --project mcp_server/pyproject.toml \
+    mcp_server/src/services/catalog_manifest.py \
+    mcp_server/src/services/catalog_identity.py \
+    mcp_server/src/models/catalog_responses.py \
+    mcp_server/tests/test_catalog_manifest.py
+  ```
+  Result: `0 errors, 0 warnings, 0 informations` (exit 0)
+- IDE-equivalent (repo root, no project file on the same four paths):
+  ```
+  uv run --project mcp_server pyright \
+    mcp_server/tests/test_catalog_manifest.py \
+    mcp_server/src/models/catalog_responses.py \
+    mcp_server/src/services/catalog_manifest.py \
+    mcp_server/src/services/catalog_identity.py
+  ```
+  Result: `0 errors, 0 warnings, 0 informations` (exit 0)
+- Verify: manifest suite 15 passed; prepare-models regression 65 pass; ruff check+format clean
+- Test imports: zero static `from services.*` / `from models.*`; module-level importlib/getattr only
+- Production `catalog_responses.py` `from models.catalog_common` left unchanged (repo convention; project Pyright clean)
 - Later-wave RED preserved (28 failed intentional)
 - No STATE.md / ROADMAP.md modifications (orchestrator-owned)
 
