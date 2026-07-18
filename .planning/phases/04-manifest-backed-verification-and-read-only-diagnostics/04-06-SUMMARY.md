@@ -230,7 +230,13 @@ _Note: TDD tasks may have multiple commits (test → feat → refactor)_
 | historical_audit.commit | a67789a |
 | historical_oracle_catalog_v2_queried | true (permanent) |
 | api_coverage_detector | false |
-| proof_head / evaluated_head | 472a5a2e584ee53f1565587bc9183a4f049d3f93 |
+| proof_head / evaluated_head | 92cee52932f1d37154b08911dbc6c2cb81cbe493 |
+
+### Post deep-review rebind
+
+- Product fix commit `92cee52` (`fix(04): deep-review CR/WR fail-closed diagnostics`) changed product/test inputs; gate ledger regenerated.
+- Re-proof: focused_pytest **380 passed**; `ready_for_phase_5=true`; canary false; current v2 false; historical `a67789a` preserved.
+- Disposition of CR-01/CR-02/WR-01..WR-06: all fixed; see `04-REVIEW.md`.
 
 ## Edge Probe Discharge (04-06)
 
@@ -254,14 +260,15 @@ None beyond plan threat_model mitigations (T-04-CAP/GATE/ISO/READ/INFO/AUTH/SC).
 
 ## Verification
 
-- Full Phase 4 focused suite: **372 passed**
-- Ruff: clean on plan files
-- Scoped Pyright: **0 errors** on graphiti_mcp_server, catalog_capabilities, catalog service/gates/capabilities tests, phase4 gate runner + unit tests
-- Gate runner `run`: ready_for_phase_5 true; canary false; current v2 false; a67789a preserved; focused_pytest pass
+- Full Phase 4 focused suite: **380 passed** (post deep-review fix `92cee52`; was 372 at Wave-6)
+- Ruff: clean on plan files and deep-review scope
+- Scoped Pyright: **0 errors** on graphiti_mcp_server, catalog_capabilities, catalog service/store, gates/capabilities tests, phase4 gate runner + unit tests
+- Gate runner `run` rebound to proof_head `92cee52`: ready_for_phase_5 true; canary false; current v2 false; a67789a preserved; focused_pytest pass
 
 ## Self-Check: PASSED
 
 - FOUND: `mcp_server/src/graphiti_mcp_server.py` three wrappers + CATALOG_TOOL_NAMES size 14 + require_initialized_client
 - FOUND: `mcp_server/src/services/catalog_capabilities.py` manifest_verification True
 - FOUND: `.planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-GATE-RESULTS.json`
-- FOUND commits: `6b7710f`, `f70a1cc`, `c0da9c4`, `ad67d2c`, `472a5a2`
+- FOUND: `.planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-REVIEW.md` (status clean)
+- FOUND commits: `6b7710f`, `f70a1cc`, `c0da9c4`, `ad67d2c`, `472a5a2`, `92cee52`

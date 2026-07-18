@@ -199,20 +199,20 @@
     }
   ],
   "clear_graph_called": false,
-  "content_digest": "64642ed84d3b52bd3da43b8a09f4ee0c26ca3c616e028622ef9110e8c21b7ae6",
+  "content_digest": "aa4ac75bc1242367ff3ff760e750797f94391c62066f45a177618d516d607cf1",
   "content_sha256_map": {
     ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-01-SUMMARY.md": "cb4a722984dbf1f425e709ab6bf0216b9d38ef344d12f6198c153b1cca86eb52",
     ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-02-SUMMARY.md": "c4ccae2a83aa78575a0364db70c15ba38fed930ceeef6e66c8e33f57eea10ade",
     ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-03-SUMMARY.md": "6a965cd95ef0822d16d89e63f8ad9ffc0fa8c1b09f2788b85bfa837ac0e4c7b4",
     ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-04-SUMMARY.md": "4e4b82a18c4ea3a40c07ba599e5524a86c419392c650ec740881f2014c231e1d",
     ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-05-SUMMARY.md": "a0eceb176349b32f3937492fe4471a9df194d54e427ffc0767236676cd2f099e",
-    ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-06-SUMMARY.md": "0ee384a9acbe3c616561581abd4f046d661331c400605a86a5d2dce946d3aaee",
+    ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-06-SUMMARY.md": "db5997996bc7b37aa84bfbddb5184004e119ec3af576ad0a5718b7734f7303bc",
     ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-CONTEXT.md": "38667c5aa7b08ec94f433964f52a143cb24518c89d821db6c0952ffd6b5e1fc8",
     ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-EDGE-PROBE-LEDGER.md": "a46eaeeedfd4206f3c2f59689b0507559303779c5a70b01a850c36fa7f8d6bb3",
     ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-VALIDATION.md": "1b7a066f750edde0e36804c1c062bbac9e0094c320195622ce5a101ddbce5657"
   },
   "current_oracle_catalog_v2_queried": false,
-  "evaluated_head": "472a5a2e584ee53f1565587bc9183a4f049d3f93",
+  "evaluated_head": "92cee52932f1d37154b08911dbc6c2cb81cbe493",
   "historical_audit": {
     "class": "test_policy",
     "commit": "a67789a",
@@ -220,7 +220,7 @@
     "note": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; local test-policy violation on local Neo4j with no corresponding production/second-schema data; permanent audit record; never query or mutate oracle-catalog-v2 again; Phase 4 preserves pointer only",
     "scope": "local_neo4j_no_corresponding_data"
   },
-  "ledger_sha256": "02ccd489ece1ab27c7f267c5cc030ed3df85fd4ba3f3e883346cfc4eae6011da",
+  "ledger_sha256": "2c34da14ea236c78869858f660100e28720d5fd4e18b7791b9d8d62815f9c2b2",
   "local_gate_pass": true,
   "manifest_verification": true,
   "notes": {
@@ -241,7 +241,7 @@
   "nyquist_compliant": true,
   "oracle_catalog_v2_queried": false,
   "phase_4_complete": true,
-  "proof_head": "472a5a2e584ee53f1565587bc9183a4f049d3f93",
+  "proof_head": "92cee52932f1d37154b08911dbc6c2cb81cbe493",
   "raw_edge_probe_count": 42,
   "ready_for_phase_5": true,
   "registration_pass": true,
@@ -276,7 +276,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a4d49b07102d2bb43\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 18 items\n\nmcp_server\\tests\\test_catalog_phase4_gate_runner.py ..................   [100%]\n\n============================= 18 passed in 0.36s ==============================\n"
+      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a90b71fa767f58c94\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 18 items\n\nmcp_server\\tests\\test_catalog_phase4_gate_runner.py ..................   [100%]\n\n============================= 18 passed in 0.38s ==============================\n"
     },
     {
       "argv": [
@@ -307,7 +307,7 @@
         "deselected": 0,
         "errors": 0,
         "failed": 0,
-        "passed": 372,
+        "passed": 380,
         "skipped": 0
       },
       "exit_code": 0,
@@ -317,7 +317,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a4d49b07102d2bb43\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 372 items\n\nmcp_server\\tests\\test_catalog_manifest.py ...............                [  4%]\nmcp_server\\tests\\test_catalog_manifest_read.py ..........                [  6%]\nmcp_server\\tests\\test_catalog_verify_manifest.py ................        [ 11%]\nmcp_server\\tests\\test_catalog_resolve_edges.py ........                  [ 13%]\nmcp_server\\tests\\test_catalog_evidence_read.py ..........                [ 15%]\nmcp_server\\tests\\test_catalog_gates.py ..........                        [ 18%]\nmcp_server\\tests\\test_catalog_service.py ............................... [ 26%]\n........................................................................ [ 46%]\n........................................................................ [ 65%]\n.................                                                        [ 70%]\nmcp_server\\tests\\test_catalog_capabilities.py .....................      [ 75%]\nmcp_server\\tests\\test_catalog_store_unit.py ............................ [ 83%]\n............................................                             [ 95%]\nmcp_server\\tests\\test_catalog_phase4_gate_runner.py ..................   [100%]\n\n============================= 372 passed in 3.32s =============================\n"
+      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a90b71fa767f58c94\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 380 items\n\nmcp_server\\tests\\test_catalog_manifest.py ...............                [  3%]\nmcp_server\\tests\\test_catalog_manifest_read.py ...........               [  6%]\nmcp_server\\tests\\test_catalog_verify_manifest.py ....................    [ 12%]\nmcp_server\\tests\\test_catalog_resolve_edges.py ..........                [ 14%]\nmcp_server\\tests\\test_catalog_evidence_read.py ...........               [ 17%]\nmcp_server\\tests\\test_catalog_gates.py ..........                        [ 20%]\nmcp_server\\tests\\test_catalog_service.py ............................... [ 28%]\n........................................................................ [ 47%]\n........................................................................ [ 66%]\n.................                                                        [ 70%]\nmcp_server\\tests\\test_catalog_capabilities.py .....................      [ 76%]\nmcp_server\\tests\\test_catalog_store_unit.py ............................ [ 83%]\n............................................                             [ 95%]\nmcp_server\\tests\\test_catalog_phase4_gate_runner.py ..................   [100%]\n\n============================= 380 passed in 3.36s =============================\n"
     },
     {
       "argv": [
