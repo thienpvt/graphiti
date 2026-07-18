@@ -158,6 +158,14 @@ status: complete
 - **Files modified:** `catalog_phase4_gate_runner.py`, `test_catalog_phase4_gate_runner.py`
 - **Commit:** `e9993a2`
 
+**2. [Rule 1 - Bug] Nested-quote markers / post-return diagnostics on gate runner**
+- **Found during:** Post-return Wave 1 blocker scan (`unterminated string` / missing `:` / missing return near ~650–670)
+- **Issue:** Nested `"'manifest_verification': True"` / `'"manifest_verification": True'` markers and nested import-if style risk false IDE/parser diagnostics; unused `json` import in unit module (Ruff F401); SIM102/SIM103 on runner
+- **Fix:** `_manifest_verification_true_marker` builds markers via `chr(39)/chr(34)` (no nested-quote soup); flatten neo4j-import ban if; `return bool(manifest_verification)`; drop unused `json`
+- **Files modified:** `catalog_phase4_gate_runner.py`, `test_catalog_phase4_gate_runner.py`
+- **Commit:** `de71c5d`
+- **Checks:** `py_compile` OK; ruff All checks passed; scoped pyright 0 errors; 15 gate unit tests passed; AST parse OK
+
 ## TDD Gate Compliance
 
 - RED gate: Task 1 commit `febca35` (`test(04-01): ...`) — five failing product suites
@@ -181,6 +189,12 @@ Intentional Wave 0 RED stubs (product GREEN later):
 
 # Task 2 gate unit
 15 passed in 0.20s
+
+# Post-return diagnostic recheck (de71c5d)
+uv run --project mcp_server python -m py_compile mcp_server/tests/catalog_phase4_gate_runner.py  # OK
+uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_phase4_gate_runner.py -q  # 15 passed
+uv run --project mcp_server ruff check mcp_server/tests/catalog_phase4_gate_runner.py mcp_server/tests/test_catalog_phase4_gate_runner.py  # All checks passed
+uv run --project mcp_server pyright mcp_server/tests/catalog_phase4_gate_runner.py mcp_server/tests/test_catalog_phase4_gate_runner.py  # 0 errors
 ```
 
 ## Next
@@ -200,3 +214,5 @@ Intentional Wave 0 RED stubs (product GREEN later):
 - FOUND: `mcp_server/tests/test_catalog_phase4_gate_runner.py`
 - FOUND: commit `febca35`
 - FOUND: commit `e9993a2`
+- FOUND: commit `de71c5d`
+- FOUND: commit `29f1322` (initial SUMMARY; this file re-committed after diagnostics)
