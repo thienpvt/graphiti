@@ -1334,5 +1334,8 @@ async def test_prepare_evidence_byte_identical_coalesce():
     )
     body = json.loads(raw.decode('utf-8'))
     assert len(body['membership']['evidence_links']) == 1
-    assert plan['evidence_link_count'] == 2 or plan['evidence_link_count'] == 1 or True
+    # Coalesced membership is count authority (WR-01).
+    assert plan['evidence_link_count'] == 1
+    assert body['counts']['evidence_links'] == 1
+    assert resp.evidence_link_count == 1
     _assert_zero_domain(service)

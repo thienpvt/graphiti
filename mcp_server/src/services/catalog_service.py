@@ -6030,6 +6030,8 @@ class CatalogService:
                     }
                 )
         membership_evidence.sort(key=lambda d: d['link_key'])
+        # Coalesced membership is count authority for plan/artifact/response/manifest.
+        coalesced_evidence_count = len(membership_evidence)
 
         plan_id = f'{request.batch_id}|{server_hash}'
         plan_uuid = catalog_prepared_plan_uuid(namespace, request.group_id, plan_id)
@@ -6055,9 +6057,7 @@ class CatalogService:
                 'entities': len(request.entities),
                 'edges': len(request.edges),
                 'sources': len(request.provenance.sources) if request.provenance else 0,
-                'evidence_links': (
-                    len(request.provenance.evidence_links) if request.provenance else 0
-                ),
+                'evidence_links': coalesced_evidence_count,
                 'created': projected_created,
                 'updated': projected_updated,
                 'unchanged': projected_unchanged,
@@ -6143,9 +6143,7 @@ class CatalogService:
             'entity_count': len(request.entities),
             'edge_count': len(request.edges),
             'source_count': len(request.provenance.sources) if request.provenance else 0,
-            'evidence_link_count': (
-                len(request.provenance.evidence_links) if request.provenance else 0
-            ),
+            'evidence_link_count': coalesced_evidence_count,
             'created_count': projected_created,
             'updated_count': projected_updated,
             'unchanged_count': projected_unchanged,
@@ -6259,9 +6257,7 @@ class CatalogService:
             entity_count=len(request.entities),
             edge_count=len(request.edges),
             source_count=len(request.provenance.sources) if request.provenance else 0,
-            evidence_link_count=(
-                len(request.provenance.evidence_links) if request.provenance else 0
-            ),
+            evidence_link_count=coalesced_evidence_count,
             projected_created=projected_created,
             projected_updated=projected_updated,
             projected_unchanged=projected_unchanged,
