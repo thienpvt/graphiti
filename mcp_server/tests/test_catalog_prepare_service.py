@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import sys
 import uuid
 from contextlib import asynccontextmanager
@@ -1199,8 +1201,10 @@ async def test_prepare_evidence_byte_identical_coalesce():
     plan = await_args.kwargs['plan']
     # membership frozen with single evidence row after coalesce
     chunks = await_args.kwargs['chunks']
-    import base64, json
-    raw = b''.join(base64.b64decode(c['payload_b64']) for c in sorted(chunks, key=lambda x: x['chunk_index']))
+    raw = b''.join(
+        base64.b64decode(c['payload_b64'])
+        for c in sorted(chunks, key=lambda x: x['chunk_index'])
+    )
     body = json.loads(raw.decode('utf-8'))
     assert len(body['membership']['evidence_links']) == 1
     assert plan['evidence_link_count'] == 2 or plan['evidence_link_count'] == 1 or True
