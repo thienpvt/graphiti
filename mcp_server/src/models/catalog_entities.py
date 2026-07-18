@@ -26,7 +26,7 @@ from models.catalog_common import (
     SystemKey,
     validate_nested_json,
 )
-from models.catalog_graph_key import _match_entity_graph_key, validate_entity_graph_key_at
+from models.catalog_graph_key import validate_entity_graph_key_at
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -116,7 +116,12 @@ class CatalogEntityItem(CatalogStrictModel):
     @model_validator(mode='after')
     def _graph_key_grammar(self) -> CatalogEntityItem:
         # Shell-less: fullmatch only; parent re-validates against shell system_key.
-        _match_entity_graph_key(self.entity_type, self.graph_key)
+        validate_entity_graph_key_at(
+            entity_type=self.entity_type,
+            graph_key=self.graph_key,
+            title=type(self).__name__,
+            loc=('graph_key',),
+        )
         return self
 
 
@@ -135,7 +140,12 @@ class ResolveEntityRef(CatalogStrictModel):
 
     @model_validator(mode='after')
     def _graph_key_grammar(self) -> ResolveEntityRef:
-        _match_entity_graph_key(self.entity_type, self.graph_key)
+        validate_entity_graph_key_at(
+            entity_type=self.entity_type,
+            graph_key=self.graph_key,
+            title=type(self).__name__,
+            loc=('graph_key',),
+        )
         return self
 
 
@@ -219,7 +229,12 @@ class VerifyEntityRef(CatalogStrictModel):
 
     @model_validator(mode='after')
     def _graph_key_grammar(self) -> VerifyEntityRef:
-        _match_entity_graph_key(self.entity_type, self.graph_key)
+        validate_entity_graph_key_at(
+            entity_type=self.entity_type,
+            graph_key=self.graph_key,
+            title=type(self).__name__,
+            loc=('graph_key',),
+        )
         return self
 
 

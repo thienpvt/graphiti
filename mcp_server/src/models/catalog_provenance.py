@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 from models.catalog_common import (
     CATALOG_EDGE_TYPES,
@@ -21,7 +23,7 @@ from models.catalog_common import (
     SystemKey,
     validate_nested_json,
 )
-from models.catalog_graph_key import _match_entity_graph_key, validate_entity_graph_key_at
+from models.catalog_graph_key import validate_entity_graph_key_at
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -42,11 +44,32 @@ class CatalogSourceItem(CatalogStrictModel):
     metadata: dict[str, Any] | None = None
     content_sha256: str | None = None
 
-    @field_validator('source_key', 'reference_time')
+    @field_validator('source_key')
     @classmethod
-    def _non_empty(cls, v: str, info) -> str:
+    def _non_empty_source_key(cls, v: str) -> str:
         if not isinstance(v, str) or not v.strip():
-            raise ValueError(f'{info.field_name} must be a non-empty string')
+            raise ValueError('source_key must be a non-empty string')
+        return v
+
+    @field_validator('reference_time')
+    @classmethod
+    def _validate_reference_time(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise PydanticCustomError(
+                'value_error',
+                'reference_time must be a non-empty ISO-8601 timestamp',
+            )
+        # Temporary normalize for parse only; return original bytes unchanged.
+        normalized = v.strip()
+        if normalized.endswith('Z') or normalized.endswith('z'):
+            normalized = normalized[:-1] + '+00:00'
+        try:
+            datetime.fromisoformat(normalized)
+        except ValueError:
+            raise PydanticCustomError(
+                'value_error',
+                'reference_time must be a valid ISO-8601 timestamp',
+            ) from None
         return v
 
     @field_validator('content_sha256')
@@ -87,7 +110,12 @@ class CatalogProvenanceEntityTarget(CatalogStrictModel):
 
     @model_validator(mode='after')
     def _graph_key_grammar(self) -> CatalogProvenanceEntityTarget:
-        _match_entity_graph_key(self.entity_type, self.graph_key)
+        validate_entity_graph_key_at(
+            entity_type=self.entity_type,
+            graph_key=self.graph_key,
+            title=type(self).__name__,
+            loc=('graph_key',),
+        )
         return self
 
 

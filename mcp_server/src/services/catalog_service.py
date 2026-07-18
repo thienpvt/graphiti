@@ -2871,7 +2871,6 @@ class CatalogService:
                 payload = self.source_canonical_payload(item)
                 digest = canonical_sha256(payload)
                 assert_optional_client_hash(item.content_sha256, digest)
-                valid_at = self._parse_source_valid_at(item.reference_time)
             except ValueError as exc:
                 msg = str(exc)
                 code = (
@@ -2885,6 +2884,18 @@ class CatalogService:
                     graph_key=item.source_key,
                     error_code=code,
                     error_message=msg,
+                )
+                continue
+            try:
+                valid_at = self._parse_source_valid_at(item.reference_time)
+            except ValueError:
+                # Defense-in-depth: model boundary should already reject malformed times.
+                early_errors[idx] = CatalogItemResult(
+                    index=idx,
+                    status='error',
+                    graph_key=item.source_key,
+                    error_code=CatalogErrorCode.validation_error,
+                    error_message='reference_time must be a valid ISO-8601 timestamp',
                 )
                 continue
 
@@ -4091,7 +4102,6 @@ class CatalogService:
                 try:
                     digest = canonical_sha256(self.source_canonical_payload(source))
                     assert_optional_client_hash(source.content_sha256, digest)
-                    valid_at = self._parse_source_valid_at(source.reference_time)
                 except ValueError as exc:
                     code = (
                         CatalogErrorCode.content_hash_mismatch
@@ -4105,6 +4115,21 @@ class CatalogService:
                             graph_key=source.source_key,
                             error_code=code,
                             error_message=str(exc),
+                            details={'kind': 'provenance'},
+                        )
+                    )
+                    continue
+                try:
+                    valid_at = self._parse_source_valid_at(source.reference_time)
+                except ValueError:
+                    # Defense-in-depth: model boundary should already reject malformed times.
+                    errors.append(
+                        CatalogItemResult(
+                            index=result_index,
+                            status='error',
+                            graph_key=source.source_key,
+                            error_code=CatalogErrorCode.validation_error,
+                            error_message='reference_time must be a valid ISO-8601 timestamp',
                             details={'kind': 'provenance'},
                         )
                     )

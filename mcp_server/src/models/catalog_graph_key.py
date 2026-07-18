@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
-from pydantic_core import PydanticCustomError
+from pydantic import ValidationError
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from models.catalog_common import (
     ENTITY_TYPE_PREFIXES,
@@ -77,24 +79,49 @@ def _match_entity_graph_key(entity_type: str, graph_key: str) -> re.Match[str]:
     return match
 
 
-def validate_entity_graph_key(*, entity_type: str, graph_key: str, system_key: str) -> None:
-    """Fullmatch registry; require PREFIX::{system_key}::...; no v1 rewrite."""
+def validate_entity_graph_key(
+    *,
+    entity_type: str,
+    graph_key: str,
+    system_key: str | None = None,
+) -> None:
+    """Fullmatch registry; optionally require PREFIX::{system_key}::...; no v1 rewrite."""
+    match = _match_entity_graph_key(entity_type, graph_key)
+    if system_key is None:
+        return
     if system_key not in SYSTEM_KEYS:
         raise PydanticCustomError('invalid_system_key', 'Invalid system key')
-    match = _match_entity_graph_key(entity_type, graph_key)
     key_system = match.group('system')
     if key_system != system_key:
         raise PydanticCustomError('invalid_system_key', 'Invalid system key')
+
+
+def _graph_key_grammar_validation_error(
+    *,
+    title: str,
+    loc: tuple[str | int, ...],
+    input_value: Any,
+) -> ValidationError:
+    line_error: InitErrorDetails = {
+        'type': PydanticCustomError(
+            'value_error',
+            'graph_key grammar mismatch: key does not fullmatch registry',
+        ),
+        'loc': loc,
+        'input': input_value,
+    }
+    return ValidationError.from_exception_data(title, [line_error])
 
 
 def validate_entity_graph_key_at(
     *,
     entity_type: str,
     graph_key: str,
-    system_key: str,
     title: str,
     loc: tuple[str | int, ...],
+    system_key: str | None = None,
 ) -> None:
+    """Validate grammar (and optional shell system) at an exact request field location."""
     try:
         validate_entity_graph_key(
             entity_type=entity_type,
@@ -108,4 +135,10 @@ def validate_entity_graph_key_at(
             title=title,
             loc=loc,
             input_value=graph_key,
-        ) from exc
+        ) from None
+    except ValueError:
+        raise _graph_key_grammar_validation_error(
+            title=title,
+            loc=loc,
+            input_value=graph_key,
+        ) from None
