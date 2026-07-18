@@ -103,10 +103,10 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **PLAN-10**: `commit_prepared_catalog_batch` accepts only `plan_token` and optional `expected_request_sha256`; it cannot accept group, batch, entities, edges, sources, evidence links, or replacement payload content.
 - [x] **PLAN-11**: Commit loads and revalidates the immutable prepared payload server-side and rejects missing, expired, changed, discarded, consumed, or conflicting plans with the specific prepared-plan error code.
 - [x] **PLAN-12**: Commit uses only embeddings frozen in the stored prepared artifact and makes no external embedding, LLM, queue, or network call before or during the domain write transaction.
-- [ ] **PLAN-13**: A successful commit writes all domain data, exact evidence, durable manifest, terminal batch status, and terminal prepared-plan state in one Neo4j transaction where supported.
-- [ ] **PLAN-14**: A commit failure rolls back the complete success transaction; an optional separate post-rollback status transaction may record only bounded failure metadata and never imply domain success; a process restart from `COMMITTING` follows a deterministic documented recovery rule.
-- [ ] **PLAN-15**: Identical replay after successful commit returns the committed logical result with unchanged outcomes rather than duplicating data or failing ambiguously.
-- [ ] **PLAN-16**: Concurrent commits using the same token yield one logical committed batch and one stable replay/conflict outcome without duplicate domain, evidence, manifest, or status records.
+- [x] **PLAN-13**: A successful commit writes all domain data, exact evidence, durable manifest, terminal batch status, and terminal prepared-plan state in one Neo4j transaction where supported.
+- [x] **PLAN-14**: A commit failure rolls back the complete success transaction; an optional separate post-rollback status transaction may record only bounded failure metadata and never imply domain success; a process restart from `COMMITTING` follows a deterministic documented recovery rule.
+- [x] **PLAN-15**: Identical replay after successful commit returns the committed logical result with unchanged outcomes rather than duplicating data or failing ambiguously.
+- [x] **PLAN-16**: Concurrent commits using the same token yield one logical committed batch and one stable replay/conflict outcome without duplicate domain, evidence, manifest, or status records.
 - [x] **PLAN-17**: A token is cryptographically and persistently bound to one immutable group, batch, identity schema, request hash, and payload; it cannot commit another scope.
 - [x] **PLAN-18**: Expired, discarded, or consumed plans cannot be revived or repurposed.
 - [x] **PLAN-19**: `discard_prepared_catalog_batch` accepts a valid token, idempotently terminates only an unconsumed plan, and never deletes domain graph data, evidence, manifests, or committed batch status.
@@ -120,24 +120,24 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **EVID-04**: Locator, excerpt, extractor, rule, confidence, hash, and nested fields have explicit length, depth, node-count, format, and finite-number bounds.
 - [x] **EVID-05**: Every evidence link receives a server-derived catalog-v2 deterministic UUID and canonical content hash.
 - [x] **EVID-06**: Every source-to-target relationship must be explicitly listed; no request path creates an implicit sources-by-targets Cartesian product.
-- [ ] **EVID-07**: Entity and edge evidence targets resolve exactly within `group_id` before writes; missing or mismatched targets fail atomically.
-- [ ] **EVID-08**: Duplicate byte-identical evidence links coalesce; reuse of one evidence identity with changed immutable source or target fields fails with `provenance_link_conflict`.
-- [ ] **EVID-09**: Existing Graphiti-compatible source Episodic, MENTIONS, and RELATES_TO `episodes` behavior remains available for search interoperability without fabricating links.
-- [ ] **EVID-10**: Detailed per-link evidence for both entity and relationship targets is retained in bounded non-Entity control-plane records.
-- [ ] **EVID-11**: Evidence/control records never carry Entity labels, enter entity indexes, or participate in community clustering.
+- [x] **EVID-07**: Entity and edge evidence targets resolve exactly within `group_id` before writes; missing or mismatched targets fail atomically.
+- [x] **EVID-08**: Duplicate byte-identical evidence links coalesce; reuse of one evidence identity with changed immutable source or target fields fails with `provenance_link_conflict`.
+- [x] **EVID-09**: Existing Graphiti-compatible source Episodic, MENTIONS, and RELATES_TO `episodes` behavior remains available for search interoperability without fabricating links.
+- [x] **EVID-10**: Detailed per-link evidence for both entity and relationship targets is retained in bounded non-Entity control-plane records.
+- [x] **EVID-11**: Evidence/control records never carry Entity labels, enter entity indexes, or participate in community clustering.
 - [ ] **EVID-12**: The read-only `get_catalog_evidence` tool returns compact group-isolated evidence for one entity or edge target with bounded pagination and optional excerpts.
 - [ ] **EVID-13**: `verify_catalog_batch` can require and compare exact evidence-link identities and counts, not only a boolean provenance-presence flag.
 - [x] **EVID-14**: Catalog-v2 rejects the legacy Cartesian provenance request shape; no automatic conversion of multi-source target arrays is performed.
 
 ### Durable Batch Manifest and Verification
 
-- [ ] **MANI-01**: Every committed batch records a durable exact manifest of requested entity, edge, provenance-source, and evidence-link UUIDs plus deterministic compact identities.
-- [ ] **MANI-02**: Manifest membership includes objects observed unchanged during the request, including shared entities; it does not depend on an object's current `batch_id` property.
-- [ ] **MANI-03**: Existing entity and edge `batch_id` properties remain only as compatibility or last-change metadata and are never the authoritative membership source.
-- [ ] **MANI-04**: Manifest data is stored in bounded, group-isolated, non-Entity control-plane records with deterministic catalog-v2 manifest identity and canonical consistency hash.
+- [x] **MANI-01**: Every committed batch records a durable exact manifest of requested entity, edge, provenance-source, and evidence-link UUIDs plus deterministic compact identities.
+- [x] **MANI-02**: Manifest membership includes objects observed unchanged during the request, including shared entities; it does not depend on an object's current `batch_id` property.
+- [x] **MANI-03**: Existing entity and edge `batch_id` properties remain only as compatibility or last-change metadata and are never the authoritative membership source.
+- [x] **MANI-04**: Manifest data is stored in bounded, group-isolated, non-Entity control-plane records with deterministic catalog-v2 manifest identity and canonical consistency hash.
 - [ ] **MANI-05**: `get_catalog_batch_manifest` returns group ID, batch ID, request hash, catalog hash, identity schema version, exact counts, and paginated compact item identities.
-- [ ] **MANI-06**: Manifest creation and terminal status/plan updates are part of the same atomic success transaction as domain and evidence writes.
-- [ ] **MANI-07**: Identical replay does not duplicate, reorder, or silently rewrite manifest entries.
+- [x] **MANI-06**: Manifest creation and terminal status/plan updates are part of the same atomic success transaction as domain and evidence writes.
+- [x] **MANI-07**: Identical replay does not duplicate, reorder, or silently rewrite manifest entries.
 - [ ] **VERI-01**: Batch-only `verify_catalog_batch` loads the committed manifest as its expected membership authority.
 - [ ] **VERI-02**: Batch-only expected counts come from committed manifest/status metadata, never from the number of physical rows returned by a live query.
 - [ ] **VERI-03**: Verification reports missing manifest members and extra physical duplicates instead of normalizing them away.
@@ -164,8 +164,8 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **TEST-03**: Identity tests prove FE/BO separation, overload separation, graph-key grammar, unsupported-version rejection, and UUID/hash changes when identity schema version changes.
 - [x] **TEST-04**: Hash tests prove `catalog_sha256` changes `request_sha256`, every included domain field is covered, excluded transport fields are stable, and dry-run returns authoritative hashes with zero writes.
 - [x] **TEST-05**: Prepare tests prove no domain/status mutation, immutable persisted payloads, token-only commit, restart safety, TTL/size/cardinality limits, and missing/expired/discarded/consumed/conflicting behavior.
-- [ ] **TEST-06**: Concurrency tests prove one logical result for identical concurrent commit, token scope cannot change, expired plans cannot revive, and no duplicate manifest/evidence/domain records appear.
-- [ ] **TEST-07**: Evidence tests prove multiple sources link only to explicitly declared targets, no Cartesian provenance occurs, exact link verification works, and conflicting immutable link targets fail closed.
+- [x] **TEST-06**: Concurrency tests prove one logical result for identical concurrent commit, token scope cannot change, expired plans cannot revive, and no duplicate manifest/evidence/domain records appear.
+- [x] **TEST-07**: Evidence tests prove multiple sources link only to explicitly declared targets, no Cartesian provenance occurs, exact link verification works, and conflicting immutable link targets fail closed.
 - [ ] **TEST-08**: Manifest and resolver tests prove unchanged shared entities remain members, missing manifest items/count drift are detected, missing manifests fail, and edge twins/endpoint mismatches are reported.
 - [ ] **TEST-09**: Gate and registration tests prove read tools work while writes are disabled, all 14 legacy tools remain registered, all expected catalog-v2 tools are registered, and `get_status` remains compatible.
 - [ ] **TEST-10**: Security tests prove no LLM, queue, prohibited Graphiti tool, implicit community, client Cypher identifier, payload, source text, credential, authorization header, raw token, or unsafe exception appears in deterministic execution or logs.
@@ -290,10 +290,10 @@ Deferred until the deterministic substrate is implemented and verified.
 | PLAN-10 | Phase 3A | Complete |
 | PLAN-11 | Phase 3A | Complete |
 | PLAN-12 | Phase 3A | Complete |
-| PLAN-13 | Phase 3B | Pending |
-| PLAN-14 | Phase 3B | Pending |
-| PLAN-15 | Phase 3B | Pending |
-| PLAN-16 | Phase 3B | Pending |
+| PLAN-13 | Phase 3B | Complete |
+| PLAN-14 | Phase 3B | Complete |
+| PLAN-15 | Phase 3B | Complete |
+| PLAN-16 | Phase 3B | Complete |
 | PLAN-17 | Phase 3A | Complete |
 | PLAN-18 | Phase 3A | Complete |
 | PLAN-19 | Phase 3A | Complete |
@@ -304,21 +304,21 @@ Deferred until the deterministic substrate is implemented and verified.
 | EVID-04 | Phase 2 | Complete |
 | EVID-05 | Phase 2 | Complete |
 | EVID-06 | Phase 2 | Complete |
-| EVID-07 | Phase 3B | Pending |
-| EVID-08 | Phase 3B | Pending |
-| EVID-09 | Phase 3B | Pending |
-| EVID-10 | Phase 3B | Pending |
-| EVID-11 | Phase 3B | Pending |
+| EVID-07 | Phase 3B | Complete |
+| EVID-08 | Phase 3B | Complete |
+| EVID-09 | Phase 3B | Complete |
+| EVID-10 | Phase 3B | Complete |
+| EVID-11 | Phase 3B | Complete |
 | EVID-12 | Phase 4 | Pending |
 | EVID-13 | Phase 4 | Pending |
 | EVID-14 | Phase 2 | Complete |
-| MANI-01 | Phase 3B | Pending |
-| MANI-02 | Phase 3B | Pending |
-| MANI-03 | Phase 3B | Pending |
-| MANI-04 | Phase 3B | Pending |
+| MANI-01 | Phase 3B | Complete |
+| MANI-02 | Phase 3B | Complete |
+| MANI-03 | Phase 3B | Complete |
+| MANI-04 | Phase 3B | Complete |
 | MANI-05 | Phase 4 | Pending |
-| MANI-06 | Phase 3B | Pending |
-| MANI-07 | Phase 3B | Pending |
+| MANI-06 | Phase 3B | Complete |
+| MANI-07 | Phase 3B | Complete |
 | VERI-01 | Phase 4 | Pending |
 | VERI-02 | Phase 4 | Pending |
 | VERI-03 | Phase 4 | Pending |
@@ -339,8 +339,8 @@ Deferred until the deterministic substrate is implemented and verified.
 | TEST-03 | Phase 1 | Complete |
 | TEST-04 | Phase 2 | Complete |
 | TEST-05 | Phase 3A | Complete |
-| TEST-06 | Phase 3B | Pending |
-| TEST-07 | Phase 3B | Pending |
+| TEST-06 | Phase 3B | Complete |
+| TEST-07 | Phase 3B | Complete |
 | TEST-08 | Phase 4 | Pending |
 | TEST-09 | Phase 4 | Pending |
 | TEST-10 | Phase 5 | Pending |

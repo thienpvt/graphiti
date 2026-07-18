@@ -30,7 +30,7 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 - [ ] **Phase 1: Strict Contracts and Catalog-v2 Identity** - Recursive forbid contracts, FE/BO/COMMON grammar, fail-closed identity
 - [x] **Phase 2: Topology Authority, Evidence Contract, Hashes, Capabilities** - Endpoint map, exact evidence schema, authoritative hashes, capabilities; local gate ready_for_phase_3a=true
 - [x] **Phase 3A: Immutable Prepare/Commit Control Plane** - Prepare/discard/token, immutable payload, zero domain write on prepare; local gate ready_for_phase_3b=true
-- [ ] **Phase 3B: Atomic Catalog, Exact Evidence, Durable Manifest Writes** - Domain+evidence+manifest co-commit, rollback, search interop
+- [x] **Phase 3B: Atomic Catalog, Exact Evidence, Durable Manifest Writes** - Domain+evidence+manifest co-commit, rollback, search interop
 - [ ] **Phase 4: Manifest-Backed Verification and Read-Only Diagnostics** - Manifest reads, verify, edge resolve, split gates
 - [ ] **Phase 5: Verification, Security, Compatibility, and Migration Docs** - Exhaustive tests, isolation, docs, final report without canary
 - Phase 6 canary: separate approval only — not in this milestone requirement set
@@ -175,7 +175,7 @@ Plans:
   4. Manifest membership is exact for created, updated, and unchanged objects and is never inferred from `entity.batch_id` / `edge.batch_id`
   5. Search interoperability for catalog entities/edges remains; fault injection between persistence steps leaves neither a partial graph nor a partial manifest
 
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans executed
 
 Plans:
 **Wave 1**
@@ -200,11 +200,11 @@ Plans:
 
 **Wave 6** *(blocked on Wave 3–5)*
 
-- [ ] 03B-06-PLAN.md — Live Neo4j proof, 24/24 edge map, gate ledger, capabilities.manifests flip
+- [x] 03B-06-PLAN.md — Live Neo4j proof, 24/24 edge map, gate ledger, capabilities.manifests flip
 
 **Research:** complete (`03B-RESEARCH.md`) — single-tx ceilings, chunk policy, recovery algorithms
 **Stop condition:** If Neo4j cannot co-commit domain+evidence+manifest+terminal states in one transaction, stop and report — do not weaken the contract
-**Gate:** Commit atomicity, evidence persist, and concurrency tests must pass before Phase 4 manifest-backed verification
+**Gate:** Passed at product HEAD `1f9a7d7`: final live gate ready/complete true; current safety green; historical `a67789a` test-policy event retained; goal 5/5, requirements 17/17, Nyquist 17/17, security 16/16, deep review clean. Phase 4 unblocked.
 
 ### Phase 4: Manifest-Backed Verification and Read-Only Diagnostics
 
@@ -250,7 +250,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 1. Strict Contracts and Catalog-v2 Identity | 12/12 | Complete; ready_for_phase_2=true | 2026-07-18 |
 | Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 5/5 | Complete; ready_for_phase_3a=true | 2026-07-18 |
 | Phase 3A. Immutable Prepare/Commit Control Plane | 6/6 | Complete; ready_for_phase_3b=true | 2026-07-18 |
-| Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 0/TBD | Not started | - |
+| Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 0/TBD | Not started | - |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 0/TBD | Not started | - |
 

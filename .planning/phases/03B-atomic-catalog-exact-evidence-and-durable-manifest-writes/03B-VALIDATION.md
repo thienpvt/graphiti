@@ -1,8 +1,8 @@
 ---
 phase: 03B
 slug: atomic-catalog-exact-evidence-and-durable-manifest-writes
-status: draft
-nyquist_compliant: false
+status: validated
+nyquist_compliant: true
 wave_0_complete: true
 created: 2026-07-18
 ---
@@ -11,7 +11,7 @@ created: 2026-07-18
 
 > Per-phase validation contract for atomic co-commit, exact evidence, durable manifest, replay, recovery, and concurrency.
 
-**Plan execution status:** Plans 01–06 executed with green evidence (unit/store/service/live gate). **Nyquist audit pending** — keep `status: draft`, `nyquist_compliant: false`, Approval pending until dedicated Nyquist workflow. Do not treat this file as Nyquist-complete.
+**Plan execution status:** Plans 01–06 executed with green evidence (unit/store/service/live gate). **Nyquist audit complete** — behavioral requirement-to-test audit found no coverage gaps; `status: validated`, `nyquist_compliant: true`.
 
 ---
 
@@ -40,7 +40,7 @@ created: 2026-07-18
 
 ## Per-Task Verification Map
 
-Aligned to six executable plans (03B-01 … 03B-06). File-exists and Status reflect post-execution evidence (not Wave 0 RED scaffolding). Nyquist audit still pending.
+Aligned to six executed plans (03B-01 … 03B-06). Audit inspected behavioral assertions, not filenames or scaffold claims. All 17 Phase 3B requirements map to executable coverage.
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
@@ -91,8 +91,12 @@ None. All Phase 3B behavior must be automated. Live Neo4j is mandatory for `read
 - [x] Live tests use only `oracle-catalog-tool-test`.
 - [x] No canary, `oracle-catalog-v2`, `clear_graph`, deployment, deletion, or remote mutation.
 - [x] Full rollback leaves no partial domain/evidence/manifest/committed terminal state.
-- [ ] `nyquist_compliant: true` set only after post-execution audit.
+- [x] Post-execution Nyquist audit maps all 17 requirements to behavioral tests; no gaps found.
+- [x] Audit rerun: 129 non-live tests passed at HEAD `1f9a7d75551fe5d1c0260f831102d2a8c5b83e18`; no DB accessed.
+- [x] Existing live ledger retained: 10 passed / 1 deselected using only `oracle-catalog-tool-test`; not rerun during audit.
+- [x] Historical `a67789a` test-policy event preserved unchanged.
 
 **Plan execution:** complete (01–06 green evidence; final gate ready/complete true).
-**Nyquist audit:** pending — dedicated workflow required; do not flip `nyquist_compliant` here.
-**Approval:** pending
+**Nyquist audit:** compliant — 17/17 requirements behaviorally covered; 0 gaps; no new tests.
+**Audit evidence:** local non-live suite 129/129 green; final HEAD-bound live ledger 10/10 selected green; clean REVIEW.md.
+**Approval:** validated
