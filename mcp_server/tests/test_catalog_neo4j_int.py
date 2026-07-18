@@ -1919,3 +1919,23 @@ async def test_concurrent_conflicting_entity_names_only_winner_persists(catalog_
         assert stored['summary'] == loser.summary
     assert stored['created_at'] is not None
     assert stored['has_emb'] is True
+
+# ---------------------------------------------------------------------------
+# Phase 5 Wave 0 RED live gaps (TEST-11) — GREEN in 05-04
+# group_id must remain oracle-catalog-tool-test only (D-04).
+# ---------------------------------------------------------------------------
+
+
+async def test_phase5_control_labels_excluded_from_entity_search_when_empty(catalog_client):
+    """TEST-11 empty: control labels excluded from entity search when zero domain entities."""
+    import pytest
+
+    pytest.fail('05 not implemented: TEST-11 control labels excluded from entity search')
+
+
+async def test_phase5_zero_writes_outside_oracle_catalog_tool_test(catalog_client):
+    """TEST-11 encoding: zero writes outside oracle-catalog-tool-test; never oracle-catalog-v2."""
+    import pytest
+
+    assert GROUP == 'oracle-catalog-tool-test'
+    pytest.fail('05 not implemented: TEST-11 zero writes outside test group')

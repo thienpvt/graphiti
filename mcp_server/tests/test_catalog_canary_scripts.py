@@ -755,3 +755,73 @@ async def test_commit_success_and_idempotent_replay_use_exact_gates_and_no_prohi
         'failed': 0,
         'rolled_back': 0,
     }
+
+# ---------------------------------------------------------------------------
+# Phase 5 Wave 0 RED scaffolds (IDEN-13 / DOCS-06) — GREEN in 05-03
+# Historical ACCEPT_TAB golden is NOT hardened authority (D-11).
+# Never execute run_catalog_canary_batch.py live (D-10).
+# ---------------------------------------------------------------------------
+
+HARDENED_ARTIFACT_DIR = ROOT / 'catalog' / 'canary-v2-requests-hardened'
+PREFERRED_HARDENED_SEQUENCE = [
+    'prepare_catalog_batch',
+    'commit_prepared_catalog_batch',
+    'get_catalog_ingest_status',
+    'verify_catalog_batch',
+]
+
+
+def test_historical_inventory_and_digests_preserved():
+    """IDEN-13 / DOCS-06: full historical inventory/digests/attempt count preserved."""
+    pytest.fail('05 not implemented: historical_inventory / historical_bytes_unchanged')
+
+
+def test_historical_bytes_unchanged_and_attempt_count():
+    """IDEN-13: historical artifact bytes and exact checkpoint attempt count unchanged."""
+    pytest.fail('05 not implemented: historical_bytes_unchanged')
+
+
+def test_hardened_manifest_schema_strict():
+    """DOCS-06: strict versioned hardened fixture/manifest schema."""
+    pytest.fail('05 not implemented: hardened_manifest_schema')
+
+
+def test_offline_receipt_schema_strict():
+    """DOCS-06: strict offline receipt schema for prepare/commit sequence."""
+    pytest.fail('05 not implemented: offline_receipt_schema')
+
+
+def test_offline_checkpoint_schema_strict():
+    """DOCS-06: strict offline checkpoint schema; hardened attempt count zero."""
+    pytest.fail('05 not implemented: offline_checkpoint_schema')
+
+
+def test_sanitized_hardened_artifacts_no_production_content():
+    """DOCS-06: recursive leakage scan bans production source/secrets/tokens/payloads."""
+    pytest.fail('05 not implemented: sanitized_hardened / no_production_content')
+
+
+def test_prepare_catalog_batch_commit_prepared_sequence_preferred():
+    """DOCS-06 / D-09: preferred offline sequence is prepare + commit_prepared."""
+    assert 'prepare_catalog_batch' in PREFERRED_HARDENED_SEQUENCE
+    assert 'commit_prepared_catalog_batch' in PREFERRED_HARDENED_SEQUENCE
+    pytest.fail('05 not implemented: prepare_catalog_batch + commit_prepared sequence')
+
+
+def test_historical_accept_tab_golden_not_hardened_authority():
+    """IDEN-13 / D-11: historical ACCEPT_TAB golden SHA is not hardened authority."""
+    pytest.fail('05 not implemented: historical ACCEPT_TAB not hardened authority')
+
+
+def test_offline_canary_no_external_side_effect():
+    """DOCS-06: pure offline — no network/DB/MCP/LLM/queue/embed side effects."""
+    pytest.fail('05 not implemented: no_external_side_effect spies')
+
+
+def test_phase5_gate_never_shells_canary_runner():
+    """D-10: Phase 5 gate/static audit must not shell run_catalog_canary_batch.py."""
+    gate = ROOT / 'mcp_server' / 'tests' / 'catalog_phase5_gate_runner.py'
+    if not gate.is_file():
+        pytest.fail('05 not implemented: catalog_phase5_gate_runner missing for shell ban')
+    src = gate.read_text(encoding='utf-8')
+    assert 'canary_executed' in src

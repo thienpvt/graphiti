@@ -6366,3 +6366,28 @@ async def test_gap_cr01_combined_batch_rolls_back_and_returns_typed_conflict():
     stored = next(iter(store.entities.values()))
     assert stored['name_raw'] == winner.name_raw
     assert stored['summary'] == winner.summary
+
+# ---------------------------------------------------------------------------
+# Phase 5 Wave 0 RED scaffolds (SAFE-04/06) — GREEN in 05-02
+# ---------------------------------------------------------------------------
+
+
+def test_phase5_same_batch_endpoint_union_no_extra_creation():
+    """SAFE-04: same-batch endpoints resolve from request entity union only."""
+    import pytest
+
+    pytest.fail('05 not implemented: service endpoint_union')
+
+
+def test_phase5_missing_endpoint_structured_error_zero_writes():
+    """SAFE-04: missing persisted endpoints return missing_endpoint; zero writes."""
+    import pytest
+
+    pytest.fail('05 not implemented: service missing_endpoint zero writes')
+
+
+def test_phase5_fail_closed_conflict_no_silent_merge():
+    """SAFE-06: conflict paths return structured codes; zero silent repair/merge."""
+    import pytest
+
+    pytest.fail('05 not implemented: service fail_closed conflicts')

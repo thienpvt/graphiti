@@ -1666,3 +1666,35 @@ async def test_load_manifest_chunks_with_payload_requires_ids():
         )
     with pytest.raises(CatalogStoreError):
         await store.load_manifest_chunks_with_payload(object(), manifest_uuid='m1', group_id='')
+
+# ---------------------------------------------------------------------------
+# Phase 5 Wave 0 RED scaffolds (TEST-10 / SAFE-04) — GREEN in 05-02
+# ---------------------------------------------------------------------------
+
+
+def test_phase5_client_entity_type_rejected_before_cypher():
+    """TEST-10: client-controlled entity type fails before query execution."""
+    import pytest
+
+    pytest.fail('05 not implemented: store cypher_identifier entity type')
+
+
+def test_phase5_client_edge_type_rejected_before_cypher():
+    """TEST-10: client-controlled edge type fails before query execution."""
+    import pytest
+
+    pytest.fail('05 not implemented: store cypher_identifier edge type')
+
+
+def test_phase5_client_property_key_rejected_before_cypher():
+    """TEST-10: client-controlled property keys fail before query execution."""
+    import pytest
+
+    pytest.fail('05 not implemented: store property_allowlist')
+
+
+def test_phase5_missing_endpoint_lookup_match_only_no_create():
+    """SAFE-04: missing endpoint store lookup is MATCH-only; zero implicit create."""
+    import pytest
+
+    pytest.fail('05 not implemented: store missing_endpoint MATCH-only')

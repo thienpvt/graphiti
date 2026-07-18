@@ -651,3 +651,24 @@ async def test_digest_only_token_storage_on_plan_root(catalog_ctx):
         if isinstance(value, str):
             assert value != prepared.plan_token
             assert 'plan_token' not in key
+
+# ---------------------------------------------------------------------------
+# Phase 5 Wave 0 RED live gaps (TEST-11) — GREEN in 05-04
+# ---------------------------------------------------------------------------
+
+
+async def test_phase5_prepare_zero_writes_outside_test_group(catalog_ctx):
+    """TEST-11: prepare path never writes outside oracle-catalog-tool-test."""
+    import pytest
+
+    assert GROUP == 'oracle-catalog-tool-test'
+    pytest.fail('05 not implemented: TEST-11 prepare zero outside-group writes')
+
+
+async def test_phase5_prepare_never_targets_protected_group(catalog_ctx):
+    """TEST-11 encoding: prepare fixtures hard-code oracle-catalog-tool-test only."""
+    import pytest
+
+    assert GROUP == 'oracle-catalog-tool-test'
+    assert GROUP != FORBIDDEN_GROUP
+    pytest.fail('05 not implemented: TEST-11 prepare protected-group ban proof')

@@ -1,0 +1,140 @@
+{
+  "schema_version": "legacy-mcp-contract-baseline.v1",
+  "description": "Wave 0 scaffold: canonical pre-Phase-5 public-contract baseline for 14 legacy MCP tools (SAFE-09, D-07). GREEN fills exact metadata/defaults/schemas/response invariants in 05-04.",
+  "legacy_tool_count": 14,
+  "catalog_tool_count": 14,
+  "union_tool_count": 28,
+  "legacy_tools": {
+    "add_memory": {
+      "name": "add_memory",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "search_nodes": {
+      "name": "search_nodes",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "search_memory_facts": {
+      "name": "search_memory_facts",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "add_triplet": {
+      "name": "add_triplet",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "get_entity_edge": {
+      "name": "get_entity_edge",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "get_episodes": {
+      "name": "get_episodes",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "get_episode_entities": {
+      "name": "get_episode_entities",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "update_entity": {
+      "name": "update_entity",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "build_communities": {
+      "name": "build_communities",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "summarize_saga": {
+      "name": "summarize_saga",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "delete_episode": {
+      "name": "delete_episode",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "delete_entity_edge": {
+      "name": "delete_entity_edge",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "clear_graph": {
+      "name": "clear_graph",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    },
+    "get_status": {
+      "name": "get_status",
+      "parameters": [],
+      "required": [],
+      "defaults": {},
+      "input_schema": {},
+      "output_schema": {},
+      "response_invariants": []
+    }
+  },
+  "notes": {
+    "wave0": "Scaffold only — empty parameter/schema bodies are intentional RED placeholders for 05-04 GREEN.",
+    "d07": "Catalog tools asserted separately; never merged into legacy baseline.",
+    "secrets": "No credentials, tokens, or payload bodies in this fixture."
+  }
+}

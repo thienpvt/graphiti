@@ -1173,3 +1173,22 @@ async def test_live_unchanged_membership_in_manifest(catalog_ctx):
     assert 'batch_id' not in match
     # Root digest matches reassembly.
     assert manifest_sha256(raw) == root.get('manifest_sha256')
+
+# ---------------------------------------------------------------------------
+# Phase 5 Wave 0 RED live gaps (TEST-11) — GREEN in 05-04
+# ---------------------------------------------------------------------------
+
+
+async def test_phase5_commit_zero_writes_outside_test_group(catalog_ctx):
+    """TEST-11: commit path never writes outside oracle-catalog-tool-test."""
+    import pytest
+
+    assert GROUP == 'oracle-catalog-tool-test'
+    pytest.fail('05 not implemented: TEST-11 commit zero outside-group writes')
+
+
+async def test_phase5_commit_control_labels_not_in_entity_search(catalog_ctx):
+    """TEST-11 empty: control/plan labels excluded from entity search post-commit."""
+    import pytest
+
+    pytest.fail('05 not implemented: TEST-11 commit control labels vs entity search')
