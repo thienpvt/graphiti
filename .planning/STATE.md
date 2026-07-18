@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-current_phase: 3A
+current_phase: 03A
 current_phase_name: Immutable Prepare/Commit Control Plane
 status: executing
 stopped_at: Phase 3A context gathered
-last_updated: "2026-07-18T05:55:29.736Z"
+last_updated: "2026-07-18T05:56:15.159Z"
 last_activity: 2026-07-18
-last_activity_desc: Phase 2 complete, transitioned to Phase 3A
+last_activity_desc: Phase 03A execution started
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 19
+  total_plans: 25
   completed_plans: 19
   percent: 75
 ---
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 3A — Immutable Prepare/Commit Control Plane
+**Current focus:** Phase 03A — Immutable Prepare/Commit Control Plane
 
 ## Current Position
 
-Phase: 3A — Immutable Prepare/Commit Control Plane
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-07-18 — Phase 2 complete, transitioned to Phase 3A
+Phase: 03A (Immutable Prepare/Commit Control Plane) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 03A
+Last activity: 2026-07-18 — Phase 03A execution started
 
 Progress: Phase 0+1+2 complete at local gate; Phase 3A unblocked for planning/execution
 
