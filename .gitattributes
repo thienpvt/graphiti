@@ -1,1 +1,5 @@
 .planning/phases/**/*-PLAN.md text eol=lf
+
+# Hardened canary artifacts are digest-bound canonical JSON + single LF.
+# Windows core.autocrlf must not rewrite them to CRLF on checkout.
+catalog/canary-v2-requests-hardened/** text eol=lf
