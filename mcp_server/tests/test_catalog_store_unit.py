@@ -1667,34 +1667,172 @@ async def test_load_manifest_chunks_with_payload_requires_ids():
     with pytest.raises(CatalogStoreError):
         await store.load_manifest_chunks_with_payload(object(), manifest_uuid='m1', group_id='')
 
+
 # ---------------------------------------------------------------------------
-# Phase 5 Wave 0 RED scaffolds (TEST-10 / SAFE-04) — GREEN in 05-02
+# Phase 5 TEST-10 / SAFE-04 store boundary proofs (05-02 GREEN)
 # ---------------------------------------------------------------------------
 
 
 def test_phase5_client_entity_type_rejected_before_cypher():
     """TEST-10: client-controlled entity type fails before query execution."""
-    import pytest
+    store = CatalogNeo4jStore()
+    bad_types = (
+        'Table; DROP TABLE Entity //',
+        'Table` WHERE 1=1 //',
+        'NotAType',
+        'Entity} DETACH DELETE n //',
+    )
+    for bad in bad_types:
+        with pytest.raises(CatalogStoreError):
+            store.resolve_entity_label(bad)
+        with pytest.raises(CatalogStoreError):
+            store.build_entity_upsert_cypher(bad)
+        with pytest.raises(CatalogStoreError):
+            store.build_resolve_endpoint_typed_cypher(bad)
+        with pytest.raises(CatalogStoreError):
+            store.prepare_entity_params(entity_type=bad, **_base_params())
 
-    pytest.fail('05 not implemented: store cypher_identifier entity type')
+    # Allowlisted path: label originates only from ENTITY_TYPE_PREFIXES / _ENTITY_LABELS.
+    for entity_type in ENTITY_TYPE_PREFIXES:
+        label = store.resolve_entity_label(entity_type)
+        cypher = store.build_entity_upsert_cypher(entity_type)
+        assert label == entity_type
+        assert f':{label}' in cypher or f"'{label}'" in cypher
+        assert '$uuid' in cypher and '$group_id' in cypher
+        for bad in bad_types:
+            assert bad not in cypher
 
 
 def test_phase5_client_edge_type_rejected_before_cypher():
     """TEST-10: client-controlled edge type fails before query execution."""
-    import pytest
+    store = CatalogNeo4jStore()
+    bad_types = (
+        'ForeignKeyTo; DROP //',
+        'RELATES_TO` //',
+        'NotAnEdge',
+    )
+    for bad in bad_types:
+        with pytest.raises(CatalogStoreError):
+            store.resolve_edge_type(bad)
+        with pytest.raises(CatalogStoreError):
+            store.prepare_edge_params(
+                edge_type=bad,
+                uuid=UUID,
+                group_id=GROUP,
+                batch_id=BATCH,
+                edge_key='FK::A->B',
+                source_uuid='s',
+                target_uuid='t',
+                fact='f',
+                content_sha256=HASH,
+                created_at=FIXED_TS,
+                updated_at=FIXED_TS,
+                fact_embedding=[0.1],
+            )
 
-    pytest.fail('05 not implemented: store cypher_identifier edge type')
+    cypher = store.build_edge_upsert_cypher()
+    assert 'RELATES_TO' in cypher
+    assert '$name' in cypher or 'e.name' in cypher
+    for bad in bad_types:
+        assert bad not in cypher
 
 
 def test_phase5_client_property_key_rejected_before_cypher():
     """TEST-10: client-controlled property keys fail before query execution."""
-    import pytest
+    store = CatalogNeo4jStore()
+    malicious_keys = (
+        'uuid; DROP',
+        '`injected`',
+        "name' OR 1=1 //",
+        'content_sha256); MATCH (x) DETACH DELETE x //',
+        'labels`',
+    )
+    attrs = {k: 'v' for k in malicious_keys}
+    attrs['owner'] = 'HR'
+    params = store.prepare_entity_params(entity_type='Table', **_base_params(attributes=attrs))
+    # Fixed server-owned key set only.
+    expected_keys = {
+        'uuid',
+        'group_id',
+        'batch_id',
+        'name',
+        'graph_key',
+        'name_raw',
+        'name_canonical',
+        'database_qualified_name',
+        'summary',
+        'content_sha256',
+        'created_at',
+        'updated_at',
+        'name_embedding',
+        'attributes',
+        'source_refs',
+        'confidence',
+        'labels',
+        'create_token',
+    }
+    assert set(params.keys()) == expected_keys
+    assert isinstance(params['attributes'], str)
+    cypher = store.build_entity_upsert_cypher('Table')
+    assert '$attributes' in cypher
+    for key in malicious_keys:
+        assert key not in cypher
+        assert f'n.{key}' not in cypher
 
-    pytest.fail('05 not implemented: store property_allowlist')
+    edge_params = store.prepare_edge_params(
+        edge_type='ForeignKeyTo',
+        uuid=UUID,
+        group_id=GROUP,
+        batch_id=BATCH,
+        edge_key='FK::A->B',
+        source_uuid='s',
+        target_uuid='t',
+        fact='f',
+        content_sha256=HASH,
+        created_at=FIXED_TS,
+        updated_at=FIXED_TS,
+        fact_embedding=[0.1],
+        attributes=attrs,
+    )
+    edge_expected = {
+        'uuid',
+        'group_id',
+        'batch_id',
+        'name',
+        'edge_key',
+        'source_uuid',
+        'target_uuid',
+        'source_node_uuid',
+        'target_node_uuid',
+        'fact',
+        'evidence',
+        'content_sha256',
+        'created_at',
+        'updated_at',
+        'fact_embedding',
+        'attributes',
+        'confidence',
+        'episodes',
+        'create_token',
+    }
+    assert set(edge_params.keys()) == edge_expected
+    edge_cypher = store.build_edge_upsert_cypher()
+    for key in malicious_keys:
+        assert key not in edge_cypher
 
 
 def test_phase5_missing_endpoint_lookup_match_only_no_create():
     """SAFE-04: missing endpoint store lookup is MATCH-only; zero implicit create."""
-    import pytest
+    store = CatalogNeo4jStore()
+    cypher = store.build_resolve_endpoint_typed_cypher('Table')
+    upper = cypher.upper().replace('CREATED_AT', '')
+    assert 'MATCH' in upper
+    assert 'CREATE' not in upper
+    assert 'MERGE' not in upper
+    assert 'SET ' not in cypher
+    assert '$group_id' in cypher
+    assert '$name' in cypher or '$graph_key' in cypher
 
-    pytest.fail('05 not implemented: store missing_endpoint MATCH-only')
+    code, row = store.classify_endpoint_rows([], expected_type='Table')
+    assert code == 'missing_endpoint'
+    assert row is None
