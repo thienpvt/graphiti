@@ -3534,6 +3534,50 @@ async def test_batch_committed_same_hash_counts_evidence_links_as_unchanged():
 
 
 @pytest.mark.asyncio
+async def test_batch_in_tx_already_committed_counts_evidence_links_as_unchanged():
+    """In-transaction already_committed replay counts sources + evidence_links."""
+    employee = _entity()
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    events = _install_batch_write_mocks(service, client)
+    source = _source()
+    provenance = NestedProvenancePayload(
+        sources=[source],
+        evidence_links=[
+            _evidence_link(
+                source_key=source.source_key,
+                entity_target={
+                    'entity_type': employee.entity_type,
+                    'graph_key': employee.graph_key,
+                },
+            )
+        ],
+    )
+    request = _batch_request(entities=[employee], provenance=provenance)
+    expected_hash = CatalogService.batch_request_sha256(request)
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service._store.claim_batch_status = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 'claim',
+            'status': 'committed',
+            'request_sha256': expected_hash,
+        }
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.status == 'committed'
+    assert resp.error_code is None
+    assert resp.provenance_unchanged == 2
+    assert resp.entity_unchanged == 1
+    assert resp.edge_unchanged == 0
+    assert 'entity_write' not in events
+    cast(AsyncMock, service._store.upsert_batch_status).assert_not_awaited()
+
+
+
+@pytest.mark.asyncio
 async def test_batch_dry_run_rejects_bad_nested_source_hash_before_side_effects():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())

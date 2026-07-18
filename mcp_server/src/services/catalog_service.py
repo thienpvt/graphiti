@@ -3594,6 +3594,14 @@ class CatalogService:
             'catalog_sha256': request.catalog_sha256,
         }
 
+    @staticmethod
+    def _batch_provenance_item_count(request: UpsertCatalogBatchRequest) -> int:
+        """Authoritative provenance item count: sources + evidence_links (request domain)."""
+        provenance = request.provenance
+        if provenance is None:
+            return 0
+        return len(provenance.sources) + len(provenance.evidence_links)
+
     def _batch_gate_error(
         self,
         client: Any,
@@ -3759,11 +3767,7 @@ class CatalogService:
                     status='committed',
                     entity_unchanged=len(request.entities),
                     edge_unchanged=len(request.edges),
-                    provenance_unchanged=(
-                        (len(request.provenance.sources) + len(request.provenance.evidence_links))
-                        if request.provenance is not None
-                        else 0
-                    ),
+                    provenance_unchanged=self._batch_provenance_item_count(request),
                     **hash_echo,
                 )
             return CatalogBatchWriteResponse(
@@ -4836,7 +4840,7 @@ class CatalogService:
                     status='committed',
                     entity_unchanged=len(request.entities),
                     edge_unchanged=len(request.edges),
-                    provenance_unchanged=len(provenance_sources),
+                    provenance_unchanged=self._batch_provenance_item_count(request),
                     **hash_echo,
                 )
             return CatalogBatchWriteResponse(
