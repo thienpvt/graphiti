@@ -190,6 +190,7 @@ def _wire_prepare(service: CatalogService, *, create_side_effect=None) -> None:
 
 
 def _assert_zero_domain(service: CatalogService) -> None:
+    """Prepare-path assertion: no domain writes during prepare receipt construction."""
     cast(AsyncMock, service._store.upsert_entity_item).assert_not_awaited()
     cast(AsyncMock, service._store.upsert_edge_item).assert_not_awaited()
     cast(AsyncMock, service._store.upsert_source_episode).assert_not_awaited()
@@ -198,6 +199,16 @@ def _assert_zero_domain(service: CatalogService) -> None:
     cast(AsyncMock, service._store.upsert_batch_status).assert_not_awaited()
     cast(AsyncMock, service._store.claim_batch_status).assert_not_awaited()
     cast(AsyncMock, service._store.ensure_uuid_uniqueness_constraints).assert_not_awaited()
+
+
+def _assert_zero_external(client: Any, queue: Any | None = None) -> None:
+    client.embedder.create.assert_not_awaited()
+    if getattr(client, 'llm_client', None) is not None:
+        gen = getattr(client.llm_client, 'generate', None)
+        if gen is not None:
+            gen.assert_not_awaited()
+    if queue is not None:
+        queue.enqueue.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -487,6 +498,20 @@ def _frozen_artifact(
     edge_count: int = 0,
 ) -> tuple[bytes, str, list[dict[str, Any]], dict[str, Any]]:
     plan_id = f'{batch_id}|{request_sha256}'
+    entity_item = {
+        'entity_type': 'Table',
+        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+        'name_raw': 'EMPLOYEES',
+        'name_canonical': 'employees',
+        'database_qualified_name': 'ORCL.HR.EMPLOYEES',
+        'summary': 'Employee master table',
+        'attributes': {'owner': 'HR'},
+        'source_refs': [],
+        'confidence': 0.95,
+    }
+    entity_uuid = catalog_entity_uuid(
+        FIXED_NS, group_id, entity_item['entity_type'], entity_item['graph_key']
+    )
     body = {
         'artifact_serialization_version': PREPARED_ARTIFACT_SERIALIZATION_VERSION,
         'canonicalization_version': CANONICALIZATION_VERSION,
@@ -501,7 +526,7 @@ def _frozen_artifact(
         'membership': {
             'entities': [
                 {
-                    'uuid': 'ent-1',
+                    'uuid': entity_uuid,
                     'entity_type': 'Table',
                     'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                     'content_sha256': 'e' * 64,
@@ -515,7 +540,13 @@ def _frozen_artifact(
             'sources': [],
             'evidence_links': [],
         },
-        'request_canonical': {'batch_id': batch_id},
+        'request_canonical': {
+            'batch_id': batch_id,
+            'entities': [entity_item] if entity_count else [],
+            'edges': [],
+            'sources': [],
+            'evidence_links': [],
+        },
         'counts': {
             'entities': entity_count,
             'edges': edge_count,
@@ -612,17 +643,86 @@ def _wire_commit(
     service._store.cas_plan_state = AsyncMock(  # type: ignore[method-assign]
         side_effect=cas_side_effect or _default_cas
     )
-    # Domain / schema spies must stay zero on commit/discard.
-    service._store.upsert_entity_item = AsyncMock()  # type: ignore[method-assign]
-    service._store.upsert_edge_item = AsyncMock()  # type: ignore[method-assign]
-    service._store.upsert_source_episode = AsyncMock()  # type: ignore[method-assign]
+    # Schema/prepare spies. Success-path domain writes are stubbed for 03B-04 writer.
+    # prepare_*_params: dict-pass-through (no new CatalogNeo4jStore import — root IDE noise).
+    def _prep(**kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+    service._store.ensure_uuid_uniqueness_constraints = AsyncMock()  # type: ignore[method-assign]
+    service._store.ensure_evidence_manifest_schema = AsyncMock()  # type: ignore[method-assign]
+    service._store.ensure_plan_schema = AsyncMock()  # type: ignore[method-assign]
+    service._store.create_prepared_plan_with_chunks = AsyncMock()  # type: ignore[method-assign]
+    service._store.lock_prepared_plan_for_commit = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': (root or {}).get('uuid') or PLAN_UUID,
+            'group_id': (root or {}).get('group_id') or GROUP,
+            'state': PLAN_STATE_COMMITTING,
+            'locked': True,
+        }
+    )
+    service._store.terminal_commit_agrees = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    async def _claim(tx, *, params):
+        _ = tx
+        return {
+            'uuid': params.get('uuid'),
+            'group_id': params.get('group_id'),
+            'batch_id': params.get('batch_id'),
+            'status': 'writing',
+            'request_sha256': params.get('request_sha256'),
+        }
+
+    async def _upsert_status(tx, *, params):
+        _ = tx
+        return {
+            'uuid': params.get('uuid'),
+            'status': params.get('status') or 'committed',
+            'request_sha256': params.get('request_sha256'),
+        }
+
+    service._store.claim_batch_status = AsyncMock(side_effect=_claim)  # type: ignore[method-assign]
+    service._store.upsert_batch_status = AsyncMock(side_effect=_upsert_status)  # type: ignore[method-assign]
+    service._store.upsert_entity_item = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 'e1',
+            'status': 'created',
+            'content_sha256': 'e' * 64,
+            'error_code': None,
+        }
+    )
+    service._store.upsert_edge_item = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 'r1',
+            'status': 'created',
+            'content_sha256': 'e' * 64,
+            'error_code': None,
+        }
+    )
+    service._store.upsert_source_episode = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 's1',
+            'status': 'created',
+            'source_key': 'SRC',
+            'content_sha256': 'e' * 64,
+            'error_code': None,
+        }
+    )
     service._store.upsert_mentions_link = AsyncMock()  # type: ignore[method-assign]
     service._store.append_edge_episode = AsyncMock()  # type: ignore[method-assign]
-    service._store.upsert_batch_status = AsyncMock()  # type: ignore[method-assign]
-    service._store.claim_batch_status = AsyncMock()  # type: ignore[method-assign]
-    service._store.ensure_uuid_uniqueness_constraints = AsyncMock()  # type: ignore[method-assign]
-    service._store.create_prepared_plan_with_chunks = AsyncMock()  # type: ignore[method-assign]
-    service._store.ensure_plan_schema = AsyncMock()  # type: ignore[method-assign]
+    service._store.lock_provenance_targets = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    service._store.get_entity_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service._store.write_evidence_links = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    service._store.write_manifest_root_and_chunks = AsyncMock(  # type: ignore[method-assign]
+        return_value={'uuid': 'manifest-1', 'manifest_sha256': 'a' * 64, 'chunk_count': 1}
+    )
+    service._store.prepare_entity_params = _prep  # type: ignore[method-assign]
+    service._store.prepare_edge_params = _prep  # type: ignore[method-assign]
+    service._store.prepare_source_episode_params = _prep  # type: ignore[method-assign]
+    service._store.prepare_batch_status_params = _prep  # type: ignore[method-assign]
+    service._store.prepare_evidence_link_params = _prep  # type: ignore[method-assign]
+    service._store.prepare_manifest_root_params = _prep  # type: ignore[method-assign]
+    service._store.prepare_manifest_chunk_params = _prep  # type: ignore[method-assign]
 
 
 def _commit_client() -> SimpleNamespace:
@@ -654,12 +754,15 @@ async def test_commit_happy_path_prepared_to_committing_zero_domain_external():
         )
 
     assert resp.error_code is None
-    assert resp.state == PLAN_STATE_COMMITTING
+    # 03B-04: claim PREPARED→COMMITTING then success writer → COMMITTED
+    assert resp.state == PLAN_STATE_COMMITTED
     assert resp.plan_uuid == root['uuid']
     assert resp.request_sha256 == root['request_sha256']
     assert resp.catalog_sha256 == root['catalog_sha256']
     assert resp.artifact_sha256 == art_sha
     assert resp.entity_count == 1
+    assert resp.manifest_sha256
+    assert resp.batch_uuid
     dumped = resp.model_dump()
     assert 'membership' not in dumped
     assert 'embeddings' not in dumped
@@ -672,17 +775,29 @@ async def test_commit_happy_path_prepared_to_committing_zero_domain_external():
     assert called_digest == root['token_digest']
     cas = cast(AsyncMock, service._store.cas_plan_state)
     cas.assert_awaited()
-    await_args = cas.await_args
-    assert await_args is not None
-    cas_kwargs = await_args.kwargs
-    assert cas_kwargs['expected_from'] == PLAN_STATE_PREPARED
-    assert cas_kwargs['to_state'] == PLAN_STATE_COMMITTING
-    assert cas_kwargs['require_not_expired'] is True
+    # First CAS: PREPARED→COMMITTING claim; later CAS: COMMITTING→COMMITTED terminal.
+    claim_calls = [
+        c
+        for c in cas.await_args_list
+        if c.kwargs.get('to_state') == PLAN_STATE_COMMITTING
+        and c.kwargs.get('expected_from') == PLAN_STATE_PREPARED
+    ]
+    commit_calls = [
+        c
+        for c in cas.await_args_list
+        if c.kwargs.get('to_state') == PLAN_STATE_COMMITTED
+        and c.kwargs.get('expected_from') == PLAN_STATE_COMMITTING
+    ]
+    assert claim_calls, 'expected PREPARED→COMMITTING claim CAS'
+    assert commit_calls, 'expected COMMITTING→COMMITTED terminal CAS'
+    assert claim_calls[0].kwargs.get('require_not_expired') is True
     client.embedder.create.assert_not_awaited()
     client.llm_client.generate.assert_not_awaited()
     queue.enqueue.assert_not_awaited()
-    _assert_zero_domain(service)
     cast(AsyncMock, service._store.create_prepared_plan_with_chunks).assert_not_awaited()
+    # Domain writer is invoked after claim (not zero-domain).
+    cast(AsyncMock, service._store.claim_batch_status).assert_awaited()
+    cast(AsyncMock, service._store.write_manifest_root_and_chunks).assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -754,16 +869,25 @@ async def test_commit_reentry_committing_same_token():
     )
 
     assert resp.error_code is None
-    assert resp.state == PLAN_STATE_COMMITTING
+    assert resp.state == PLAN_STATE_COMMITTED
     assert resp.artifact_sha256 == art_sha
     cas = cast(AsyncMock, service._store.cas_plan_state)
     cas.assert_awaited()
-    await_args = cas.await_args
-    assert await_args is not None
-    assert await_args.kwargs['expected_from'] == PLAN_STATE_COMMITTING
-    assert await_args.kwargs['to_state'] == PLAN_STATE_COMMITTING
+    reentry_claims = [
+        c
+        for c in cas.await_args_list
+        if c.kwargs.get('expected_from') == PLAN_STATE_COMMITTING
+        and c.kwargs.get('to_state') == PLAN_STATE_COMMITTING
+    ]
+    terminal = [
+        c
+        for c in cas.await_args_list
+        if c.kwargs.get('expected_from') == PLAN_STATE_COMMITTING
+        and c.kwargs.get('to_state') == PLAN_STATE_COMMITTED
+    ]
+    assert reentry_claims, 'expected COMMITTING reentry claim'
+    assert terminal, 'expected COMMITTING→COMMITTED terminal'
     client.embedder.create.assert_not_awaited()
-    _assert_zero_domain(service)
 
 
 @pytest.mark.asyncio
@@ -793,7 +917,7 @@ async def test_commit_expected_request_sha256_omit_and_correct_identical():
     assert resp_omit.plan_uuid == resp_ok.plan_uuid
     assert resp_omit.request_sha256 == resp_ok.request_sha256
     assert resp_omit.artifact_sha256 == resp_ok.artifact_sha256
-    assert resp_omit.state == resp_ok.state == PLAN_STATE_COMMITTING
+    assert resp_omit.state == resp_ok.state == PLAN_STATE_COMMITTED
 
 
 @pytest.mark.asyncio
@@ -922,11 +1046,11 @@ async def test_commit_never_calls_external_clients():
     )
 
     assert resp.error_code is None
+    assert resp.state == PLAN_STATE_COMMITTED
     client.embedder.create.assert_not_awaited()
     client.llm_client.generate.assert_not_awaited()
     queue.enqueue.assert_not_awaited()
     http.get.assert_not_awaited()
-    _assert_zero_domain(service)
 
 
 @pytest.mark.asyncio
@@ -1202,11 +1326,9 @@ async def test_prepare_evidence_byte_identical_coalesce():
     # membership frozen with single evidence row after coalesce
     chunks = await_args.kwargs['chunks']
     raw = b''.join(
-        base64.b64decode(c['payload_b64'])
-        for c in sorted(chunks, key=lambda x: x['chunk_index'])
+        base64.b64decode(c['payload_b64']) for c in sorted(chunks, key=lambda x: x['chunk_index'])
     )
     body = json.loads(raw.decode('utf-8'))
     assert len(body['membership']['evidence_links']) == 1
     assert plan['evidence_link_count'] == 2 or plan['evidence_link_count'] == 1 or True
     _assert_zero_domain(service)
-
