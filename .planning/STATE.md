@@ -4,15 +4,15 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 03B
 current_phase_name: Atomic Catalog, Exact Evidence, Durable Manifest Writes
-status: pending discussion/planning
+status: executing
 stopped_at: Phase 3B context gathered
-last_updated: "2026-07-18T09:13:25.888Z"
+last_updated: "2026-07-18T10:11:56.227Z"
 last_activity: 2026-07-18
-last_activity_desc: Phase 3A verified 6/6; ready_for_phase_3b=true
+last_activity_desc: Phase 03B execution started
 progress:
   total_phases: 5
   completed_phases: 4
-  total_plans: 25
+  total_plans: 31
   completed_plans: 25
   percent: 80
 ---
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 03B — Atomic Catalog, Exact Evidence, Durable Manifest Writes (pending discussion/planning)
+**Current focus:** Phase 03B — Atomic Catalog, Exact Evidence, Durable Manifest Writes
 
 ## Current Position
 
-Phase: 03B (Atomic Catalog, Exact Evidence, Durable Manifest Writes) — PENDING DISCUSSION/PLANNING
-Plan: not planned
-Status: Phase 3A verified; Phase 3B awaiting discussion/planning
-Last activity: 2026-07-18 — Phase 3A verified 6/6; ready_for_phase_3b=true
+Phase: 03B (Atomic Catalog, Exact Evidence, Durable Manifest Writes) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 03B
+Last activity: 2026-07-18 — Phase 03B execution started
 
 Progress: Phase 0+1+2+3A complete at local gate (25 v1.1 plans: 2+12+5+6); Phase 3B pending discussion/planning
 

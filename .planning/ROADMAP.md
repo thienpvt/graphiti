@@ -175,25 +175,31 @@ Plans:
   4. Manifest membership is exact for created, updated, and unchanged objects and is never inferred from `entity.batch_id` / `edge.batch_id`
   5. Search interoperability for catalog entities/edges remains; fault injection between persistence steps leaves neither a partial graph nor a partial manifest
 
-**Plans:** 6 plans
+**Plans:** 1/6 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 03B-01-PLAN.md — Wave 0 RED Nyquist scaffolds + fail-closed gate runner skeleton
+
+- [x] 03B-01-PLAN.md — Wave 0 RED Nyquist scaffolds + fail-closed gate runner skeleton
 
 **Wave 2**
+
 - [ ] 03B-02-PLAN.md — Pure manifest canonicalize/chunk + additive commit response fields
 
 **Wave 3** *(blocked on Wave 2)*
+
 - [ ] 03B-03-PLAN.md — Evidence + manifest store Cypher, constraints, terminal agree, plan lock
 
 **Wave 4** *(blocked on Wave 2+3)*
+
 - [ ] 03B-04-PLAN.md — Shared atomic writer; upsert+commit co-commit; fault injection
 
 **Wave 5** *(blocked on Wave 4)*
+
 - [ ] 03B-05-PLAN.md — Stranded COMMITTING recovery, stable replay, concurrency arbitration
 
 **Wave 6** *(blocked on Wave 3–5)*
+
 - [ ] 03B-06-PLAN.md — Live Neo4j proof, 24/24 edge map, gate ledger, capabilities.manifests flip
 
 **Research:** complete (`03B-RESEARCH.md`) — single-tx ceilings, chunk policy, recovery algorithms
