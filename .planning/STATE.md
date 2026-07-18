@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 status: in_progress
-stopped_at: Phase 5 Wave 2 complete; Plan 05-04 next
-last_updated: "2026-07-18T23:01:51.103Z"
+stopped_at: Phase 5 Wave 3 complete; Plan 05-05 executing
+last_updated: "2026-07-18T23:37:55.766Z"
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 44
-  completed_plans: 39
-  percent: 89
+  completed_plans: 40
+  percent: 91
 current_phase: 05
 current_phase_name: Verification, Security, Compatibility, and Migration Docs
 last_activity: 2026-07-19
@@ -28,11 +28,13 @@ See: `.planning/PROJECT.md`
 
 ## Current Position
 
-Phase 5 Waves 1–2 complete; Plan 05-04 executing.
+Phase 5 Waves 1–3 complete; Plan 05-05 executing.
 
-- Phase 5 plans: 3/7 complete across 6 waves
+- Phase 5 plans: 4/7 complete across 6 waves
 - Plan 05-01: Wave 0 fail-closed scaffolds green
 - Plans 05-02/05-03: security matrix and offline canary hardening green; 309 merged tests; Ruff clean; Pyright 0 errors
+- Plan 05-04: exact 14 legacy + 14 catalog + 28 union; 19 offline tests; 62 live Neo4j tests; Pyright/Ruff clean
+- Live TEST-11 used only `oracle-catalog-tool-test`; test-created elementId teardown; no protected/other-group query
 - Hardened digest-bound JSON pinned to LF for Windows checkout; historical artifacts unchanged
 - Planning coverage: 17/17 requirements; D-01..D-23; 37/37 edge probes
 - Phase 4 gate remains `manifest_verification=true`; `ready_for_phase_5=true`
@@ -51,7 +53,7 @@ Phase 5 Waves 1–2 complete; Plan 05-04 executing.
 | Phase 3A | 6/6 | Complete |
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
-| Phase 5 | 3/7 | In progress; Waves 1–2 green |
+| Phase 5 | 4/7 | In progress; Waves 1–3 green |
 
 ## Accumulated Context
 
@@ -70,7 +72,7 @@ Phase 5 Waves 1–2 complete; Plan 05-04 executing.
 
 ### Pending Todos
 
-1. Complete Plans 05-04..05-06 without canary.
+1. Complete Plans 05-05..05-06 without canary.
 2. Run deep review/fix, Nyquist validation, ASVS security audit, and goal verification.
 3. Execute 05-07 final closure only after all four audits are green.
 4. Run local Ollama E2E before closure; classify unavailable infrastructure as skip with reason.
@@ -103,8 +105,8 @@ Phase 5 Waves 1–2 complete; Plan 05-04 executing.
 
 ## Session Continuity
 
-**Last session:** 2026-07-18T23:01:51.103Z
-**Resume file:** .planning/phases/05-verification-security-compatibility-and-migration-docs/05-04-PLAN.md
+**Last session:** 2026-07-18T23:37:55.766Z
+**Resume file:** .planning/phases/05-verification-security-compatibility-and-migration-docs/05-05-PLAN.md
 
-Stopped at: Phase 5 Wave 2 complete; Plan 05-04 next
-Next: complete Plans 05-04..05-06, run post-execution audits, then execute 05-07 closure. Stop before Phase 6.
+Stopped at: Phase 5 Wave 3 complete; Plan 05-05 executing
+Next: complete Plans 05-05..05-06, run post-execution audits, then execute 05-07 closure. Stop before Phase 6.
