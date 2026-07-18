@@ -544,14 +544,22 @@ def test_edge_item_rejects_unknown_type():
 
 
 def test_edge_enforced_by_requires_evidence():
+    # Finite map allows only Constraint→{Table,Column}; keep defaults out of success path.
+    enforced_endpoints = dict(
+        source_entity_type='Constraint',
+        source_graph_key='CONSTRAINT::FE::ORCL.HR.EMP_PK',
+        target_entity_type='Table',
+        target_graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+    )
     with pytest.raises(ValidationError):
-        _edge(edge_type='EnforcedBy', evidence=None)
+        _edge(edge_type='EnforcedBy', evidence=None, **enforced_endpoints)
     with pytest.raises(ValidationError):
-        _edge(edge_type='EnforcedBy', evidence='')
+        _edge(edge_type='EnforcedBy', evidence='', **enforced_endpoints)
     item = _edge(
         edge_type='EnforcedBy',
         edge_key='ENFORCEDBY::CONSTRAINT::C1',
         evidence='ALTER TABLE ... CONSTRAINT C1',
+        **enforced_endpoints,
     )
     assert item.evidence is not None
     assert item.evidence.startswith('ALTER')
@@ -987,9 +995,7 @@ def test_nested_batch_rejects_evidence_links_over_hard_max():
                     'evidence_links': [
                         _evidence_link_kwargs(
                             source_key=f'DOC::SRC::{i}',
-                            entity_target=_entity_target(
-                                graph_key=f'TABLE::FE::ORCL.HR.T{i % 50}'
-                            ),
+                            entity_target=_entity_target(graph_key=f'TABLE::FE::ORCL.HR.T{i % 50}'),
                         )
                         for i in range(over)
                     ],
@@ -2491,9 +2497,7 @@ def test_gap_cr02_reference_time_accepts_iso_forms_and_preserves_exact_input(ref
 def test_gap_cr02_malformed_reference_time_fails_at_exact_field_location(reference_time: str):
     with pytest.raises(ValidationError) as exc:
         CatalogSourceItem.model_validate(_source_kwargs(reference_time=reference_time))
-    matching = [
-        err for err in exc.value.errors() if tuple(err['loc']) == ('reference_time',)
-    ]
+    matching = [err for err in exc.value.errors() if tuple(err['loc']) == ('reference_time',)]
     assert len(matching) == 1, exc.value.errors()
     structured = _get_catalog_validation_error_to_structured()(exc.value)
     assert structured['code'] == CatalogErrorCode.validation_error
@@ -2583,7 +2587,9 @@ def _gap_wr01_malformed_graph_key_cases():
     ]
 
 
-@pytest.mark.parametrize(('model', 'payload', 'expected_loc'), _gap_wr01_malformed_graph_key_cases())
+@pytest.mark.parametrize(
+    ('model', 'payload', 'expected_loc'), _gap_wr01_malformed_graph_key_cases()
+)
 def test_gap_wr01_malformed_graph_key_reports_exact_field_location(model, payload, expected_loc):
     with pytest.raises(ValidationError) as exc:
         model.model_validate(payload)

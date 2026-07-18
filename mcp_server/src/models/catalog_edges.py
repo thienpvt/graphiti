@@ -108,10 +108,8 @@ class CatalogEdgeItem(CatalogStrictModel):
     def _enforced_by_requires_evidence(self) -> CatalogEdgeItem:
         if self.edge_type == 'EnforcedBy' and (not self.evidence or not self.evidence.strip()):
             raise ValueError('EnforcedBy requires non-empty evidence')
-        # Topology authority after allowlists + EnforcedBy evidence; before any side effect.
-        validate_edge_endpoint_pair(
-            self.edge_type, self.source_entity_type, self.target_entity_type
-        )
+        # Exact field-path grammar first so malformed keys never collapse to edges.N.
+        # Topology after grammar; still before any side effect.
         validate_entity_graph_key_at(
             entity_type=self.source_entity_type,
             graph_key=self.source_graph_key,
@@ -123,6 +121,9 @@ class CatalogEdgeItem(CatalogStrictModel):
             graph_key=self.target_graph_key,
             title=type(self).__name__,
             loc=('target_graph_key',),
+        )
+        validate_edge_endpoint_pair(
+            self.edge_type, self.source_entity_type, self.target_entity_type
         )
         return self
 
