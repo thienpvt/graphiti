@@ -219,8 +219,35 @@ Plans:
   4. Separate read/write feature gates keep capabilities and catalog diagnostics usable when writes are disabled; read paths never initialize/repair schema or open write transactions
   5. Explicit-key verification remains available; gate/registration tests prove read tools work while writes are off
 
-**Plans**: TBD
-**Research**: required during planning (manifest property size vs chunk children, verify pagination)
+**Plans**: 0/6 plans executed
+
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Wave 0 behavioral tests and fail-closed Phase 4 gate scaffold
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 04-02-PLAN.md — Split read/write gates, missing-status truth, bounded page limits, capability foundations
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 04-03-PLAN.md — Durable manifest reassembly, integrity checks, and canonical paginated membership read
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 04-04-PLAN.md — Manifest-authoritative batch verification, exact drift, evidence identities, explicit-key compatibility
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 04-05-PLAN.md — Read-only typed-edge resolution and bounded evidence diagnostics
+
+**Wave 6** *(blocked on Wave 5)*
+
+- [ ] 04-06-PLAN.md — Additive 28-tool registration, final capability flip, and fail-closed Phase 4 gate
+
+**Research**: complete (`04-RESEARCH.md`) — manifest reassembly, pagination, verification authority, split gates
+**Planning gate**: passed after one revision; 21/21 requirements, D-01–D-31, 42/42 edge probes, 31/31 decision coverage
+**Stop condition**: Any invalid/missing manifest, cross-group read, read-side mutation, expected-from-observed verification, or legacy-tool regression blocks Phase 5
 
 ### Phase 5: Verification, Security, Compatibility, and Migration Docs
 
@@ -251,7 +278,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 5/5 | Complete; ready_for_phase_3a=true | 2026-07-18 |
 | Phase 3A. Immutable Prepare/Commit Control Plane | 6/6 | Complete; ready_for_phase_3b=true | 2026-07-18 |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
-| Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 0/TBD | Not started | - |
+| Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 0/6 | Planned; ready to execute | - |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 0/TBD | Not started | - |
 
 ## Coverage

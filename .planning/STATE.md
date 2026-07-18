@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 04
 current_phase_name: Manifest-Backed Verification and Read-Only Diagnostics
-status: ready_to_discuss
-stopped_at: Phase 3B complete; Phase 4 unblocked
-last_updated: "2026-07-19T00:00:00Z"
+status: ready_to_execute
+stopped_at: Phase 4 planned and plan-checker verified
+last_updated: "2026-07-19T01:15:00Z"
 last_activity: 2026-07-19
-last_activity_desc: Phase 03B passed final live gate, deep review, Nyquist, security, and goal verification
+last_activity_desc: Phase 04 research, validation, six plans, and plan-checker verification complete
 progress:
   total_phases: 7
   completed_phases: 5
-  total_plans: 37
+  total_plans: 43
   completed_plans: 31
-  percent: 84
+  percent: 72
 ---
 
 # Project State
@@ -28,14 +28,13 @@ See: `.planning/PROJECT.md`
 
 ## Current Position
 
-Phase 3B complete. Phase 4 unblocked and ready for autonomous discussion/planning.
+Phase 4 discussion, research, validation strategy, and planning complete. Six plans verified and ready for autonomous execution.
 
-- Phase 3B plans: 6/6 complete.
-- Final live gate at product HEAD `1f9a7d7`: `ready_for_phase_4=true`, `phase_3b_complete=true`, current safety green.
-- Goal verification: PASSED, 5/5 success criteria, 17/17 requirements.
-- Nyquist: COMPLIANT, 17/17, zero gaps.
-- Security: SECURED, 16/16 threats closed.
-- Deep code review: clean after WR-R01/WR-R02 fixes.
+- Phase 4 plans: 0/6 executed; six ordered waves.
+- Plan checker: PASSED after one revision, 21/21 requirements and D-01 through D-31 covered.
+- Edge-probe ledger: 42/42 dispositions; no silent drops.
+- Decision coverage: 31/31; API coverage gate: not required, detector false.
+- Phase 3B prerequisite remains green; `manifest_verification=false` until Phase 4 final proof.
 
 ## Performance Metrics
 
@@ -48,7 +47,7 @@ Phase 3B complete. Phase 4 unblocked and ready for autonomous discussion/plannin
 | Phase 2 | 5/5 | Complete |
 | Phase 3A | 6/6 | Complete |
 | Phase 3B | 6/6 | Complete |
-| Phase 4 | TBD | Ready to discuss/plan |
+| Phase 4 | 0/6 | Planned; ready to execute |
 | Phase 5 | TBD | Blocked on Phase 4 |
 
 ## Accumulated Context
@@ -67,11 +66,10 @@ Phase 3B complete. Phase 4 unblocked and ready for autonomous discussion/plannin
 
 ### Pending Todos
 
-1. Discuss and plan Phase 4.
-2. Execute/review/validate/secure/verify Phase 4.
-3. Execute Phase 5 final readiness work without canary.
-4. Run local Ollama E2E before milestone cleanup.
-5. Require explicit confirmation before cleanup/deletion.
+1. Execute/review/validate/secure/verify Phase 4.
+2. Execute Phase 5 final readiness work without canary.
+3. Run local Ollama E2E before milestone cleanup.
+4. Require explicit confirmation before cleanup/deletion.
 
 ### Blockers/Concerns
 
@@ -100,5 +98,5 @@ Phase 3B complete. Phase 4 unblocked and ready for autonomous discussion/plannin
 
 ## Session Continuity
 
-Stopped at: Phase 3B truthfully complete; Phase 4 unblocked.
-Next: `/gsd-discuss-phase 4 --auto`, automatically selecting recommended options.
+Stopped at: Phase 4 planned and plan-checker verified.
+Next: `/gsd-execute-phase 4 --auto --no-transition`.
