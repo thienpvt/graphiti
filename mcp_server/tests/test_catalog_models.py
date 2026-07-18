@@ -938,6 +938,18 @@ def test_upsert_catalog_batch_rejects_empty_all_collections():
         )
 
 
+def _evidence_link_kwargs(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        'source_key': 'DOC::HR.PDF#p12',
+        'entity_target': _entity_target(),
+        'evidence_kind': 'ddl',
+        'extractor_name': 'oracle-ddl-extractor',
+        'extractor_version': '1.0.0',
+    }
+    base.update(overrides)
+    return base
+
+
 def test_upsert_catalog_batch_accepts_provenance_only():
     req = UpsertCatalogBatchRequest.model_validate(
         {
@@ -949,25 +961,37 @@ def test_upsert_catalog_batch_accepts_provenance_only():
             'edges': [],
             'provenance': {
                 'sources': [_source_kwargs()],
-                'entity_targets': [_entity_target()],
+                'evidence_links': [_evidence_link_kwargs()],
             },
         }
     )
     assert req.provenance is not None
     assert len(req.provenance.sources) == 1
+    assert len(req.provenance.evidence_links) == 1
 
 
-def test_nested_batch_rejects_generated_link_product_over_hard_max():
+def test_nested_batch_rejects_evidence_links_over_hard_max():
+    from models.catalog_common import HARD_MAX_PROVENANCE_LINKS_PER_BATCH
+
+    over = HARD_MAX_PROVENANCE_LINKS_PER_BATCH + 1
     with pytest.raises(ValidationError):
         UpsertCatalogBatchRequest.model_validate(
             {
+                'identity_schema_version': 'catalog-v2',
+                'system_key': 'FE',
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'batch-1',
                 'entities': [],
                 'provenance': {
-                    'sources': [_source_kwargs(source_key=f'DOC::SRC::{i}') for i in range(201)],
-                    'entity_targets': [
-                        _entity_target(graph_key=f'TABLE::FE::ORCL.HR.T{i}') for i in range(100)
+                    'sources': [_source_kwargs()],
+                    'evidence_links': [
+                        _evidence_link_kwargs(
+                            source_key=f'DOC::SRC::{i}',
+                            entity_target=_entity_target(
+                                graph_key=f'TABLE::FE::ORCL.HR.T{i % 50}'
+                            ),
+                        )
+                        for i in range(over)
                     ],
                 },
             }
@@ -1242,8 +1266,7 @@ def _loc_paths(exc: ValidationError) -> list[tuple[Any, ...]]:
                     edges=[],
                     provenance={
                         'sources': [_source_kwargs()],
-                        'entity_targets': [],
-                        'edge_targets': [],
+                        'evidence_links': [],
                         'nested_unknown': True,
                     },
                 ),
@@ -2389,10 +2412,18 @@ def _graph_key_mismatch_cases():
                 batch_id='mismatch',
                 provenance={
                     'sources': [_source_kwargs()],
-                    'entity_targets': [bo_target],
+                    'evidence_links': [
+                        {
+                            'source_key': 'DOC::HR.PDF#p12',
+                            'entity_target': bo_target,
+                            'evidence_kind': 'ddl',
+                            'extractor_name': 'oracle-ddl-extractor',
+                            'extractor_version': '1.0.0',
+                        }
+                    ],
                 },
             ),
-            ('provenance', 'entity_targets', 0, 'graph_key'),
+            ('provenance', 'evidence_links', 0, 'entity_target', 'graph_key'),
         ),
     ]
 
@@ -2536,10 +2567,18 @@ def _gap_wr01_malformed_graph_key_cases():
                 entities=[],
                 provenance={
                     'sources': [_source_kwargs()],
-                    'entity_targets': [bad_target],
+                    'evidence_links': [
+                        {
+                            'source_key': 'DOC::HR.PDF#p12',
+                            'entity_target': bad_target,
+                            'evidence_kind': 'ddl',
+                            'extractor_name': 'oracle-ddl-extractor',
+                            'extractor_version': '1.0.0',
+                        }
+                    ],
                 },
             ),
-            ('provenance', 'entity_targets', 0, 'graph_key'),
+            ('provenance', 'evidence_links', 0, 'entity_target', 'graph_key'),
         ),
     ]
 

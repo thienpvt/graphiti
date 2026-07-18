@@ -373,3 +373,182 @@ def test_evidence_helpers_reentrant_no_shared_state():
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda _: _once(), range(32)))
     assert len(set(results)) == 1
+
+
+# ---------------------------------------------------------------------------
+# EVID-06 / EVID-14: batch non-Cartesian evidence_links
+# ---------------------------------------------------------------------------
+
+
+def _batch_shell(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        'identity_schema_version': 'catalog-v2',
+        'system_key': 'FE',
+        'group_id': GROUP,
+        'batch_id': 'batch-1',
+        'entities': [],
+        'edges': [],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_batch_accepts_sources_and_evidence_links():
+    from models.catalog_batch import UpsertCatalogBatchRequest
+
+    req = UpsertCatalogBatchRequest.model_validate(
+        _batch_shell(
+            provenance={
+                'sources': [
+                    {
+                        'source_key': 'DOC::HR.PDF#p12',
+                        'reference_time': '2024-01-15T10:30:00+00:00',
+                    }
+                ],
+                'evidence_links': [_link_kwargs()],
+            }
+        )
+    )
+    assert req.provenance is not None
+    assert len(req.provenance.sources) == 1
+    assert len(req.provenance.evidence_links) == 1
+    assert req.provenance.evidence_links[0].evidence_kind == 'ddl'
+
+
+def test_batch_rejects_cartesian_entity_targets():
+    from models.catalog_batch import UpsertCatalogBatchRequest
+
+    with pytest.raises(ValidationError) as exc:
+        UpsertCatalogBatchRequest.model_validate(
+            _batch_shell(
+                provenance={
+                    'sources': [
+                        {
+                            'source_key': 'DOC::HR.PDF#p12',
+                            'reference_time': '2024-01-15T10:30:00+00:00',
+                        }
+                    ],
+                    'entity_targets': [_entity_target()],
+                }
+            )
+        )
+    text = str(exc.value).lower()
+    assert 'cartesian' in text or 'entity_targets' in text
+    assert 'auto-conversion' in text or 'evidence_links' in text
+
+
+def test_batch_rejects_cartesian_edge_targets():
+    from models.catalog_batch import UpsertCatalogBatchRequest
+
+    with pytest.raises(ValidationError):
+        UpsertCatalogBatchRequest.model_validate(
+            _batch_shell(
+                provenance={
+                    'sources': [
+                        {
+                            'source_key': 'DOC::A',
+                            'reference_time': '2024-01-15T10:30:00+00:00',
+                        }
+                    ],
+                    'edge_targets': [_edge_target()],
+                }
+            )
+        )
+
+
+def test_batch_no_cartesian_product_expansion():
+    """Two sources + one explicit link remains one link (not product)."""
+    from models.catalog_batch import UpsertCatalogBatchRequest
+
+    req = UpsertCatalogBatchRequest.model_validate(
+        _batch_shell(
+            provenance={
+                'sources': [
+                    {
+                        'source_key': 'DOC::A',
+                        'reference_time': '2024-01-15T10:30:00+00:00',
+                    },
+                    {
+                        'source_key': 'DOC::B',
+                        'reference_time': '2024-01-15T10:30:00+00:00',
+                    },
+                ],
+                'evidence_links': [_link_kwargs(source_key='DOC::A')],
+            }
+        )
+    )
+    assert req.provenance is not None
+    assert len(req.provenance.sources) == 2
+    assert len(req.provenance.evidence_links) == 1
+
+
+def test_batch_evidence_links_only_ok():
+    from models.catalog_batch import UpsertCatalogBatchRequest
+
+    req = UpsertCatalogBatchRequest.model_validate(
+        _batch_shell(provenance={'evidence_links': [_link_kwargs()]})
+    )
+    assert req.provenance is not None
+    assert req.provenance.sources == []
+    assert len(req.provenance.evidence_links) == 1
+
+
+def test_batch_empty_evidence_links_with_sources_ok():
+    from models.catalog_batch import UpsertCatalogBatchRequest
+
+    req = UpsertCatalogBatchRequest.model_validate(
+        _batch_shell(
+            provenance={
+                'sources': [
+                    {
+                        'source_key': 'DOC::ONLY',
+                        'reference_time': '2024-01-15T10:30:00+00:00',
+                    }
+                ],
+                'evidence_links': [],
+            }
+        )
+    )
+    assert req.provenance is not None
+    assert len(req.provenance.sources) == 1
+    assert req.provenance.evidence_links == []
+
+
+def test_standalone_upsert_provenance_cartesian_still_valid():
+    from models.catalog_provenance import UpsertProvenanceRequest
+
+    req = UpsertProvenanceRequest.model_validate(
+        {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
+            'group_id': GROUP,
+            'batch_id': 'batch-1',
+            'sources': [
+                {
+                    'source_key': 'DOC::HR.PDF#p12',
+                    'reference_time': '2024-01-15T10:30:00+00:00',
+                }
+            ],
+            'entity_targets': [_entity_target()],
+            'edge_targets': [_edge_target()],
+        }
+    )
+    assert len(req.entity_targets) == 1
+    assert len(req.edge_targets) == 1
+
+
+def test_model_validate_does_not_invent_links_from_cartesian():
+    from models.catalog_batch import NestedProvenancePayload
+
+    with pytest.raises(ValidationError):
+        NestedProvenancePayload.model_validate(
+            {
+                'sources': [
+                    {
+                        'source_key': 'DOC::A',
+                        'reference_time': '2024-01-15T10:30:00+00:00',
+                    }
+                ],
+                'entity_targets': [_entity_target(), _entity_target(graph_key='TABLE::FE::ORCL.X')],
+            }
+        )
