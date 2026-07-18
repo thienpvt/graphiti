@@ -99,11 +99,12 @@ status: complete
 
 1. **Task 1: CatalogEvidenceLink models + pure identity helpers** - `c3f8d6f` (feat)
 2. **Task 2: Batch non-Cartesian evidence_links + legacy shape reject** - `f3d395f` (feat)
+3. **Follow-up: Pyright cast on evidence `_dump`** - `76fe3c7` (fix)
 
 ## Files Created/Modified
 
 - `mcp_server/src/models/catalog_evidence.py` - EVIDENCE_KINDS, locator, targets, CatalogEvidenceLink
-- `mcp_server/src/services/catalog_identity.py` - link_key, canonical payload, coalesce
+- `mcp_server/src/services/catalog_identity.py` - link_key, canonical payload, coalesce; `cast(dict[str, Any], dump(...))` for pyright
 - `mcp_server/src/models/catalog_batch.py` - non-Cartesian NestedProvenancePayload + system_key on evidence entity targets
 - `mcp_server/tests/test_catalog_evidence.py` - EVID-01..06/14 unit coverage
 - `mcp_server/tests/test_catalog_models.py` - batch provenance fixtures updated to evidence_links
@@ -113,10 +114,19 @@ status: complete
 - Link key omits excerpt and client `content_sha256` (transport); content hash includes excerpt bytes as submitted
 - Coalesce by payload digest equality only; non-identical multiplicity retained; order-stable via link_key sort
 - Smallest batch change: replace nested target arrays with `evidence_links`; sources may be empty when links alone provide work
+- `getattr(model_dump)` types as object; cast dump result rather than change runtime path
 
 ## Deviations from Plan
 
-None - plan executed exactly as written.
+### Auto-fixed Issues
+
+**1. [Rule 1 - Bug] Pyright return type on evidence `_dump`**
+- **Found during:** post-plan diagnostics on `catalog_identity.py`
+- **Issue:** `getattr(..., 'model_dump')` callable return typed `object`, not assignable to `dict[str, Any] | None`
+- **Fix:** `cast(dict[str, Any], dump(mode='json'))`; import `cast`
+- **Files modified:** `mcp_server/src/services/catalog_identity.py`
+- **Verification:** `uv run --project mcp_server pyright -p mcp_server` on identity/evidence/batch → 0 errors; 71 evidence+identity tests pass; 99 filtered models tests pass
+- **Committed in:** `76fe3c7`
 
 ## Threat Flags
 
@@ -126,13 +136,14 @@ None new beyond plan threat model (Cartesian reject, safe errors, bounds).
 
 1. RED: `test_catalog_evidence.py` failed collection (missing module)
 2. GREEN: models + helpers landed (`c3f8d6f`), then batch migration (`f3d395f`)
-3. Verify: 63 evidence+identity tests pass; 99 filtered evidence/provenance/batch tests pass
+3. Follow-up type fix (`76fe3c7`)
+4. Verify: 71 evidence+identity tests pass; 99 filtered evidence/provenance/batch tests pass; scoped pyright 0 errors
 
 ## Self-Check: PASSED
 
 - FOUND: `mcp_server/src/models/catalog_evidence.py`
 - FOUND: `mcp_server/src/services/catalog_identity.py` helpers
 - FOUND: `mcp_server/src/models/catalog_batch.py` evidence_links
-- FOUND: commits `c3f8d6f`, `f3d395f`
+- FOUND: commits `c3f8d6f`, `f3d395f`, `76fe3c7`
 - FOUND: `02-02-SUMMARY.md`
 - STATE.md / ROADMAP.md not modified (orchestrator-owned)
