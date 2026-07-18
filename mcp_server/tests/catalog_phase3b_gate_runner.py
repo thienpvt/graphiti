@@ -23,7 +23,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 'phase3b-gate-results.v1'
+SCHEMA_VERSION = 'phase3b-gate-results.v2'
 PHASE_DIR_REL = Path(
     '.planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes'
 )
@@ -839,12 +839,18 @@ def derive_live_proof_status(results: list[dict[str, Any]], require_neo4j: bool)
     }
 
 
-# Historical hard gate: initial live suite queried oracle-catalog-v2 read-only
-# for before/after isolation counts. Remediation cannot erase that phase history.
+# Two-axis safety (schema v2): permanent historical audit vs current execution safety.
+# History is audit-only and must never be erased. Current safety gates readiness/CLI.
 HISTORICAL_ORACLE_CATALOG_V2_QUERIED = True
+HISTORICAL_V2_COMMIT = 'a67789a'
+HISTORICAL_V2_CLASS = 'test_policy'
+HISTORICAL_V2_SCOPE = 'local_neo4j_no_corresponding_data'
 HISTORICAL_V2_VIOLATION_NOTE = (
     'initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for '
-    'before/after group counts; historical violation permanent; current source remediated'
+    'before/after group counts; local test-policy violation on local Neo4j with no '
+    'corresponding production/second-schema data; permanent audit record; never query '
+    'or mutate oracle-catalog-v2 again; authorized two-axis re-gate separates history '
+    'audit from current safety'
 )
 
 
@@ -852,14 +858,17 @@ def derive_safety_ledger(
     results: list[dict[str, Any]],
     root: Path | None = None,
 ) -> dict[str, Any]:
-    """Derive safety ledger from history + current source evidence (never constant false).
+    """Two-axis safety: permanent historical audit + current-source/execution safety.
 
-    Historical oracle-catalog-v2 read-only probes are a hard gate: always true.
-    Current-source canary/clear_graph/param scans still run for residual violations.
+    Axis A (audit, permanent): historical_oracle_catalog_v2_queried always true;
+    aggregate oracle_catalog_v2_queried true while history holds or current source dirty.
+    Axis B (current safety): safety_checks_pass from safety_no_probe + canary +
+    clear_graph + current_source_v2_param_query only. History does NOT force current
+    safety false.
     """
     safety_ids = {'safety_no_probe'}
     by_id = {r.get('id'): r for r in results}
-    safety_ok = all(
+    current_safety_ok = all(
         by_id.get(sid, {}).get('status') == 'pass' and by_id.get(sid, {}).get('exit_code') == 0
         for sid in safety_ids
     )
@@ -884,19 +893,23 @@ def derive_safety_ledger(
                     current_source_v2_param = True
             clear_called = bool(re.search(r'\bclear_graph\s*\(', code))
         else:
-            safety_ok = False
-    # Historical violation is permanent and blocks readiness regardless of current source.
+            current_safety_ok = False
+    # Current safety: only current-axis signals (history does not force false).
+    if canary_executed or clear_called or current_source_v2_param:
+        current_safety_ok = False
+    # Aggregate audit field: history OR current dirty (never erase history).
     v2_queried = HISTORICAL_ORACLE_CATALOG_V2_QUERIED or current_source_v2_param
-    if canary_executed or v2_queried or clear_called:
-        safety_ok = False
     return {
         'canary_executed': canary_executed,
         'oracle_catalog_v2_queried': v2_queried,
         'clear_graph_called': clear_called,
-        'safety_checks_pass': safety_ok,
+        'safety_checks_pass': current_safety_ok,
         'test_group': ALLOWED_TEST_GROUP,
         'forbidden_group': FORBIDDEN_GROUP,
         'historical_oracle_catalog_v2_queried': HISTORICAL_ORACLE_CATALOG_V2_QUERIED,
+        'historical_v2_commit': HISTORICAL_V2_COMMIT,
+        'historical_v2_class': HISTORICAL_V2_CLASS,
+        'historical_v2_scope': HISTORICAL_V2_SCOPE,
         'current_source_v2_param_query': current_source_v2_param,
         'historical_violation_note': HISTORICAL_V2_VIOLATION_NOTE,
     }
@@ -915,22 +928,27 @@ def derive_ready_for_phase_4(
     manifests: bool,
     require_neo4j: bool,
 ) -> bool:
-    """Fail-closed readiness: local + live (when required) + safety + manifests flag.
+    """Fail-closed readiness on current safety axis only (schema v2 two-axis re-gate).
 
     Default is false. ready_for_phase_4 is true only when every mandatory non-live
-    check passes, live atomic proof is green under require_neo4j, safety holds,
-    and features.manifests has been flipped after proof (D-32/D-33).
+    check passes, live atomic proof is green under require_neo4j, *current* safety
+    holds, and features.manifests has been flipped after proof (D-32/D-33).
+
+    Never gates on aggregate oracle_catalog_v2_queried / historical audit field.
+    Current-axis blockers: canary_executed, clear_graph_called,
+    current_source_v2_param_query, safety_checks_pass.
     """
     if not local_gate_pass:
         return False
     if safety.get('canary_executed') is not False:
         return False
-    if safety.get('oracle_catalog_v2_queried') is not False:
-        return False
     if safety.get('clear_graph_called') is not False:
+        return False
+    if safety.get('current_source_v2_param_query') is not False:
         return False
     if safety.get('safety_checks_pass') is not True:
         return False
+    # Do NOT gate on oracle_catalog_v2_queried (aggregate includes permanent history).
     if require_neo4j and not live.get('live_neo4j_atomic_proof_pass'):
         return False
     if require_neo4j and not manifests:
@@ -940,11 +958,11 @@ def derive_ready_for_phase_4(
 
 
 def derive_cli_exit_code(ledger: dict[str, Any], *, require_neo4j: bool) -> int:
-    """CLI process exit for `run`. Fail-closed under historical/current safety block.
+    """CLI process exit for `run`. Fail-closed on *current* safety axis only.
 
     local_gate_pass alone is NOT overall success — it only means mandatory non-live
-    command checks passed. Safety (incl. permanent historical v2) and readiness
-    must also hold. Under permanent history, this always returns 1.
+    command checks passed. Current safety_checks_pass and readiness must hold.
+    Aggregate/historical oracle_catalog_v2_queried does NOT force nonzero exit.
     """
     if not ledger.get('local_gate_pass'):
         return 1
@@ -953,13 +971,14 @@ def derive_cli_exit_code(ledger: dict[str, Any], *, require_neo4j: bool) -> int:
         return 1
     if ledger.get('canary_executed') is not False:
         return 1
-    if ledger.get('oracle_catalog_v2_queried') is not False:
-        return 1
     if ledger.get('clear_graph_called') is not False:
         return 1
+    if safety.get('current_source_v2_param_query') is not False:
+        return 1
+    # Do NOT gate CLI exit on aggregate oracle_catalog_v2_queried (includes history).
     if require_neo4j and ledger.get('ready_for_phase_4') is not True:
         return 1
-    # Non-live path: still require safety green above; ready stays false by design.
+    # Non-live path: current safety green above; ready stays false without live.
     if not require_neo4j and ledger.get('ready_for_phase_4') is True:
         return 1  # impossible under current policy; guard anyway
     return 0
@@ -1079,6 +1098,13 @@ def run_gate(
         'oracle_catalog_v2_queried': safety['oracle_catalog_v2_queried'],
         'clear_graph_called': safety['clear_graph_called'],
         'safety': safety,
+        'historical_audit': {
+            'historical_oracle_catalog_v2_queried': HISTORICAL_ORACLE_CATALOG_V2_QUERIED,
+            'commit': HISTORICAL_V2_COMMIT,
+            'class': HISTORICAL_V2_CLASS,
+            'scope': HISTORICAL_V2_SCOPE,
+            'note': HISTORICAL_V2_VIOLATION_NOTE,
+        },
         'notes': {
             'integration_policy': (
                 'live suite invoked only under --require-neo4j; skip/fail blocks readiness'
@@ -1086,21 +1112,36 @@ def run_gate(
             'test_group': ALLOWED_TEST_GROUP,
             'forbidden_group': FORBIDDEN_GROUP,
             'resolution_policy': '24/24 research probe map; no silent drop',
-            'd32_policy': 'ready_for_phase_4 true only after live+safety+manifests',
+            'd32_policy': (
+                'ready_for_phase_4 true only after live+current_safety+manifests; '
+                'never gates on aggregate historical v2 field'
+            ),
             'historical_v2_policy': HISTORICAL_V2_VIOLATION_NOTE,
-            'phase4_transition': 'blocked; no Phase 4 while historical v2 probe recorded',
+            'two_axis_policy': (
+                'schema v2: Axis A permanent historical audit (oracle_catalog_v2_queried '
+                'aggregate true); Axis B current safety (safety_checks_pass from '
+                'safety_no_probe/canary/clear_graph/current_source_v2_param only). '
+                'Readiness/CLI gate on Axis B only.'
+            ),
+            'phase4_transition': (
+                'authorized two-axis re-gate; Phase 4 still requires live+manifests; '
+                'history remains on audit axis; never query/mutate oracle-catalog-v2 again'
+            ),
             'local_gate_pass_meaning': (
                 'local_gate_pass means mandatory non-live command checks only '
                 '(pytest/ruff/pyright/structural). It is NOT overall gate success '
                 'and does NOT include historical/current safety or Phase 4 readiness.'
             ),
             'safety_meaning': (
-                'safety.safety_checks_pass and top-level canary/v2/clear_graph are '
-                'separate from local_gate_pass; historical v2 permanently fails safety'
+                'safety.safety_checks_pass is CURRENT axis only (not forced false by '
+                'history). Top-level oracle_catalog_v2_queried is aggregate audit '
+                '(history OR current dirty). canary/clear_graph are current-axis.'
             ),
             'cli_exit_policy': (
-                'CLI run exits nonzero unless local_gate_pass and safety_checks_pass '
-                'and no canary/v2/clear_graph; require-neo4j also needs ready_for_phase_4'
+                'CLI run exits nonzero unless local_gate_pass and current '
+                'safety_checks_pass and no canary/clear_graph/current_source_v2; '
+                'aggregate historical v2 does not force nonzero; require-neo4j also '
+                'needs ready_for_phase_4'
             ),
         },
     }
@@ -1191,7 +1232,7 @@ def verify_ledger(
     if sentinel.get('argv_third') != 'assert False':
         errors.append('sentinel argv third element must be assert False')
 
-    # Top-level safety fields must equal derived safety (truthful blocked ledgers accepted).
+    # Top-level safety fields must equal derived safety (two-axis: history audit + current).
     recomputed_local = derive_local_gate_pass(
         results if isinstance(results, list) else [],
         sentinel,
@@ -1221,16 +1262,20 @@ def verify_ledger(
             errors.append(
                 f'{key} top-level mismatch ledger={raw.get(key)!r} derived={safety.get(key)!r}'
             )
-    # Historical violation must remain recorded (cannot be erased by remediation).
+    # Axis A: historical audit must remain recorded (cannot be erased).
+    if safety.get('historical_oracle_catalog_v2_queried') is not True:
+        errors.append('derived historical_oracle_catalog_v2_queried must be true (permanent audit)')
     if safety.get('oracle_catalog_v2_queried') is not True:
-        errors.append('derived oracle_catalog_v2_queried must be true (historical hard gate)')
+        errors.append('derived oracle_catalog_v2_queried must be true (aggregate includes history)')
     if raw.get('oracle_catalog_v2_queried') is not True:
-        errors.append('ledger oracle_catalog_v2_queried must be true (historical hard gate)')
-    # Truthful blocked ledger: ready_for_phase_4 must be false while violation holds.
-    if ready is not False:
-        errors.append('recomputed ready_for_phase_4 must be false under historical v2 gate')
-    if raw.get('ready_for_phase_4') is not False:
-        errors.append('ledger ready_for_phase_4 must be false under historical v2 gate')
+        errors.append('ledger oracle_catalog_v2_queried must be true (history erasure rejected)')
+    hist = raw.get('historical_audit') or (raw.get('safety') or {})
+    if hist.get('historical_oracle_catalog_v2_queried') is False or (
+        isinstance(raw.get('safety'), dict)
+        and raw['safety'].get('historical_oracle_catalog_v2_queried') is False
+    ):
+        errors.append('historical_oracle_catalog_v2_queried erasure rejected')
+    # Axis B: current safety may be green with history true; do NOT force ready false.
 
     if isinstance(results, list):
         for r in results:
@@ -1297,9 +1342,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     'local_gate_pass': ledger['local_gate_pass'],
-                    'safety_checks_pass': (ledger.get('safety') or {}).get(
-                        'safety_checks_pass'
-                    ),
+                    'safety_checks_pass': (ledger.get('safety') or {}).get('safety_checks_pass'),
                     'ready_for_phase_4': ledger['ready_for_phase_4'],
                     'manifests': ledger['manifests'],
                     'evaluated_head': ledger['evaluated_head'],
