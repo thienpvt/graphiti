@@ -149,7 +149,15 @@ Plans:
   4. Token is bound to one immutable group/batch/schema/hash/payload; expired/discarded/consumed plans cannot revive; discard terminates only unconsumed plans without deleting domain data
   5. Dry-run remains zero-write; existing `upsert_catalog_batch` remains available
 
-**Plans**: TBD
+**Plans**: 2/6 plans executed
+
+- [x] 03A-01-PLAN.md
+- [x] 03A-02-PLAN.md
+- [ ] 03A-03-PLAN.md
+- [ ] 03A-04-PLAN.md
+- [ ] 03A-05-PLAN.md
+- [ ] 03A-06-PLAN.md
+
 **Research**: required during planning (payload chunking, property limits, token CAS)
 **Stop condition**: If Neo4j cannot store immutable prepared payloads, stop and report — do not weaken the contract
 **Gate**: Prepare/discard zero-domain-write and token/control-plane tests must pass before Phase 3B domain co-commit
