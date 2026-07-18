@@ -28,7 +28,7 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 - [x] **v1.0 Phase 2: Provenance and Atomic Batch** - Provenance, batch status, atomic batch, docs (shipped)
 - [ ] **Phase 0: Baseline, Inventory, and Compatibility Policy** - Live baseline, isolation policy, worktree/remote safety
 - [ ] **Phase 1: Strict Contracts and Catalog-v2 Identity** - Recursive forbid contracts, FE/BO/COMMON grammar, fail-closed identity
-- [ ] **Phase 2: Topology Authority, Evidence Contract, Hashes, Capabilities** - Endpoint map, exact evidence schema, authoritative hashes, capabilities
+- [x] **Phase 2: Topology Authority, Evidence Contract, Hashes, Capabilities** - Endpoint map, exact evidence schema, authoritative hashes, capabilities; local gate ready_for_phase_3a=true
 - [ ] **Phase 3A: Immutable Prepare/Commit Control Plane** - Prepare/discard/token, immutable payload, zero domain write on prepare
 - [ ] **Phase 3B: Atomic Catalog, Exact Evidence, Durable Manifest Writes** - Domain+evidence+manifest co-commit, rollback, search interop
 - [ ] **Phase 4: Manifest-Backed Verification and Read-Only Diagnostics** - Manifest reads, verify, edge resolve, split gates
@@ -114,7 +114,7 @@ Plans:
   4. `upsert_catalog_batch` results (including dry-run) return `identity_schema_version`, server `request_sha256`, `catalog_sha256`, and `batch_uuid` with zero dry-run writes
   5. `get_catalog_capabilities` works after server init even when writes are disabled and returns versions, gates, non-reversible namespace fingerprint, registries, endpoint map, limits, and feature flags without secrets
 
-**Plans**: 4/5 plans executed
+**Plans**: 5/5 plans executed
 
 Plans:
 **Wave 1**
@@ -132,9 +132,9 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 02-05-PLAN.md — Wave 4: Phase 2 fail-closed gate runner, 02-EDGE-PROBE-RESOLUTION.json 68/68, ready_for_phase_3a ledger
+- [x] 02-05-PLAN.md — Wave 4: Phase 2 fail-closed gate runner, 02-EDGE-PROBE-RESOLUTION.json 68/68, ready_for_phase_3a ledger
 
-**Gate**: Endpoint-map, evidence-contract, and hash unit gates must pass before Phase 3A prepare/control-plane write implementation
+**Gate**: Local Phase 2 gate green (`ready_for_phase_3a=true` via `02-GATE-RESULTS.json`); Phase 3A prepare/control-plane write implementation unblocked for planning/execution under separate plans
 
 ### Phase 3A: Immutable Prepare/Commit Control Plane
 
@@ -214,7 +214,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | v1.0 Phase 2. Provenance and Atomic Batch | 6/6 | Complete | 2026-07-17 |
 | Phase 0. Baseline, Inventory, and Compatibility Policy | 2/2 | Complete | 2026-07-17 |
 | Phase 1. Strict Contracts and Catalog-v2 Identity | 12/12 | Complete; ready_for_phase_2=true | 2026-07-18 |
-| Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 0/5 | Planned | - |
+| Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 5/5 | Complete; ready_for_phase_3a=true | 2026-07-18 |
 | Phase 3A. Immutable Prepare/Commit Control Plane | 0/TBD | Not started | - |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 0/TBD | Not started | - |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 0/TBD | Not started | - |

@@ -57,37 +57,37 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 
 ### Server-Owned Edge Endpoint Map
 
-- [ ] **EDGE-01**: A fixed server-owned endpoint map defines every allowed `(source_entity_type, target_entity_type)` pair for every catalog edge type; clients cannot widen or replace it.
-- [ ] **EDGE-02**: The map covers `Contains`, `PrimaryKeyOf`, `UniqueKeyOf`, `ForeignKeyTo`, `EnforcedBy`, `TriggerOn`, `SynonymFor`, `DocumentedBy`, `Calls`, `ReadsFrom`, `WritesTo`, `JoinsWith`, `ReferencesByCode`, `DependsOn`, `DerivedFrom`, and `UsesSequence`.
-- [ ] **EDGE-03**: `ForeignKeyTo` represents declared FK semantics with Column-to-Column as the canonical pair; any retained Table-to-Table legacy pair is explicit, separately documented, and separately tested.
-- [ ] **EDGE-04**: `Calls` connects only finite executable/code-unit type pairs; `ReadsFrom` and `WritesTo` start only from explicitly allowed code-unit or derived-object types.
-- [ ] **EDGE-05**: `TriggerOn` starts at Trigger; `SynonymFor` starts at Synonym; `DocumentedBy` targets DictionaryDocument or SourceArtifact; `UsesSequence` targets Sequence.
-- [ ] **EDGE-06**: `JoinsWith` permits only documented Table, View, MaterializedView, and Column pair combinations; `DependsOn`, `ReferencesByCode`, and `DerivedFrom` remain broad only through documented finite maps.
-- [ ] **EDGE-07**: `EnforcedBy` accepts only documented endpoint pairs and retains its explicit DDL or Oracle-dictionary evidence requirement.
-- [ ] **EDGE-08**: Disallowed endpoint pairs fail with `edge_endpoint_pair_not_allowed` before endpoint database reads when possible and always before embeddings, schema initialization, transactions, or status writes.
-- [ ] **EDGE-09**: Standalone edge upsert, combined batch, dry-run, prepare, commit preflight, verification, and edge resolution share one endpoint-map authority and cannot disagree; `LikelyReferencesTo`, `MapsTo`, and `SynchronizesTo` remain unregistered until later inference/schema approval.
+- [x] **EDGE-01**: A fixed server-owned endpoint map defines every allowed `(source_entity_type, target_entity_type)` pair for every catalog edge type; clients cannot widen or replace it.
+- [x] **EDGE-02**: The map covers `Contains`, `PrimaryKeyOf`, `UniqueKeyOf`, `ForeignKeyTo`, `EnforcedBy`, `TriggerOn`, `SynonymFor`, `DocumentedBy`, `Calls`, `ReadsFrom`, `WritesTo`, `JoinsWith`, `ReferencesByCode`, `DependsOn`, `DerivedFrom`, and `UsesSequence`.
+- [x] **EDGE-03**: `ForeignKeyTo` represents declared FK semantics with Column-to-Column as the canonical pair; any retained Table-to-Table legacy pair is explicit, separately documented, and separately tested.
+- [x] **EDGE-04**: `Calls` connects only finite executable/code-unit type pairs; `ReadsFrom` and `WritesTo` start only from explicitly allowed code-unit or derived-object types.
+- [x] **EDGE-05**: `TriggerOn` starts at Trigger; `SynonymFor` starts at Synonym; `DocumentedBy` targets DictionaryDocument or SourceArtifact; `UsesSequence` targets Sequence.
+- [x] **EDGE-06**: `JoinsWith` permits only documented Table, View, MaterializedView, and Column pair combinations; `DependsOn`, `ReferencesByCode`, and `DerivedFrom` remain broad only through documented finite maps.
+- [x] **EDGE-07**: `EnforcedBy` accepts only documented endpoint pairs and retains its explicit DDL or Oracle-dictionary evidence requirement.
+- [x] **EDGE-08**: Disallowed endpoint pairs fail with `edge_endpoint_pair_not_allowed` before endpoint database reads when possible and always before embeddings, schema initialization, transactions, or status writes.
+- [x] **EDGE-09**: Standalone edge upsert, combined batch, dry-run, prepare, commit preflight, verification, and edge resolution share one endpoint-map authority and cannot disagree; `LikelyReferencesTo`, `MapsTo`, and `SynchronizesTo` remain unregistered until later inference/schema approval.
 
 ### Authoritative Hash Contract
 
-- [ ] **HASH-01**: Every combined catalog batch requires a valid lowercase 64-hex `catalog_sha256`.
-- [ ] **HASH-02**: The server-authoritative request hash includes identity schema version, group ID, batch ID, catalog hash, all canonical entity content, all canonical edge content, all canonical provenance source content, and all canonical evidence-link content.
-- [ ] **HASH-03**: The request hash excludes only documented transport or server-execution fields such as `dry_run`, caller-supplied `request_sha256`, generated timestamps, retry counters, and plan tokens.
-- [ ] **HASH-04**: Changing `catalog_sha256` or any included canonical domain field changes the server-computed `request_sha256`; collection ordering and canonical JSON rules are deterministic and versioned.
-- [ ] **HASH-05**: Every `upsert_catalog_batch` result, including dry-run, returns `identity_schema_version`, server-computed `request_sha256`, `catalog_sha256`, and `batch_uuid`.
-- [ ] **HASH-06**: A caller-supplied `request_sha256` is audit-only and must exactly match the server-computed value or fail with `content_hash_mismatch`.
-- [ ] **HASH-07**: One documented canonicalization version governs request, item, prepared payload, evidence, and manifest hashing so omitted fields cannot create false idempotence.
+- [x] **HASH-01**: Every combined catalog batch requires a valid lowercase 64-hex `catalog_sha256`.
+- [x] **HASH-02**: The server-authoritative request hash includes identity schema version, group ID, batch ID, catalog hash, all canonical entity content, all canonical edge content, all canonical provenance source content, and all canonical evidence-link content.
+- [x] **HASH-03**: The request hash excludes only documented transport or server-execution fields such as `dry_run`, caller-supplied `request_sha256`, generated timestamps, retry counters, and plan tokens.
+- [x] **HASH-04**: Changing `catalog_sha256` or any included canonical domain field changes the server-computed `request_sha256`; collection ordering and canonical JSON rules are deterministic and versioned.
+- [x] **HASH-05**: Every `upsert_catalog_batch` result, including dry-run, returns `identity_schema_version`, server-computed `request_sha256`, `catalog_sha256`, and `batch_uuid`.
+- [x] **HASH-06**: A caller-supplied `request_sha256` is audit-only and must exactly match the server-computed value or fail with `content_hash_mismatch`.
+- [x] **HASH-07**: One documented canonicalization version governs request, item, prepared payload, evidence, and manifest hashing so omitted fields cannot create false idempotence.
 
 ### Capabilities and Status
 
-- [ ] **CAPA-01**: The read-only `get_catalog_capabilities` MCP tool works after server initialization even when catalog writes are disabled or identity write prerequisites are incomplete.
-- [ ] **CAPA-02**: Capabilities return server/package version, graph backend, and safely determined connectivity state.
-- [ ] **CAPA-03**: Capabilities return catalog read/write gate state, UUID namespace configured as a boolean, and a non-reversible namespace fingerprint; the raw namespace is never returned.
-- [ ] **CAPA-04**: Capabilities return identity schema version, canonicalization version, and catalog schema version.
-- [ ] **CAPA-05**: Capabilities return the entity type/prefix/grammar registry, edge type registry, and complete endpoint type map.
-- [ ] **CAPA-06**: Capabilities return configured limits and immutable hard limits for entities, edges, provenance sources, evidence links, prepared payload bytes, active plans, TTL, and pagination.
-- [ ] **CAPA-07**: Capabilities return embedding provider configuration/readiness and Neo4j vector/index readiness only when those states can be determined safely without mutation.
-- [ ] **CAPA-08**: Capabilities explicitly report prepare/commit, explicit evidence-link, manifest, and manifest-verification support.
-- [ ] **CAPA-09**: `get_status` remains backward compatible, preserving its existing `status` and `message` fields even if catalog capability summaries are added.
+- [x] **CAPA-01**: The read-only `get_catalog_capabilities` MCP tool works after server initialization even when catalog writes are disabled or identity write prerequisites are incomplete.
+- [x] **CAPA-02**: Capabilities return server/package version, graph backend, and safely determined connectivity state.
+- [x] **CAPA-03**: Capabilities return catalog read/write gate state, UUID namespace configured as a boolean, and a non-reversible namespace fingerprint; the raw namespace is never returned.
+- [x] **CAPA-04**: Capabilities return identity schema version, canonicalization version, and catalog schema version.
+- [x] **CAPA-05**: Capabilities return the entity type/prefix/grammar registry, edge type registry, and complete endpoint type map.
+- [x] **CAPA-06**: Capabilities return configured limits and immutable hard limits for entities, edges, provenance sources, evidence links, prepared payload bytes, active plans, TTL, and pagination.
+- [x] **CAPA-07**: Capabilities return embedding provider configuration/readiness and Neo4j vector/index readiness only when those states can be determined safely without mutation.
+- [x] **CAPA-08**: Capabilities explicitly report prepare/commit, explicit evidence-link, manifest, and manifest-verification support.
+- [x] **CAPA-09**: `get_status` remains backward compatible, preserving its existing `status` and `message` fields even if catalog capability summaries are added.
 
 ### Immutable Prepare, Commit, and Discard
 
@@ -114,12 +114,12 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 
 ### Exact Provenance Evidence
 
-- [ ] **EVID-01**: Catalog-v2 provenance uses an explicit `CatalogEvidenceLink` containing `source_key`, exactly one typed entity-or-edge target, evidence kind, bounded locator, optional excerpt, extractor identity/version, optional rule ID, finite confidence, and optional content hash.
-- [ ] **EVID-02**: Evidence targets are exclusive and complete: entity targets provide entity type and graph key; edge targets provide edge type and edge key; mixed, empty, or ambiguous targets fail validation.
-- [ ] **EVID-03**: Evidence kind is restricted to the documented server allowlist containing `oracle_dictionary`, `ddl`, `view_sql`, `plsql_source`, `comment`, and `manual`.
-- [ ] **EVID-04**: Locator, excerpt, extractor, rule, confidence, hash, and nested fields have explicit length, depth, node-count, format, and finite-number bounds.
-- [ ] **EVID-05**: Every evidence link receives a server-derived catalog-v2 deterministic UUID and canonical content hash.
-- [ ] **EVID-06**: Every source-to-target relationship must be explicitly listed; no request path creates an implicit sources-by-targets Cartesian product.
+- [x] **EVID-01**: Catalog-v2 provenance uses an explicit `CatalogEvidenceLink` containing `source_key`, exactly one typed entity-or-edge target, evidence kind, bounded locator, optional excerpt, extractor identity/version, optional rule ID, finite confidence, and optional content hash.
+- [x] **EVID-02**: Evidence targets are exclusive and complete: entity targets provide entity type and graph key; edge targets provide edge type and edge key; mixed, empty, or ambiguous targets fail validation.
+- [x] **EVID-03**: Evidence kind is restricted to the documented server allowlist containing `oracle_dictionary`, `ddl`, `view_sql`, `plsql_source`, `comment`, and `manual`.
+- [x] **EVID-04**: Locator, excerpt, extractor, rule, confidence, hash, and nested fields have explicit length, depth, node-count, format, and finite-number bounds.
+- [x] **EVID-05**: Every evidence link receives a server-derived catalog-v2 deterministic UUID and canonical content hash.
+- [x] **EVID-06**: Every source-to-target relationship must be explicitly listed; no request path creates an implicit sources-by-targets Cartesian product.
 - [ ] **EVID-07**: Entity and edge evidence targets resolve exactly within `group_id` before writes; missing or mismatched targets fail atomically.
 - [ ] **EVID-08**: Duplicate byte-identical evidence links coalesce; reuse of one evidence identity with changed immutable source or target fields fails with `provenance_link_conflict`.
 - [ ] **EVID-09**: Existing Graphiti-compatible source Episodic, MENTIONS, and RELATES_TO `episodes` behavior remains available for search interoperability without fabricating links.
@@ -127,7 +127,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [ ] **EVID-11**: Evidence/control records never carry Entity labels, enter entity indexes, or participate in community clustering.
 - [ ] **EVID-12**: The read-only `get_catalog_evidence` tool returns compact group-isolated evidence for one entity or edge target with bounded pagination and optional excerpts.
 - [ ] **EVID-13**: `verify_catalog_batch` can require and compare exact evidence-link identities and counts, not only a boolean provenance-presence flag.
-- [ ] **EVID-14**: Catalog-v2 rejects the legacy Cartesian provenance request shape; no automatic conversion of multi-source target arrays is performed.
+- [x] **EVID-14**: Catalog-v2 rejects the legacy Cartesian provenance request shape; no automatic conversion of multi-source target arrays is performed.
 
 ### Durable Batch Manifest and Verification
 
@@ -160,9 +160,9 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 ### Verification, Regression, and Documentation
 
 - [x] **TEST-01**: Automated unit coverage proves strict unknown-field rejection at every nested level, misspelled optional-field rejection, `strict_endpoints=false` rejection, and `atomic=false` rejection.
-- [ ] **TEST-02**: Exhaustive table-driven tests cover every allowed and rejected endpoint pair for all 16 edge types.
+- [x] **TEST-02**: Exhaustive table-driven tests cover every allowed and rejected endpoint pair for all 16 edge types.
 - [x] **TEST-03**: Identity tests prove FE/BO separation, overload separation, graph-key grammar, unsupported-version rejection, and UUID/hash changes when identity schema version changes.
-- [ ] **TEST-04**: Hash tests prove `catalog_sha256` changes `request_sha256`, every included domain field is covered, excluded transport fields are stable, and dry-run returns authoritative hashes with zero writes.
+- [x] **TEST-04**: Hash tests prove `catalog_sha256` changes `request_sha256`, every included domain field is covered, excluded transport fields are stable, and dry-run returns authoritative hashes with zero writes.
 - [ ] **TEST-05**: Prepare tests prove no domain/status mutation, immutable persisted payloads, token-only commit, restart safety, TTL/size/cardinality limits, and missing/expired/discarded/consumed/conflicting behavior.
 - [ ] **TEST-06**: Concurrency tests prove one logical result for identical concurrent commit, token scope cannot change, expired plans cannot revive, and no duplicate manifest/evidence/domain records appear.
 - [ ] **TEST-07**: Evidence tests prove multiple sources link only to explicitly declared targets, no Cartesian provenance occurs, exact link verification works, and conflicting immutable link targets fail closed.
@@ -253,31 +253,31 @@ Deferred until the deterministic substrate is implemented and verified.
 | IDEN-11 | Phase 1 | Complete |
 | IDEN-12 | Phase 1 | Complete |
 | IDEN-13 | Phase 5 | Pending |
-| EDGE-01 | Phase 2 | Pending |
-| EDGE-02 | Phase 2 | Pending |
-| EDGE-03 | Phase 2 | Pending |
-| EDGE-04 | Phase 2 | Pending |
-| EDGE-05 | Phase 2 | Pending |
-| EDGE-06 | Phase 2 | Pending |
-| EDGE-07 | Phase 2 | Pending |
-| EDGE-08 | Phase 2 | Pending |
-| EDGE-09 | Phase 2 | Pending |
-| HASH-01 | Phase 2 | Pending |
-| HASH-02 | Phase 2 | Pending |
-| HASH-03 | Phase 2 | Pending |
-| HASH-04 | Phase 2 | Pending |
-| HASH-05 | Phase 2 | Pending |
-| HASH-06 | Phase 2 | Pending |
-| HASH-07 | Phase 2 | Pending |
-| CAPA-01 | Phase 2 | Pending |
-| CAPA-02 | Phase 2 | Pending |
-| CAPA-03 | Phase 2 | Pending |
-| CAPA-04 | Phase 2 | Pending |
-| CAPA-05 | Phase 2 | Pending |
-| CAPA-06 | Phase 2 | Pending |
-| CAPA-07 | Phase 2 | Pending |
-| CAPA-08 | Phase 2 | Pending |
-| CAPA-09 | Phase 2 | Pending |
+| EDGE-01 | Phase 2 | Complete |
+| EDGE-02 | Phase 2 | Complete |
+| EDGE-03 | Phase 2 | Complete |
+| EDGE-04 | Phase 2 | Complete |
+| EDGE-05 | Phase 2 | Complete |
+| EDGE-06 | Phase 2 | Complete |
+| EDGE-07 | Phase 2 | Complete |
+| EDGE-08 | Phase 2 | Complete |
+| EDGE-09 | Phase 2 | Complete |
+| HASH-01 | Phase 2 | Complete |
+| HASH-02 | Phase 2 | Complete |
+| HASH-03 | Phase 2 | Complete |
+| HASH-04 | Phase 2 | Complete |
+| HASH-05 | Phase 2 | Complete |
+| HASH-06 | Phase 2 | Complete |
+| HASH-07 | Phase 2 | Complete |
+| CAPA-01 | Phase 2 | Complete |
+| CAPA-02 | Phase 2 | Complete |
+| CAPA-03 | Phase 2 | Complete |
+| CAPA-04 | Phase 2 | Complete |
+| CAPA-05 | Phase 2 | Complete |
+| CAPA-06 | Phase 2 | Complete |
+| CAPA-07 | Phase 2 | Complete |
+| CAPA-08 | Phase 2 | Complete |
+| CAPA-09 | Phase 2 | Complete |
 | PLAN-01 | Phase 3A | Pending |
 | PLAN-02 | Phase 3A | Pending |
 | PLAN-03 | Phase 3A | Pending |
@@ -298,12 +298,12 @@ Deferred until the deterministic substrate is implemented and verified.
 | PLAN-18 | Phase 3A | Pending |
 | PLAN-19 | Phase 3A | Pending |
 | PLAN-20 | Phase 3A | Pending |
-| EVID-01 | Phase 2 | Pending |
-| EVID-02 | Phase 2 | Pending |
-| EVID-03 | Phase 2 | Pending |
-| EVID-04 | Phase 2 | Pending |
-| EVID-05 | Phase 2 | Pending |
-| EVID-06 | Phase 2 | Pending |
+| EVID-01 | Phase 2 | Complete |
+| EVID-02 | Phase 2 | Complete |
+| EVID-03 | Phase 2 | Complete |
+| EVID-04 | Phase 2 | Complete |
+| EVID-05 | Phase 2 | Complete |
+| EVID-06 | Phase 2 | Complete |
 | EVID-07 | Phase 3B | Pending |
 | EVID-08 | Phase 3B | Pending |
 | EVID-09 | Phase 3B | Pending |
@@ -311,7 +311,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | EVID-11 | Phase 3B | Pending |
 | EVID-12 | Phase 4 | Pending |
 | EVID-13 | Phase 4 | Pending |
-| EVID-14 | Phase 2 | Pending |
+| EVID-14 | Phase 2 | Complete |
 | MANI-01 | Phase 3B | Pending |
 | MANI-02 | Phase 3B | Pending |
 | MANI-03 | Phase 3B | Pending |
@@ -335,9 +335,9 @@ Deferred until the deterministic substrate is implemented and verified.
 | GATE-05 | Phase 4 | Pending |
 | GATE-06 | Phase 4 | Pending |
 | TEST-01 | Phase 1 | Complete |
-| TEST-02 | Phase 2 | Pending |
+| TEST-02 | Phase 2 | Complete |
 | TEST-03 | Phase 1 | Complete |
-| TEST-04 | Phase 2 | Pending |
+| TEST-04 | Phase 2 | Complete |
 | TEST-05 | Phase 3A | Pending |
 | TEST-06 | Phase 3B | Pending |
 | TEST-07 | Phase 3B | Pending |

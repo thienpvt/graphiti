@@ -1,0 +1,323 @@
+"""Unit tests for catalog_phase2_gate_runner (no network, no Neo4j)."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
+import catalog_phase2_gate_runner as gate  # noqa: E402
+
+
+def _root() -> Path:
+    return gate.repo_root_from(Path(__file__))
+
+
+def test_canonical_specs_shape_and_reject_shell_integration():
+    root = _root()
+    specs = gate.canonical_specs(root)
+    assert specs
+    ids = [s['id'] for s in specs]
+    assert len(ids) == len(set(ids))
+    assert 'focused_pytest' in ids
+    assert 'topology_evidence_hash_capabilities' in ids
+    assert 'scoped_ruff' in ids
+    assert 'scoped_pyright' in ids
+    assert 'safety_no_probe' in ids
+    assert 'edge_probe_resolution' in ids
+    assert 'no_new_store_write_path' in ids
+    # Focus files include topology/evidence/hash/capabilities.
+    focused = next(s for s in specs if s['id'] == 'focused_pytest')
+    joined = ' '.join(focused['argv'])
+    for token in (
+        'test_catalog_topology.py',
+        'test_catalog_evidence.py',
+        'test_catalog_hash.py',
+        'test_catalog_capabilities.py',
+    ):
+        assert token in joined
+    for s in specs:
+        gate.validate_spec(s, root)
+        assert s['expected_exit'] == 0
+        assert isinstance(s['argv'], list) and s['argv']
+        for a in s['argv']:
+            norm = a.replace('\\', '/')
+            assert not norm.endswith('test_catalog_neo4j_int.py')
+        assert s['argv'][0].lower() not in gate.SHELL_EXECUTABLES
+
+    bad_shell = {
+        'id': 'bad',
+        'argv': ['bash', '-c', 'true'],
+        'expected_exit': 0,
+        'mandatory': True,
+    }
+    with pytest.raises(ValueError, match='shell'):
+        gate.validate_spec(bad_shell, root)
+
+    bad_meta = {
+        'id': 'bad2',
+        'argv': ['uv', 'run', '&&', 'echo'],
+        'expected_exit': 0,
+        'mandatory': True,
+    }
+    with pytest.raises(ValueError, match='metacharacter|shell'):
+        gate.validate_spec(bad_meta, root)
+
+    bad_int = {
+        'id': 'bad3',
+        'argv': [
+            'uv',
+            'run',
+            '--project',
+            'mcp_server',
+            'python',
+            '-m',
+            'pytest',
+            'mcp_server/tests/test_catalog_neo4j_int.py',
+        ],
+        'expected_exit': 0,
+        'mandatory': True,
+    }
+    with pytest.raises(ValueError, match='test_catalog_neo4j_int'):
+        gate.validate_spec(bad_int, root)
+
+
+def test_sentinel_exact_third_element_nonzero():
+    root = _root()
+    sentinel = gate.run_sentinel(root)
+    assert sentinel['argv_third'] == 'assert False'
+    assert sentinel['exit_code'] != 0
+    assert sentinel['pass'] is True
+    assert sentinel['excluded_from_aggregation'] is True
+
+
+def test_bound_output_and_pytest_counts():
+    long = 'x' * 10000
+    bounded = gate.bound_output(long, 100)
+    assert len(bounded) <= 100
+    assert 'truncated' in bounded
+    counts = gate.parse_pytest_counts('===== 12 passed, 3 deselected, 1 failed in 2.0s =====')
+    assert counts['passed'] == 12
+    assert counts['deselected'] == 3
+    assert counts['failed'] == 1
+
+
+def test_deterministic_spec_digest():
+    root = _root()
+    a = gate.canonical_specs_json(gate.canonical_specs(root))
+    b = gate.canonical_specs_json(gate.canonical_specs(root))
+    assert a == b
+    assert gate.sha256_text(a) == gate.sha256_text(b)
+
+
+def test_derive_local_gate_pass_requires_all_mandatory():
+    sentinel = {'pass': True, 'exit_code': 1, 'argv_third': 'assert False'}
+    results = [
+        {
+            'id': 'a',
+            'status': 'pass',
+            'exit_code': 0,
+            'expected_exit': 0,
+            'mandatory': True,
+        },
+        {
+            'id': 'b',
+            'status': 'fail',
+            'exit_code': 1,
+            'expected_exit': 0,
+            'mandatory': True,
+        },
+    ]
+    assert gate.derive_local_gate_pass(results, sentinel, 'skip', False) is False
+    results[1]['status'] = 'pass'
+    results[1]['exit_code'] = 0
+    assert gate.derive_local_gate_pass(results, sentinel, 'skip', False) is True
+    assert gate.derive_local_gate_pass(results, sentinel, 'pass', False) is False
+    assert gate.derive_local_gate_pass(results, sentinel, 'skip', True) is False
+
+
+def test_derive_ready_for_phase_3a_fail_closed():
+    safety_ok = {
+        'canary_executed': False,
+        'oracle_catalog_v2_queried': False,
+        'no_new_store_or_control_plane_write_path': True,
+        'safety_checks_pass': True,
+    }
+    assert gate.derive_ready_for_phase_3a(True, safety_ok) is True
+    assert gate.derive_ready_for_phase_3a(False, safety_ok) is False
+    bad = dict(safety_ok, canary_executed=True)
+    assert gate.derive_ready_for_phase_3a(True, bad) is False
+    bad2 = dict(safety_ok, no_new_store_or_control_plane_write_path=False)
+    assert gate.derive_ready_for_phase_3a(True, bad2) is False
+
+
+def test_plan_ownership_covers_0_to_67_unique():
+    covered: set[int] = set()
+    for rows in gate.PLAN_OWNERSHIP.values():
+        covered |= set(rows)
+    assert covered == set(range(68))
+    # no overlaps
+    total = sum(len(v) for v in gate.PLAN_OWNERSHIP.values())
+    assert total == 68
+
+
+def test_injected_mandatory_failure_and_tamper_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = _root()
+    ledger_path = tmp_path / '02-GATE-RESULTS.json'
+
+    def fake_run_argv(argv, root_arg, timeout=1800):  # noqa: ARG001
+        return {
+            'exit_code': 0,
+            'stdout': '1 passed',
+            'stderr': '',
+            'counts': {'passed': 1, 'failed': 0, 'skipped': 0, 'deselected': 0, 'errors': 0},
+        }
+
+    monkeypatch.setattr(gate, 'run_argv', fake_run_argv)
+    monkeypatch.setenv('CATALOG_PHASE2_GATE_SKIP_SELF', '1')
+
+    ledger = gate.run_gate(
+        root,
+        ledger_path,
+        injected_overrides={
+            'focused_pytest': {
+                'exit_code': 1,
+                'status': 'fail',
+                'stdout': 'forced failure',
+                'stderr': '',
+            }
+        },
+    )
+    assert ledger['local_gate_pass'] is False
+    assert ledger['ready_for_phase_3a'] is False
+    assert ledger['catalog_neo4j_int'] == 'skip'
+    assert ledger['availability_probed'] is False
+    assert ledger['canary_executed'] is False
+    assert ledger['oracle_catalog_v2_queried'] is False
+    assert ledger['schema_version'] == gate.SCHEMA_VERSION
+    ids = [r['id'] for r in ledger['results']]
+    assert 'focused_pytest' in ids
+    assert 'safety_no_probe' in ids
+    assert 'topology_evidence_hash_capabilities' in ids
+
+    # Tamper specs digest
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['spec_sha256'] = '0' * 64
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(root, ledger_path)
+    assert ver['ok'] is False
+    assert any('spec_sha256' in e for e in ver['errors'])
+
+    # Fresh fail ledger then HEAD tamper
+    ledger = gate.run_gate(
+        root,
+        ledger_path,
+        injected_overrides={
+            'focused_pytest': {'exit_code': 1, 'status': 'fail', 'stdout': '', 'stderr': ''}
+        },
+    )
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['evaluated_head'] = 'deadbeef' * 5
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(root, ledger_path)
+    assert ver['ok'] is False
+    assert any('evaluated_head' in e for e in ver['errors'])
+
+    # Missing result
+    ledger = gate.run_gate(
+        root,
+        ledger_path,
+        injected_overrides={
+            'focused_pytest': {'exit_code': 1, 'status': 'fail', 'stdout': '', 'stderr': ''}
+        },
+    )
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['results'] = [r for r in raw['results'] if r['id'] != 'scoped_ruff']
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(root, ledger_path)
+    assert ver['ok'] is False
+    assert any('scoped_ruff' in e for e in ver['errors'])
+
+    # Raw probe digest tamper
+    ledger = gate.run_gate(
+        root,
+        ledger_path,
+        injected_overrides={
+            'focused_pytest': {'exit_code': 1, 'status': 'fail', 'stdout': '', 'stderr': ''}
+        },
+    )
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['raw_edge_probe_sha256'] = '1' * 64
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(root, ledger_path)
+    assert ver['ok'] is False
+    assert any('raw_edge_probe_sha256' in e for e in ver['errors'])
+
+    # Content digest tamper
+    ledger = gate.run_gate(
+        root,
+        ledger_path,
+        injected_overrides={
+            'focused_pytest': {'exit_code': 1, 'status': 'fail', 'stdout': '', 'stderr': ''}
+        },
+    )
+    raw = json.loads(ledger_path.read_text(encoding='utf-8'))
+    raw['content_digest'] = '2' * 64
+    ledger_path.write_text(json.dumps(raw), encoding='utf-8')
+    ver = gate.verify_ledger(root, ledger_path)
+    assert ver['ok'] is False
+    assert any('content_digest' in e for e in ver['errors'])
+
+
+def test_injected_mandatory_failure():
+    """Alias node required by plan: test_injected_mandatory_failure."""
+    root = _root()
+    sentinel = gate.run_sentinel(root)
+    results = [
+        {
+            'id': 'x',
+            'status': 'fail',
+            'exit_code': 2,
+            'expected_exit': 0,
+            'mandatory': True,
+        }
+    ]
+    assert gate.derive_local_gate_pass(results, sentinel, 'skip', False) is False
+    assert gate.derive_ready_for_phase_3a(False, {
+        'canary_executed': False,
+        'oracle_catalog_v2_queried': False,
+        'no_new_store_or_control_plane_write_path': True,
+        'safety_checks_pass': True,
+    }) is False
+
+
+def test_no_integration_import_in_runner_source():
+    module_file = gate.__file__
+    assert module_file is not None
+    src = Path(module_file).read_text(encoding='utf-8')
+    import_lines = [
+        ln for ln in src.splitlines() if ln.startswith('import ') or ln.startswith('from ')
+    ]
+    assert not any('test_catalog_neo4j_int' in ln for ln in import_lines)
+    assert 'INTEGRATION_MODULE' in src
+    assert 'test_catalog_neo4j_int' not in sys.modules
+    assert 'ready_for_phase_3a' in src
+    assert gate.FORBIDDEN_GROUP == 'oracle-catalog-v2'
+    assert gate.ALLOWED_TEST_GROUP == 'oracle-catalog-tool-test'
+
+
+def test_edge_probe_raw_structure():
+    root = _root()
+    gate.check_edge_probe_raw(root)
+    data, raw_bytes, digest = gate.load_raw_probe(root)
+    assert len(data['items']) == 68
+    assert len(digest) == 64
+    assert len(raw_bytes) > 0

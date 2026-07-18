@@ -1,9 +1,9 @@
 ---
 phase: 02
 slug: topology-authority-evidence-contract-hashes-and-capabilities
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-07-18
 ---
 
@@ -38,11 +38,11 @@ created: 2026-07-18
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 02-01-01 | 01 | 1 | EDGE-01..09, TEST-02 | T-02-01, T-02-06 | Server map rejects unregistered types/pairs before side effects | unit + service spy | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_topology.py mcp_server/tests/test_catalog_service.py -q --tb=line -k 'endpoint or topology or deferred'` | ❌ W0 | ⬜ pending |
-| 02-02-01 | 02 | 1 | EVID-01..06, EVID-14 | T-02-02, T-02-07 | Exclusive explicit links; bounded input; no Cartesian conversion | unit | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_evidence.py mcp_server/tests/test_catalog_models.py -q --tb=line -k 'evidence or provenance'` | ❌ W0 | ⬜ pending |
-| 02-03-01 | 03 | 2 | HASH-01..07, TEST-04 | T-02-03 | Versioned full-domain hash changes for every included field; transport fields stable | unit + service spy | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_hash.py mcp_server/tests/test_catalog_service.py -q --tb=line -k 'hash or dry_run'` | ❌ W0 | ⬜ pending |
-| 02-04-01 | 04 | 2 | CAPA-01..09 | T-02-04 | Read-only capabilities redact namespace/secrets and preserve `get_status` | unit + MCP registration | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_capabilities.py mcp_server/tests/test_graphiti_mcp_server.py -q --tb=line -k 'capabilit or get_status or tool'` | ❌ W0 | ⬜ pending |
-| 02-05-01 | 05 | 3 | All Phase 2 | T-02-01..07 | Gate proves no canary/live-group/store/control-plane writes | structural + focused regression | `uv run --project mcp_server python mcp_server/tests/run_phase2_gate.py` | ❌ W0 | ⬜ pending |
+| 02-01-01 | 01 | 1 | EDGE-01..09, TEST-02 | T-02-01, T-02-06 | Server map rejects unregistered types/pairs before side effects | unit + service spy | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_topology.py mcp_server/tests/test_catalog_service.py -q --tb=line -k 'endpoint or topology or deferred'` | ✅ | green |
+| 02-02-01 | 02 | 1 | EVID-01..06, EVID-14 | T-02-02, T-02-07 | Exclusive explicit links; bounded input; no Cartesian conversion | unit | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_evidence.py mcp_server/tests/test_catalog_models.py -q --tb=line -k 'evidence or provenance'` | ✅ | green |
+| 02-03-01 | 03 | 2 | HASH-01..07, TEST-04 | T-02-03 | Versioned full-domain hash changes for every included field; transport fields stable | unit + service spy | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_hash.py mcp_server/tests/test_catalog_service.py -q --tb=line -k 'hash or dry_run'` | ✅ | green |
+| 02-04-01 | 04 | 2 | CAPA-01..09 | T-02-04 | Read-only capabilities redact namespace/secrets and preserve `get_status` | unit + MCP registration | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_capabilities.py mcp_server/tests/test_graphiti_mcp_server.py -q --tb=line -k 'capabilit or get_status or tool'` | ✅ | green |
+| 02-05-01 | 05 | 3 | All Phase 2 | T-02-01..07 | Gate proves no canary/live-group/store/control-plane writes | structural + focused regression | `uv run --project mcp_server python mcp_server/tests/run_phase2_gate.py` | ✅ | green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -50,11 +50,11 @@ created: 2026-07-18
 
 ## Wave 0 Requirements
 
-- [ ] `mcp_server/tests/test_catalog_topology.py` — exhaustive allowed/rejected topology matrix and pre-side-effect ordering.
-- [ ] `mcp_server/tests/test_catalog_evidence.py` — explicit evidence-link schema, bounds, identity/hash, Cartesian rejection.
-- [ ] `mcp_server/tests/test_catalog_hash.py` — field mutation, ordering, exclusions, versioning, catalog-hash sensitivity.
-- [ ] `mcp_server/tests/test_catalog_capabilities.py` — disabled-write/read-only behavior, redaction, registries, limits, support flags, status compatibility.
-- [ ] `mcp_server/tests/run_phase2_gate.py` — tracked fail-closed focused gate and safety ledger.
+- [x] `mcp_server/tests/test_catalog_topology.py` — exhaustive allowed/rejected topology matrix and pre-side-effect ordering.
+- [x] `mcp_server/tests/test_catalog_evidence.py` — explicit evidence-link schema, bounds, identity/hash, Cartesian rejection.
+- [x] `mcp_server/tests/test_catalog_hash.py` — field mutation, ordering, exclusions, versioning, catalog-hash sensitivity.
+- [x] `mcp_server/tests/test_catalog_capabilities.py` — disabled-write/read-only behavior, redaction, registries, limits, support flags, status compatibility.
+- [x] `mcp_server/tests/run_phase2_gate.py` — tracked fail-closed focused gate and safety ledger.
 
 Existing pytest infrastructure covers fixtures, asyncio, and spies; no new framework dependency is needed.
 
@@ -82,15 +82,15 @@ All Phase 2 behaviors have automated verification. Live Neo4j is deliberately no
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies.
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify.
-- [ ] Wave 0 covers all missing references.
-- [ ] No watch-mode flags.
-- [ ] Feedback latency <120 seconds.
-- [ ] Focused pytest suite passes.
-- [ ] Scoped Ruff passes.
-- [ ] Scoped Pyright passes or baseline-only failures are truthfully isolated.
-- [ ] Safety ledger records no canary, no `oracle-catalog-v2` access, no new store/control-plane write path.
-- [ ] `nyquist_compliant: true` set only after evidence exists.
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies.
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify.
+- [x] Wave 0 covers all missing references.
+- [x] No watch-mode flags.
+- [x] Feedback latency <120 seconds.
+- [x] Focused pytest suite passes.
+- [x] Scoped Ruff passes.
+- [x] Scoped Pyright passes or baseline-only failures are truthfully isolated.
+- [x] Safety ledger records no canary, no `oracle-catalog-v2` access, no new store/control-plane write path.
+- [x] `nyquist_compliant: true` set only after evidence exists.
 
-**Approval:** pending
+**Approval:** local gate green via 02-GATE-RESULTS.json

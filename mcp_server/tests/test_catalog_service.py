@@ -2480,10 +2480,10 @@ async def test_batch_topology_disallowed_edge_skips_resolve_embed_write():
         )
         or resp.error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
     )
-    service._store.resolve_endpoint_typed.assert_not_awaited()
+    cast(AsyncMock, service._store.resolve_endpoint_typed).assert_not_awaited()
     client.embedder.create.assert_not_awaited()
     client.embedder.create_batch.assert_not_awaited()
-    service._store.upsert_edge_item.assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_edge_item).assert_not_awaited()
     service._ensure_schema.assert_not_awaited()
     assert 'transaction' not in client.call_order
 
