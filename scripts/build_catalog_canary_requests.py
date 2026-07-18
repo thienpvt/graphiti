@@ -24,11 +24,9 @@ if str(MCP_SRC) not in sys.path:
 from models.catalog_batch import NestedProvenancePayload, UpsertCatalogBatchRequest
 from models.catalog_edges import CatalogEdgeItem
 from models.catalog_entities import CatalogEntityItem
-from models.catalog_provenance import (
-    CatalogProvenanceEdgeTarget,
-    CatalogProvenanceEntityTarget,
-    CatalogSourceItem,
-)
+from models.catalog_evidence import CatalogEvidenceLink
+from models.catalog_prepare import PrepareCatalogBatchRequest
+from models.catalog_provenance import CatalogSourceItem
 from services.catalog_identity import canonical_sha256
 from services.catalog_service import CatalogService
 
@@ -99,6 +97,31 @@ PAYLOAD_FIELDS = frozenset(
     {'group_id', 'batch_id', 'catalog_sha256', 'atomic', 'entities', 'edges', 'provenance'}
 )
 TRANSIENT_FIELDS = frozenset({'dry_run', 'request_sha256', 'timestamps', 'counters'})
+
+# Phase 5 offline hardened catalog-v2 artifacts (IDEN-13 / DOCS-06). Historical
+# canary-v2-requests/ remain read-only and invalid as hardened authority.
+HARDENED_ARTIFACT_SCHEMA_VERSION = 'canary-hardened-v1'
+HARDENED_IDENTITY_SCHEMA_VERSION = 'catalog-v2'
+HARDENED_SYSTEM_KEY = 'FE'
+HARDENED_GROUP_ID = 'oracle-catalog-tool-test'  # never live-write oracle-catalog-v2
+FUTURE_TARGET_GROUP_METADATA = 'oracle-catalog-v2'  # metadata only; never transported/executed
+SANITIZED_FIXTURE_REL = Path('mcp_server') / 'tests' / 'fixtures' / 'accept_tab_sanitized.json'
+HARDENED_OUTPUT_REL = Path('catalog') / 'canary-v2-requests-hardened'
+HARDENED_PAYLOAD_FIELDS = frozenset(
+    {
+        'identity_schema_version',
+        'system_key',
+        'group_id',
+        'batch_id',
+        'catalog_sha256',
+        'atomic',
+        'entities',
+        'edges',
+        'provenance',
+    }
+)
+HARDENED_EXTRACTOR_NAME = 'sanitized-fixture'
+HARDENED_EXTRACTOR_VERSION = '1.0.0'
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -789,17 +812,16 @@ def validate_request(raw: dict[str, Any]) -> tuple[UpsertCatalogBatchRequest, st
     _reject_unknown_fields(provenance, NestedProvenancePayload, '$.provenance')
     for index, item in enumerate(provenance['sources']):
         _reject_unknown_fields(item, CatalogSourceItem, f'$.provenance.sources[{index}]')
-    for index, item in enumerate(provenance['entity_targets']):
-        _reject_unknown_fields(
-            item,
-            CatalogProvenanceEntityTarget,
-            f'$.provenance.entity_targets[{index}]',
+    if 'entity_targets' in provenance or 'edge_targets' in provenance:
+        raise ValueError(
+            '$.provenance: Cartesian entity_targets/edge_targets rejected for catalog-v2; '
+            'use evidence_links'
         )
-    for index, item in enumerate(provenance['edge_targets']):
+    for index, item in enumerate(provenance.get('evidence_links') or []):
         _reject_unknown_fields(
             item,
-            CatalogProvenanceEdgeTarget,
-            f'$.provenance.edge_targets[{index}]',
+            CatalogEvidenceLink,
+            f'$.provenance.evidence_links[{index}]',
         )
 
     model = UpsertCatalogBatchRequest.model_validate(raw)
@@ -856,12 +878,15 @@ def validate_batches(
         }
         visible_edges = {**available_edges, **current_edges}
         assert model.provenance is not None
-        for target in model.provenance.entity_targets:
-            if (target.entity_type, target.graph_key) not in visible_entities:
-                raise ValueError(f'{batch_id}: missing provenance entity target {target}')
-        for target in model.provenance.edge_targets:
-            if (target.edge_type, target.edge_key) not in visible_edges:
-                raise ValueError(f'{batch_id}: missing provenance edge target {target}')
+        for link in model.provenance.evidence_links:
+            if link.entity_target is not None:
+                key = (link.entity_target.entity_type, link.entity_target.graph_key)
+                if key not in visible_entities:
+                    raise ValueError(f'{batch_id}: missing evidence entity target {key}')
+            if link.edge_target is not None:
+                key = (link.edge_target.edge_type, link.edge_target.edge_key)
+                if key not in visible_edges:
+                    raise ValueError(f'{batch_id}: missing evidence edge target {key}')
 
         for identity, item in current_entities.items():
             prior = unique_entities.setdefault(identity, item)
@@ -1063,26 +1088,414 @@ def build(catalog_path: Path, output_dir: Path) -> dict[str, Any]:
     return manifest
 
 
+def _with_content_hashes(
+    entities: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    sources: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    hashed_entities: list[dict[str, Any]] = []
+    for item in entities:
+        model = CatalogEntityItem.model_validate(item)
+        payload = dict(item)
+        payload['content_sha256'] = canonical_sha256(CatalogService.entity_canonical_payload(model))
+        CatalogEntityItem.model_validate(payload)
+        hashed_entities.append(payload)
+    hashed_edges: list[dict[str, Any]] = []
+    for item in edges:
+        model = CatalogEdgeItem.model_validate(item)
+        payload = dict(item)
+        payload['content_sha256'] = canonical_sha256(CatalogService.edge_canonical_payload(model))
+        CatalogEdgeItem.model_validate(payload)
+        hashed_edges.append(payload)
+    hashed_sources: list[dict[str, Any]] = []
+    for item in sources:
+        model = CatalogSourceItem.model_validate(item)
+        payload = dict(item)
+        payload['content_sha256'] = canonical_sha256(CatalogService.source_canonical_payload(model))
+        CatalogSourceItem.model_validate(payload)
+        hashed_sources.append(payload)
+    return hashed_entities, hashed_edges, hashed_sources
+
+
+def _evidence_links_from_cartesian(
+    sources: list[dict[str, Any]],
+    entity_targets: list[dict[str, Any]],
+    edge_targets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not sources:
+        raise ValueError('sanitized fixture requires at least one provenance source')
+    source_key = sources[0]['source_key']
+    links: list[dict[str, Any]] = []
+    for target in entity_targets:
+        links.append(
+            {
+                'source_key': source_key,
+                'entity_target': {
+                    'entity_type': target['entity_type'],
+                    'graph_key': target['graph_key'],
+                },
+                'evidence_kind': 'manual',
+                'extractor_name': HARDENED_EXTRACTOR_NAME,
+                'extractor_version': HARDENED_EXTRACTOR_VERSION,
+                'confidence': 1.0,
+            }
+        )
+    for target in edge_targets:
+        links.append(
+            {
+                'source_key': source_key,
+                'edge_target': {
+                    'edge_type': target['edge_type'],
+                    'edge_key': target['edge_key'],
+                },
+                'evidence_kind': 'manual',
+                'extractor_name': HARDENED_EXTRACTOR_NAME,
+                'extractor_version': HARDENED_EXTRACTOR_VERSION,
+                'confidence': 1.0,
+            }
+        )
+    return links
+
+
+def build_hardened_payload_from_fixture(fixture: dict[str, Any]) -> dict[str, Any]:
+    """Build one model-valid catalog-v2 prepare-shaped payload from synthetic fixture only."""
+    if fixture.get('identity_schema_version') != HARDENED_IDENTITY_SCHEMA_VERSION:
+        raise ValueError('fixture identity_schema_version must be catalog-v2')
+    if fixture.get('system_key') != HARDENED_SYSTEM_KEY:
+        raise ValueError('fixture system_key must be FE')
+    entities = [dict(item) for item in fixture['entities']]
+    edges = [dict(item) for item in fixture['edges']]
+    provenance = dict(fixture['provenance'])
+    sources = [dict(item) for item in provenance.get('sources') or []]
+    if provenance.get('evidence_links'):
+        evidence_links = [dict(item) for item in provenance['evidence_links']]
+    else:
+        evidence_links = _evidence_links_from_cartesian(
+            sources,
+            list(provenance.get('entity_targets') or []),
+            list(provenance.get('edge_targets') or []),
+        )
+    entities, edges, sources = _with_content_hashes(entities, edges, sources)
+    fixture_digest = sha256_bytes(
+        json.dumps(fixture, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode(
+            'utf-8'
+        )
+    )
+    payload = {
+        'identity_schema_version': HARDENED_IDENTITY_SCHEMA_VERSION,
+        'system_key': HARDENED_SYSTEM_KEY,
+        'group_id': HARDENED_GROUP_ID,
+        'batch_id': fixture['batch_id'],
+        'catalog_sha256': fixture_digest,
+        'atomic': True,
+        'entities': entities,
+        'edges': edges,
+        'provenance': {
+            'sources': sources,
+            'evidence_links': evidence_links,
+        },
+    }
+    if set(payload) != HARDENED_PAYLOAD_FIELDS:
+        raise ValueError(f'hardened payload field set mismatch: {sorted(payload)}')
+    PrepareCatalogBatchRequest.model_validate(payload)
+    UpsertCatalogBatchRequest.model_validate({**payload, 'dry_run': False})
+    return payload
+
+
+def validate_hardened_request(raw: dict[str, Any]) -> tuple[UpsertCatalogBatchRequest, str]:
+    if set(raw) != HARDENED_PAYLOAD_FIELDS:
+        raise ValueError(
+            f'hardened top-level fields must be {sorted(HARDENED_PAYLOAD_FIELDS)}, got {sorted(raw)}'
+        )
+    if raw.get('identity_schema_version') != HARDENED_IDENTITY_SCHEMA_VERSION:
+        raise ValueError('identity_schema_version must be catalog-v2')
+    if raw.get('system_key') != HARDENED_SYSTEM_KEY:
+        raise ValueError('system_key must be FE for sanitized hardened fixture')
+    if raw.get('group_id') != HARDENED_GROUP_ID:
+        raise ValueError('hardened offline group_id must be oracle-catalog-tool-test')
+    _reject_unknown_fields(raw, UpsertCatalogBatchRequest, '$')
+    for index, item in enumerate(raw['entities']):
+        _reject_unknown_fields(item, CatalogEntityItem, f'$.entities[{index}]')
+    for index, item in enumerate(raw['edges']):
+        _reject_unknown_fields(item, CatalogEdgeItem, f'$.edges[{index}]')
+    provenance = raw['provenance']
+    _reject_unknown_fields(provenance, NestedProvenancePayload, '$.provenance')
+    if 'entity_targets' in provenance or 'edge_targets' in provenance:
+        raise ValueError('Cartesian provenance rejected; use evidence_links')
+    for index, item in enumerate(provenance['sources']):
+        _reject_unknown_fields(item, CatalogSourceItem, f'$.provenance.sources[{index}]')
+    for index, item in enumerate(provenance['evidence_links']):
+        _reject_unknown_fields(item, CatalogEvidenceLink, f'$.provenance.evidence_links[{index}]')
+    model = UpsertCatalogBatchRequest.model_validate(raw)
+    for item in model.entities:
+        digest = canonical_sha256(CatalogService.entity_canonical_payload(item))
+        if item.content_sha256 != digest:
+            raise ValueError(f'{item.graph_key}: entity content hash mismatch')
+    for item in model.edges:
+        digest = canonical_sha256(CatalogService.edge_canonical_payload(item))
+        if item.content_sha256 != digest:
+            raise ValueError(f'{item.edge_key}: edge content hash mismatch')
+    assert model.provenance is not None
+    for item in model.provenance.sources:
+        digest = canonical_sha256(CatalogService.source_canonical_payload(item))
+        if item.content_sha256 != digest:
+            raise ValueError(f'{item.source_key}: source content hash mismatch')
+    return model, CatalogService.batch_request_sha256(model)
+
+
+def _offline_prepare_receipt(
+    *,
+    batch_id: str,
+    request_sha256: str,
+    catalog_sha256: str,
+    artifact_sha256: str,
+    entity_count: int,
+    edge_count: int,
+    source_count: int,
+    evidence_link_count: int,
+) -> dict[str, Any]:
+    return {
+        'artifact_schema_version': HARDENED_ARTIFACT_SCHEMA_VERSION,
+        'execution_mode': 'offline_simulation',
+        'canary_executed': False,
+        'tool': 'prepare_catalog_batch',
+        'batch_id': batch_id,
+        'plan_uuid': 'offline-plan-uuid',
+        'request_sha256': request_sha256,
+        'catalog_sha256': catalog_sha256,
+        'artifact_sha256': artifact_sha256,
+        'identity_schema_version': HARDENED_IDENTITY_SCHEMA_VERSION,
+        'expires_at': '1970-01-01T00:00:00Z',
+        'entity_count': entity_count,
+        'edge_count': edge_count,
+        'source_count': source_count,
+        'evidence_link_count': evidence_link_count,
+        'projected_created': 0,
+        'projected_updated': 0,
+        'projected_unchanged': entity_count + edge_count + source_count + evidence_link_count,
+        'token_present': False,
+        'notes': 'offline simulation only; raw plan_token omitted; not live server success',
+    }
+
+
+def _offline_commit_receipt(
+    *,
+    batch_id: str,
+    request_sha256: str,
+    catalog_sha256: str,
+    artifact_sha256: str,
+    entity_count: int,
+    edge_count: int,
+    source_count: int,
+    evidence_link_count: int,
+) -> dict[str, Any]:
+    return {
+        'artifact_schema_version': HARDENED_ARTIFACT_SCHEMA_VERSION,
+        'execution_mode': 'offline_simulation',
+        'canary_executed': False,
+        'tool': 'commit_prepared_catalog_batch',
+        'batch_id': batch_id,
+        'plan_uuid': 'offline-plan-uuid',
+        'request_sha256': request_sha256,
+        'catalog_sha256': catalog_sha256,
+        'artifact_sha256': artifact_sha256,
+        'state': 'COMMITTED',
+        'entity_count': entity_count,
+        'edge_count': edge_count,
+        'source_count': source_count,
+        'evidence_link_count': evidence_link_count,
+        'batch_uuid': 'offline-batch-uuid',
+        'manifest_sha256': request_sha256,
+        'committed_created': 0,
+        'committed_updated': 0,
+        'committed_unchanged': entity_count + edge_count,
+        'token_present': False,
+        'notes': 'offline simulation only; no transport body; not live server success',
+    }
+
+
+def _offline_checkpoint() -> dict[str, Any]:
+    return {
+        'artifact_schema_version': HARDENED_ARTIFACT_SCHEMA_VERSION,
+        'execution_mode': 'offline_simulation',
+        'canary_executed': False,
+        'canary_attempt_count': 0,
+        'validation_runs': [],
+        'future_target_group_id_metadata': FUTURE_TARGET_GROUP_METADATA,
+        'notes': (
+            'Hardened offline checkpoint is separate from '
+            'catalog/catalog.json.graphiti-canary-v2-state.json'
+        ),
+    }
+
+
+def build_hardened(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
+    """Emit versioned hardened payload/manifest/receipts/checkpoint offline only."""
+    fixture_raw = fixture_path.read_bytes()
+    fixture = strict_json_bytes(fixture_raw, str(fixture_path))
+    if not isinstance(fixture, dict):
+        raise ValueError('sanitized fixture root must be an object')
+    payload = build_hardened_payload_from_fixture(fixture)
+    model, request_sha256 = validate_hardened_request(payload)
+    assert model.provenance is not None
+    payload_bytes = canonical_bytes(payload)
+    artifact_sha256 = sha256_bytes(payload_bytes)
+    file_name = 'accept-tab.payload.json'
+    relative_payload = (HARDENED_OUTPUT_REL / file_name).as_posix()
+    prepare_receipt = _offline_prepare_receipt(
+        batch_id=model.batch_id,
+        request_sha256=request_sha256,
+        catalog_sha256=model.catalog_sha256,
+        artifact_sha256=artifact_sha256,
+        entity_count=len(model.entities),
+        edge_count=len(model.edges),
+        source_count=len(model.provenance.sources),
+        evidence_link_count=len(model.provenance.evidence_links),
+    )
+    commit_receipt = _offline_commit_receipt(
+        batch_id=model.batch_id,
+        request_sha256=request_sha256,
+        catalog_sha256=model.catalog_sha256,
+        artifact_sha256=artifact_sha256,
+        entity_count=len(model.entities),
+        edge_count=len(model.edges),
+        source_count=len(model.provenance.sources),
+        evidence_link_count=len(model.provenance.evidence_links),
+    )
+    checkpoint = _offline_checkpoint()
+    prepare_bytes = canonical_bytes(prepare_receipt)
+    commit_bytes = canonical_bytes(commit_receipt)
+    checkpoint_bytes = canonical_bytes(checkpoint)
+    inventory = {
+        'builder': 'scripts/build_catalog_canary_requests.py',
+        'runner': 'scripts/run_catalog_canary_batch.py',
+        'sanitized_fixture': SANITIZED_FIXTURE_REL.as_posix(),
+        'offline_tests': 'mcp_server/tests/test_catalog_canary_scripts.py',
+        'payload': relative_payload,
+        'offline_prepare_receipt': (
+            HARDENED_OUTPUT_REL / 'offline-prepare.receipt.json'
+        ).as_posix(),
+        'offline_commit_receipt': (HARDENED_OUTPUT_REL / 'offline-commit.receipt.json').as_posix(),
+        'offline_checkpoint': (HARDENED_OUTPUT_REL / 'offline-checkpoint.json').as_posix(),
+    }
+    digests = {
+        'payload': artifact_sha256,
+        'offline_prepare_receipt': sha256_bytes(prepare_bytes),
+        'offline_commit_receipt': sha256_bytes(commit_bytes),
+        'offline_checkpoint': sha256_bytes(checkpoint_bytes),
+        'sanitized_fixture': sha256_bytes(fixture_raw),
+    }
+    manifest = {
+        'artifact_schema_version': HARDENED_ARTIFACT_SCHEMA_VERSION,
+        'identity_schema_version': HARDENED_IDENTITY_SCHEMA_VERSION,
+        'execution_mode': 'offline_simulation',
+        'canary_executed': False,
+        'generated_at': _manifest_timestamp(output_dir / 'manifest.json'),
+        'system_key': HARDENED_SYSTEM_KEY,
+        'group_id': HARDENED_GROUP_ID,
+        'future_target_group_id_metadata': FUTURE_TARGET_GROUP_METADATA,
+        'preferred_tool_sequence': [
+            'prepare_catalog_batch',
+            'commit_prepared_catalog_batch',
+            'get_catalog_ingest_status',
+            'verify_catalog_batch',
+            'resolve_typed_entities',
+            'get_catalog_batch_manifest',
+            'get_catalog_evidence',
+            'search_nodes',
+            'search_memory_facts',
+        ],
+        'inventory': inventory,
+        'digests': digests,
+        'batches': [
+            {
+                'order': 1,
+                'batch_id': model.batch_id,
+                'path': relative_payload,
+                'artifact_sha256': artifact_sha256,
+                'server_request_sha256': request_sha256,
+                'counts': {
+                    'entities': len(model.entities),
+                    'edges': len(model.edges),
+                    'provenance_sources': len(model.provenance.sources),
+                    'evidence_links': len(model.provenance.evidence_links),
+                },
+            }
+        ],
+        'history': {
+            'status': 'read_only_not_authority',
+            'historical_dir': 'catalog/canary-v2-requests',
+            'historical_summary': 'catalog/CANARY_V2_SUMMARY.md',
+            'historical_checkpoint': 'catalog/catalog.json.graphiti-canary-v2-state.json',
+            'historical_accept_tab_golden_server_request_sha256': ACCEPT_TAB_GOLDEN_REQUEST_SHA256,
+            'historical_unique_totals': {'entities': 38, 'edges': 85},
+            'historical_accept_tab_receipt_shape': '10/16/1',
+            'note': 'Historical ACCEPT_TAB SHA/receipt/plan remain history only (D-05, D-11)',
+        },
+    }
+    digests['manifest'] = sha256_bytes(canonical_bytes(manifest))
+    # recompute with final digests map
+    manifest['digests'] = digests
+    manifest_bytes = canonical_bytes(manifest)
+    digests['manifest'] = sha256_bytes(manifest_bytes)
+    manifest['digests'] = digests
+    manifest_bytes = canonical_bytes(manifest)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    destinations = {
+        output_dir / file_name: payload_bytes,
+        output_dir / 'offline-prepare.receipt.json': prepare_bytes,
+        output_dir / 'offline-commit.receipt.json': commit_bytes,
+        output_dir / 'offline-checkpoint.json': checkpoint_bytes,
+        output_dir / 'manifest.json': manifest_bytes,
+    }
+    for dest, raw in destinations.items():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists() and dest.read_bytes() == raw:
+            continue
+        dest.write_bytes(raw)
+    reopened = strict_json_bytes((output_dir / file_name).read_bytes(), file_name)
+    validate_hardened_request(reopened)
+    return manifest
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        '--mode',
+        choices=('historical', 'hardened'),
+        default='historical',
+        help='historical catalog.json builder or offline sanitized hardened builder',
+    )
     parser.add_argument(
         '--catalog',
         type=Path,
         default=REPO_ROOT / 'catalog' / 'catalog.json',
-        help='source catalog.json path',
+        help='source catalog.json path (historical mode only)',
+    )
+    parser.add_argument(
+        '--fixture',
+        type=Path,
+        default=REPO_ROOT / SANITIZED_FIXTURE_REL,
+        help='sanitized synthetic fixture (hardened mode only)',
     )
     parser.add_argument(
         '--output-dir',
         type=Path,
-        default=REPO_ROOT / 'catalog' / 'canary-v2-requests',
-        help='immutable artifact output directory',
+        default=None,
+        help='artifact output directory',
     )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    manifest = build(args.catalog.resolve(), args.output_dir.resolve())
+    if args.mode == 'hardened':
+        output = args.output_dir or (REPO_ROOT / HARDENED_OUTPUT_REL)
+        manifest = build_hardened(args.fixture.resolve(), output.resolve())
+    else:
+        output = args.output_dir or (REPO_ROOT / 'catalog' / 'canary-v2-requests')
+        manifest = build(args.catalog.resolve(), output.resolve())
     print(json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False))
     return 0
 

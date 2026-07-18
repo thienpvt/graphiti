@@ -1,0 +1,1 @@
+{"artifact_schema_version":"canary-hardened-v1","canary_attempt_count":0,"canary_executed":false,"execution_mode":"offline_simulation","future_target_group_id_metadata":"oracle-catalog-v2","notes":"Hardened offline checkpoint is separate from catalog/catalog.json.graphiti-canary-v2-state.json","validation_runs":[]}
