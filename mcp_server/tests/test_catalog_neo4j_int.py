@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import json
 import os
 import sys
 import uuid
@@ -28,41 +27,8 @@ import pytest
 # Match catalog unit tests: insert mcp_server/src (pyright extraPaths = ["src"]).
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from config.schema import CatalogConfig  # noqa: E402
-from models.catalog_batch import (  # noqa: E402
-    GetCatalogIngestStatusRequest,
-    NestedProvenancePayload,
-    UpsertCatalogBatchRequest,
-)
-from models.catalog_common import CatalogErrorCode  # noqa: E402
-from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
-from models.catalog_entities import (  # noqa: E402
-    CatalogEntityItem,
-    ResolveEntityRef,
-    ResolveTypedEntitiesRequest,
-    UpsertTypedEntitiesRequest,
-    VerifyCatalogBatchRequest,
-    VerifyEdgeRef,
-    VerifyEntityRef,
-)
-from models.catalog_provenance import (  # noqa: E402
-    CatalogProvenanceEdgeTarget,
-    CatalogProvenanceEntityTarget,
-    CatalogSourceItem,
-    UpsertProvenanceRequest,
-)
-from services.catalog_identity import (  # noqa: E402
-    canonical_sha256,
-    catalog_batch_uuid,
-    catalog_edge_uuid,
-    catalog_entity_uuid,
-    catalog_source_uuid,
-)
-from services.catalog_service import CatalogService  # noqa: E402
-
 from catalog_neo4j_fixtures import (  # noqa: E402
     ACCEPT_TAB_BATCH,
-    ACCEPT_TAB_FIXTURE,
     BATCH,
     EDGE_BATCH,
     FIXED_NS,
@@ -79,6 +45,36 @@ from catalog_neo4j_fixtures import (  # noqa: E402
     build_upsert_edges_request,
     build_upsert_entities_request,
 )
+
+from config.schema import CatalogConfig  # noqa: E402
+from models.catalog_batch import (  # noqa: E402
+    GetCatalogIngestStatusRequest,
+    UpsertCatalogBatchRequest,
+)
+from models.catalog_common import CatalogErrorCode  # noqa: E402
+from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
+from models.catalog_entities import (  # noqa: E402
+    CatalogEntityItem,
+    ResolveEntityRef,
+    ResolveTypedEntitiesRequest,
+    UpsertTypedEntitiesRequest,
+    VerifyCatalogBatchRequest,
+    VerifyEdgeRef,
+    VerifyEntityRef,
+)
+from models.catalog_provenance import (  # noqa: E402
+    CatalogProvenanceEntityTarget,
+    CatalogSourceItem,
+    UpsertProvenanceRequest,
+)
+from services.catalog_identity import (  # noqa: E402
+    canonical_sha256,
+    catalog_batch_uuid,
+    catalog_edge_uuid,
+    catalog_entity_uuid,
+    catalog_source_uuid,
+)
+from services.catalog_service import CatalogService  # noqa: E402
 
 # Back-compat local aliases used throughout this module.
 _entity = build_entity

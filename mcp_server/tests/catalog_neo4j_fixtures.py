@@ -6,15 +6,13 @@ No test-framework fixtures, Neo4j drivers, sockets, network clients, or integrat
 from __future__ import annotations
 
 import json
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
 
-import sys
-from pathlib import Path as _Path
-
 # Allow running without package install: mcp_server/src on path.
-_SRC = _Path(__file__).resolve().parent.parent / 'src'
+_SRC = Path(__file__).resolve().parent.parent / 'src'
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 

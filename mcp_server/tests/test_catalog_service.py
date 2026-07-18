@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import ast
+import asyncio
 import importlib
 import logging
 import sys
@@ -5305,6 +5304,17 @@ class _RaceEntityStore:
         self.batch_status_writes.append(dict(params))
         self.checkpoints.append(f'batch_status:{params.get("status")}')
         return dict(params)
+
+    async def get_batch_status(
+        self,
+        executor: Any,
+        *,
+        uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        _ = executor, uuid, group_id, tx
+        return None
 
     async def get_edge_by_uuid(self, *args: Any, **kwargs: Any) -> None:
         _ = args, kwargs

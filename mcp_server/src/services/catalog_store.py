@@ -311,12 +311,14 @@ class CatalogNeo4jStore:
         return label
 
     def build_entity_upsert_cypher(self, entity_type: str) -> str:
-        """Build MERGE Cypher with create-once identity and zero-mutation unchanged path.
+        """Build MERGE Cypher with lock-authoritative identity arbitration.
 
         Labels are server-resolved literals only. Values are parameters.
+        After MERGE, a lock-retaining self-assignment runs before immutable
+        name/type checks. Conflict returns status=error + deterministic_uuid_conflict
+        and never enters mutable FOREACH or vector update.
         Create path sets full props + per-write $create_token marker.
-        Status derived from token presence + pre-update hash compare — never timestamps.
-        Matched unchanged: no SET of content props, no vector rewrite.
+        Status derived from error_code, token presence, and hash compare.
         Token REMOVEd before RETURN (create-only; never client authority).
         MERGE key is composite (uuid, group_id) matching catalog identity UNIQUE.
         Identity properties set only ON CREATE (never rewritten on match).
@@ -355,20 +357,37 @@ class CatalogNeo4jStore:
                 n.created_at = $created_at,
                 n.updated_at = $updated_at,
                 n._catalog_create_token = $create_token
-            WITH n,
-                 coalesce(n._catalog_create_token, '') = $create_token AS created,
-                 n.content_sha256 = $content_sha256 AS same
-            WITH n, created, same,
+            WITH n, coalesce(n._catalog_create_token, '') = $create_token AS created
+            SET n.uuid = n.uuid
+            WITH n, created,
                  CASE
+                   WHEN NOT created AND (
+                     n.name IS NULL OR n.name <> $name
+                     OR n.graph_key IS NULL OR n.graph_key <> $graph_key
+                     OR n.name_raw IS NULL OR n.name_raw <> $name_raw
+                     OR n.name_canonical IS NULL OR n.name_canonical <> $name_canonical
+                     OR NOT ('Entity' IN labels(n))
+                     OR NOT ('{label}' IN labels(n))
+                     OR NOT (size([label IN labels(n) WHERE label <> 'Entity']) = 1)
+                     OR n.labels IS NULL
+                     OR size(n.labels) <> 2
+                     OR NOT all(l IN n.labels WHERE l IN ['Entity', '{label}'])
+                     OR NOT all(l IN ['Entity', '{label}'] WHERE l IN n.labels)
+                   ) THEN 'deterministic_uuid_conflict'
+                   ELSE null
+                 END AS error_code
+            WITH n, created, error_code,
+                 CASE
+                   WHEN error_code IS NOT NULL THEN 'error'
                    WHEN created THEN 'created'
-                   WHEN same THEN 'unchanged'
+                   WHEN n.content_sha256 = $content_sha256 THEN 'unchanged'
                    ELSE 'updated'
                  END AS status
             FOREACH (_ IN CASE WHEN status = 'updated' THEN [1] ELSE [] END |
               SET {updated_set}
             )
             REMOVE n._catalog_create_token
-            WITH n, status
+            WITH n, status, error_code
             CALL {{
               WITH n, status
               WITH n, status WHERE status IN ['created', 'updated']
@@ -376,15 +395,24 @@ class CatalogNeo4jStore:
               RETURN 1 AS _
               UNION
               WITH n, status
-              WITH n, status WHERE status = 'unchanged'
+              WITH n, status WHERE NOT status IN ['created', 'updated']
               RETURN 0 AS _
             }}
             RETURN n.uuid AS uuid,
+                   n.name AS name,
+                   n.graph_key AS graph_key,
+                   n.name_raw AS name_raw,
+                   n.name_canonical AS name_canonical,
+                   n.labels AS labels,
+                   labels(n) AS neo4j_labels,
                    n.content_sha256 AS content_sha256,
+                   n.summary AS summary,
                    n.batch_id AS batch_id,
                    n.created_at AS created_at,
                    n.updated_at AS updated_at,
-                   status
+                   n.name_embedding IS NOT NULL AS has_name_embedding,
+                   status,
+                   error_code
             """
 
     def build_get_entity_by_uuid_cypher(self) -> str:

@@ -602,6 +602,7 @@ class CatalogService:
                     )
                     if not row or not row.get('uuid'):
                         raise RuntimeError('entity upsert empty row')
+                    self._raise_entity_row_error(row)
                     # Prefer DB-captured status (create-token / hash-derived).
                     status = self._write_status_from_row(row, prep.projected_status)
                     result = CatalogItemResult(
@@ -726,6 +727,32 @@ class CatalogService:
                     )
                     if not row or not row.get('uuid'):
                         raise RuntimeError('entity upsert empty row')
+                    row_err = self._row_error_code(row)
+                    if row_err is not None:
+                        written[prep.index] = CatalogItemResult(
+                            index=prep.index,
+                            status='error',
+                            uuid=prep.entity_uuid,
+                            graph_key=prep.item.graph_key,
+                            entity_type=prep.item.entity_type,
+                            error_code=row_err,
+                            error_message=(
+                                f'entity under-lock conflict: {row_err.value}'
+                            ),
+                        )
+                        for ci in prep.coalesced_indices:
+                            written[ci] = CatalogItemResult(
+                                index=ci,
+                                status='error',
+                                uuid=prep.entity_uuid,
+                                graph_key=request.entities[ci].graph_key,
+                                entity_type=request.entities[ci].entity_type,
+                                error_code=row_err,
+                                error_message=(
+                                    f'entity under-lock conflict: {row_err.value}'
+                                ),
+                            )
+                        continue
                     status = self._write_status_from_row(row, prep.projected_status)
                     written[prep.index] = CatalogItemResult(
                         index=prep.index,
@@ -744,6 +771,28 @@ class CatalogService:
                             graph_key=request.entities[ci].graph_key,
                             entity_type=request.entities[ci].entity_type,
                         )
+            except self._EntityInvariantRace as exc:
+                written[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.entity_uuid,
+                    graph_key=prep.item.graph_key,
+                    entity_type=prep.item.entity_type,
+                    error_code=exc.code,
+                    error_message=f'entity invariant race in write transaction: {exc.code.value}',
+                )
+                for ci in prep.coalesced_indices:
+                    written[ci] = CatalogItemResult(
+                        index=ci,
+                        status='error',
+                        uuid=prep.entity_uuid,
+                        graph_key=request.entities[ci].graph_key,
+                        entity_type=request.entities[ci].entity_type,
+                        error_code=exc.code,
+                        error_message=(
+                            f'entity invariant race in write transaction: {exc.code.value}'
+                        ),
+                    )
             except Exception as exc:
                 logger.error(
                     'catalog neo4j_transaction_failed batch_id=%s index=%s',
@@ -785,9 +834,34 @@ class CatalogService:
         return resp
 
     @staticmethod
+    def _row_error_code(row: dict[str, Any]) -> CatalogErrorCode | None:
+        """Consume authoritative under-lock error_code before status fallback."""
+        error_code = row.get('error_code')
+        if error_code is None:
+            return None
+        if error_code == CatalogErrorCode.deterministic_uuid_conflict.value:
+            return CatalogErrorCode.deterministic_uuid_conflict
+        if error_code == CatalogErrorCode.entity_type_conflict.value:
+            return CatalogErrorCode.entity_type_conflict
+        if error_code == CatalogErrorCode.batch_conflict.value:
+            return CatalogErrorCode.batch_conflict
+        # Unknown error_code with status=error fails closed.
+        if row.get('status') == 'error':
+            return CatalogErrorCode.internal_error
+        return None
+
+    def _raise_entity_row_error(self, row: dict[str, Any]) -> None:
+        code = self._row_error_code(row)
+        if code is None:
+            return
+        raise self._EntityInvariantRace(code)
+
+    @staticmethod
     def _write_status_from_row(row: dict[str, Any], projected: str) -> str:
-        """Prefer DB-captured write status; fall back to projected only if absent."""
+        """Prefer DB-captured write status; never reinterpret status=error as success."""
         status = row.get('status')
+        if status == 'error' or row.get('error_code') is not None:
+            return 'error'
         if status in ('created', 'updated', 'unchanged'):
             return str(status)
         if projected in ('created', 'updated', 'unchanged'):
@@ -4524,6 +4598,7 @@ class CatalogService:
                                 confidence=prep.item.confidence,
                             ),
                         )
+                        self._raise_entity_row_error(row)
                         status = self._write_status_from_row(row, prep.projected_status)
                         written_request_entities.add(prep.entity_uuid)
                     entity_results.append(self._batch_result_for_entity(prep, status=status))
@@ -4700,6 +4775,23 @@ class CatalogService:
                 failed=max(len(request.entities) + len(request.edges) + len(provenance_sources), 1),
                 error_code=CatalogErrorCode.batch_conflict,
                 error_message='batch_id has different request_sha256',
+            )
+        except self._EntityInvariantRace as exc:
+            logger.error(
+                'catalog upsert_catalog_batch entity_invariant_race batch_id=%s code=%s',
+                request.batch_id,
+                exc.code.value,
+            )
+            await _record_failed_status(exc.code.value)
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges) + len(provenance_sources), 1),
+                rolled_back=len(entity_results) + len(edge_results) + len(provenance_results),
+                error_code=exc.code,
+                error_message=f'entity under-lock conflict: {exc.code.value}',
             )
         except self._ProvenanceInvariantRace as exc:
             logger.error(
