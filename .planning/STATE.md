@@ -5,16 +5,16 @@ milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 03B
 current_phase_name: Atomic Catalog, Exact Evidence, Durable Manifest Writes
 status: pending discussion/planning
-stopped_at: Phase 3A verified; Phase 3B pending discussion/planning
-last_updated: "2026-07-18T12:00:00.000Z"
+stopped_at: Phase 3B context gathered
+last_updated: "2026-07-18T09:13:25.888Z"
 last_activity: 2026-07-18
-last_activity_desc: Phase 3A verified 6/6; ready_for_phase_3b=true; tracking advanced to Phase 3B
+last_activity_desc: Phase 3A verified 6/6; ready_for_phase_3b=true
 progress:
-  total_phases: 7
+  total_phases: 5
   completed_phases: 4
   total_plans: 25
   completed_plans: 25
-  percent: 57
+  percent: 80
 ---
 
 # Project State
@@ -114,7 +114,7 @@ Phase 3A fully verified 6/6; ready_for_phase_3b=true. Next: Phase 3B discussion/
 
 ## Session Continuity
 
-Last session: 2026-07-18
-Stopped at: Phase 3A verified; Phase 3B pending discussion/planning
-Resume file: None
+Last session: 2026-07-18T09:13:25.881Z
+Stopped at: Phase 3B context gathered
+Resume file: .planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-CONTEXT.md
 Next: Phase 3B discussion, research, and planning
