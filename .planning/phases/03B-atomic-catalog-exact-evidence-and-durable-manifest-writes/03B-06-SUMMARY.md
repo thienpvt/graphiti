@@ -122,9 +122,10 @@ Structural check: `check_manifests_feature_true` / `manifests_feature_true` (rep
 | `ready_for_phase_4` / `phase_3b_complete` | **true** / **true** |
 | `pre_live_only` | false |
 | CLI exit under `--require-neo4j` | **0** |
-| `verify_ledger` | **ok** as **ledger-only-child** after final docs rebind (product flip evaluated_head `6c83909`; docs HEAD is ledger-only child) |
+| `verify_ledger` | **ok** as **ledger-only-child** after final docs rebind (evaluated_head product/static-path flip `e5271bf`; docs commit is ledger-only child) |
 | `schema_version` | `phase3b-gate-results.v2` |
 | historical_audit class/scope/commit | `test_policy` / `local_neo4j_no_corresponding_data` / `a67789a` |
+| scoped ruff/pyright | includes `mcp_server/src/services/catalog_capabilities.py` |
 | TrackingDriver rejects | none observed |
 | Neo4j target | local `graphiti-catalog-neo4j-test` bolt `localhost:17687`; group `oracle-catalog-tool-test` only |
 
@@ -152,8 +153,9 @@ Initial live suite at `a67789a` performed read-only group-count probes against `
 | T1 | Truthful historical block remediation | 056f960 | permanent hard-block model (superseded) |
 | T2 | Authorized two-axis re-gate schema v2 | preflip wave | history audit; current safety independent |
 | Preflip | Live preflip manifests still False | through 6a9b3e6 | 10/1 live; ready false solely manifests |
-| Flip | Product manifests True + gate check true | **6c83909** | final capability flip |
-| Docs | Final ledger + SUMMARY complete | (this commit) | bind final HEAD |
+| Flip | Product manifests True + gate check true | **6c83909** | capability flip |
+| Static paths | RUFF/PYRIGHT include capabilities | **e5271bf** | adversarial close; evaluated_head for final gate |
+| Docs | Final ledger + SUMMARY complete | (docs commit) | ledger-only-child rebind |
 
 ## Deviations from Plan
 
@@ -188,7 +190,9 @@ None. Product manifests True; verification remains intentionally False until Pha
 - FOUND: SUMMARY `status: complete`
 - FOUND: edge row 22 post-flip True wording
 - FOUND: final ledger ready/complete/manifests true; live 10/1; verify ok ledger-only-child; CLI 0
-- FOUND: product flip evaluated_head `6c83909`; docs rebind as ledger-only-child; historical audit retained
+- FOUND: final gate evaluated_head `e5271bf` (capabilities in static paths); docs rebind ledger-only-child; history audit retained
+- FOUND: RUFF_PATHS/PYRIGHT_PATHS include catalog_capabilities.py
+- FOUND: VALIDATION wave_0_complete true; status draft; nyquist_compliant false; Approval pending
 - No Phase 4 / canary / deploy / push / primary merge
 - No shared STATE.md / ROADMAP.md updates (orchestrator-owned; stop after Phase 3B)
 - Plan execution complete; Nyquist audit still pending (`nyquist_compliant: false`)
