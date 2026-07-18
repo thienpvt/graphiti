@@ -9,7 +9,7 @@ import hashlib
 import json
 import math
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from models.catalog_common import IDENTITY_SCHEMA_VERSION, CatalogErrorCode
 
@@ -168,7 +168,7 @@ def evidence_canonical_payload(link: Any) -> dict[str, Any]:
             return None
         dump = getattr(model, 'model_dump', None)
         if callable(dump):
-            return dump(mode='json')
+            return cast(dict[str, Any], dump(mode='json'))
         return dict(model)
 
     return {
