@@ -219,11 +219,11 @@ Plans:
   4. Separate read/write feature gates keep capabilities and catalog diagnostics usable when writes are disabled; read paths never initialize/repair schema or open write transactions
   5. Explicit-key verification remains available; gate/registration tests prove read tools work while writes are off
 
-**Plans**: 0/6 plans executed
+**Plans**: 1/6 plans executed
 
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — Wave 0 behavioral tests and fail-closed Phase 4 gate scaffold
+- [x] 04-01-PLAN.md — Wave 0 behavioral tests and fail-closed Phase 4 gate scaffold
 
 **Wave 2** *(blocked on Wave 1)*
 
