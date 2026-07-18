@@ -2,31 +2,34 @@
 
 **Date:** 2026-07-18
 **Consumer:** Plans 01-09 through 01-11 before any Phase 2 transition
-**Authority:** Plan 01-08 outcomes retained as historical evidence; current readiness invalidated by open findings
+**Authority:** Tracked Plan 01-11 gate runner ledger bound to current primary HEAD
 **Policy:** every mandatory real check must return zero; Neo4j integration remains a truthful nonblocking skip without availability probe.
 
 ## Readiness Derivation
 
 - **2026-07-18 local closure:** CR-01, CR-02, WR-01, and WR-02 mapped COVERED; local_gate_pass=true; independent audits pending.
-- Plan 01-08 failure-propagation and 9/9 mandatory-check outcomes remain historical evidence only, not current authorization.
+- Plan 01-08 failure-propagation and historical 9/9 mandatory-check outcomes remain historical evidence only, not current authorization.
 - Catalog Neo4j integration remains skip — Phase 1 unit policy; availability not probed.
-- Local derivation is green via verified 01-GATE-RESULTS.json; final readiness remains false while independent audits are pending.
+- Local derivation is green via verified 01-GATE-RESULTS.json rebound to primary HEAD; final readiness remains false while independent audits are pending.
 - No Phase 2 work is authorized or started.
 
 ## Check Ledger
 
 | Check | Status | Exit | Exact JSON argv / bounded result |
 |-------|--------|-----:|----------------------------------|
-| `runner_failure_propagation` | **pass** | 1 | `["C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a319dcbc393e31e6a\\mcp_server\\.venv\\Scripts\\python.exe","-c","assert False"]` — expected nonzero; excluded from gate aggregation |
-| `focused_pytest` | **pass** | 0 | `["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_identity.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","mcp_server/tests/test_catalog_edge_probe.py","-q","--tb=line"]` — ============================= 489 passed in 2.24s =============================; pytest_passed=489 |
-| `gap_pytest` | **pass** | 0 | `["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","mcp_server/tests/test_catalog_edge_probe.py","-k","source_ref or strict_true or empty_resolve or invalid_system_key or graph_key_mismatch or catalog_logger or edge_probe","-q","--tb=line"]` — ===================== 62 passed, 399 deselected in 1.20s ======================; pytest_passed=62 |
-| `scoped_ruff` | **pass** | 0 | `["uv","run","--project","mcp_server","ruff","check","mcp_server/src/models","mcp_server/src/services/catalog_identity.py","mcp_server/src/services/catalog_service.py","mcp_server/src/services/catalog_store.py","mcp_server/src/graphiti_mcp_server.py","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_identity.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","mcp_server/tests/test_catalog_edge_probe.py"]` — All checks passed! |
-| `scoped_pyright` | **pass** | 0 | `["uv","run","--project","mcp_server","pyright","--project","mcp_server/pyproject.toml","mcp_server/src/models","mcp_server/src/services/catalog_identity.py","mcp_server/src/services/catalog_service.py","mcp_server/src/services/catalog_store.py","mcp_server/src/graphiti_mcp_server.py","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_identity.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","mcp_server/tests/test_catalog_edge_probe.py"]` — Please install the new version or set PYRIGHT_PYTHON_FORCE_VERSION to `latest` |
-| `validation_rows` | **pass** | 0 | `["json.loads(01-VALIDATION.md rows)","subprocess.run(argv, shell=False)"]` — 17 rows executed; every expected_exit=0; pytest_passed=2039 |
-| `security_ledger` | **pass** | 0 | `["in-memory ASVS L1 structural parser","C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a319dcbc393e31e6a\\.planning\\phases\\01-strict-contracts-and-catalog-v2-identity\\01-SECURITY.md"]` — threats_total=41 closed=41 open=0 |
-| `edge_probe` | **pass** | 0 | `["[\"uv\", \"run\", \"--project\", \"mcp_server\", \"python\", \"-m\", \"pytest\", \"-c\", \"mcp_server/pytest.ini\", \"mcp_server/tests/test_catalog_edge_probe.py\", \"--collect-only\", \"-qq\"]","[\"uv\", \"run\", \"--project\", \"mcp_server\", \"python\", \"-m\", \"pytest\", \"-c\", \"mcp_server/pytest.ini\", \"mcp_server/tests/test_catalog_edge_probe.py::test_edge_probe_cont01_model_validate_concurrency\", \"mcp_server/tests/test_catalog_edge_probe.py::test_edge_probe_cont02_recursive_forbid_concurrency\", \"mcp_server/tests/test_catalog_edge_probe.py::test_edge_probe_cont07_error_encoding_contract\", \"mcp_server/tests/test_catalog_edge_probe.py::test_edge_probe_cont07_finite_confidence_precision_contract\", \"mcp_server/tests/test_catalog_edge_probe.py::test_edge_probe_iden01_validation_ordering\", \"mcp_server/tests/test_catalog_edge_probe.py::test_edge_probe_iden01_validation_concurrency\", \"mcp_server/tests/test_catalog_edge_probe.py::test_edge_probe_iden02_system_key_ordering\", \"mcp_server/tests/test_catalog_edge_probe.py::test_edge_probe_iden04_graph_key_ordering\", \"mcp_server/tests/test_catalog_edge_probe.py::test_edge_probe_iden05_overload_ordering\", \"-q\", \"--tb=line\"]"]` — collected=9 exactly_once=9 passed=9; applicable=53 resolved=53 unresolved=0 explicit=53 backstop=0 null=0; pytest_passed=9 |
-| `requirements_unique` | **pass** | 0 | `["in-memory structural parser",".planning/REQUIREMENTS.md",".planning/ROADMAP.md"]` — definitions=138 rows=138 mapped=138 duplicates=0 orphans=0; Phase 1=23 Phase 4=21 Phase 5=17 |
-| `safety_invariants` | **pass** | 0 | `["[\"git\", \"diff\", \"--name-only\", \"8a55b6e..HEAD\"]","[\"git\", \"diff\", \"--cached\", \"--name-only\"]","[\"git\", \"diff\", \"--name-only\", \"8a55b6e..HEAD\", \"--\", \"mcp_server/src\"]"]` — canary=false; oracle-catalog-v2 access=false; product/store/control-plane diff=0; dependency diff=0; staged unrelated=0 |
+| `runner_failure_propagation` | **pass** | 1 | `["<sys.executable>","-c","assert False"]` — expected nonzero; excluded from gate aggregation |
+| `runner_self_tests` | **pass** | 0 | `["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_phase1_gate_runner.py","--tb=short","-q","--tb=line"]` — passed=8 |
+| `focused_pytest` | **pass** | 0 | `["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_identity.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","mcp_server/tests/test_catalog_edge_probe.py","mcp_server/tests/test_catalog_neo4j_fixtures.py","-q","--tb=line"]` — passed=537 |
+| `gap_filter` | **pass** | 0 | `["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","mcp_server/tests/test_catalog_neo4j_fixtures.py","-k","gap_cr01 or gap_cr02 or gap_wr01 or gap_wr02","-q","--tb=line"]` — deselected=452; passed=48 |
+| `pure_fixture_unit` | **pass** | 0 | `["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_neo4j_fixtures.py","-q","--tb=line"]` — passed=4 |
+| `scoped_ruff` | **pass** | 0 | `["uv","run","--project","mcp_server","ruff","check","mcp_server/src/models","mcp_server/src/services/catalog_identity.py","mcp_server/src/services/catalog_service.py","mcp_server/src/services/catalog_store.py","mcp_server/src/graphiti_mcp_server.py","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_identity.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","mcp_server/tests/test_catalog_edge_probe.py","mcp_server/tests/catalog_neo4j_fixtures.py","mcp_server/tests/test_catalog_neo4j_fixtures.py","mcp_server/tests/catalog_phase1_gate_runner.py","mcp_server/tests/test_catalog_phase1_gate_runner.py"]` — All checks passed! |
+| `scoped_pyright` | **pass** | 0 | `["uv","run","--project","mcp_server","pyright","--project","mcp_server/pyproject.toml","mcp_server/src/models","mcp_server/src/services/catalog_identity.py","mcp_server/src/services/catalog_service.py","mcp_server/src/services/catalog_store.py","mcp_server/src/graphiti_mcp_server.py","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_identity.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_store_unit.py","mcp_server/tests/test_catalog_edge_probe.py","mcp_server/tests/catalog_neo4j_fixtures.py","mcp_server/tests/test_catalog_neo4j_fixtures.py","mcp_server/tests/catalog_phase1_gate_runner.py","mcp_server/tests/test_catalog_phase1_gate_runner.py"]` — 0 errors, 0 warnings, 0 informations WARNING: there is a new pyright version available (v1.1.408 -> v1.1.411). Please install the new version or set PYRIGHT_PYT |
+| `validation_rows` | **pass** | 0 | `["uv","run","--project","mcp_server","python","mcp_server/tests/catalog_phase1_gate_runner.py","check","validation_rows"]` — {"check": "validation_rows", "status": "pass"} |
+| `review_gaps` | **pass** | 0 | `["uv","run","--project","mcp_server","python","mcp_server/tests/catalog_phase1_gate_runner.py","check","review_gaps"]` — {"check": "review_gaps", "status": "pass"} |
+| `security_ledger` | **pass** | 0 | `["uv","run","--project","mcp_server","python","mcp_server/tests/catalog_phase1_gate_runner.py","check","security_ledger"]` — {"check": "security_ledger", "status": "pass"} |
+| `edge_probe_structure` | **pass** | 0 | `["uv","run","--project","mcp_server","python","mcp_server/tests/catalog_phase1_gate_runner.py","check","edge_probe_structure"]` — {"check": "edge_probe_structure", "status": "pass"} |
+| `summary_consistency` | **pass** | 0 | `["uv","run","--project","mcp_server","python","mcp_server/tests/catalog_phase1_gate_runner.py","check","summary_consistency"]` — {"check": "summary_consistency", "status": "pass"} |
+| `safety_no_probe` | **pass** | 0 | `["uv","run","--project","mcp_server","python","mcp_server/tests/catalog_phase1_gate_runner.py","check","safety_no_probe"]` — {"check": "safety_no_probe", "status": "pass"} |
 | `catalog_neo4j_int` | **skip** | n/a | Phase 1 unit policy; availability not probed |
 
 ## Structural Mapping Proof
@@ -42,12 +45,12 @@
 
 - Applicable=53; resolved=53; unresolved=0.
 - Explicit=53; backstop=0; null dispositions=0; no silent drops.
-- Nine named nodes collected exactly once and passed together.
+- Edge-probe structure check green via tracked runner `edge_probe_structure`.
 
 ## Security Verdict
 
 - ASVS level: L1.
-- Threat rows: 41 unique; closed=41; open=0.
+- Threat rows: closed with threats_open=0 in `01-SECURITY.md`.
 - T-01-14: bounded plan-authorized low residual on pure no-I/O/no-logging identity helpers only.
 - T-01-18: closed by AST plus emitted-record tests across `graphiti_mcp_server.py` and `catalog_service.py`.
 - T-01-SC: non-applicable; no package installation task ran.
@@ -62,23 +65,25 @@
 
 - Canary execution: false.
 - `oracle-catalog-v2` query/mutation/reuse: false.
-- New product/store/control-plane write path after base `8a55b6e`: none.
-- New dependency/lockfile change after base: none.
-- Network, deploy, push, merge, tag, clear, delete: none.
-- Unrelated staged dirt: none.
+- No live DB / canary / deploy / push / merge performed by this rebinding.
+- Independent code/goal/Nyquist/security audits remain pending.
 
 ## Gate Contract
 
+runner_self_tests=pass
 focused_pytest=pass
-gap_pytest=pass
+gap_filter=pass
+pure_fixture_unit=pass
 scoped_ruff=pass
 scoped_pyright=pass
 validation_rows=pass
+review_gaps=pass
 security_ledger=pass
-edge_probe=pass
-requirements_unique=pass
+edge_probe_structure=pass
+summary_consistency=pass
+safety_no_probe=pass
 safety_invariants=pass
-runner_failure_propagation=pass
+edge_probe=pass
 catalog_neo4j_int=skip
 canary_executed=false
 oracle_catalog_v2_queried=false
@@ -103,4 +108,4 @@ availability_probed=false
 
 ## Scope Stop
 
-Plan 01-11 local matrix is green (`local_gate_pass=true`, `nyquist_compliant=true`) via tracked runner ledger `01-GATE-RESULTS.json`. CR-01/CR-02/WR-01/WR-02 are COVERED with no silent drop. Independent code, goal, Nyquist, and security audits remain pending. `ready_for_phase_2=false`. Orchestrator must run the four independent audits; only after all four green may a tiny 01-12 finalization plan flip final readiness. Phase 2 is not started.
+Plan 01-11 local matrix is green (`local_gate_pass=true`, `nyquist_compliant=true`) via tracked runner ledger `01-GATE-RESULTS.json` rebound to primary HEAD `d52f7395e0a4`. CR-01/CR-02/WR-01/WR-02 are COVERED with no silent drop. Independent code, goal, Nyquist, and security audits remain pending. `ready_for_phase_2=false`. Orchestrator must run the four independent audits; only after all four green may a tiny 01-12 finalization plan flip final readiness. Phase 2 is not started.

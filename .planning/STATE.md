@@ -4,7 +4,7 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 current_phase: 1
 current_phase_name: Strict Contracts and Catalog-v2 Identity
-status: Phase 1 local gate green via 01-11; ready_for_phase_2=false; independent audits pending
+status: Phase 1 local gate green on primary HEAD; ready_for_phase_2=false; independent audits pending
 stopped_at: Completed 01-11-PLAN.md
 last_updated: "2026-07-18T01:19:42.271Z"
 last_activity: 2026-07-18
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 Phase: 1 of 7 (Strict Contracts and Catalog-v2 Identity) — LOCAL GREEN / AUDITS PENDING
 Plan: 11 of 11 complete (local); final readiness blocked on independent audits
 Status: local_gate_pass=true; nyquist_compliant=true; ready_for_phase_2=false; catalog_neo4j_int=skip; availability_probed=false; independent_code_review/goal/nyquist/security=pending
-Last activity: 2026-07-18 — Completed 01-11 tracked gate runner, CR/WR no-silent-drop evidence, local ledger apply
+Last activity: 2026-07-18 — Rebound Phase 1 gate ledger to primary HEAD d52f739; ready_for_phase_2=false; independent audits pending
 
 Progress: [██████████] 100% local plans; final readiness blocked
 
@@ -142,6 +142,7 @@ Next: Plan 01-11 readiness reconsideration only after mandatory checks. ready_fo
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260718-bnv | Remediate Phase 1 Nyquist non-compliance: rebind gate ledger to primary HEAD | 2026-07-18 | pending | [260718-bnv-remediate-phase-1-nyquist-non-compliance](./quick/260718-bnv-remediate-phase-1-nyquist-non-compliance/) |
 | 260717-wvz | Reconcile ROADMAP.md and REQUIREMENTS.md to the canonical pre-canary roadmap; preserve 138/138 unique mappings | 2026-07-17 | 37ff944 | [260717-wvz-reconcile-planning-roadmap-md-and-planni](./quick/260717-wvz-reconcile-planning-roadmap-md-and-planni/) |
 
 ## Deferred Items
