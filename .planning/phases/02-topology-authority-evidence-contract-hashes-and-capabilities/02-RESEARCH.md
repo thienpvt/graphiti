@@ -713,23 +713,26 @@ assert 'uuid_namespace' not in caps.model_dump()
 
 **If wrong:** Discuss-phase can amend A1/A2/A3 without reopening Phase 1. Map content is the highest product-risk assumption.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **DocumentedBy encoding**
-   - What we know: targets must be DictionaryDocument or SourceArtifact.
-   - Unclear: expand N entity types × 2 targets vs special-case validator.
-   - Recommendation: special-case target check **plus** capabilities export listing rule text and generating pairs from `CATALOG_ENTITY_TYPES` so one authority remains.
+1. **DocumentedBy encoding — RESOLVED**
+   - Decision: finite expanded-pair encoding. For every entity type E in `CATALOG_ENTITY_TYPES`, register pairs `(E, DictionaryDocument)` and `(E, SourceArtifact)` in `EDGE_ENDPOINT_MAP['DocumentedBy']` (A8 locked).
+   - Rationale: single authority for validation and `endpoint_map_export` / capabilities; no special-case target branch that diverges from the map.
+   - Plan owner: 02-01 Task 1.
 
-2. **`system_key` in request hash**
-   - CONTEXT lists identity schema, group, batch, catalog hash, entities/edges/sources/evidence — not explicitly system_key.
-   - Recommendation: include it (A2) because FE/BO scope changes graph keys already inside entities; system_key still gates validation — include for defense if shell-only requests ever exist.
+2. **`system_key` in request hash — RESOLVED**
+   - Decision: include `system_key` in `batch_request_canonical_payload` (A2 locked).
+   - Rationale: system_key gates FE/BO domain membership; shell-only or partial batches must not silently share digests across systems.
+   - Plan owner: 02-03 Task 1.
 
-3. **Standalone provenance tool**
-   - EVID-14 is catalog-v2 oriented; tool name preserved.
-   - Recommendation: Phase 2 rejects Cartesian only on `UpsertCatalogBatchRequest`; leave `UpsertProvenanceRequest` with deprecation note in capabilities (`legacy_cartesian_provenance_tool: true`) without implementing persistence changes.
+3. **Standalone provenance tool — RESOLVED**
+   - Decision: `UpsertProvenanceRequest` / standalone `upsert_provenance` remains legacy Cartesian until Phase 3B (A4 locked). Catalog-v2 `UpsertCatalogBatchRequest` rejects Cartesian multi-target arrays and accepts only explicit `evidence_links` (EVID-14). No auto-convert adapter on either path.
+   - Plan owner: 02-02 Task 2 (batch reject); standalone left intact.
 
-4. **Exact `CATALOG_SCHEMA_VERSION` string**
-   - Free string for capabilities; pick `catalog-schema-v1` and freeze.
+4. **Exact `CATALOG_SCHEMA_VERSION` string — RESOLVED**
+   - Decision: single exported authority `CATALOG_SCHEMA_VERSION = 'catalog-schema-v1'` in `mcp_server/src/services/catalog_identity.py` alongside `CANONICALIZATION_VERSION = 'catalog-canonical-v1'`.
+   - Capabilities and responses import these symbols only; no duplicate string literals.
+   - Plan owner: 02-03 creates; 02-04 imports.
 
 ## Environment Availability
 
