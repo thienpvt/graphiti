@@ -166,7 +166,7 @@ Each task was committed atomically:
 1. **Task 1: Exact evidence + durable manifest store suite (RED/GREEN-intent)** - `3db0c8a` (test)
 2. **Task 2: Store authorities implementation (GREEN)** - `2c02b08` (feat)
 
-**Plan metadata:** (pending docs commit)
+**Plan metadata:** `5a858bd` (docs: complete plan)
 
 _Note: TDD tasks may have multiple commits (test → feat → refactor)_
 
