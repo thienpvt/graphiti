@@ -1251,10 +1251,11 @@ class CatalogService:
                 CatalogErrorCode.validation_error,
                 'group_id is required',
             )
-        if not self.catalog_config.enabled:
+        # Phase 4 GATE-01/03: reads gated by reads_enabled, not write `enabled`.
+        if not getattr(self.catalog_config, 'reads_enabled', True):
             return (
                 CatalogErrorCode.feature_disabled,
-                'catalog_upsert.enabled is false',
+                'catalog_upsert.reads_enabled is false',
             )
         if self._namespace() is None:
             return (
@@ -3719,6 +3720,7 @@ class CatalogService:
                 batch_id=batch_id,
                 batch_uuid=batch_uuid or '00000000-0000-0000-0000-000000000000',
                 status='failed',
+                found=False,
                 error_code=code,
                 error_summary=(message or '')[:512],
             )
@@ -3743,6 +3745,7 @@ class CatalogService:
                 batch_id=batch_id,
                 batch_uuid=batch_uuid,
                 status='failed',
+                found=False,
                 error_code=CatalogErrorCode.internal_error,
                 error_summary='status read failed',
             )
@@ -3752,12 +3755,14 @@ class CatalogService:
                 'catalog get_catalog_ingest_status missing batch_id=%s',
                 batch_id,
             )
+            # GATE-05: pure absence is found=False with no error_code — not validation_error.
             return CatalogIngestStatusResponse(
                 group_id=group_id,
                 batch_id=batch_id,
                 batch_uuid=batch_uuid,
                 status='failed',
-                error_code=CatalogErrorCode.validation_error,
+                found=False,
+                error_code=None,
                 error_summary='batch status not found',
             )
 
@@ -3789,6 +3794,7 @@ class CatalogService:
             batch_id=str(row.get('batch_id') or batch_id),
             batch_uuid=str(row.get('uuid') or batch_uuid),
             status=status,
+            found=True,
             request_sha256=row.get('request_sha256'),
             catalog_sha256=row.get('catalog_sha256'),
             entity_count=int(row.get('entity_count') or 0),

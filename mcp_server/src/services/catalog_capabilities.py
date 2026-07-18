@@ -34,12 +34,12 @@ Connectivity = Literal['ok', 'error', 'unknown']
 IndexReadiness = Literal['ready', 'unknown', 'n/a']
 
 # Real plan hard ceilings (PLAN-08 / D-29). features.prepare_commit flips true only after
-# 03A-06 live immutable proof on final HEAD; pagination remains explicitly zero.
+# 03A-06 live immutable proof on final HEAD.
 HARD_MAX_PREPARED_PAYLOAD_BYTES = _COMMON_HARD_MAX_PREPARED_PAYLOAD_BYTES
 HARD_MAX_ACTIVE_PLANS = HARD_MAX_ACTIVE_PLANS_PER_GROUP
 HARD_PLAN_TTL_SECONDS = _COMMON_HARD_PLAN_TTL_SECONDS
-# Pagination not configured; expose explicit zero authority for CAPA-06.
-HARD_MAX_PAGE_SIZE = 0
+# Phase 4 (D-04/D-24): hard page ceiling for diagnostic list tools.
+HARD_MAX_PAGE_SIZE = 500
 
 
 def namespace_fingerprint(namespace: uuid.UUID | None) -> str | None:
@@ -110,7 +110,7 @@ def build_catalog_capabilities(
         backend=backend_name,
         connectivity=conn,
         catalog_writes_enabled=bool(config.enabled),
-        catalog_reads_enabled=True,
+        catalog_reads_enabled=bool(getattr(config, 'reads_enabled', True)),
         uuid_namespace_configured=ns_configured,
         namespace_fingerprint=fp,
         identity_schema_version=IDENTITY_SCHEMA_VERSION,
@@ -129,7 +129,7 @@ def build_catalog_capabilities(
                 'max_active_plans': config.max_active_plans_per_group,
                 'plan_ttl_seconds': config.plan_ttl_seconds,
                 'prepared_chunk_bytes': config.prepared_chunk_bytes,
-                'max_page_size': getattr(config, 'max_page_size', HARD_MAX_PAGE_SIZE),
+                'max_page_size': int(getattr(config, 'max_page_size', 100)),
             },
             'hard': {
                 'max_entities_per_batch': HARD_MAX_ENTITIES_PER_BATCH,

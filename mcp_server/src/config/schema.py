@@ -324,6 +324,17 @@ class CatalogConfig(BaseModel):
     prepared_chunk_bytes: int = Field(
         default=DEFAULT_PREPARED_CHUNK_BYTES, ge=1, le=HARD_PREPARED_CHUNK_BYTES
     )
+    # Phase 4: split read/write gates. Writes stay off by default; reads default on.
+    # Do not couple reads_enabled validation to write `enabled` (GATE-01, D-17).
+    reads_enabled: bool = Field(
+        default=True, description='Enable catalog read/diagnostic tools'
+    )
+    max_page_size: int = Field(
+        default=100,
+        ge=1,
+        le=500,
+        description='Configured page size ceiling for diagnostic list tools (hard max 500)',
+    )
 
     @model_validator(mode='before')
     @classmethod
