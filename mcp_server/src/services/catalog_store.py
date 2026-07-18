@@ -2183,10 +2183,17 @@ class CatalogNeo4jStore:
 
     def prepare_prepared_plan_params(self, **fields: Any) -> dict[str, Any]:
         """Allowlisted plan root params; reject raw token / embedding keys."""
-        for bad in _FORBIDDEN_PLAN_PARAM_KEYS:
-            if bad in fields and fields[bad] is not None:
+        for key in fields:
+            if key in _FORBIDDEN_PLAN_PARAM_KEYS:
+                if fields[key] is not None:
+                    raise CatalogStoreError(
+                        f'forbidden plan param key: {key}',
+                        code='validation_error',
+                    )
+                continue
+            if key not in _PLAN_ROOT_PROP_KEYS:
                 raise CatalogStoreError(
-                    f'forbidden plan param key: {bad}',
+                    f'unknown plan param key: {key}',
                     code='validation_error',
                 )
         required = (
@@ -2270,10 +2277,17 @@ class CatalogNeo4jStore:
 
     def prepare_prepared_plan_chunk_params(self, **fields: Any) -> dict[str, Any]:
         """Allowlisted chunk params; payload_b64 is ASCII base64 storage."""
-        for bad in _FORBIDDEN_PLAN_PARAM_KEYS:
-            if bad in fields and fields[bad] is not None:
+        for key in fields:
+            if key in _FORBIDDEN_PLAN_PARAM_KEYS:
+                if fields[key] is not None:
+                    raise CatalogStoreError(
+                        f'forbidden chunk param key: {key}',
+                        code='validation_error',
+                    )
+                continue
+            if key not in _PLAN_CHUNK_PROP_KEYS:
                 raise CatalogStoreError(
-                    f'forbidden chunk param key: {bad}',
+                    f'unknown plan chunk param key: {key}',
                     code='validation_error',
                 )
         required = (

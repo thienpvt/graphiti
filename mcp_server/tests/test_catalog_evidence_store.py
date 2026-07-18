@@ -254,7 +254,8 @@ async def test_ensure_evidence_manifest_schema_emits_create_only():
     calls: list[str] = []
 
     class _Exec:
-        async def execute_query(self, stmt: str, _params=None, **_kwargs):
+        async def execute_query(self, stmt: str, params=None, **kwargs):
+            _ = (params, kwargs)  # match execute_query contract; unused by this fake
             calls.append(stmt)
             if 'SHOW CONSTRAINTS' in stmt:
                 if any('CREATE CONSTRAINT' in c for c in calls):
@@ -840,7 +841,8 @@ async def test_read_manifest_root_for_recovery():
     root_uuid = str(uuid5(NS, f'{GROUP}|catalog-v2|Manifest|batch-001'))
 
     class _Exec:
-        async def execute_query(self, query: str, params=None, **_kwargs):
+        async def execute_query(self, query: str, params=None, **kwargs):
+            _ = kwargs  # match execute_query contract; unused by this fake
             assert 'CatalogBatchManifest' in query
             assert params is not None
             assert params['group_id'] == GROUP
