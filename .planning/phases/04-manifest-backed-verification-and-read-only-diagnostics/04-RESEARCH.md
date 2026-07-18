@@ -399,25 +399,29 @@ return CatalogIngestStatusResponse(
 | A1 | Conservative default `max_page_size=100`, hard `500` is acceptable | D-04 discretion | User may want different ceilings; easy config change |
 | A2 | Config field name `reads_enabled` under `catalog_upsert` is preferred | GATE-01 | Rename-only if discuss prefers sibling name |
 | A3 | Verify response can stay backward-compatible via additive fields (`extras`, `manifest_sha256`, `evidence` section) without breaking existing clients | VERI-03/04 | If strict consumers reject unknown fields — unlikely for Pydantic responses |
-| A4 | `content_sha256` may be absent on some edge live rows today; resolve may need property return added to Cypher | RESE-01 | Add RETURN e.content_sha256 if property stored on write path |
+| A4 | SUPERSEDED by Open Questions (RESOLVED) Q2 — edge writer always stores `e.content_sha256`; verify/resolve Cypher must RETURN it; null observation is anomaly not schema absence | RESE-01 | See Q2 RESOLVED |
 | A5 | Live Neo4j optional for Phase 4 unit gate; retained 3B live proof sufficient until Phase 5 expansion | TEST-08/D-30 | Planner may still want one optional live smoke on tool-test group |
 
 **If this table is empty:** N/A — five discretionary assumptions above need planner awareness only; none block planning.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Exact evidence-link MATCH shape for EVID-13**
-   - What we know: write path creates `CatalogEvidenceLink` with uuid+group_id and group_id+link_key uniqueness; verify currently only boolean provenance. [VERIFIED: store constraints + match_provenance_presence]
-   - What's unclear: whether manifest body evidence_links rows include enough fields to MATCH without additional live joins.
-   - Recommendation: MATCH by group_id + uuid from manifest first; fall back to link_key; report missing/extra separately.
+   - What we know: write path creates `CatalogEvidenceLink` with `(uuid, group_id)` and `(group_id, link_key)` uniqueness; verify currently only boolean provenance. [VERIFIED: `catalog_store.py` constraints `CATALOG_EVIDENCE_LINK_IDENTITY_CONSTRAINT` / `CATALOG_EVIDENCE_LINK_KEY_CONSTRAINT` + `match_provenance_presence`]
+   - Manifest body evidence_links members always carry `uuid`, `link_key`, `content_sha256` under Phase 3B canonicalization. [VERIFIED: `catalog_manifest.py` category projection `('evidence_links', 'link_key', ('uuid', 'link_key', 'content_sha256'))`]
+   - **RESOLVED:** EVID-13 lookup authority is **`group_id + evidence-link uuid`** from the committed durable manifest member. MATCH `(:CatalogEvidenceLink {uuid: $uuid, group_id: $group_id})` (or equivalent parameterized form). After load, compare `link_key` and `content_sha256` as consistency properties — they are **not** alternate identity authorities. **Do not** fall back to `link_key`-only MATCH when uuid is present; that can hide uuid drift. If a manifest evidence member lacks uuid (non-canonical / corrupt body), fail closed as invalid manifest (`manifest_mismatch` / incomplete), never synthesize identity from live rows or link_key alone. Report missing expected uuids and extra live links as distinct diagnostics. Locked by D-08/D-09 and checker revision (prefer uuid when canonical manifest contains UUID).
 
 2. **Edge `content_sha256` on live RELATES_TO**
-   - What we know: entity verify returns content_sha256; edge verify Cypher currently omits it. [VERIFIED: match_edges_for_verify RETURN list]
-   - Recommendation: add property to RETURN if writer stores it; else report null and still check type/uuid/endpoints/embedding.
+   - What we know: entity verify returns content_sha256; edge verify Cypher currently omits it. [VERIFIED: `build_match_edges_for_verify_by_batch_cypher` / `_by_keys_cypher` RETURN lists at `catalog_store.py` ~904–946 omit `e.content_sha256`]
+   - Writer always stores the property on upsert. [VERIFIED: `build_edge_upsert_cypher` sets `e.content_sha256 = $content_sha256` and RETURN includes `e.content_sha256 AS content_sha256`; `build_get_edge_by_uuid_cypher` also returns it]
+   - **RESOLVED:** `content_sha256` **exists** on catalog RELATES_TO writes. Phase 4 edge resolve and any edge verify observation path **must** add `e.content_sha256 AS content_sha256` to the read RETURN. Expected edge content hash for batch verify comes from the durable manifest edge member (`content_sha256` field), not from inventing a hash. A null/missing live property is an **observation anomaly** (report; do not repair), not a permanent schema-optional field. Supersedes discretionary A4 “null-tolerant if absent from schema.”
 
 3. **Committed batch without manifest (legacy pre-3B rows)**
-   - What we know: VERI-05 requires `manifest_mismatch` for committed catalog-v2 batches lacking valid manifest.
-   - Recommendation: if status committed and manifest load fails → `manifest_mismatch`; if status missing entirely → not-found path, not mismatch.
+   - What we know: VERI-05 / D-09 require `manifest_mismatch` for committed catalog-v2 batches lacking a valid durable manifest; GATE-05 / D-22 require missing status `found=false`.
+   - **RESOLVED:**
+     - Ingest/batch **status present and committed** (or equivalent committed catalog-v2 state) **and** durable manifest load/reassembly fails (missing root, incomplete chunks, digest mismatch, contradictory metadata) → **`CatalogErrorCode.manifest_mismatch`** (fail closed; never silent partial verify).
+     - **Missing batch status entirely** → **`found=false`** (GATE-05 path); **not** `manifest_mismatch`, **not** committed success, **not** generic operational failure alone.
+     - Never synthesize membership from live `batch_id` rows when manifest is invalid.
 
 ## Environment Availability
 
@@ -441,9 +445,9 @@ Step 2.6 note: research deliberately does **not** open Neo4j connections (safety
 | Property | Value |
 |----------|-------|
 | Framework | pytest 9.0.3 + pytest-asyncio (auto) |
-| Config file | `mcp_server/tests/pytest.ini` |
-| Quick run command | `cd mcp_server && uv run pytest tests/test_catalog_manifest.py tests/test_catalog_capabilities.py -q --tb=line` |
-| Full suite command (Phase 4 focused) | `cd mcp_server && uv run pytest tests/test_catalog_manifest.py tests/test_catalog_manifest_read.py tests/test_catalog_verify_manifest.py tests/test_catalog_resolve_edges.py tests/test_catalog_evidence_read.py tests/test_catalog_gates.py tests/test_catalog_service.py tests/test_catalog_capabilities.py tests/test_catalog_store_unit.py -q --tb=short` |
+| Config file | `mcp_server/pytest.ini` (canonical; package-root; used by Phase 1–3A gate runners and all 04-*-PLAN verify blocks) |
+| Quick run command | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_manifest.py mcp_server/tests/test_catalog_capabilities.py -q --tb=line` |
+| Full suite command (Phase 4 focused) | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_manifest.py mcp_server/tests/test_catalog_manifest_read.py mcp_server/tests/test_catalog_verify_manifest.py mcp_server/tests/test_catalog_resolve_edges.py mcp_server/tests/test_catalog_evidence_read.py mcp_server/tests/test_catalog_gates.py mcp_server/tests/test_catalog_service.py mcp_server/tests/test_catalog_capabilities.py mcp_server/tests/test_catalog_store_unit.py -q --tb=short` |
 | Lint/type | `cd mcp_server && uv run ruff check src/services/catalog_*.py src/models/catalog_*.py src/config/schema.py src/graphiti_mcp_server.py && uv run pyright src/services/catalog_*.py src/models/catalog_*.py` |
 
 ### Phase Requirements → Test Map
