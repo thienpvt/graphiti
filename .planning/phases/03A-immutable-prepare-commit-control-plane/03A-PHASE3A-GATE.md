@@ -31,12 +31,12 @@ See `03A-GATE-RESULTS.json` for HEAD-bound results, digests, and per-check outco
 
 ## Scope Stop
 
-local_gate_pass=false
-nyquist_compliant=false
-ready_for_phase_3b=false
-prepare_commit=false
-live_neo4j_immutable_proof=pending
-live_neo4j_immutable_proof_pass=false
+local_gate_pass=true
+nyquist_compliant=true
+ready_for_phase_3b=true
+prepare_commit=true
+live_neo4j_immutable_proof=pass
+live_neo4j_immutable_proof_pass=true
 canary_executed=false
 oracle_catalog_v2_queried=false
 clear_graph_called=false
