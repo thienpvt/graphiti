@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
@@ -14,6 +15,7 @@ from models.catalog_common import (  # noqa: E402
     CATALOG_ENTITY_TYPES,
     CatalogErrorCode,
 )
+from models.catalog_edges import CatalogEdgeItem  # noqa: E402
 from models.catalog_topology import (  # noqa: E402
     EDGE_ENDPOINT_MAP,
     endpoint_map_export,
@@ -182,7 +184,9 @@ def test_expected_map_matches_authority():
     assert set(EXPECTED_MAP.keys()) == set(CATALOG_EDGE_TYPES)
     for edge_type, expected in EXPECTED_MAP.items():
         actual = EDGE_ENDPOINT_MAP[edge_type]
-        assert actual == expected, f'{edge_type}: missing={expected - actual} extra={actual - expected}'
+        assert actual == expected, (
+            f'{edge_type}: missing={expected - actual} extra={actual - expected}'
+        )
 
 
 def _allowed_cases() -> list[tuple[str, str, str]]:
@@ -288,10 +292,6 @@ def test_map_lookup_order_stable_and_reentrant():
 # ---------------------------------------------------------------------------
 # CatalogEdgeItem model preflight (Task 2)
 # ---------------------------------------------------------------------------
-
-
-from models.catalog_edges import CatalogEdgeItem  # noqa: E402
-from pydantic import ValidationError  # noqa: E402
 
 
 def _edge_payload(**overrides):
