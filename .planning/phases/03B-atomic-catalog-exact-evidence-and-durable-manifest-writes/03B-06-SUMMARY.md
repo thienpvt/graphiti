@@ -43,8 +43,8 @@ key-files:
 key-decisions:
   - "Historical a67789a oracle-catalog-v2 read-only probes remain permanent audit (test_policy; local Neo4j; no corresponding production data)"
   - "Authorized two-axis re-gate: history does not force current safety_checks_pass false"
-  - "ready_for_phase_4 still false pre-live (no live re-run; manifests False)"
-  - "features.manifests static False until coordinator authorizes live + flip"
+  - "ready_for_phase_4 still false after live preflip solely because manifests False"
+  - "features.manifests static False until coordinator authorizes flip after accepted live"
   - "Never query/mutate oracle-catalog-v2 again"
   - "Prior permanent hard-block-on-history readiness model superseded; history still cannot be erased"
 
@@ -62,11 +62,11 @@ status: incomplete
 
 # Phase 03B Plan 06: Live Atomic Co-Commit Gate Summary
 
-**INCOMPLETE / PRE-LIVE.** Authorized two-axis re-gate applied. Historical audit remains true. Current safety axis independent of history. Plan not complete. Phase 4 not opened. No Neo4j in this wave.
+**INCOMPLETE / PREFLIP.** Authorized two-axis re-gate applied. Live preflip ran against local Neo4j (`oracle-catalog-tool-test` only): **10 passed / 1 deselected**. Historical audit remains true. Current safety green. Plan not complete. Phase 4 not opened. `features.manifests` still False — sole readiness blocker. No additional live during evidence-correction wave.
 
-## Status: incomplete (pre-live review)
+## Status: incomplete (preflip — stop before manifests flip)
 
-Do not mark requirements complete. Do not open Phase 4. Do not flip `features.manifests` until coordinator pre-live review and accepted live proof.
+Do not mark requirements complete. Do not open Phase 4. Do not flip `features.manifests` until coordinator authorizes flip after accepted live preflip.
 
 ## Two-axis safety model (schema v2)
 
@@ -98,13 +98,14 @@ Rejected:
 - Permanent hard-block model that forced `safety_checks_pass=false` solely from history (superseded by two-axis; history still permanent audit)
 - Completed requirements list as phase-accepted
 
-### Live suite evidence (exact known)
+### Live suite evidence (exact)
 
 | Claim | Status |
 |-------|--------|
 | Coordinator pre-remediation run | **10 passed / 1 deselected** (independently known) |
-| Later agent-reported 11/11 after adversarial suite rewrite | **agent-reported only; not independently accepted** |
-| Use as Phase 4 transition evidence | **not accepted yet** — needs coordinator pre-live review + re-run under two-axis gate |
+| Live preflip under two-axis gate (`--require-neo4j`) | **10 passed / 1 deselected / 0 failed** — local Neo4j `graphiti-catalog-neo4j-test`; group `oracle-catalog-tool-test` only; TrackingDriver rejects none |
+| Later agent-reported 11/11 after adversarial suite rewrite | **superseded** by preflip 10/1 under `-m integration` (sync guard deselected) |
+| Use as Phase 4 transition evidence | **blocked solely by `features.manifests=False`** — live proof green; flip not yet authorized |
 
 Do not restate "11/11 results" as accepted proof.
 
@@ -115,14 +116,14 @@ Do not restate "11/11 results" as accepted proof.
 - Static ban on forbidden-group Cypher params in current source scan.
 - Scoped teardown by created UUID/batch allowlist (no whole-group delete).
 - `clear_graph` not called; canary not present in suite source.
-- Gate forces `CATALOG_INT_REQUIRED=1` + `CATALOG_CEILING_SMOKE=1` on live argv **when** live is run — **this re-gate wave does not query Neo4j**.
+- Gate forces `CATALOG_INT_REQUIRED=1` + `CATALOG_CEILING_SMOKE=1` on live argv. Live preflip already ran; evidence-correction wave does **not** re-query Neo4j.
 
-## Capability flags (pre-live)
+## Capability flags (preflip)
 
 | Flag | Value | Reason |
 |------|-------|--------|
 | `prepare_commit` | `True` | Prior plan live proof retained |
-| `manifests` | `False` | Pre-live; flip only after accepted live + coordinator |
+| `manifests` | `False` | Preflip; sole readiness blocker after live green |
 | `manifest_verification` | `False` | Phase 4 public tools not opened |
 
 ## Edge resolution rows 21/22
@@ -138,13 +139,11 @@ Do not restate "11/11 results" as accepted proof.
 
 ### Live preflip (`--require-neo4j`, manifests still False)
 
-Exact run bound to content HEAD before ledger rebind:
+Authoritative counts from final live ledger (no additional live re-run during evidence correction):
 
 | Field | Value |
 |-------|-------|
 | live suite | **10 passed, 1 deselected, 0 failed** (`-m integration`; sync guard deselected) |
-| live wall time (suite alone) | **6.73s** then **6.69s** under gate |
-| full gate wall time | **13s** |
 | `live_neo4j_atomic_proof` | pass |
 | `live_neo4j_atomic_proof_pass` | true |
 | `safety_checks_pass` | true |
@@ -155,7 +154,7 @@ Exact run bound to content HEAD before ledger rebind:
 | `ready_for_phase_4` / `phase_3b_complete` | **false** / **false** |
 | `pre_live_only` | false |
 | CLI exit under `--require-neo4j` | **1** (expected: ready false while manifests false) |
-| `verify_ledger` | ok at evaluated HEAD (exact) |
+| `verify_ledger` | ok as **ledger-only-child** after doc rebind (not exact HEAD match) |
 | TrackingDriver rejects | none observed |
 | Neo4j target | local `graphiti-catalog-neo4j-test` bolt `localhost:17687`; group `oracle-catalog-tool-test` only |
 
@@ -206,8 +205,9 @@ None intentional product stubs. Live proofs exist in source but are **unaccepted
 
 - FOUND: `mcp_server/src/services/catalog_capabilities.py` (`'manifests': False`)
 - FOUND: schema v2 two-axis constants/functions in `catalog_phase3b_gate_runner.py`
-- FOUND: SUMMARY `status: incomplete`
+- FOUND: SUMMARY `status: incomplete` (preflip; stop before manifests flip)
 - FOUND: edge rows 21/22 two-axis wording
-- No Neo4j / live re-run in this re-gate wave
+- FOUND: live preflip evidence 10 passed / 1 deselected; tool-test only
+- Evidence-correction wave: no additional Neo4j/live re-run
 - Plan **not** marked complete; requirements-completed empty
 - No shared STATE.md / ROADMAP.md updates (orchestrator-owned; do not advance)

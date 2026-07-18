@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -34,6 +35,50 @@ def _current_clean_safety(**overrides: object) -> dict[str, object]:
     }
     base.update(overrides)
     return base
+
+
+def test_atomic_write_json_raises_when_replace_always_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Exhausted os.replace PermissionError: destination unchanged; temp cleaned; raise."""
+    dest = tmp_path / 'ledger.json'
+    original = '{"keep": true}\n'
+    dest.write_text(original, encoding='utf-8')
+    monkeypatch.setattr(gate.time, 'sleep', lambda _s: None)
+    monkeypatch.setattr(
+        gate.os,
+        'replace',
+        mock.Mock(side_effect=PermissionError('locked')),
+    )
+    with pytest.raises(PermissionError, match='locked'):
+        gate.atomic_write_json(dest, {'new': True})
+    assert dest.read_text(encoding='utf-8') == original
+    leftover = list(tmp_path.glob('ledger.json.*.tmp'))
+    assert leftover == []
+    assert gate.os.replace.call_count == 8
+
+
+def test_atomic_write_json_succeeds_after_transient_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Retry os.replace: first PermissionError then success; destination updated."""
+    dest = tmp_path / 'ledger.json'
+    dest.write_text('{"old": true}\n', encoding='utf-8')
+    monkeypatch.setattr(gate.time, 'sleep', lambda _s: None)
+    calls = {'n': 0}
+
+    def flaky_replace(src: str, dst: str) -> None:
+        calls['n'] += 1
+        if calls['n'] < 3:
+            raise PermissionError('transient')
+        Path(dst).write_bytes(Path(src).read_bytes())
+        Path(src).unlink(missing_ok=True)
+
+    monkeypatch.setattr(gate.os, 'replace', flaky_replace)
+    gate.atomic_write_json(dest, {'ok': True})
+    assert calls['n'] == 3
+    assert json.loads(dest.read_text(encoding='utf-8')) == {'ok': True}
+    assert list(tmp_path.glob('ledger.json.*.tmp')) == []
 
 
 def test_ready_for_phase_4_false_without_live():

@@ -170,6 +170,7 @@ def write_text_lf(path: Path, text: str) -> None:
 
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Atomic JSON write via temp + os.replace only. Never non-atomic fallback."""
     path.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + '\n'
     fd, tmp_name = tempfile.mkstemp(prefix=path.name + '.', suffix='.tmp', dir=str(path.parent))
@@ -178,22 +179,17 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        # Windows: destination may be briefly locked (AV/indexer); retry replace.
-        last_err: Exception | None = None
+        # Windows: destination may be briefly locked (AV/indexer); retry replace only.
+        last_err: PermissionError | None = None
         for attempt in range(8):
             try:
                 os.replace(tmp_name, path)
-                last_err = None
-                break
+                return
             except PermissionError as exc:
                 last_err = exc
                 time.sleep(0.05 * (attempt + 1))
-        if last_err is not None:
-            # Fallback: direct overwrite if replace still denied (preflip ledger path).
-            path.write_bytes(data.encode('utf-8'))
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_name)
-            return
+        assert last_err is not None
+        raise last_err
     except Exception:
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)
