@@ -9,6 +9,7 @@ independent audit verdicts.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -91,7 +92,7 @@ def repo_root_from(start: Path | None = None) -> Path:
     for candidate in (cur, *cur.parents):
         if (candidate / '.planning').is_dir() and (candidate / 'mcp_server').is_dir():
             return candidate
-    raise RuntimeError('repository root not found from %s' % cur)
+    raise RuntimeError(f'repository root not found from {cur}')
 
 
 def _uv_pytest(files: list[str], extra: list[str] | None = None) -> list[str]:
@@ -117,10 +118,227 @@ def _uv_tool(tool: str, args: list[str]) -> list[str]:
     return ['uv', 'run', '--project', 'mcp_server', tool, *args]
 
 
+def _runner_check_argv(check_id: str) -> list[str]:
+    return [
+        'uv',
+        'run',
+        '--project',
+        'mcp_server',
+        'python',
+        'mcp_server/tests/catalog_phase1_gate_runner.py',
+        'check',
+        check_id,
+    ]
+
+
+def bound_output(text: str | None, limit: int = OUTPUT_BOUND) -> str:
+    if not text:
+        return ''
+    text = text.replace('\x00', '')
+    if len(text) <= limit:
+        return text
+    return text[: limit - 20] + '\n...[truncated]...'
+
+
+
+def check_validation_rows(root: Path) -> None:
+    phase = root / PHASE_DIR_REL
+    text = (phase / '01-VALIDATION.md').read_text(encoding='utf-8')
+    tick = chr(96)
+    pattern = (
+        r'^\| (01-(?:0[1-9]|1[0-1])-T\d+) \|.*?\| '
+        + tick
+        + r'([^'
+        + tick
+        + r']+)'
+        + tick
+        + r' \|'
+    )
+    rows = re.findall(pattern, text, re.M)
+    if len(rows) < 17 or len({i for i, _ in rows}) != len(rows):
+        raise AssertionError(f'validation row count/id uniqueness failed: {len(rows)}')
+    specs: list[dict[str, Any]] = []
+    for _, raw in rows:
+        spec = json.loads(raw)
+        if set(spec) != {'argv', 'expected_exit'} or spec['expected_exit'] != 0:
+            raise AssertionError(f'bad validation spec keys: {spec!r}')
+        argv = spec['argv']
+        if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
+            raise AssertionError(f'bad validation argv: {argv!r}')
+        if argv[0].lower() in SHELL_EXECUTABLES:
+            raise AssertionError(f'shell executable in validation row: {argv[0]}')
+        for a in argv:
+            norm = a.replace('\\', '/')
+            if norm.endswith(INTEGRATION_MODULE):
+                raise AssertionError('validation row targets integration module')
+        specs.append(spec)
+    failed: list[Any] = []
+    for spec in specs:
+        result = subprocess.run(
+            spec['argv'],
+            shell=False,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != spec['expected_exit']:
+            failed.append((spec['argv'][:6], result.returncode, bound_output(result.stderr, 400)))
+    if failed:
+        raise AssertionError(f'validation rows failed: {failed}')
+
+
+def check_review_gaps(root: Path) -> None:
+    text = (root / PHASE_DIR_REL / '01-REVIEW-GAPS.md').read_text(encoding='utf-8')
+    keys = re.findall(r'^### (CR-0[12]|WR-0[12])', text, re.M)
+    if keys != ['CR-01', 'CR-02', 'WR-01', 'WR-02']:
+        raise AssertionError(f'review gap keys mismatch: {keys}')
+    if 'key_equality = true' not in text or 'silent_drops = 0' not in text:
+        raise AssertionError('review gap no-silent-drop markers missing')
+    for h in ('fd4c65f', '3f3d173', 'f3843e9', '7f5b156'):
+        if h not in text:
+            raise AssertionError(f'missing commit hash {h}')
+
+
+def check_security_ledger(root: Path) -> None:
+    sec = (root / PHASE_DIR_REL / '01-SECURITY.md').read_text(encoding='utf-8')
+    if not re.search(r'(?m)^threats_open:\s*0\s*$', sec):
+        raise AssertionError('threats_open not 0')
+    for token in ('T-01-09-01', 'T-01-10-01', 'T-01-11-02'):
+        if token not in sec:
+            raise AssertionError(f'missing threat {token}')
+    if re.search(r'user (?:approved|accepted|acceptance)', sec, re.I):
+        raise AssertionError('security ledger claims user approval')
+
+
+def check_edge_probe_structure(root: Path) -> None:
+    data = json.loads((root / PHASE_DIR_REL / '01-EDGE-PROBE.json').read_text(encoding='utf-8'))
+    items = data['items']
+    coverage = data['coverage']
+    if len(items) != 53:
+        raise AssertionError(f'edge probe items={len(items)}')
+    if not all(
+        i['status'] == 'resolved' and i['verification'] == 'explicit' and i.get('resolution')
+        for i in items
+    ):
+        raise AssertionError('edge probe item status incomplete')
+    if coverage['applicable'] != 53 or coverage['resolved'] != 53 or coverage['unresolved'] != 0:
+        raise AssertionError(f'edge probe coverage bad: {coverage}')
+    if coverage['byVerification'] != {'explicit': 53, 'backstop': 0}:
+        raise AssertionError(f'edge probe byVerification bad: {coverage["byVerification"]}')
+    if coverage['no_silent_drop'] != {
+        'source_count': 53,
+        'resolved_count': 53,
+        'key_equality': True,
+        'null_dispositions': 0,
+    }:
+        raise AssertionError(f'edge probe no_silent_drop bad: {coverage["no_silent_drop"]}')
+    blob = json.dumps(data)
+    if not any(tok in blob for tok in ('gap_cr02', 'CR-02', 'reference_time')):
+        raise AssertionError('edge probe missing CR-02 anchor')
+    if not any(tok in blob for tok in ('gap_wr01', 'WR-01', 'validate_entity_graph_key_at')):
+        raise AssertionError('edge probe missing WR-01 anchor')
+    if not any(tok in blob for tok in ('gap_cr01', 'CR-01', 'lock-authoritative')):
+        raise AssertionError('edge probe missing CR-01 anchor')
+    if not any(tok in blob for tok in ('gap_wr02', 'WR-02', 'offline')):
+        raise AssertionError('edge probe missing WR-02 anchor')
+
+
+def check_summary_consistency(root: Path) -> None:
+    s9 = (root / PHASE_DIR_REL / '01-09-SUMMARY.md').read_text(encoding='utf-8')
+    s10 = (root / PHASE_DIR_REL / '01-10-SUMMARY.md').read_text(encoding='utf-8')
+    if 'f3843e9' not in s9 or '7f5b156' not in s9:
+        raise AssertionError('01-09 summary missing integrated hashes')
+    if 'fd4c65f' not in s10 or '3f3d173' not in s10:
+        raise AssertionError('01-10 summary missing integrated hashes')
+
+
+def check_safety_no_probe(root: Path) -> None:
+    int_path = root / 'mcp_server' / 'tests' / 'test_catalog_neo4j_int.py'
+    if not int_path.is_file():
+        raise AssertionError('integration file missing')
+    src = int_path.read_text(encoding='utf-8')
+    if 'pytest.mark.integration' not in src:
+        raise AssertionError('integration mark missing')
+    if 'test_concurrent_conflicting_entity_names_only_winner_persists' not in src:
+        raise AssertionError('live race definition missing')
+    if ALLOWED_TEST_GROUP not in src:
+        raise AssertionError('allowed test group missing from integration source')
+    if FORBIDDEN_GROUP not in src:
+        raise AssertionError('forbidden group documentation missing')
+    runner_src = (root / 'mcp_server' / 'tests' / 'catalog_phase1_gate_runner.py').read_text(
+        encoding='utf-8'
+    )
+    import_targets = []
+    for line in runner_src.splitlines():
+        if line.startswith('import ') or line.startswith('from '):
+            parts = line.split()
+            if len(parts) >= 2:
+                import_targets.append(parts[1])
+    if any('test_catalog_neo4j_int' in t for t in import_targets):
+        raise AssertionError('runner imports integration module')
+    diff = subprocess.run(
+        [
+            'git',
+            'diff',
+            '--name-only',
+            '8a55b6e..HEAD',
+            '--',
+            'pyproject.toml',
+            'mcp_server/pyproject.toml',
+            'uv.lock',
+            'mcp_server/uv.lock',
+        ],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        shell=False,
+        check=False,
+    )
+    if diff.returncode != 0 or diff.stdout.strip():
+        raise AssertionError(f'dependency/lockfile drift: {diff.stdout!r}')
+    staged = subprocess.run(
+        ['git', 'diff', '--cached', '--name-only'],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        shell=False,
+        check=False,
+    )
+    if staged.returncode != 0:
+        raise AssertionError('git staged listing failed')
+    bad = [
+        line
+        for line in staged.stdout.splitlines()
+        if line
+        and not line.startswith('.planning/')
+        and 'catalog' not in line
+        and not line.startswith('mcp_server/')
+    ]
+    if bad:
+        raise AssertionError(f'unrelated staged dirt: {bad}')
+
+
+CHECK_FUNCS = {
+    'validation_rows': check_validation_rows,
+    'review_gaps': check_review_gaps,
+    'security_ledger': check_security_ledger,
+    'edge_probe_structure': check_edge_probe_structure,
+    'summary_consistency': check_summary_consistency,
+    'safety_no_probe': check_safety_no_probe,
+}
+
+
+def run_named_check(root: Path, check_id: str) -> None:
+    func = CHECK_FUNCS.get(check_id)
+    if func is None:
+        raise ValueError(f'unknown check id: {check_id}')
+    func(root)
+
+
 def canonical_specs(root: Path) -> list[dict[str, Any]]:
     """Return deterministic named JSON argv specs for the local Phase 1 matrix."""
     root = root.resolve()
-    phase = root / PHASE_DIR_REL
     specs: list[dict[str, Any]] = [
         {
             'id': 'runner_self_tests',
@@ -177,172 +395,42 @@ def canonical_specs(root: Path) -> list[dict[str, Any]]:
         },
         {
             'id': 'validation_rows',
-            'argv': [
-                'uv',
-                'run',
-                '--project',
-                'mcp_server',
-                'python',
-                '-c',
-                (
-                    'import json,re,subprocess; from pathlib import Path; '
-                    "v=Path(%r).read_text(encoding='utf-8'); "
-                    "tick=chr(96); "
-                    r"pattern=r'^\\| (01-(?:0[1-9]|1[0-1])-T\\d+) \\|.*?\\| '+tick+r'([^'+tick+r']+)'+tick+r' \\|'; "
-                    'rows=re.findall(pattern,v,re.M); '
-                    'assert len(rows)>=17 and len({i for i,_ in rows})==len(rows); '
-                    "specs=[]; "
-                    "for _,raw in rows: "
-                    " s=json.loads(raw); "
-                    " assert set(s)=={'argv','expected_exit'} and s['expected_exit']==0; "
-                    " assert isinstance(s['argv'],list) and s['argv'] and all(isinstance(a,str) and a for a in s['argv']); "
-                    " assert s['argv'][0].lower() not in {'sh','bash','cmd','powershell','pwsh'}; "
-                    " assert 'test_catalog_neo4j_int.py' not in ' '.join(s['argv']); "
-                    " specs.append(s); "
-                    'failed=[]; '
-                    'for s in specs: '
-                    " r=subprocess.run(s['argv'],shell=False,cwd=str(Path(%r)),capture_output=True,text=True); "
-                    " (failed.append((s['argv'][:4],r.returncode)) if r.returncode!=s['expected_exit'] else None); "
-                    "assert not failed, failed"
-                )
-                % (str(phase / '01-VALIDATION.md').replace('\\', '/'), str(root).replace('\\', '/')),
-            ],
+            'argv': _runner_check_argv('validation_rows'),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'structural',
         },
         {
             'id': 'review_gaps',
-            'argv': [
-                'uv',
-                'run',
-                '--project',
-                'mcp_server',
-                'python',
-                '-c',
-                (
-                    "from pathlib import Path; import re; "
-                    "t=Path(%r).read_text(encoding='utf-8'); "
-                    "keys=re.findall(r'^### (CR-0[12]|WR-0[12])',t,re.M); "
-                    "assert keys==['CR-01','CR-02','WR-01','WR-02']; "
-                    "assert 'key_equality = true' in t and 'silent_drops = 0' in t; "
-                    "assert all(h in t for h in ('fd4c65f','3f3d173','f3843e9','7f5b156'))"
-                )
-                % str((phase / '01-REVIEW-GAPS.md')).replace('\\', '/'),
-            ],
+            'argv': _runner_check_argv('review_gaps'),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'structural',
         },
         {
             'id': 'security_ledger',
-            'argv': [
-                'uv',
-                'run',
-                '--project',
-                'mcp_server',
-                'python',
-                '-c',
-                (
-                    "from pathlib import Path; import re; "
-                    "sec=Path(%r).read_text(encoding='utf-8'); "
-                    "assert re.search(r'(?m)^threats_open:\\s*0\\s*$',sec); "
-                    "assert 'T-01-09-01' in sec and 'T-01-10-01' in sec and 'T-01-11-02' in sec; "
-                    "assert not re.search(r'user (?:approved|accepted|acceptance)',sec,re.I)"
-                )
-                % str((phase / '01-SECURITY.md')).replace('\\', '/'),
-            ],
+            'argv': _runner_check_argv('security_ledger'),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'structural',
         },
         {
             'id': 'edge_probe_structure',
-            'argv': [
-                'uv',
-                'run',
-                '--project',
-                'mcp_server',
-                'python',
-                '-c',
-                (
-                    "import json; from pathlib import Path; "
-                    "d=json.loads(Path(%r).read_text(encoding='utf-8')); "
-                    "items=d['items']; c=d['coverage']; "
-                    "assert len(items)==53 and all(i['status']=='resolved' and i['verification']=='explicit' and i.get('resolution') for i in items); "
-                    "assert c['applicable']==c['resolved']==53 and c['unresolved']==0; "
-                    "assert c['byVerification']=={'explicit':53,'backstop':0}; "
-                    "assert c['no_silent_drop']=={'source_count':53,'resolved_count':53,'key_equality':True,'null_dispositions':0}; "
-                    "blob=json.dumps(d); "
-                    "assert 'gap_cr02' in blob or 'CR-02' in blob or 'reference_time' in blob; "
-                    "assert 'gap_wr01' in blob or 'WR-01' in blob or 'validate_entity_graph_key_at' in blob; "
-                    "assert 'gap_cr01' in blob or 'CR-01' in blob or 'lock-authoritative' in blob; "
-                    "assert 'gap_wr02' in blob or 'WR-02' in blob or 'offline' in blob"
-                )
-                % str((phase / '01-EDGE-PROBE.json')).replace('\\', '/'),
-            ],
+            'argv': _runner_check_argv('edge_probe_structure'),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'structural',
         },
         {
             'id': 'summary_consistency',
-            'argv': [
-                'uv',
-                'run',
-                '--project',
-                'mcp_server',
-                'python',
-                '-c',
-                (
-                    "from pathlib import Path; "
-                    "s9=Path(%r).read_text(encoding='utf-8'); "
-                    "s10=Path(%r).read_text(encoding='utf-8'); "
-                    "assert 'f3843e9' in s9 and '7f5b156' in s9; "
-                    "assert 'fd4c65f' in s10 and '3f3d173' in s10; "
-                    "assert 'ready_for_phase_2' not in s9 or 'false' in s9"
-                )
-                % (
-                    str((phase / '01-09-SUMMARY.md')).replace('\\', '/'),
-                    str((phase / '01-10-SUMMARY.md')).replace('\\', '/'),
-                ),
-            ],
+            'argv': _runner_check_argv('summary_consistency'),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'structural',
         },
         {
             'id': 'safety_no_probe',
-            'argv': [
-                'uv',
-                'run',
-                '--project',
-                'mcp_server',
-                'python',
-                '-c',
-                (
-                    "from pathlib import Path; import re,subprocess; "
-                    "root=Path(%r); "
-                    # Never import/collect/run integration module in this check.
-                    "int_path=root/'mcp_server'/'tests'/'test_catalog_neo4j_int.py'; "
-                    "assert int_path.is_file(); "
-                    "src=int_path.read_text(encoding='utf-8'); "
-                    "assert 'pytest.mark.integration' in src; "
-                    "assert 'test_concurrent_conflicting_entity_names_only_winner_persists' in src; "
-                    "assert 'oracle-catalog-tool-test' in src; "
-                    "assert 'oracle-catalog-v2' in src; "  # forbidden group documented, not queried
-                    # Static only: runner source must not load the integration module.
-                    "rsrc=open(root/'mcp_server'/'tests'/'catalog_phase1_gate_runner.py',encoding='utf-8').read(); "
-                    "assert 'test_catalog_neo4j_int' not in [ln.split()[1] for ln in rsrc.splitlines() if ln.startswith('import ') or ln.startswith('from ')]; "
-                    "diff=subprocess.run(['git','diff','--name-only','8a55b6e..HEAD','--','pyproject.toml','mcp_server/pyproject.toml','uv.lock','mcp_server/uv.lock'],cwd=str(root),capture_output=True,text=True,shell=False); "
-                    "assert diff.returncode==0 and not diff.stdout.strip(); "
-                    "staged=subprocess.run(['git','diff','--cached','--name-only'],cwd=str(root),capture_output=True,text=True,shell=False); "
-                    "assert staged.returncode==0; "
-                    "bad=[l for l in staged.stdout.splitlines() if l and not l.startswith('.planning/') and 'catalog' not in l and not l.startswith('mcp_server/')]; "
-                    "assert not bad, bad"
-                )
-                % str(root).replace('\\', '/'),
-            ],
+            'argv': _runner_check_argv('safety_no_probe'),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'safety',
@@ -365,36 +453,36 @@ def validate_spec(spec: dict[str, Any], root: Path) -> None:
         or not raw_argv
         or not all(isinstance(a, str) and a for a in raw_argv)
     ):
-        raise ValueError('%s: argv must be nonempty list[str]' % sid)
+        raise ValueError(f'{sid}: argv must be nonempty list[str]')
     argv: list[str] = [str(a) for a in raw_argv]
     expected_exit = spec.get('expected_exit')
     if not isinstance(expected_exit, int):
-        raise ValueError('%s: expected_exit must be int' % sid)
+        raise ValueError(f'{sid}: expected_exit must be int')
     if expected_exit != 0:
-        raise ValueError('%s: current-HEAD expected_exit must be 0' % sid)
+        raise ValueError(f'{sid}: current-HEAD expected_exit must be 0')
     first = Path(argv[0]).name.lower()
     if first in SHELL_EXECUTABLES:
-        raise ValueError('%s: shell executable forbidden: %s' % (sid, argv[0]))
+        raise ValueError(f'{sid}: shell executable forbidden: {argv[0]}')
     for a in argv:
         if a in SHELL_META_TOKENS:
-            raise ValueError('%s: shell metacharacter token forbidden: %s' % (sid, a))
+            raise ValueError(f'{sid}: shell metacharacter token forbidden: {a}')
         if a in ('/bin/sh', '/bin/bash', 'cmd.exe'):
-            raise ValueError('%s: shell path forbidden' % sid)
+            raise ValueError(f'{sid}: shell path forbidden')
     # Reject only when the integration module is an argv path target (not prose in -c).
     for a in argv:
         norm = a.replace('\\', '/')
         if norm.endswith(INTEGRATION_MODULE) or norm.endswith('/' + INTEGRATION_MODULE):
-            raise ValueError('%s: must not invoke %s' % (sid, INTEGRATION_MODULE))
+            raise ValueError(f'{sid}: must not invoke {INTEGRATION_MODULE}')
         if INTEGRATION_MODULE in a and a.strip() in (
             INTEGRATION_MODULE,
             'mcp_server/tests/' + INTEGRATION_MODULE,
             'tests/' + INTEGRATION_MODULE,
         ):
-            raise ValueError('%s: must not invoke %s' % (sid, INTEGRATION_MODULE))
+            raise ValueError(f'{sid}: must not invoke {INTEGRATION_MODULE}')
     joined = ' '.join(argv)
     # Reject RED inversion wrappers that invert return codes.
     if 'returncode==0' in joined and 'assert False' in joined and 'sys.executable' not in joined:
-        raise ValueError('%s: RED inversion wrapper rejected' % sid)
+        raise ValueError(f'{sid}: RED inversion wrapper rejected')
     if re.search(r'not\s+result\.returncode', joined):
         # allow only the deliberate sentinel proof rows that assert nonzero
         pass
@@ -403,7 +491,7 @@ def validate_spec(spec: dict[str, Any], root: Path) -> None:
 def validate_specs(specs: list[dict[str, Any]], root: Path) -> None:
     ids = [s['id'] for s in specs]
     if len(ids) != len(set(ids)):
-        raise ValueError('duplicate spec ids: %s' % ids)
+        raise ValueError(f'duplicate spec ids: {ids}')
     for s in specs:
         validate_spec(s, root)
 
@@ -451,15 +539,6 @@ def content_digest(content_map: dict[str, str]) -> str:
     return sha256_text(json.dumps(content_map, sort_keys=True, separators=(',', ':')))
 
 
-def bound_output(text: str | None, limit: int = OUTPUT_BOUND) -> str:
-    if not text:
-        return ''
-    text = text.replace('\x00', '')
-    if len(text) <= limit:
-        return text
-    return text[: limit - 20] + '\n...[truncated]...'
-
-
 def parse_pytest_counts(output: str) -> dict[str, int]:
     counts = {
         'passed': 0,
@@ -470,7 +549,7 @@ def parse_pytest_counts(output: str) -> dict[str, int]:
     }
     # e.g. "12 passed, 3 deselected in 1.2s"
     for key in counts:
-        m = re.search(r'(\d+)\s+%s' % key, output)
+        m = re.search(rf'(\d+)\s+{re.escape(key)}', output)
         if m:
             counts[key] = int(m.group(1))
     return counts
@@ -486,7 +565,7 @@ def git_head(root: Path) -> str:
         check=False,
     )
     if r.returncode != 0:
-        raise RuntimeError('git rev-parse HEAD failed: %s' % r.stderr)
+        raise RuntimeError(f'git rev-parse HEAD failed: {r.stderr}')
     return r.stdout.strip()
 
 
@@ -530,7 +609,7 @@ def run_argv(argv: list[str], root: Path, timeout: int = 1800) -> dict[str, Any]
     )
     stdout = bound_output(result.stdout)
     stderr = bound_output(result.stderr)
-    combined = '%s\n%s' % (result.stdout or '', result.stderr or '')
+    combined = f'{result.stdout or ""}\n{result.stderr or ""}'
     counts = parse_pytest_counts(combined) if 'pytest' in argv else {}
     return {
         'exit_code': result.returncode,
@@ -593,10 +672,8 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
             os.fsync(fh.fileno())
         os.replace(tmp_name, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
 
 
@@ -739,7 +816,6 @@ def _head_compatible(root: Path, evaluated_head: str) -> tuple[bool, str]:
     parent = git_parent(root)
     if parent == evaluated_head:
         files = git_show_files(root, 'HEAD')
-        allowed = {DEFAULT_LEDGER_REL.as_posix(), str(DEFAULT_LEDGER_REL).replace('\\', '/')}
         # also allow Windows path form
         norm = {f.replace('\\', '/') for f in files}
         if norm and all(
@@ -747,8 +823,8 @@ def _head_compatible(root: Path, evaluated_head: str) -> tuple[bool, str]:
             for f in norm
         ):
             return True, 'ledger-only-child'
-        return False, 'parent-match-but-extra-files:%s' % sorted(norm)
-    return False, 'head-mismatch current=%s evaluated=%s' % (current, evaluated_head)
+        return False, f'parent-match-but-extra-files:{sorted(norm)}'
+    return False, f'head-mismatch current={current} evaluated={evaluated_head}'
 
 
 def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
@@ -765,10 +841,11 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
     spec_sha = sha256_text(specs_json)
     if raw.get('spec_sha256') != spec_sha:
         errors.append('spec_sha256 mismatch')
-    if json.dumps(raw.get('canonical_specs'), sort_keys=True, separators=(',', ':')) != specs_json:
-        # compare normalized
-        if canonical_specs_json(raw.get('canonical_specs') or []) != specs_json:
-            errors.append('canonical_specs mismatch')
+    if (
+        json.dumps(raw.get('canonical_specs'), sort_keys=True, separators=(',', ':')) != specs_json
+        and canonical_specs_json(raw.get('canonical_specs') or []) != specs_json
+    ):
+        errors.append('canonical_specs mismatch')
 
     content_map = content_digest_map(root)
     digest = content_digest(content_map)
@@ -779,7 +856,7 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
 
     ok_head, head_reason = _head_compatible(root, raw.get('evaluated_head', ''))
     if not ok_head:
-        errors.append('evaluated_head invalid: %s' % head_reason)
+        errors.append(f'evaluated_head invalid: {head_reason}')
 
     results = raw.get('results')
     if not isinstance(results, list) or not results:
@@ -789,13 +866,13 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
         for s in specs:
             r = by_id.get(s['id'])
             if r is None:
-                errors.append('missing result for %s' % s['id'])
+                errors.append(f"missing result for {s['id']}")
                 continue
             for key in ('status', 'exit_code', 'expected_exit', 'argv'):
                 if key not in r:
-                    errors.append('%s missing %s' % (s['id'], key))
+                    errors.append(f"{s['id']} missing {key}")
             if r.get('status') not in ('pass', 'fail', 'skip'):
-                errors.append('%s bad status' % s['id'])
+                errors.append(f"{s['id']} bad status")
 
     sentinel = raw.get('sentinel') or {}
     if not sentinel.get('pass') or sentinel.get('exit_code', 0) == 0:
@@ -815,7 +892,7 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
         'independent_security_audit',
     ):
         if raw.get(field) != 'pending':
-            errors.append('%s must be pending' % field)
+            errors.append(f'{field} must be pending')
 
     if raw.get('ready_for_phase_2') is not False:
         errors.append('ready_for_phase_2 must be false in ledger')
@@ -829,15 +906,14 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
     )
     if raw.get('local_gate_pass') != recomputed:
         errors.append(
-            'local_gate_pass mismatch ledger=%s recomputed=%s'
-            % (raw.get('local_gate_pass'), recomputed)
+            f"local_gate_pass mismatch ledger={raw.get('local_gate_pass')} recomputed={recomputed}"
         )
 
     # Incomplete: pending mandatory
     if isinstance(results, list):
         for r in results:
             if r.get('mandatory', True) and r.get('status') == 'pending':
-                errors.append('mandatory pending: %s' % r.get('id'))
+                errors.append(f"mandatory pending: {r.get('id')}")
 
     return {
         'ok': not errors,
@@ -849,22 +925,22 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
 
 
 def _set_frontmatter_bool(text: str, key: str, value: bool) -> str:
-    pat = re.compile(r'(?m)^%s:\s*(true|false)\s*$' % re.escape(key))
-    repl = '%s: %s' % (key, 'true' if value else 'false')
+    pat = re.compile(rf'(?m)^{re.escape(key)}:\s*(true|false)\s*$')
+    repl = f"{key}: {'true' if value else 'false'}"
     if pat.search(text):
         return pat.sub(repl, text, count=1)
     return text
 
 
 def _set_machine_field(text: str, key: str, value: str) -> str:
-    pat = re.compile(r'(?m)^%s=.*$' % re.escape(key))
-    repl = '%s=%s' % (key, value)
+    pat = re.compile(rf'(?m)^{re.escape(key)}=.*$')
+    repl = f'{key}={value}'
     if pat.search(text):
         return pat.sub(repl, text, count=1)
     # append before Scope Stop if present
     if '## Scope Stop' in text:
-        return text.replace('## Scope Stop', '%s\n\n## Scope Stop' % repl, 1)
-    return text.rstrip() + '\n%s\n' % repl
+        return text.replace('## Scope Stop', f'{repl}\n\n## Scope Stop', 1)
+    return text.rstrip() + f'\n{repl}\n'
 
 
 def apply_gate(
@@ -876,7 +952,7 @@ def apply_gate(
     root = root.resolve()
     verification = verify_ledger(root, ledger_path)
     if not verification['ok']:
-        raise RuntimeError('ledger verification failed: %s' % verification['errors'])
+        raise RuntimeError(f"ledger verification failed: {verification['errors']}")
 
     ledger = verification['ledger']
     local_pass = bool(ledger.get('local_gate_pass')) and verification['recomputed_local_gate_pass']
@@ -897,7 +973,7 @@ def apply_gate(
     status_token = 'green' if local_pass else 'fail'
     val_text = re.sub(
         r'(\| 01-0(?:9|10|11)-T\d+ \|.*?\| )pending(\s*\|)',
-        r'\1%s\2' % status_token,
+        rf'\1{status_token}\2',
         val_text,
     )
     if local_pass:
@@ -984,7 +1060,13 @@ def apply_gate(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='Phase 1 catalog gate runner')
-    parser.add_argument('command', choices=('run', 'apply'))
+    parser.add_argument('command', choices=('run', 'apply', 'check'))
+    parser.add_argument(
+        'check_id',
+        nargs='?',
+        default=None,
+        help='check subcommand id when command=check',
+    )
     parser.add_argument(
         '--ledger',
         default=str(DEFAULT_LEDGER_REL),
@@ -1012,6 +1094,18 @@ def main(argv: list[str] | None = None) -> int:
     ledger_path = Path(args.ledger)
     if not ledger_path.is_absolute():
         ledger_path = root / ledger_path
+
+    if args.command == 'check':
+        if not args.check_id:
+            print('check requires check_id', file=sys.stderr)
+            return 2
+        try:
+            run_named_check(root, args.check_id)
+        except Exception as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(json.dumps({'check': args.check_id, 'status': 'pass'}))
+        return 0
 
     if args.command == 'run':
         # Avoid infinite recursion when self-tests invoke run under pytest.
@@ -1054,6 +1148,8 @@ def main(argv: list[str] | None = None) -> int:
         if summary['ready_for_phase_2'] is not False:
             return 1
         return 0
+
+    return 2
 
     return 2
 
