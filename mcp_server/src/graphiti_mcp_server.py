@@ -42,6 +42,7 @@ from models.catalog_entities import (
 from models.catalog_provenance import UpsertProvenanceRequest
 from models.catalog_responses import (
     CatalogBatchWriteResponse,
+    CatalogCapabilitiesResponse,
     CatalogIngestStatusResponse,
     CatalogWriteResponse,
     ResolveTypedEntitiesResponse,
@@ -61,6 +62,7 @@ from models.response_types import (
     SuccessResponse,
     TripletResponse,
 )
+from services.catalog_capabilities import build_catalog_capabilities
 from services.catalog_service import CatalogService
 from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
 from services.queue_service import QueueService
@@ -1485,6 +1487,39 @@ async def upsert_catalog_batch(
             type(e).__name__,
         )
         return ErrorResponse(error='catalog upsert_catalog_batch failed')
+
+
+@mcp.tool()
+async def get_catalog_capabilities() -> CatalogCapabilitiesResponse | ErrorResponse:
+    """Read-only catalog-v2 capabilities discovery.
+
+    Available after server init even when catalog writes are disabled or the UUID
+    namespace is missing. Never mutates schema, indexes, or graph state. Never
+    returns raw namespace or secrets.
+    """
+    global graphiti_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+
+    try:
+        cfg = graphiti_service.config.catalog_upsert
+        backend = getattr(graphiti_service.config.database, 'provider', None)
+        embedder_cfg = getattr(graphiti_service.config, 'embedder', None)
+        embedder_provider = getattr(embedder_cfg, 'provider', None) if embedder_cfg else None
+        embedder_model = getattr(embedder_cfg, 'model', None) if embedder_cfg else None
+        # Do not call get_client / driver / build_indices — pure config view only.
+        return build_catalog_capabilities(
+            config=cfg,
+            client=None,
+            backend=backend,
+            connectivity='unknown',
+            embedder_provider=embedder_provider,
+            embedder_model=embedder_model,
+        )
+    except Exception as e:
+        logger.error('get_catalog_capabilities failed reason=%s', type(e).__name__)
+        return ErrorResponse(error='catalog get_catalog_capabilities failed')
 
 
 @mcp.custom_route('/health', methods=['GET'])

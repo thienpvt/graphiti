@@ -202,3 +202,139 @@ def test_build_capabilities_no_driver_call_when_client_none():
     )
     assert caps.package_version
     assert caps.backend is None or isinstance(caps.backend, str)
+
+
+# ---------------------------------------------------------------------------
+# Task 2: MCP registration + get_status compatibility (CAPA-01/09)
+# ---------------------------------------------------------------------------
+
+
+def _mcp_server():
+    import importlib
+
+    return importlib.import_module('graphiti_mcp_server')
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_get_catalog_capabilities_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'get_catalog_capabilities')
+    assert callable(server.get_catalog_capabilities)
+    tools = await server.mcp.list_tools()
+    names = {tool.name for tool in tools}
+    assert 'get_catalog_capabilities' in names
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_capabilities_works_when_writes_disabled(monkeypatch):
+    server = _mcp_server()
+    cfg = CatalogConfig(enabled=False, uuid_namespace=None)
+    mock_service = SimpleNamespace(
+        config=SimpleNamespace(
+            catalog_upsert=cfg,
+            database=SimpleNamespace(provider='neo4j'),
+            embedder=SimpleNamespace(provider='openai', model='text-embedding-3-small'),
+        ),
+        get_client=AsyncMock(
+            side_effect=AssertionError('capabilities must not require get_client success')
+        ),
+    )
+    monkeypatch.setattr(server, 'graphiti_service', mock_service)
+
+    result = await server.get_catalog_capabilities()
+    assert not isinstance(result, dict) or 'error' not in result
+    dumped = result.model_dump() if hasattr(result, 'model_dump') else dict(result)
+    assert dumped['catalog_writes_enabled'] is False
+    assert dumped['uuid_namespace_configured'] is False
+    assert dumped['namespace_fingerprint'] is None
+    assert dumped['features']['prepare_commit'] is False
+    assert dumped['features']['explicit_evidence_links'] is True
+    assert 'uuid_namespace' not in dumped
+    mock_service.get_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_capabilities_zero_mutation_spies(monkeypatch):
+    server = _mcp_server()
+    driver = MagicMock()
+    driver.execute_write = AsyncMock()
+    driver.build_indices_and_constraints = AsyncMock()
+    client = SimpleNamespace(driver=driver)
+    cfg = CatalogConfig(enabled=True, uuid_namespace=str(FIXED_NS))
+    mock_service = SimpleNamespace(
+        config=SimpleNamespace(
+            catalog_upsert=cfg,
+            database=SimpleNamespace(provider='neo4j'),
+            embedder=SimpleNamespace(provider='openai', model=None),
+        ),
+        get_client=AsyncMock(return_value=client),
+    )
+    monkeypatch.setattr(server, 'graphiti_service', mock_service)
+
+    result = await server.get_catalog_capabilities()
+    dumped = result.model_dump() if hasattr(result, 'model_dump') else dict(result)
+    assert dumped['catalog_writes_enabled'] is True
+    assert dumped['namespace_fingerprint'] is not None
+    # Optional get_client for non-mutating context is allowed; write paths forbidden.
+    driver.execute_write.assert_not_called()
+    driver.build_indices_and_constraints.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_status_preserves_status_and_message_keys(monkeypatch):
+    server = _mcp_server()
+    assert server.StatusResponse.__annotations__.keys() >= {'status', 'message'}
+    assert set(server.StatusResponse.__required_keys__) == {'status', 'message'}
+
+    monkeypatch.setattr(server, 'graphiti_service', None)
+    resp = await server.get_status()
+    assert set(resp.keys()) == {'status', 'message'}
+    assert resp['status'] == 'error'
+    assert isinstance(resp['message'], str)
+
+
+@pytest.mark.asyncio
+async def test_mcp_registers_capabilities_plus_legacy_and_catalog_tools():
+    server = _mcp_server()
+    tools = await server.mcp.list_tools()
+    names = {tool.name for tool in tools}
+    # Write/read catalog tools preserved; capabilities is additive read tool.
+    for required in (
+        'upsert_typed_entities',
+        'upsert_typed_edges',
+        'resolve_typed_entities',
+        'verify_catalog_batch',
+        'upsert_provenance',
+        'get_catalog_ingest_status',
+        'upsert_catalog_batch',
+        'get_catalog_capabilities',
+        'get_status',
+        'add_memory',
+    ):
+        assert required in names
+    assert len(names) >= 22
+
+
+def test_capabilities_source_omits_raw_namespace_logging():
+    """Static: capabilities path never logs uuid_namespace material."""
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).parent.parent / 'src'
+    for rel in (
+        'services/catalog_capabilities.py',
+        'graphiti_mcp_server.py',
+    ):
+        tree = ast.parse((src / rel).read_text(encoding='utf-8'))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            if not isinstance(node.func.value, ast.Name) or node.func.value.id != 'logger':
+                continue
+            # Only inspect get_catalog_capabilities body in server module.
+            # Fingerprint builder has no logger; server wrapper must not log namespace.
+            text = ast.unparse(node)
+            assert 'uuid_namespace' not in text
+            assert 'GRAPHITI_CATALOG_UUID_NAMESPACE' not in text
