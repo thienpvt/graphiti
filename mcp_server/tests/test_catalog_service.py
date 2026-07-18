@@ -3576,6 +3576,47 @@ async def test_batch_in_tx_already_committed_counts_evidence_links_as_unchanged(
     cast(AsyncMock, service._store.upsert_batch_status).assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_batch_status_provenance_count_includes_evidence_links():
+    """Committed batch status stores sources + evidence_links as provenance_count."""
+    employee = _entity()
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    events = _install_batch_write_mocks(service, client)
+    source = _source()
+    provenance = NestedProvenancePayload(
+        sources=[source],
+        evidence_links=[
+            _evidence_link(
+                source_key=source.source_key,
+                entity_target={
+                    'entity_type': employee.entity_type,
+                    'graph_key': employee.graph_key,
+                },
+            )
+        ],
+    )
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service._store.upsert_source_episode = AsyncMock(  # type: ignore[method-assign]
+        return_value={'uuid': 'src', 'status': 'created'}
+    )
+    service._store.upsert_mentions_link = AsyncMock(  # type: ignore[method-assign]
+        return_value={'uuid': 'mention', 'status': 'created'}
+    )
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(entities=[employee], provenance=provenance),
+    )
+
+    assert resp.status == 'committed'
+    status_call = cast(AsyncMock, service._store.upsert_batch_status).await_args
+    assert status_call is not None
+    assert status_call.kwargs['params']['status'] == 'committed'
+    assert status_call.kwargs['params']['provenance_count'] == 2
+    assert 'status_committed' in events
+
 
 @pytest.mark.asyncio
 async def test_batch_dry_run_rejects_bad_nested_source_hash_before_side_effects():
