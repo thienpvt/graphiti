@@ -165,6 +165,7 @@ Each task was committed atomically:
 
 1. **Task 1: Exact evidence + durable manifest store suite (RED/GREEN-intent)** - `3db0c8a` (test)
 2. **Task 2: Store authorities implementation (GREEN)** - `2c02b08` (feat)
+3. **Follow-up: IDE diagnostics / dead allowlist constants** - `7a6dd8d` (fix)
 
 **Plan metadata:** `5a858bd` (docs: complete plan)
 
@@ -210,6 +211,14 @@ _Note: TDD tasks may have multiple commits (test → feat → refactor)_
 - **Verification:** ruff check clean; tests still green
 - **Committed in:** `2c02b08` (task 2)
 
+**4. [Rule 2 - Diagnostics] Fake kwargs unused + dead plan prop frozensets**
+- **Found during:** Coordinator merge pause (IDE diagnostics)
+- **Issue:** Pyright flagged unused `_params`/`_kwargs` in test fakes; `_PLAN_ROOT_PROP_KEYS` / `_PLAN_CHUNK_PROP_KEYS` were defined but unused at base and HEAD.
+- **Fix:** Consume `params`/`kwargs` via `_ = (...)` in fakes; enforce unknown-key rejection with plan prop allowlists in `prepare_prepared_plan_params` / `prepare_prepared_plan_chunk_params`. Production `models.*` / `services.*` static imports left (project-config + root Pyright 0; baseline convention).
+- **Files modified:** `mcp_server/tests/test_catalog_evidence_store.py`, `mcp_server/src/services/catalog_store.py`
+- **Verification:** ruff 0; pyright project+root 0; 121 unit tests pass
+- **Committed in:** `7a6dd8d`
+
 ## TDD Gate Compliance
 
 - RED gate commit present: `3db0c8a` `test(03B-03): ...`
@@ -222,6 +231,7 @@ _Note: TDD tasks may have multiple commits (test → feat → refactor)_
 - FOUND: `mcp_server/tests/test_catalog_evidence_store.py`
 - FOUND: commit `3db0c8a`
 - FOUND: commit `2c02b08`
+- FOUND: commit `7a6dd8d`
 - Tests: 27 passed; store unit + prepare store regressions 121 passed combined earlier
 - Ruff: All checks passed
 - Pyright (mcp_server project + root-scoped): 0 errors
