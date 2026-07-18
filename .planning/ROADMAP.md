@@ -114,7 +114,7 @@ Plans:
   4. `upsert_catalog_batch` results (including dry-run) return `identity_schema_version`, server `request_sha256`, `catalog_sha256`, and `batch_uuid` with zero dry-run writes
   5. `get_catalog_capabilities` works after server init even when writes are disabled and returns versions, gates, non-reversible namespace fingerprint, registries, endpoint map, limits, and feature flags without secrets
 
-**Plans**: 3/5 plans executed
+**Plans**: 4/5 plans executed
 
 Plans:
 **Wave 1**
@@ -128,7 +128,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 02-04-PLAN.md — Wave 3 (after 03): Read-only get_catalog_capabilities + imports version constants + get_status compat
+- [x] 02-04-PLAN.md — Wave 3 (after 03): Read-only get_catalog_capabilities + imports version constants + get_status compat
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
