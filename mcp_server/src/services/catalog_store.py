@@ -1066,6 +1066,96 @@ class CatalogNeo4jStore:
         params = {'group_id': group_id, 'uuids': uniq}
         return await self._read_many(executor, cypher, params, tx=tx)
 
+    def build_match_edges_for_resolve_cypher(self) -> str:
+        """MATCH RELATES_TO edges by group_id + edge_key (RESE-01).
+
+        Always RETURNs e.content_sha256 (Q2 RESOLVED). Read-only; no writes.
+        """
+        return """
+            MATCH (s:Entity)-[e:RELATES_TO]->(t:Entity)
+            WHERE e.group_id = $group_id
+              AND e.edge_key IN $edge_keys
+            RETURN elementId(e) AS element_id,
+                   e.uuid AS uuid,
+                   e.group_id AS group_id,
+                   e.name AS edge_type,
+                   e.edge_key AS edge_key,
+                   e.batch_id AS batch_id,
+                   e.content_sha256 AS content_sha256,
+                   e.fact_embedding IS NOT NULL AS has_fact_embedding,
+                   s.uuid AS source_uuid,
+                   s.name AS source_name,
+                   s.graph_key AS source_graph_key,
+                   labels(s) AS source_labels,
+                   t.uuid AS target_uuid,
+                   t.name AS target_name,
+                   t.graph_key AS target_graph_key,
+                   labels(t) AS target_labels
+            """
+
+    async def match_edges_for_resolve(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        edge_keys: list[str],
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read-only edge MATCH for resolve; scoped to group_id + requested keys."""
+        if not edge_keys:
+            return []
+        cypher = self.build_match_edges_for_resolve_cypher()
+        params = {'group_id': group_id, 'edge_keys': list(edge_keys)}
+        return await self._read_many(executor, cypher, params, tx=tx)
+
+    def build_match_evidence_links_for_target_cypher(self) -> str:
+        """MATCH CatalogEvidenceLink by group_id + target (EVID-12).
+
+        Stable ORDER BY uuid. Compact fields always; excerpt returned so service
+        can strip it when include_excerpts is false.
+        """
+        return """
+            MATCH (n:CatalogEvidenceLink)
+            WHERE n.group_id = $group_id
+              AND n.target_kind = $target_kind
+              AND n.target_uuid = $target_uuid
+            RETURN n.uuid AS uuid,
+                   n.group_id AS group_id,
+                   n.link_key AS link_key,
+                   n.content_sha256 AS content_sha256,
+                   n.batch_id AS batch_id,
+                   n.source_uuid AS source_uuid,
+                   n.target_kind AS target_kind,
+                   n.target_uuid AS target_uuid,
+                   n.evidence_kind AS evidence_kind,
+                   n.extractor_name AS extractor_name,
+                   n.extractor_version AS extractor_version,
+                   n.rule_id AS rule_id,
+                   n.confidence AS confidence,
+                   n.excerpt AS excerpt
+            ORDER BY n.uuid ASC
+            """
+
+    async def match_evidence_links_for_target(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        target_kind: str,
+        target_uuid: str,
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read-only evidence MATCH by group_id + target; no writes."""
+        if not target_uuid or target_kind not in {'entity', 'edge'}:
+            return []
+        cypher = self.build_match_evidence_links_for_target_cypher()
+        params = {
+            'group_id': group_id,
+            'target_kind': target_kind,
+            'target_uuid': str(target_uuid),
+        }
+        return await self._read_many(executor, cypher, params, tx=tx)
+
     # ------------------------------------------------------------------
     # Provenance: Episodic sources, MENTIONS, RELATES_TO.episodes append
     # ------------------------------------------------------------------

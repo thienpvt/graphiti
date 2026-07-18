@@ -26,6 +26,7 @@ from models.catalog_common import (
     SystemKey,
     validate_nested_json,
 )
+from models.catalog_evidence import CatalogEvidenceEdgeTarget, CatalogEvidenceEntityTarget
 from models.catalog_graph_key import validate_entity_graph_key_at
 
 
@@ -298,6 +299,87 @@ class VerifyCatalogBatchRequest(CatalogStrictModel):
                 system_key=self.system_key,
                 title=type(self).__name__,
                 loc=('entities', index, 'graph_key'),
+            )
+        return self
+
+
+class ResolveEdgeRef(CatalogStrictModel):
+    """Minimal edge identity for resolve_typed_edges (RESE-01)."""
+
+    edge_type: str
+    edge_key: str = Field(..., min_length=1, max_length=MAX_GRAPH_KEY_LENGTH)
+
+    @field_validator('edge_type')
+    @classmethod
+    def _edge_type_allowlisted(cls, v: str) -> str:
+        from models.catalog_common import CATALOG_EDGE_TYPES
+
+        if v not in CATALOG_EDGE_TYPES:
+            raise ValueError(f'edge_type not allowlisted: {v}')
+        return v
+
+    @field_validator('edge_key')
+    @classmethod
+    def _non_empty_edge_key(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError('edge_key must be a non-empty string')
+        return v
+
+
+class ResolveTypedEdgesRequest(CatalogStrictModel):
+    """Request for resolve_typed_edges (read-only, RESE-01..03)."""
+
+    identity_schema_version: Literal['catalog-v2']
+    system_key: SystemKey
+    group_id: str = Field(..., min_length=1)
+    edges: list[ResolveEdgeRef] = Field(..., min_length=1, max_length=HARD_MAX_EDGES_PER_BATCH)
+
+    @field_validator('group_id')
+    @classmethod
+    def _validate_group_id_field(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('group_id is required and must be non-empty')
+        _validate_group_id(v)
+        return v
+
+
+class GetCatalogEvidenceRequest(CatalogStrictModel):
+    """Request for get_catalog_evidence (read-only, EVID-12).
+
+    Exactly one of entity_target or edge_target is required. Pagination is
+    offset/limit over stable uuid order; limit defaults at the service layer.
+    """
+
+    group_id: str = Field(..., min_length=1)
+    identity_schema_version: Literal['catalog-v2'] = 'catalog-v2'
+    system_key: SystemKey
+    entity_target: CatalogEvidenceEntityTarget | None = None
+    edge_target: CatalogEvidenceEdgeTarget | None = None
+    offset: int = Field(default=0, ge=0)
+    limit: int | None = Field(default=None, ge=1)
+    include_excerpts: bool = False
+
+    @field_validator('group_id')
+    @classmethod
+    def _validate_group_id_field(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('group_id is required and must be non-empty')
+        _validate_group_id(v)
+        return v
+
+    @model_validator(mode='after')
+    def _exactly_one_target_and_validate(self) -> GetCatalogEvidenceRequest:
+        has_entity = self.entity_target is not None
+        has_edge = self.edge_target is not None
+        if has_entity == has_edge:
+            raise ValueError('exactly one of entity_target or edge_target is required')
+        if self.entity_target is not None:
+            validate_entity_graph_key_at(
+                entity_type=self.entity_target.entity_type,
+                graph_key=self.entity_target.graph_key,
+                system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entity_target', 'graph_key'),
             )
         return self
 

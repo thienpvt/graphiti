@@ -79,6 +79,71 @@ class ResolveTypedEntitiesResponse(BaseModel):
     results: list[ResolveEntityResult] = Field(default_factory=list)
 
 
+class ResolveEdgeResult(BaseModel):
+    """Per-edge resolve outcome (RESE-01..02)."""
+
+    index: int
+    edge_type: str
+    edge_key: str
+    status: str = 'missing'
+    found: bool = False
+    uuid: str | None = None
+    verified_type: str | None = None
+    source_uuid: str | None = None
+    target_uuid: str | None = None
+    source_graph_key: str | None = None
+    target_graph_key: str | None = None
+    source_entity_type: str | None = None
+    target_entity_type: str | None = None
+    content_sha256: str | None = None
+    has_fact_embedding: bool | None = None
+    duplicate_uuids: list[str] = Field(default_factory=list)
+    anomalies: list[str] = Field(default_factory=list)
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
+class ResolveTypedEdgesResponse(BaseModel):
+    """Response for resolve_typed_edges."""
+
+    group_id: str
+    results: list[ResolveEdgeResult] = Field(default_factory=list)
+
+
+class CompactEvidenceLink(BaseModel):
+    """Compact evidence-link projection (EVID-12). No embeddings/raw source."""
+
+    uuid: str
+    link_key: str
+    content_sha256: str | None = None
+    source_uuid: str | None = None
+    target_kind: str | None = None
+    target_uuid: str | None = None
+    evidence_kind: str | None = None
+    extractor_name: str | None = None
+    extractor_version: str | None = None
+    rule_id: str | None = None
+    confidence: float | None = None
+    excerpt: str | None = None
+
+
+class GetCatalogEvidenceResponse(BaseModel):
+    """Paginated compact evidence read for one target (EVID-12, IDEN-08)."""
+
+    group_id: str
+    target_kind: str
+    target_uuid: str | None = None
+    target_graph_key: str | None = None
+    target_edge_key: str | None = None
+    found_target: bool = False
+    offset: int = 0
+    limit: int = 0
+    total: int = 0
+    links: list[CompactEvidenceLink] = Field(default_factory=list)
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
 class VerifyEntitySection(BaseModel):
     """Entity verification counts and anomaly lists (VERI-02)."""
 
