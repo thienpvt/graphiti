@@ -716,6 +716,25 @@ class CatalogService:
                             graph_key=request.entities[ci].graph_key,
                             entity_type=request.entities[ci].entity_type,
                         )
+        except CatalogStoreError as exc:
+            if getattr(exc, 'code', None) == 'embedding_failed':
+                trigger = current_prep or (to_write[0] if to_write else None)
+                trigger_idx = trigger.index if trigger is not None else 0
+                early_errors[trigger_idx] = CatalogItemResult(
+                    index=trigger_idx,
+                    status='error',
+                    uuid=trigger.entity_uuid if trigger is not None else None,
+                    graph_key=trigger.item.graph_key if trigger is not None else None,
+                    entity_type=trigger.item.entity_type if trigger is not None else None,
+                    error_code=CatalogErrorCode.embedding_failed,
+                    error_message='embedding generation failed',
+                )
+                return self._atomic_fail_response(
+                    request,
+                    early_errors,
+                    trigger_indices={trigger_idx},
+                )
+            raise
         except self._EntityInvariantRace as exc:
             trigger = current_prep or (to_write[0] if to_write else None)
             trigger_idx = trigger.index if trigger is not None else 0
@@ -860,6 +879,29 @@ class CatalogService:
                             graph_key=request.entities[ci].graph_key,
                             entity_type=request.entities[ci].entity_type,
                         )
+            except CatalogStoreError as exc:
+                if getattr(exc, 'code', None) == 'embedding_failed':
+                    written[prep.index] = CatalogItemResult(
+                        index=prep.index,
+                        status='error',
+                        uuid=prep.entity_uuid,
+                        graph_key=prep.item.graph_key,
+                        entity_type=prep.item.entity_type,
+                        error_code=CatalogErrorCode.embedding_failed,
+                        error_message='embedding generation failed',
+                    )
+                    for ci in prep.coalesced_indices:
+                        written[ci] = CatalogItemResult(
+                            index=ci,
+                            status='error',
+                            uuid=prep.entity_uuid,
+                            graph_key=request.entities[ci].graph_key,
+                            entity_type=request.entities[ci].entity_type,
+                            error_code=CatalogErrorCode.embedding_failed,
+                            error_message='embedding generation failed',
+                        )
+                    continue
+                raise
             except self._EntityInvariantRace as exc:
                 written[prep.index] = CatalogItemResult(
                     index=prep.index,
@@ -1045,7 +1087,13 @@ class CatalogService:
         request_ts: datetime,
     ) -> dict[str, Any]:
         item = prep.item
-        embedding = prep.name_embedding or []
+        # Fail closed: typed non-unchanged writes must never send empty vectors.
+        if not prep.name_embedding:
+            raise CatalogStoreError(
+                'name_embedding missing for non-unchanged entity',
+                code='embedding_failed',
+            )
+        embedding = list(prep.name_embedding)
         return self._store.prepare_entity_params(
             entity_type=item.entity_type,
             uuid=prep.entity_uuid,
@@ -2312,7 +2360,13 @@ class CatalogService:
         request_ts: datetime,
     ) -> dict[str, Any]:
         item = prep.item
-        embedding = prep.fact_embedding or []
+        # Fail closed: typed non-unchanged writes must never send empty vectors.
+        if not prep.fact_embedding:
+            raise CatalogStoreError(
+                'fact_embedding missing for non-unchanged edge',
+                code='embedding_failed',
+            )
+        embedding = list(prep.fact_embedding)
         return self._store.prepare_edge_params(
             edge_type=item.edge_type,
             uuid=prep.edge_uuid,
@@ -2610,6 +2664,24 @@ class CatalogService:
                             edge_key=request.edges[ci].edge_key,
                             edge_type=request.edges[ci].edge_type,
                         )
+        except CatalogStoreError as exc:
+            # Fail-closed embedding / store errors must not collapse to neo4j_transaction_failed.
+            if getattr(exc, 'code', None) == 'embedding_failed':
+                trigger = current_prep or (to_write[0] if to_write else None)
+                trigger_idx = trigger.index if trigger is not None else 0
+                early_errors[trigger_idx] = CatalogItemResult(
+                    index=trigger_idx,
+                    status='error',
+                    uuid=trigger.edge_uuid if trigger is not None else None,
+                    edge_key=trigger.item.edge_key if trigger is not None else None,
+                    edge_type=trigger.item.edge_type if trigger is not None else None,
+                    error_code=CatalogErrorCode.embedding_failed,
+                    error_message='embedding generation failed',
+                )
+                return self._edge_atomic_fail_response(
+                    request, early_errors, trigger_indices={trigger_idx}
+                )
+            raise
         except self._EdgeEndpointRace as exc:
             trigger = current_prep or (to_write[0] if to_write else None)
             trigger_idx = trigger.index if trigger is not None else 0
@@ -2726,6 +2798,29 @@ class CatalogService:
                             edge_key=request.edges[ci].edge_key,
                             edge_type=request.edges[ci].edge_type,
                         )
+            except CatalogStoreError as exc:
+                if getattr(exc, 'code', None) == 'embedding_failed':
+                    written[prep.index] = CatalogItemResult(
+                        index=prep.index,
+                        status='error',
+                        uuid=prep.edge_uuid,
+                        edge_key=prep.item.edge_key,
+                        edge_type=prep.item.edge_type,
+                        error_code=CatalogErrorCode.embedding_failed,
+                        error_message='embedding generation failed',
+                    )
+                    for ci in prep.coalesced_indices:
+                        written[ci] = CatalogItemResult(
+                            index=ci,
+                            status='error',
+                            uuid=prep.edge_uuid,
+                            edge_key=request.edges[ci].edge_key,
+                            edge_type=request.edges[ci].edge_type,
+                            error_code=CatalogErrorCode.embedding_failed,
+                            error_message='embedding generation failed',
+                        )
+                    continue
+                raise
             except self._EdgeEndpointRace as exc:
                 written[prep.index] = CatalogItemResult(
                     index=prep.index,
