@@ -52,15 +52,18 @@ CATALOG_REQUEST_TOOL_NAMES = {
     'upsert_typed_entities',
     'upsert_typed_edges',
     'resolve_typed_entities',
+    'resolve_typed_edges',
     'verify_catalog_batch',
     'upsert_provenance',
     'get_catalog_ingest_status',
+    'get_catalog_batch_manifest',
+    'get_catalog_evidence',
     'upsert_catalog_batch',
     'prepare_catalog_batch',
     'commit_prepared_catalog_batch',
     'discard_prepared_catalog_batch',
 }
-# Full catalog tool surface: request-bound + get_catalog_capabilities (03A-05: +3 prepare tools).
+# Full catalog tool surface: request-bound + get_catalog_capabilities (04-06: +3 read tools → 14).
 CATALOG_TOOL_NAMES = CATALOG_REQUEST_TOOL_NAMES | {
     'get_catalog_capabilities',
 }
@@ -4578,7 +4581,7 @@ async def test_mcp_tool_upsert_catalog_batch_registered():
 
 @pytest.mark.asyncio
 async def test_mcp_registers_exactly_eight_catalog_tools_and_preserves_legacy_tools():
-    """03A-05: eleven catalog tools (10 request-bound + get_catalog_capabilities) + 14 legacy."""
+    """04-06 / TEST-09: 14 catalog tools (13 request-bound + capabilities) + 14 legacy = 28."""
     server = _mcp_server()
     tools = await server.mcp.list_tools()
     names = {tool.name for tool in tools}
@@ -4590,16 +4593,40 @@ async def test_mcp_registers_exactly_eight_catalog_tools_and_preserves_legacy_to
     assert 'commit_prepared_catalog_batch' in registered_catalog
     assert 'discard_prepared_catalog_batch' in registered_catalog
     assert 'upsert_catalog_batch' in registered_catalog
-    assert len(CATALOG_TOOL_NAMES) == 11
-    assert len(CATALOG_REQUEST_TOOL_NAMES) == 10
+    assert 'get_catalog_batch_manifest' in registered_catalog
+    assert 'resolve_typed_edges' in registered_catalog
+    assert 'get_catalog_evidence' in registered_catalog
+    assert len(CATALOG_TOOL_NAMES) == 14
+    assert len(CATALOG_REQUEST_TOOL_NAMES) == 13
     assert LEGACY_TOOL_NAMES.issubset(names)
     assert len(LEGACY_TOOL_NAMES) == 14
-    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 25
+    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 28
     assert names == (CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES)
 
     schemas = {tool.name: tool.inputSchema for tool in tools if tool.name in CATALOG_TOOL_NAMES}
     assert schemas.keys() == CATALOG_TOOL_NAMES
     assert all(schema['type'] == 'object' for schema in schemas.values())
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_get_catalog_batch_manifest_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'get_catalog_batch_manifest')
+    assert callable(server.get_catalog_batch_manifest)
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_resolve_typed_edges_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'resolve_typed_edges')
+    assert callable(server.resolve_typed_edges)
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_get_catalog_evidence_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'get_catalog_evidence')
+    assert callable(server.get_catalog_evidence)
 
 
 # ---------------------------------------------------------------------------
@@ -4610,10 +4637,13 @@ async def test_mcp_registers_exactly_eight_catalog_tools_and_preserves_legacy_to
 _FROZEN_CATALOG_TOOL_REQUEST_MODELS = {
     'upsert_typed_entities': UpsertTypedEntitiesRequest,
     'resolve_typed_entities': ResolveTypedEntitiesRequest,
+    'resolve_typed_edges': None,  # filled at runtime
     'verify_catalog_batch': VerifyCatalogBatchRequest,
     'upsert_typed_edges': UpsertTypedEdgesRequest,
     'upsert_provenance': None,  # filled at runtime
     'get_catalog_ingest_status': GetCatalogIngestStatusRequest,
+    'get_catalog_batch_manifest': None,  # filled at runtime
+    'get_catalog_evidence': None,  # filled at runtime
     'upsert_catalog_batch': UpsertCatalogBatchRequest,
     'prepare_catalog_batch': None,  # filled at runtime
     'commit_prepared_catalog_batch': None,  # filled at runtime
@@ -4622,6 +4652,11 @@ _FROZEN_CATALOG_TOOL_REQUEST_MODELS = {
 
 
 def _catalog_request_models():
+    from models.catalog_entities import (
+        GetCatalogBatchManifestRequest,
+        GetCatalogEvidenceRequest,
+        ResolveTypedEdgesRequest,
+    )
     from models.catalog_prepare import (
         CommitPreparedCatalogBatchRequest,
         DiscardPreparedCatalogBatchRequest,
@@ -4634,6 +4669,9 @@ def _catalog_request_models():
     mapping['prepare_catalog_batch'] = PrepareCatalogBatchRequest
     mapping['commit_prepared_catalog_batch'] = CommitPreparedCatalogBatchRequest
     mapping['discard_prepared_catalog_batch'] = DiscardPreparedCatalogBatchRequest
+    mapping['resolve_typed_edges'] = ResolveTypedEdgesRequest
+    mapping['get_catalog_batch_manifest'] = GetCatalogBatchManifestRequest
+    mapping['get_catalog_evidence'] = GetCatalogEvidenceRequest
     return mapping
 
 
@@ -4704,6 +4742,28 @@ def _v2_request_payload(tool_name: str, **overrides):
         payload = {**base, 'sources': [_minimal_source_dict()]}
     elif tool_name == 'get_catalog_ingest_status':
         payload = {'group_id': GROUP, 'batch_id': 'cont07-status'}
+    elif tool_name == 'get_catalog_batch_manifest':
+        payload = {'group_id': GROUP, 'batch_id': 'cont07-manifest'}
+    elif tool_name == 'resolve_typed_edges':
+        payload = {
+            **base,
+            'edges': [
+                {
+                    'edge_type': 'Contains',
+                    'edge_key': 'CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
+                }
+            ],
+        }
+        payload.pop('batch_id', None)
+    elif tool_name == 'get_catalog_evidence':
+        payload = {
+            **base,
+            'entity_target': {
+                'entity_type': 'Table',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+            },
+        }
+        payload.pop('batch_id', None)
     elif tool_name == 'upsert_catalog_batch' or tool_name == 'prepare_catalog_batch':
         payload = {**base, 'entities': [_minimal_entity_dict()], 'catalog_sha256': 'a' * 64}
     elif (
@@ -4734,10 +4794,13 @@ def _side_effect_spies(server):
     for name in (
         'upsert_typed_entities',
         'resolve_typed_entities',
+        'resolve_typed_edges',
         'verify_catalog_batch',
         'upsert_typed_edges',
         'upsert_provenance',
         'get_catalog_ingest_status',
+        'get_catalog_batch_manifest',
+        'get_catalog_evidence',
         'upsert_catalog_batch',
         'prepare_catalog_batch',
         'commit_prepared_catalog_batch',
@@ -4771,10 +4834,13 @@ def _assert_no_backend_side_effects(spies, body_entered: list):
     for name in (
         'upsert_typed_entities',
         'resolve_typed_entities',
+        'resolve_typed_edges',
         'verify_catalog_batch',
         'upsert_typed_edges',
         'upsert_provenance',
         'get_catalog_ingest_status',
+        'get_catalog_batch_manifest',
+        'get_catalog_evidence',
         'upsert_catalog_batch',
         'prepare_catalog_batch',
         'commit_prepared_catalog_batch',

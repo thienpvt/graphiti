@@ -113,7 +113,15 @@ def test_capabilities_callable_both_gates_false():
 
 @pytest.mark.asyncio
 async def test_read_tools_when_writes_disabled():
-    """GATE-03: identity-bearing read tools usable when writes off (reads on)."""
+    """GATE-03: six identity-bearing read tools usable when writes off (reads on)."""
+    from models.catalog_common import CatalogErrorCode
+    from models.catalog_entities import (
+        GetCatalogBatchManifestRequest,
+        GetCatalogEvidenceRequest,
+        ResolveEdgeRef,
+        ResolveTypedEdgesRequest,
+    )
+    from models.catalog_entities import CatalogEvidenceEntityTarget
     from services.catalog_service import CatalogService
 
     client = _neo4j_client()
@@ -123,10 +131,13 @@ async def test_read_tools_when_writes_disabled():
     gate = service._read_gate(client, group_id=GROUP, item_count=1)
     assert gate is None
 
-    from models.catalog_common import CatalogErrorCode
-
     service._store.match_entities_for_resolve = AsyncMock(return_value=[])
+    service._store.match_edges_for_resolve = AsyncMock(return_value=[])
     service._store.get_batch_status = AsyncMock(return_value=None)
+    service._store.load_batch_manifest_payload = AsyncMock(return_value=None)
+    service._store.match_evidence_links_for_target = AsyncMock(return_value=[])
+    service._store.find_entity_for_evidence = AsyncMock(return_value=None)
+    service._store.find_edge_for_evidence = AsyncMock(return_value=None)
 
     resolve_resp = await service.resolve_typed_entities(
         client=client, request=_resolve_request()
@@ -143,10 +154,59 @@ async def test_read_tools_when_writes_disabled():
     assert status_resp.error_code is None
     service._store.get_batch_status.assert_awaited()
 
+    # Phase 4 tools (D-19 / GATE-03 six-tool set).
+    edges_resp = await service.resolve_typed_edges(
+        client=client,
+        request=ResolveTypedEdgesRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
+            group_id=GROUP,
+            edges=[
+                ResolveEdgeRef(
+                    edge_type='Contains',
+                    edge_key='CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
+                )
+            ],
+        ),
+    )
+    assert edges_resp.group_id == GROUP
+    assert all(
+        getattr(r, 'error_code', None) != CatalogErrorCode.feature_disabled
+        for r in edges_resp.results
+    )
+
+    manifest_resp = await service.get_catalog_batch_manifest(
+        client=client,
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH),
+    )
+    assert manifest_resp.group_id == GROUP
+    assert manifest_resp.error_code != CatalogErrorCode.feature_disabled
+
+    evidence_resp = await service.get_catalog_evidence(
+        client=client,
+        request=GetCatalogEvidenceRequest(
+            group_id=GROUP,
+            system_key='FE',
+            entity_target=CatalogEvidenceEntityTarget(
+                entity_type='Table',
+                graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+            ),
+        ),
+    )
+    assert evidence_resp.group_id == GROUP
+    assert evidence_resp.error_code != CatalogErrorCode.feature_disabled
+
 
 @pytest.mark.asyncio
 async def test_reads_no_schema_write_embed():
     """GATE-04: zero ensure_*_schema / write tx / embedder / LLM / queue on read paths."""
+    from models.catalog_entities import (
+        CatalogEvidenceEntityTarget,
+        GetCatalogBatchManifestRequest,
+        GetCatalogEvidenceRequest,
+        ResolveEdgeRef,
+        ResolveTypedEdgesRequest,
+    )
     from services.catalog_service import CatalogService
 
     client = _neo4j_client()
@@ -160,10 +220,44 @@ async def test_reads_no_schema_write_embed():
     service._store.ensure_plan_schema = ensure_plan  # type: ignore[method-assign]
     service._store.ensure_uuid_uniqueness_constraints = ensure_uuid  # type: ignore[method-assign]
     service._store.match_entities_for_resolve = AsyncMock(return_value=[])
+    service._store.match_edges_for_resolve = AsyncMock(return_value=[])
     service._store.get_batch_status = AsyncMock(return_value=None)
+    service._store.load_batch_manifest_payload = AsyncMock(return_value=None)
+    service._store.match_evidence_links_for_target = AsyncMock(return_value=[])
+    service._store.find_entity_for_evidence = AsyncMock(return_value=None)
+    service._store.find_edge_for_evidence = AsyncMock(return_value=None)
 
     await service.resolve_typed_entities(client=client, request=_resolve_request())
     await service.get_catalog_ingest_status(client=client, request=_status_request())
+    await service.resolve_typed_edges(
+        client=client,
+        request=ResolveTypedEdgesRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
+            group_id=GROUP,
+            edges=[
+                ResolveEdgeRef(
+                    edge_type='Contains',
+                    edge_key='CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
+                )
+            ],
+        ),
+    )
+    await service.get_catalog_batch_manifest(
+        client=client,
+        request=GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH),
+    )
+    await service.get_catalog_evidence(
+        client=client,
+        request=GetCatalogEvidenceRequest(
+            group_id=GROUP,
+            system_key='FE',
+            entity_target=CatalogEvidenceEntityTarget(
+                entity_type='Table',
+                graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+            ),
+        ),
+    )
 
     ensure_evidence.assert_not_awaited()
     ensure_plan.assert_not_awaited()
