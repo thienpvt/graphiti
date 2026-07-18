@@ -2160,7 +2160,10 @@ class CatalogNeo4jStore:
             """
 
     def build_cas_plan_state_cypher(self) -> str:
-        """CAS state transition: MATCH expected from-state then SET to-state."""
+        """CAS state transition: MATCH expected from-state then SET to-state.
+
+        Optional outcome counts apply only on COMMITTING→COMMITTED (WR-02).
+        """
         return """
             MATCH (p:CatalogPreparedPlan {token_digest: $token_digest})
             WHERE p.state = $expected_from
@@ -2170,6 +2173,18 @@ class CatalogNeo4jStore:
                     WHEN $to_state = 'COMMITTING' AND $expected_from = 'PREPARED'
                     THEN $updated_at
                     ELSE p.committing_started_at
+                END,
+                p.created_count = CASE
+                    WHEN $apply_outcome_counts THEN $created_count
+                    ELSE p.created_count
+                END,
+                p.updated_count = CASE
+                    WHEN $apply_outcome_counts THEN $updated_count
+                    ELSE p.updated_count
+                END,
+                p.unchanged_count = CASE
+                    WHEN $apply_outcome_counts THEN $unchanged_count
+                    ELSE p.unchanged_count
                 END
             RETURN p.uuid AS uuid,
                    p.group_id AS group_id,
@@ -2178,7 +2193,10 @@ class CatalogNeo4jStore:
                    p.artifact_sha256 AS artifact_sha256,
                    p.expires_at AS expires_at,
                    p.updated_at AS updated_at,
-                   p.committing_started_at AS committing_started_at
+                   p.committing_started_at AS committing_started_at,
+                   p.created_count AS created_count,
+                   p.updated_count AS updated_count,
+                   p.unchanged_count AS unchanged_count
             """
 
     def prepare_prepared_plan_params(self, **fields: Any) -> dict[str, Any]:
@@ -2532,11 +2550,15 @@ class CatalogNeo4jStore:
         updated_at: datetime,
         now: datetime | None = None,
         require_not_expired: bool = False,
+        created_count: int | None = None,
+        updated_count: int | None = None,
+        unchanged_count: int | None = None,
     ) -> dict[str, Any]:
         """Compare-and-set plan state under legal transition table (PLAN-18/19).
 
         Zero-row CAS maps to structured prepared-plan codes after a load.
         COMMITTING→PREPARED is never legal. Terminal states never revive.
+        Optional outcome counts apply only on COMMITTING→COMMITTED (WR-02).
         """
         if not token_digest:
             raise CatalogStoreError('token_digest is required', code='validation_error')
@@ -2556,6 +2578,16 @@ class CatalogNeo4jStore:
                 'transition to PREPARED is forbidden',
                 code='prepared_plan_conflict',
             )
+        apply_outcome_counts = (
+            to_state == PLAN_STATE_COMMITTED
+            and expected_from == PLAN_STATE_COMMITTING
+            and created_count is not None
+            and updated_count is not None
+            and unchanged_count is not None
+        )
+        outcome_created = int(created_count) if created_count is not None else 0
+        outcome_updated = int(updated_count) if updated_count is not None else 0
+        outcome_unchanged = int(unchanged_count) if unchanged_count is not None else 0
 
         current = await self.load_prepared_plan_by_token_digest(
             None, token_digest=token_digest, tx=tx
@@ -2654,7 +2686,12 @@ class CatalogNeo4jStore:
                     'prepared plan expired',
                     code='prepared_plan_expired',
                 )
-            if current_state == PLAN_STATE_COMMITTING and expected_from == PLAN_STATE_COMMITTING:
+            # Same-token COMMITTING re-entry: expected may be COMMITTING (resume)
+            # or stale PREPARED (follower load raced winner claim) — CR-01.
+            if current_state == PLAN_STATE_COMMITTING and expected_from in {
+                PLAN_STATE_COMMITTING,
+                PLAN_STATE_PREPARED,
+            }:
                 return {
                     'uuid': current.get('uuid'),
                     'group_id': current.get('group_id'),
@@ -2706,8 +2743,51 @@ class CatalogNeo4jStore:
             expected_from=expected_from,
             to_state=to_state,
             updated_at=updated_at,
+            apply_outcome_counts=apply_outcome_counts,
+            created_count=outcome_created,
+            updated_count=outcome_updated,
+            unchanged_count=outcome_unchanged,
         )
         if not row or not row.get('uuid'):
+            # CR-01 residual: TOCTOU after initial load — winner moved PREPARED→COMMITTING
+            # (or COMMITTED) before raw CAS. Reload under same tx and classify.
+            if to_state == PLAN_STATE_COMMITTING:
+                live = await self.load_prepared_plan_by_token_digest(
+                    None, token_digest=token_digest, tx=tx
+                )
+                if live is None:
+                    raise CatalogStoreError(
+                        'prepared plan not found',
+                        code='prepared_plan_not_found',
+                    )
+                live_state = str(live.get('state') or '')
+                if live_state == PLAN_STATE_COMMITTING:
+                    return {
+                        'uuid': live.get('uuid'),
+                        'group_id': live.get('group_id'),
+                        'token_digest': live.get('token_digest'),
+                        'state': PLAN_STATE_COMMITTING,
+                        'artifact_sha256': live.get('artifact_sha256'),
+                        'expires_at': live.get('expires_at'),
+                        'updated_at': live.get('updated_at'),
+                        'committing_started_at': live.get('committing_started_at'),
+                        'reentry': True,
+                    }
+                if live_state == PLAN_STATE_COMMITTED:
+                    raise CatalogStoreError(
+                        'prepared plan already consumed',
+                        code='prepared_plan_already_consumed',
+                    )
+                if live_state == PLAN_STATE_EXPIRED:
+                    raise CatalogStoreError(
+                        'prepared plan expired',
+                        code='prepared_plan_expired',
+                    )
+                if live_state == PLAN_STATE_DISCARDED:
+                    raise CatalogStoreError(
+                        'prepared plan not found',
+                        code='prepared_plan_not_found',
+                    )
             raise CatalogStoreError(
                 'plan CAS returned no row',
                 code='prepared_plan_conflict',
@@ -2722,6 +2802,10 @@ class CatalogNeo4jStore:
         expected_from: str,
         to_state: str,
         updated_at: datetime,
+        apply_outcome_counts: bool = False,
+        created_count: int = 0,
+        updated_count: int = 0,
+        unchanged_count: int = 0,
     ) -> dict[str, Any] | None:
         result = await tx.run(
             self.build_cas_plan_state_cypher(),
@@ -2729,6 +2813,10 @@ class CatalogNeo4jStore:
             expected_from=expected_from,
             to_state=to_state,
             updated_at=updated_at,
+            apply_outcome_counts=bool(apply_outcome_counts),
+            created_count=int(created_count),
+            updated_count=int(updated_count),
+            unchanged_count=int(unchanged_count),
         )
         return await self._first_from_tx_result(result)
 
@@ -3271,7 +3359,10 @@ class CatalogNeo4jStore:
                    m.artifact_sha256 AS artifact_sha256,
                    m.identity_schema_version AS identity_schema_version,
                    m.batch_id AS batch_id,
-                   m.group_id AS group_id
+                   m.group_id AS group_id,
+                   p.created_count AS plan_created_count,
+                   p.updated_count AS plan_updated_count,
+                   p.unchanged_count AS plan_unchanged_count
             """
 
     def prepare_manifest_root_params(self, **fields: Any) -> dict[str, Any]:
@@ -3584,6 +3675,28 @@ class CatalogNeo4jStore:
             )
         return row
 
+    async def read_terminal_commit_snapshot(
+        self,
+        tx: Any,
+        *,
+        group_id: str,
+        batch_id: str,
+        plan_uuid: str,
+        batch_uuid: str,
+    ) -> dict[str, Any] | None:
+        """Group-scoped plan+batch+manifest snapshot for recovery classification (D-09)."""
+        if not group_id or not batch_id or not plan_uuid or not batch_uuid:
+            return None
+        result = await tx.run(
+            self.build_terminal_commit_agrees_cypher(),
+            group_id=group_id,
+            batch_id=batch_id,
+            plan_uuid=plan_uuid,
+            batch_uuid=batch_uuid,
+        )
+        row = await self._first_from_tx_result(result)
+        return dict(row) if row else None
+
     async def terminal_commit_agrees(
         self,
         tx: Any,
@@ -3597,14 +3710,13 @@ class CatalogNeo4jStore:
         batch_uuid = str(projection.get('batch_uuid') or '')
         if not group_id or not batch_id or not plan_uuid or not batch_uuid:
             return False
-        result = await tx.run(
-            self.build_terminal_commit_agrees_cypher(),
+        row = await self.read_terminal_commit_snapshot(
+            tx,
             group_id=group_id,
             batch_id=batch_id,
             plan_uuid=plan_uuid,
             batch_uuid=batch_uuid,
         )
-        row = await self._first_from_tx_result(result)
         if not row:
             return False
         if str(row.get('plan_state') or '') != PLAN_STATE_COMMITTED:

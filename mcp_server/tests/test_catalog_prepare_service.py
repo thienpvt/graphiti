@@ -643,6 +643,7 @@ def _wire_commit(
     service._store.cas_plan_state = AsyncMock(  # type: ignore[method-assign]
         side_effect=cas_side_effect or _default_cas
     )
+
     # Schema/prepare spies. Success-path domain writes are stubbed for 03B-04 writer.
     # prepare_*_params: dict-pass-through (no new CatalogNeo4jStore import — root IDE noise).
     def _prep(**kwargs: Any) -> dict[str, Any]:
@@ -659,6 +660,9 @@ def _wire_commit(
             'state': PLAN_STATE_COMMITTING,
             'locked': True,
         }
+    )
+    service._store.read_terminal_commit_snapshot = AsyncMock(  # type: ignore[method-assign]
+        return_value=None
     )
     service._store.terminal_commit_agrees = AsyncMock(return_value=False)  # type: ignore[method-assign]
 

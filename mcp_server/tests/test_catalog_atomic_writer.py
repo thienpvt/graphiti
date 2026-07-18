@@ -79,6 +79,7 @@ class _RecordingStore:
         self.fail_after: str | None = None
         self.order: list[str] = []
         self.agree = False
+        self.snapshot: dict[str, Any] | None = None
         self.claim_status = 'open'
         self.claim_hash = HEX64
 
@@ -224,6 +225,19 @@ class _RecordingStore:
             'locked': True,
         }
 
+    async def read_terminal_commit_snapshot(
+        self,
+        tx: Any,
+        *,
+        group_id: str,
+        batch_id: str,
+        plan_uuid: str,
+        batch_uuid: str,
+    ) -> dict[str, Any] | None:
+        _ = tx, group_id, batch_id, plan_uuid, batch_uuid
+        self.order.append('terminal_snapshot')
+        return self.snapshot
+
     async def terminal_commit_agrees(self, tx: Any, *, projection: dict[str, Any]) -> bool:
         _ = tx, projection
         self.order.append('terminal_agree_check')
@@ -231,8 +245,11 @@ class _RecordingStore:
 
     async def cas_plan_state(self, tx: Any, **kwargs: Any) -> dict[str, Any]:
         _ = tx
+        to_state = kwargs.get('to_state')
+        if to_state == 'PREPARED':
+            raise RuntimeError('illegal cas to PREPARED')
         self._rec('cas_plan', dict(kwargs))
-        return {'state': kwargs.get('to_state'), 'uuid': 'plan-1'}
+        return {'state': to_state, 'uuid': 'plan-1'}
 
     def prepare_entity_params(self, **fields: Any) -> dict[str, Any]:
         return dict(fields)
@@ -610,6 +627,33 @@ async def test_terminal_agree_short_circuits_without_rewrite():
     assert 'entity' not in store.order
     assert 'manifest' not in store.order
     assert 'cas_plan' not in store.order
+
+
+@pytest.mark.asyncio
+async def test_short_circuit_preserves_zero_created_count():
+    """WR-02 residual: plan_created_count=0 must not fall through projected counts."""
+    store = _RecordingStore()
+    service = _service_with_store(store)
+    store.agree = True
+    store.snapshot = {
+        'plan_state': 'COMMITTED',
+        'batch_status': 'committed',
+        'plan_created_count': 0,
+        'plan_updated_count': 2,
+        'plan_unchanged_count': 1,
+    }
+    proj = _projection(with_plan=True)
+    # Projected leftover would wrongly win under `or 0` fallback.
+    assert proj.plan is not None
+    proj.plan['created_count'] = 9
+    proj.plan['updated_count'] = 0
+    proj.plan['unchanged_count'] = 0
+    outcome = await _run_writer(service, store, proj)
+    assert outcome is not None
+    assert outcome.get('short_circuit') is True
+    assert outcome.get('committed_created') == 0
+    assert outcome.get('committed_updated') == 2
+    assert outcome.get('committed_unchanged') == 1
 
 
 @pytest.mark.asyncio
