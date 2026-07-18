@@ -24,6 +24,7 @@ from models.catalog_common import (
     HARD_MAX_ACTIVE_PLANS_PER_GROUP,
     HARD_MAX_CHUNKS_PER_PLAN,
     HARD_MAX_PREPARED_PAYLOAD_BYTES,
+    MAX_EVIDENCE_LENGTH,
     PLAN_STATE_COMMITTED,
     PLAN_STATE_COMMITTING,
     PLAN_STATE_DISCARDED,
@@ -94,6 +95,44 @@ _CREATE_PREPARED_PLAN_CHUNK_IDENTITY_UNIQUE = (
 _CREATE_PREPARED_PLAN_CHUNK_INDEX_UNIQUE = (
     f'CREATE CONSTRAINT {CATALOG_PREPARED_PLAN_CHUNK_INDEX_CONSTRAINT} IF NOT EXISTS '
     'FOR (n:CatalogPreparedPlanChunk) REQUIRE (n.plan_uuid, n.group_id, n.chunk_index) IS UNIQUE'
+)
+
+# Exact evidence + durable manifest control-plane constraints (EVID/MANI; fixed labels only).
+CATALOG_EVIDENCE_LINK_IDENTITY_CONSTRAINT = 'catalog_evidence_link_identity_unique'
+CATALOG_EVIDENCE_LINK_KEY_CONSTRAINT = 'catalog_evidence_link_key_unique'
+CATALOG_MANIFEST_IDENTITY_CONSTRAINT = 'catalog_batch_manifest_identity_unique'
+CATALOG_MANIFEST_CHUNK_IDENTITY_CONSTRAINT = 'catalog_batch_manifest_chunk_identity_unique'
+CATALOG_MANIFEST_CHUNK_INDEX_CONSTRAINT = 'catalog_batch_manifest_chunk_index_unique'
+
+_CREATE_EVIDENCE_LINK_IDENTITY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_EVIDENCE_LINK_IDENTITY_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:CatalogEvidenceLink) REQUIRE (n.uuid, n.group_id) IS UNIQUE'
+)
+_CREATE_EVIDENCE_LINK_KEY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_EVIDENCE_LINK_KEY_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:CatalogEvidenceLink) REQUIRE (n.group_id, n.link_key) IS UNIQUE'
+)
+_CREATE_MANIFEST_IDENTITY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_MANIFEST_IDENTITY_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:CatalogBatchManifest) REQUIRE (n.uuid, n.group_id) IS UNIQUE'
+)
+_CREATE_MANIFEST_CHUNK_IDENTITY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_MANIFEST_CHUNK_IDENTITY_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:CatalogBatchManifestChunk) REQUIRE (n.uuid, n.group_id) IS UNIQUE'
+)
+_CREATE_MANIFEST_CHUNK_INDEX_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_MANIFEST_CHUNK_INDEX_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:CatalogBatchManifestChunk) REQUIRE (n.manifest_uuid, n.group_id, n.chunk_index) IS UNIQUE'
+)
+
+_FORBIDDEN_EVIDENCE_MANIFEST_PARAM_KEYS: frozenset[str] = frozenset(
+    {
+        'plan_token',
+        'raw_token',
+        'token',
+        'name_embedding',
+        'fact_embedding',
+    }
 )
 
 # Legal CAS edges for prepared-plan state machine (PLAN-18 / D-10..D-12).
@@ -206,6 +245,8 @@ class CatalogNeo4jStore:
         self._schema_ready = False
         self._plan_schema_lock = asyncio.Lock()
         self._plan_schema_ready = False
+        self._evidence_manifest_schema_lock = asyncio.Lock()
+        self._evidence_manifest_schema_ready = False
 
     @staticmethod
     def identity_uniqueness_constraint_statements() -> tuple[str, ...]:
@@ -327,9 +368,7 @@ class CatalogNeo4jStore:
         props = list(row.get('properties') or [])
         # Exact property set (order-insensitive). Default: composite (uuid, group_id).
         wanted = (
-            set(expected_properties)
-            if expected_properties is not None
-            else {'uuid', 'group_id'}
+            set(expected_properties) if expected_properties is not None else {'uuid', 'group_id'}
         )
         return set(props) == wanted
 
@@ -2202,9 +2241,7 @@ class CatalogNeo4jStore:
             'plan_id': str(fields['plan_id']),
             'token_digest': str(fields['token_digest']),
             'state': PLAN_STATE_PREPARED,
-            'identity_schema_version': str(
-                fields.get('identity_schema_version') or 'catalog-v2'
-            ),
+            'identity_schema_version': str(fields.get('identity_schema_version') or 'catalog-v2'),
             'canonicalization_version': str(
                 fields.get('canonicalization_version') or CANONICALIZATION_VERSION
             ),
@@ -2293,7 +2330,6 @@ class CatalogNeo4jStore:
         if not row:
             return 0
         return int(row.get('active') or 0)
-
 
     @staticmethod
     def _is_uniqueness_constraint_race(exc: BaseException) -> bool:
@@ -2604,10 +2640,7 @@ class CatalogNeo4jStore:
                     'prepared plan expired',
                     code='prepared_plan_expired',
                 )
-            if (
-                current_state == PLAN_STATE_COMMITTING
-                and expected_from == PLAN_STATE_COMMITTING
-            ):
+            if current_state == PLAN_STATE_COMMITTING and expected_from == PLAN_STATE_COMMITTING:
                 return {
                     'uuid': current.get('uuid'),
                     'group_id': current.get('group_id'),
@@ -2684,3 +2717,919 @@ class CatalogNeo4jStore:
             updated_at=updated_at,
         )
         return await self._first_from_tx_result(result)
+
+    # ------------------------------------------------------------------
+    # Exact evidence control records + durable manifest (03B-03)
+    # ------------------------------------------------------------------
+
+    def evidence_manifest_schema_constraint_statements(self) -> tuple[str, ...]:
+        """Fixed CREATE CONSTRAINT IF NOT EXISTS for evidence/manifest uniqueness."""
+        return (
+            _CREATE_EVIDENCE_LINK_IDENTITY_UNIQUE,
+            _CREATE_EVIDENCE_LINK_KEY_UNIQUE,
+            _CREATE_MANIFEST_IDENTITY_UNIQUE,
+            _CREATE_MANIFEST_CHUNK_IDENTITY_UNIQUE,
+            _CREATE_MANIFEST_CHUNK_INDEX_UNIQUE,
+        )
+
+    async def ensure_evidence_manifest_schema(self, executor: Any) -> None:
+        """Idempotent evidence/manifest uniqueness. CREATE only, never DROP.
+
+        Outside success transaction (same pattern as ensure_plan_schema).
+        """
+        if self._evidence_manifest_schema_ready:
+            return
+        async with self._evidence_manifest_schema_lock:
+            if self._evidence_manifest_schema_ready:
+                return
+            await self._ensure_evidence_manifest_schema_locked(executor)
+            self._evidence_manifest_schema_ready = True
+
+    async def _ensure_evidence_manifest_schema_locked(self, executor: Any) -> None:
+        if await self._evidence_manifest_uniqueness_present(executor):
+            return
+
+        for stmt in self.evidence_manifest_schema_constraint_statements():
+            assert 'DROP' not in stmt.upper()
+            try:
+                await self._run_schema_query(executor, stmt)
+            except CatalogStoreError:
+                raise
+            except Exception as exc:
+                msg = f'{type(exc).__name__}: {exc}'
+                if (
+                    'EquivalentSchemaRuleAlreadyExists' in msg
+                    or 'already exists' in msg.lower()
+                    or 'ConstraintAlreadyExists' in msg
+                ):
+                    continue
+                if (
+                    'ConstraintValidationFailed' in msg
+                    or 'already has' in msg.lower()
+                    or 'duplicate' in msg.lower()
+                ):
+                    raise CatalogStoreError(
+                        'evidence/manifest uniqueness constraint failed: existing duplicates',
+                        code='neo4j_schema_failed',
+                    ) from exc
+                raise CatalogStoreError(
+                    f'evidence/manifest schema init failed: {type(exc).__name__}',
+                    code='neo4j_schema_failed',
+                ) from exc
+
+        if not await self._evidence_manifest_uniqueness_present(executor):
+            raise CatalogStoreError(
+                'evidence/manifest uniqueness constraints not present after init',
+                code='neo4j_schema_failed',
+            )
+        logger.info(
+            'catalog evidence/manifest schema ready constraints=%s,%s,%s,%s,%s',
+            CATALOG_EVIDENCE_LINK_IDENTITY_CONSTRAINT,
+            CATALOG_EVIDENCE_LINK_KEY_CONSTRAINT,
+            CATALOG_MANIFEST_IDENTITY_CONSTRAINT,
+            CATALOG_MANIFEST_CHUNK_IDENTITY_CONSTRAINT,
+            CATALOG_MANIFEST_CHUNK_INDEX_CONSTRAINT,
+        )
+
+    async def _evidence_manifest_uniqueness_present(self, executor: Any) -> bool:
+        try:
+            result = await self._run_schema_query(
+                executor,
+                """
+                SHOW CONSTRAINTS
+                YIELD name, type, entityType, labelsOrTypes, properties
+                RETURN name, type, entityType, labelsOrTypes, properties
+                """,
+            )
+        except Exception:
+            return False
+        rows = self._all_from_execute_query_result(result)
+        evidence_id_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_EVIDENCE_LINK_IDENTITY_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='CatalogEvidenceLink',
+                expected_properties={'uuid', 'group_id'},
+            )
+            for row in rows
+        )
+        evidence_key_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_EVIDENCE_LINK_KEY_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='CatalogEvidenceLink',
+                expected_properties={'group_id', 'link_key'},
+            )
+            for row in rows
+        )
+        manifest_id_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_MANIFEST_IDENTITY_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='CatalogBatchManifest',
+                expected_properties={'uuid', 'group_id'},
+            )
+            for row in rows
+        )
+        chunk_id_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_MANIFEST_CHUNK_IDENTITY_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='CatalogBatchManifestChunk',
+                expected_properties={'uuid', 'group_id'},
+            )
+            for row in rows
+        )
+        chunk_idx_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_MANIFEST_CHUNK_INDEX_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='CatalogBatchManifestChunk',
+                expected_properties={'manifest_uuid', 'group_id', 'chunk_index'},
+            )
+            for row in rows
+        )
+        return (
+            evidence_id_ok and evidence_key_ok and manifest_id_ok and chunk_id_ok and chunk_idx_ok
+        )
+
+    def build_resolve_evidence_source_cypher(self) -> str:
+        """MATCH Episodic source by uuid+group_id (property-touch lock)."""
+        return """
+            MATCH (n:Episodic {uuid: $source_uuid, group_id: $group_id})
+            SET n.uuid = n.uuid
+            RETURN n.uuid AS uuid, 'source' AS kind
+            """
+
+    def build_resolve_evidence_target_cypher(self) -> str:
+        """MATCH typed target under group_id; entity or edge only."""
+        return """
+            CALL {
+              WITH $target_kind AS kind, $target_uuid AS tid, $group_id AS gid
+              WITH kind, tid, gid WHERE kind = 'entity'
+              MATCH (n:Entity {uuid: tid, group_id: gid})
+              SET n.uuid = n.uuid
+              RETURN n.uuid AS uuid, 'entity' AS kind, labels(n) AS labels
+              UNION ALL
+              WITH $target_kind AS kind, $target_uuid AS tid, $group_id AS gid
+              WITH kind, tid, gid WHERE kind = 'edge'
+              MATCH ()-[e:RELATES_TO {uuid: tid, group_id: gid}]->()
+              SET e.uuid = e.uuid
+              RETURN e.uuid AS uuid, 'edge' AS kind, [] AS labels
+            }
+            RETURN uuid, kind, labels
+            """
+
+    def build_evidence_link_write_cypher(self) -> str:
+        """CREATE-once CatalogEvidenceLink; divergent content_sha256 -> error_code."""
+        return """
+            MERGE (n:CatalogEvidenceLink {uuid: $uuid, group_id: $group_id})
+            ON CREATE SET
+                n.uuid = $uuid,
+                n.group_id = $group_id,
+                n.batch_id = $batch_id,
+                n.link_key = $link_key,
+                n.content_sha256 = $content_sha256,
+                n.source_uuid = $source_uuid,
+                n.target_kind = $target_kind,
+                n.target_uuid = $target_uuid,
+                n.evidence_kind = $evidence_kind,
+                n.locator_json = $locator_json,
+                n.excerpt = $excerpt,
+                n.extractor_name = $extractor_name,
+                n.extractor_version = $extractor_version,
+                n.rule_id = $rule_id,
+                n.confidence = $confidence,
+                n.created_at = $created_at,
+                n.updated_at = $updated_at,
+                n._catalog_create_token = $create_token
+            WITH n, coalesce(n._catalog_create_token, '') = $create_token AS created
+            SET n.uuid = n.uuid
+            WITH n, created,
+                 CASE
+                   WHEN NOT created AND (
+                     n.link_key IS NULL OR n.link_key <> $link_key
+                   ) THEN 'provenance_link_conflict'
+                   WHEN NOT created AND (
+                     n.content_sha256 IS NULL OR n.content_sha256 <> $content_sha256
+                   ) THEN 'provenance_link_conflict'
+                   WHEN NOT created AND (
+                     n.source_uuid IS NULL OR n.source_uuid <> $source_uuid
+                     OR n.target_kind IS NULL OR n.target_kind <> $target_kind
+                     OR n.target_uuid IS NULL OR n.target_uuid <> $target_uuid
+                   ) THEN 'provenance_link_conflict'
+                   ELSE null
+                 END AS error_code
+            WITH n, created, error_code,
+                 CASE
+                   WHEN error_code IS NOT NULL THEN 'error'
+                   WHEN created THEN 'created'
+                   ELSE 'unchanged'
+                 END AS status
+            REMOVE n._catalog_create_token
+            RETURN n.uuid AS uuid,
+                   n.content_sha256 AS content_sha256,
+                   n.link_key AS link_key,
+                   n.group_id AS group_id,
+                   n.batch_id AS batch_id,
+                   n.source_uuid AS source_uuid,
+                   n.target_kind AS target_kind,
+                   n.target_uuid AS target_uuid,
+                   labels(n) AS labels,
+                   status,
+                   error_code
+            """
+
+    def prepare_evidence_link_params(self, **fields: Any) -> dict[str, Any]:
+        """Allowlisted evidence params; reject embeddings/raw token keys."""
+        for bad in _FORBIDDEN_EVIDENCE_MANIFEST_PARAM_KEYS:
+            if bad in fields and fields[bad] is not None:
+                raise CatalogStoreError(
+                    f'forbidden evidence param key: {bad}',
+                    code='validation_error',
+                )
+        required = (
+            'uuid',
+            'group_id',
+            'batch_id',
+            'link_key',
+            'content_sha256',
+            'source_uuid',
+            'target_kind',
+            'target_uuid',
+            'evidence_kind',
+            'created_at',
+            'updated_at',
+        )
+        for key in required:
+            val = fields.get(key)
+            if val is None or (isinstance(val, str) and not str(val).strip()):
+                raise CatalogStoreError(
+                    f'evidence field {key} is required',
+                    code='validation_error',
+                )
+        target_kind = str(fields['target_kind'])
+        if target_kind not in {'entity', 'edge'}:
+            raise CatalogStoreError(
+                f'invalid target_kind {target_kind!r}',
+                code='validation_error',
+            )
+        content_sha256 = str(fields['content_sha256'])
+        if len(content_sha256) != 64 or any(c not in '0123456789abcdef' for c in content_sha256):
+            raise CatalogStoreError(
+                'content_sha256 must be 64 lowercase hex characters',
+                code='validation_error',
+            )
+        excerpt = fields.get('excerpt')
+        if excerpt is not None:
+            if not isinstance(excerpt, str):
+                raise CatalogStoreError(
+                    'excerpt must be a string',
+                    code='validation_error',
+                )
+            if len(excerpt) > MAX_EVIDENCE_LENGTH:
+                raise CatalogStoreError(
+                    f'excerpt exceeds max length ({MAX_EVIDENCE_LENGTH})',
+                    code='validation_error',
+                )
+        confidence = fields.get('confidence')
+        if confidence is not None:
+            try:
+                conf_f = float(confidence)
+            except (TypeError, ValueError) as exc:
+                raise CatalogStoreError(
+                    'confidence must be a finite float',
+                    code='validation_error',
+                ) from exc
+            if conf_f != conf_f or conf_f in (float('inf'), float('-inf')):
+                raise CatalogStoreError(
+                    'confidence must be finite',
+                    code='validation_error',
+                )
+            if conf_f < 0.0 or conf_f > 1.0:
+                raise CatalogStoreError(
+                    'confidence out of range',
+                    code='validation_error',
+                )
+            confidence = conf_f
+        out: dict[str, Any] = {
+            'uuid': str(fields['uuid']),
+            'group_id': str(fields['group_id']),
+            'batch_id': str(fields['batch_id']),
+            'link_key': str(fields['link_key']),
+            'content_sha256': content_sha256,
+            'source_uuid': str(fields['source_uuid']),
+            'target_kind': target_kind,
+            'target_uuid': str(fields['target_uuid']),
+            'evidence_kind': str(fields['evidence_kind']),
+            'locator_json': fields.get('locator_json'),
+            'excerpt': excerpt,
+            'extractor_name': (
+                str(fields['extractor_name']) if fields.get('extractor_name') is not None else None
+            ),
+            'extractor_version': (
+                str(fields['extractor_version'])
+                if fields.get('extractor_version') is not None
+                else None
+            ),
+            'rule_id': fields.get('rule_id'),
+            'confidence': confidence,
+            'created_at': fields['created_at'],
+            'updated_at': fields['updated_at'],
+            'create_token': uuid4().hex,
+        }
+        for bad in _FORBIDDEN_EVIDENCE_MANIFEST_PARAM_KEYS:
+            out.pop(bad, None)
+        return out
+
+    async def write_evidence_link(
+        self,
+        tx: Any,
+        *,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve source+target then CREATE-once evidence control record in open tx."""
+        group_id = str(params.get('group_id') or '')
+        source_uuid = str(params.get('source_uuid') or '')
+        target_uuid = str(params.get('target_uuid') or '')
+        target_kind = str(params.get('target_kind') or '')
+        if not group_id or not source_uuid or not target_uuid:
+            raise CatalogStoreError(
+                'group_id, source_uuid, and target_uuid are required',
+                code='validation_error',
+            )
+        if target_kind not in {'entity', 'edge'}:
+            raise CatalogStoreError(
+                f'invalid target_kind {target_kind!r}',
+                code='validation_error',
+            )
+
+        src_res = await tx.run(
+            self.build_resolve_evidence_source_cypher(),
+            source_uuid=source_uuid,
+            group_id=group_id,
+        )
+        src_row = await self._first_from_tx_result(src_res)
+        if not src_row or not src_row.get('uuid'):
+            raise CatalogStoreError(
+                'evidence source missing in group',
+                code='provenance_target_missing',
+            )
+
+        tgt_res = await tx.run(
+            self.build_resolve_evidence_target_cypher(),
+            target_uuid=target_uuid,
+            target_kind=target_kind,
+            group_id=group_id,
+        )
+        tgt_row = await self._first_from_tx_result(tgt_res)
+        if not tgt_row or not tgt_row.get('uuid'):
+            raise CatalogStoreError(
+                'evidence target missing in group',
+                code='provenance_target_missing',
+            )
+        if str(tgt_row.get('kind') or '') != target_kind:
+            raise CatalogStoreError(
+                'evidence target type mismatch',
+                code='endpoint_type_mismatch',
+            )
+
+        write_params = dict(params)
+        if 'create_token' not in write_params or not write_params['create_token']:
+            write_params['create_token'] = uuid4().hex
+        result = await tx.run(self.build_evidence_link_write_cypher(), **write_params)
+        row = await self._first_from_tx_result(result)
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'evidence link write returned no row',
+                code='neo4j_transaction_failed',
+            )
+        error_code = row.get('error_code')
+        if error_code:
+            raise CatalogStoreError(
+                'evidence link identity conflict',
+                code=str(error_code),
+            )
+        labels = list(row.get('labels') or [])
+        if 'Entity' in labels or 'Episodic' in labels:
+            raise CatalogStoreError(
+                'evidence control record must not carry Entity/Episodic labels',
+                code='internal_error',
+            )
+        return row
+
+    async def write_evidence_links(
+        self,
+        tx: Any,
+        *,
+        links: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Write zero or more evidence links; empty list is a no-op."""
+        if not links:
+            return []
+        out: list[dict[str, Any]] = []
+        for link in links:
+            params = link if 'create_token' in link else self.prepare_evidence_link_params(**link)
+            out.append(await self.write_evidence_link(tx, params=params))
+        return out
+
+    def build_existing_manifest_root_cypher(self) -> str:
+        """MATCH existing manifest root by deterministic uuid+group_id."""
+        return """
+            MATCH (m:CatalogBatchManifest {uuid: $uuid, group_id: $group_id})
+            RETURN m.uuid AS uuid,
+                   m.group_id AS group_id,
+                   m.batch_id AS batch_id,
+                   m.manifest_sha256 AS manifest_sha256,
+                   m.request_sha256 AS request_sha256,
+                   m.catalog_sha256 AS catalog_sha256,
+                   m.artifact_sha256 AS artifact_sha256,
+                   m.identity_schema_version AS identity_schema_version,
+                   m.chunk_count AS chunk_count,
+                   m.payload_bytes AS payload_bytes
+            """
+
+    def build_create_manifest_root_cypher(self) -> str:
+        """CREATE-once CatalogBatchManifest root (never Entity)."""
+        return """
+            CREATE (m:CatalogBatchManifest {
+                uuid: $uuid,
+                group_id: $group_id,
+                batch_id: $batch_id,
+                identity_schema_version: $identity_schema_version,
+                canonicalization_version: $canonicalization_version,
+                manifest_serialization_version: $manifest_serialization_version,
+                catalog_schema_version: $catalog_schema_version,
+                request_sha256: $request_sha256,
+                catalog_sha256: $catalog_sha256,
+                artifact_sha256: $artifact_sha256,
+                manifest_sha256: $manifest_sha256,
+                payload_bytes: $payload_bytes,
+                chunk_count: $chunk_count,
+                entity_count: $entity_count,
+                edge_count: $edge_count,
+                source_count: $source_count,
+                evidence_link_count: $evidence_link_count,
+                created_at: $created_at,
+                updated_at: $updated_at
+            })
+            RETURN m.uuid AS uuid,
+                   m.group_id AS group_id,
+                   m.batch_id AS batch_id,
+                   m.manifest_sha256 AS manifest_sha256,
+                   m.chunk_count AS chunk_count,
+                   m.payload_bytes AS payload_bytes
+            """
+
+    def build_create_manifest_chunk_cypher(self) -> str:
+        """CREATE-once ordered CatalogBatchManifestChunk."""
+        return """
+            CREATE (c:CatalogBatchManifestChunk {
+                uuid: $uuid,
+                group_id: $group_id,
+                manifest_uuid: $manifest_uuid,
+                batch_id: $batch_id,
+                chunk_index: $chunk_index,
+                chunk_count: $chunk_count,
+                byte_offset: $byte_offset,
+                byte_length: $byte_length,
+                chunk_sha256: $chunk_sha256,
+                payload_b64: $payload_b64
+            })
+            RETURN c.uuid AS uuid,
+                   c.manifest_uuid AS manifest_uuid,
+                   c.chunk_index AS chunk_index,
+                   c.byte_offset AS byte_offset,
+                   c.byte_length AS byte_length,
+                   c.chunk_sha256 AS chunk_sha256
+            """
+
+    def build_read_manifest_root_by_batch_cypher(self) -> str:
+        """Internal recovery read of manifest root by group_id+batch_id."""
+        return """
+            MATCH (m:CatalogBatchManifest {group_id: $group_id, batch_id: $batch_id})
+            RETURN m.uuid AS uuid,
+                   m.group_id AS group_id,
+                   m.batch_id AS batch_id,
+                   m.manifest_sha256 AS manifest_sha256,
+                   m.request_sha256 AS request_sha256,
+                   m.catalog_sha256 AS catalog_sha256,
+                   m.artifact_sha256 AS artifact_sha256,
+                   m.identity_schema_version AS identity_schema_version,
+                   m.chunk_count AS chunk_count,
+                   m.payload_bytes AS payload_bytes,
+                   m.created_at AS created_at,
+                   m.updated_at AS updated_at
+            """
+
+    def build_lock_prepared_plan_for_commit_cypher(self) -> str:
+        """Property-touch lock on prepared plan under group_id (D-08)."""
+        return """
+            MATCH (p:CatalogPreparedPlan {uuid: $uuid, group_id: $group_id})
+            SET p.uuid = p.uuid
+            RETURN p.uuid AS uuid,
+                   p.group_id AS group_id,
+                   p.state AS state,
+                   p.token_digest AS token_digest,
+                   p.batch_id AS batch_id,
+                   p.request_sha256 AS request_sha256,
+                   p.catalog_sha256 AS catalog_sha256,
+                   p.artifact_sha256 AS artifact_sha256,
+                   true AS locked
+            """
+
+    def build_terminal_commit_agrees_cypher(self) -> str:
+        """Read plan + batch + manifest binding under group for D-09 agreement."""
+        return """
+            OPTIONAL MATCH (p:CatalogPreparedPlan {uuid: $plan_uuid, group_id: $group_id})
+            OPTIONAL MATCH (b:CatalogIngestBatch {uuid: $batch_uuid, group_id: $group_id})
+            OPTIONAL MATCH (m:CatalogBatchManifest {group_id: $group_id, batch_id: $batch_id})
+            RETURN p.state AS plan_state,
+                   b.status AS batch_status,
+                   m.manifest_sha256 AS manifest_sha256,
+                   m.request_sha256 AS request_sha256,
+                   m.catalog_sha256 AS catalog_sha256,
+                   m.artifact_sha256 AS artifact_sha256,
+                   m.identity_schema_version AS identity_schema_version,
+                   m.batch_id AS batch_id,
+                   m.group_id AS group_id
+            """
+
+    def prepare_manifest_root_params(self, **fields: Any) -> dict[str, Any]:
+        """Allowlisted manifest root params; reject embeddings/raw token."""
+        for bad in _FORBIDDEN_EVIDENCE_MANIFEST_PARAM_KEYS:
+            if bad in fields and fields[bad] is not None:
+                raise CatalogStoreError(
+                    f'forbidden manifest param key: {bad}',
+                    code='validation_error',
+                )
+        required = (
+            'uuid',
+            'group_id',
+            'batch_id',
+            'request_sha256',
+            'catalog_sha256',
+            'manifest_sha256',
+            'payload_bytes',
+            'chunk_count',
+            'created_at',
+            'updated_at',
+        )
+        for key in required:
+            val = fields.get(key)
+            if val is None or (isinstance(val, str) and not str(val).strip()):
+                raise CatalogStoreError(
+                    f'manifest field {key} is required',
+                    code='validation_error',
+                )
+        payload_bytes = int(fields['payload_bytes'])
+        if payload_bytes < 0 or payload_bytes > HARD_MAX_PREPARED_PAYLOAD_BYTES:
+            raise CatalogStoreError(
+                'payload_bytes out of hard ceiling',
+                code='batch_limit_exceeded',
+            )
+        chunk_count = int(fields['chunk_count'])
+        if chunk_count < 1 or chunk_count > HARD_MAX_CHUNKS_PER_PLAN:
+            raise CatalogStoreError(
+                'chunk_count out of hard ceiling',
+                code='batch_limit_exceeded',
+            )
+        for digest_key in (
+            'request_sha256',
+            'catalog_sha256',
+            'manifest_sha256',
+        ):
+            digest = str(fields[digest_key])
+            if len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
+                raise CatalogStoreError(
+                    f'{digest_key} must be 64 lowercase hex characters',
+                    code='validation_error',
+                )
+        artifact = fields.get('artifact_sha256')
+        if artifact is not None:
+            artifact_s = str(artifact)
+            if artifact_s and (
+                len(artifact_s) != 64 or any(c not in '0123456789abcdef' for c in artifact_s)
+            ):
+                raise CatalogStoreError(
+                    'artifact_sha256 must be 64 lowercase hex characters',
+                    code='validation_error',
+                )
+        out: dict[str, Any] = {
+            'uuid': str(fields['uuid']),
+            'group_id': str(fields['group_id']),
+            'batch_id': str(fields['batch_id']),
+            'identity_schema_version': str(fields.get('identity_schema_version') or 'catalog-v2'),
+            'canonicalization_version': str(
+                fields.get('canonicalization_version') or CANONICALIZATION_VERSION
+            ),
+            'manifest_serialization_version': str(
+                fields.get('manifest_serialization_version') or 'catalog-manifest-v1'
+            ),
+            'catalog_schema_version': str(
+                fields.get('catalog_schema_version') or 'catalog-schema-v1'
+            ),
+            'request_sha256': str(fields['request_sha256']),
+            'catalog_sha256': str(fields['catalog_sha256']),
+            'artifact_sha256': (str(artifact) if artifact is not None and str(artifact) else None),
+            'manifest_sha256': str(fields['manifest_sha256']),
+            'payload_bytes': payload_bytes,
+            'chunk_count': chunk_count,
+            'entity_count': int(fields.get('entity_count') or 0),
+            'edge_count': int(fields.get('edge_count') or 0),
+            'source_count': int(fields.get('source_count') or 0),
+            'evidence_link_count': int(fields.get('evidence_link_count') or 0),
+            'created_at': fields['created_at'],
+            'updated_at': fields['updated_at'],
+        }
+        for bad in _FORBIDDEN_EVIDENCE_MANIFEST_PARAM_KEYS:
+            out.pop(bad, None)
+        return out
+
+    def prepare_manifest_chunk_params(self, **fields: Any) -> dict[str, Any]:
+        """Allowlisted manifest chunk params."""
+        for bad in _FORBIDDEN_EVIDENCE_MANIFEST_PARAM_KEYS:
+            if bad in fields and fields[bad] is not None:
+                raise CatalogStoreError(
+                    f'forbidden manifest chunk param key: {bad}',
+                    code='validation_error',
+                )
+        required = (
+            'uuid',
+            'group_id',
+            'manifest_uuid',
+            'batch_id',
+            'chunk_index',
+            'chunk_count',
+            'byte_offset',
+            'byte_length',
+            'chunk_sha256',
+            'payload_b64',
+        )
+        for key in required:
+            val = fields.get(key)
+            if key == 'payload_b64':
+                if val is None:
+                    raise CatalogStoreError(
+                        f'manifest chunk field {key} is required',
+                        code='validation_error',
+                    )
+                continue
+            if val is None or (isinstance(val, str) and not str(val).strip()):
+                raise CatalogStoreError(
+                    f'manifest chunk field {key} is required',
+                    code='validation_error',
+                )
+        chunk_index = int(fields['chunk_index'])
+        chunk_count = int(fields['chunk_count'])
+        if chunk_index < 0 or chunk_index >= chunk_count:
+            raise CatalogStoreError(
+                'chunk_index out of range',
+                code='validation_error',
+            )
+        if chunk_count < 1 or chunk_count > HARD_MAX_CHUNKS_PER_PLAN:
+            raise CatalogStoreError(
+                'chunk_count out of hard ceiling',
+                code='batch_limit_exceeded',
+            )
+        chunk_sha = str(fields['chunk_sha256'])
+        if len(chunk_sha) != 64 or any(c not in '0123456789abcdef' for c in chunk_sha):
+            raise CatalogStoreError(
+                'chunk_sha256 must be 64 lowercase hex characters',
+                code='validation_error',
+            )
+        out: dict[str, Any] = {
+            'uuid': str(fields['uuid']),
+            'group_id': str(fields['group_id']),
+            'manifest_uuid': str(fields['manifest_uuid']),
+            'batch_id': str(fields['batch_id']),
+            'chunk_index': chunk_index,
+            'chunk_count': chunk_count,
+            'byte_offset': int(fields['byte_offset']),
+            'byte_length': int(fields['byte_length']),
+            'chunk_sha256': chunk_sha,
+            'payload_b64': str(fields.get('payload_b64') or ''),
+        }
+        for bad in _FORBIDDEN_EVIDENCE_MANIFEST_PARAM_KEYS:
+            out.pop(bad, None)
+        return out
+
+    async def write_manifest_root_and_chunks(
+        self,
+        tx: Any,
+        *,
+        root: dict[str, Any],
+        chunks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """CREATE-once manifest root + ordered chunks; divergent hash conflicts."""
+        root_params = (
+            root
+            if 'manifest_sha256' in root and 'identity_schema_version' in root
+            else self.prepare_manifest_root_params(**root)
+        )
+        if not chunks:
+            raise CatalogStoreError('at least one manifest chunk required', code='validation_error')
+        if len(chunks) != int(root_params['chunk_count']):
+            raise CatalogStoreError(
+                'chunk_count does not match chunks length',
+                code='validation_error',
+            )
+        group_id = root_params['group_id']
+
+        existing_res = await tx.run(
+            self.build_existing_manifest_root_cypher(),
+            uuid=root_params['uuid'],
+            group_id=group_id,
+        )
+        existing = await self._first_from_tx_result(existing_res)
+        if existing and existing.get('uuid'):
+            same = (
+                str(existing.get('manifest_sha256') or '') == str(root_params['manifest_sha256'])
+                and str(existing.get('request_sha256') or '') == str(root_params['request_sha256'])
+                and str(existing.get('catalog_sha256') or '') == str(root_params['catalog_sha256'])
+                and str(existing.get('batch_id') or '') == str(root_params['batch_id'])
+            )
+            existing_artifact = existing.get('artifact_sha256')
+            root_artifact = root_params.get('artifact_sha256')
+            if (existing_artifact or None) != (root_artifact or None):
+                same = False
+            if not same:
+                raise CatalogStoreError(
+                    'manifest identity already exists with divergent binding',
+                    code='batch_conflict',
+                )
+            return {
+                'uuid': existing.get('uuid'),
+                'group_id': existing.get('group_id'),
+                'batch_id': existing.get('batch_id'),
+                'manifest_sha256': existing.get('manifest_sha256'),
+                'chunk_count': existing.get('chunk_count'),
+                'payload_bytes': existing.get('payload_bytes'),
+                'idempotent': True,
+            }
+
+        try:
+            create_res = await tx.run(self.build_create_manifest_root_cypher(), **root_params)
+            created = await self._first_from_tx_result(create_res)
+        except CatalogStoreError:
+            raise
+        except Exception as exc:
+            if self._is_uniqueness_constraint_race(exc):
+                raise CatalogStoreError(
+                    'manifest identity already exists',
+                    code='batch_conflict',
+                ) from exc
+            raise CatalogStoreError(
+                f'manifest create failed: {type(exc).__name__}',
+                code='neo4j_transaction_failed',
+            ) from exc
+        if not created or not created.get('uuid'):
+            raise CatalogStoreError(
+                'manifest create returned no row',
+                code='neo4j_transaction_failed',
+            )
+
+        ordered = sorted(
+            (
+                ch
+                if 'chunk_sha256' in ch and 'manifest_uuid' in ch
+                else self.prepare_manifest_chunk_params(**ch)
+                for ch in chunks
+            ),
+            key=lambda c: int(c['chunk_index']),
+        )
+        for ch_params in ordered:
+            if ch_params['manifest_uuid'] != root_params['uuid']:
+                raise CatalogStoreError(
+                    'chunk manifest_uuid mismatch',
+                    code='validation_error',
+                )
+            if ch_params['group_id'] != group_id:
+                raise CatalogStoreError(
+                    'chunk group_id mismatch',
+                    code='validation_error',
+                )
+            if ch_params['batch_id'] != root_params['batch_id']:
+                raise CatalogStoreError(
+                    'chunk batch_id mismatch',
+                    code='validation_error',
+                )
+            try:
+                ch_res = await tx.run(
+                    self.build_create_manifest_chunk_cypher(),
+                    **ch_params,
+                )
+                ch_row = await self._first_from_tx_result(ch_res)
+            except CatalogStoreError:
+                raise
+            except Exception as exc:
+                if self._is_uniqueness_constraint_race(exc):
+                    raise CatalogStoreError(
+                        'manifest chunk identity already exists',
+                        code='batch_conflict',
+                    ) from exc
+                raise CatalogStoreError(
+                    f'manifest chunk create failed: {type(exc).__name__}',
+                    code='neo4j_transaction_failed',
+                ) from exc
+            if not ch_row or not ch_row.get('uuid'):
+                raise CatalogStoreError(
+                    'manifest chunk create returned no row',
+                    code='neo4j_transaction_failed',
+                )
+        return created
+
+    async def lock_prepared_plan_for_commit(
+        self,
+        tx: Any,
+        *,
+        plan_uuid: str,
+        group_id: str,
+    ) -> dict[str, Any]:
+        """Property-touch lock prepared plan under group_id for recovery serialization."""
+        if not plan_uuid or not group_id:
+            raise CatalogStoreError(
+                'plan_uuid and group_id are required',
+                code='validation_error',
+            )
+        result = await tx.run(
+            self.build_lock_prepared_plan_for_commit_cypher(),
+            uuid=plan_uuid,
+            group_id=group_id,
+        )
+        row = await self._first_from_tx_result(result)
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'prepared plan not found for lock',
+                code='prepared_plan_not_found',
+            )
+        return row
+
+    async def terminal_commit_agrees(
+        self,
+        tx: Any,
+        *,
+        projection: dict[str, Any],
+    ) -> bool:
+        """True only when plan COMMITTED + batch committed + manifest hashes agree."""
+        group_id = str(projection.get('group_id') or '')
+        batch_id = str(projection.get('batch_id') or '')
+        plan_uuid = str(projection.get('plan_uuid') or '')
+        batch_uuid = str(projection.get('batch_uuid') or '')
+        if not group_id or not batch_id or not plan_uuid or not batch_uuid:
+            return False
+        result = await tx.run(
+            self.build_terminal_commit_agrees_cypher(),
+            group_id=group_id,
+            batch_id=batch_id,
+            plan_uuid=plan_uuid,
+            batch_uuid=batch_uuid,
+        )
+        row = await self._first_from_tx_result(result)
+        if not row:
+            return False
+        if str(row.get('plan_state') or '') != PLAN_STATE_COMMITTED:
+            return False
+        if str(row.get('batch_status') or '') != 'committed':
+            return False
+        if str(row.get('group_id') or '') != group_id:
+            return False
+        if str(row.get('batch_id') or '') != batch_id:
+            return False
+        for key in (
+            'manifest_sha256',
+            'request_sha256',
+            'catalog_sha256',
+            'identity_schema_version',
+        ):
+            if str(row.get(key) or '') != str(projection.get(key) or ''):
+                return False
+        proj_artifact = projection.get('artifact_sha256')
+        row_artifact = row.get('artifact_sha256')
+        return str(proj_artifact or '') == str(row_artifact or '')
+
+    async def read_manifest_root_for_recovery(
+        self,
+        executor: Any,
+        *,
+        group_id: str,
+        batch_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Internal recovery read of durable manifest root (no public MCP tool)."""
+        if not group_id or not batch_id:
+            raise CatalogStoreError(
+                'group_id and batch_id are required',
+                code='validation_error',
+            )
+        return await self._read_one(
+            executor,
+            self.build_read_manifest_root_by_batch_cypher(),
+            {'group_id': str(group_id), 'batch_id': str(batch_id)},
+            tx=tx,
+        )
