@@ -1,167 +1,135 @@
 ---
 phase: 03A-immutable-prepare-commit-control-plane
-reviewed: 2026-07-18T12:00:00Z
+reviewed: 2026-07-18T15:10:00Z
 depth: deep
-files_reviewed: 21
+files_reviewed: 12
 files_reviewed_list:
-  - mcp_server/src/graphiti_mcp_server.py
-  - mcp_server/src/config/schema.py
-  - mcp_server/src/models/catalog_common.py
-  - mcp_server/src/models/catalog_prepare.py
-  - mcp_server/src/models/catalog_responses.py
-  - mcp_server/src/services/catalog_capabilities.py
   - mcp_server/src/services/catalog_identity.py
-  - mcp_server/src/services/catalog_prepared_artifact.py
-  - mcp_server/src/services/catalog_service.py
   - mcp_server/src/services/catalog_store.py
-  - mcp_server/tests/catalog_phase3a_gate_runner.py
-  - mcp_server/tests/run_phase3a_gate.py
-  - mcp_server/tests/test_catalog_capabilities.py
-  - mcp_server/tests/test_catalog_phase3a_gate_runner.py
-  - mcp_server/tests/test_catalog_prepare_models.py
-  - mcp_server/tests/test_catalog_prepare_neo4j_int.py
-  - mcp_server/tests/test_catalog_prepare_service.py
-  - mcp_server/tests/test_catalog_prepare_store.py
-  - mcp_server/tests/test_catalog_prepared_artifact.py
+  - mcp_server/src/services/catalog_service.py
+  - mcp_server/src/models/catalog_common.py
   - mcp_server/tests/test_catalog_token.py
-  - mcp_server/tests/test_graphiti_mcp_server.py
+  - mcp_server/tests/test_catalog_prepare_store.py
+  - mcp_server/tests/test_catalog_prepare_service.py
+  - mcp_server/tests/test_catalog_prepare_neo4j_int.py
+  - mcp_server/tests/catalog_phase3a_gate_runner.py
+  - .planning/phases/03A-immutable-prepare-commit-control-plane/03A-GATE-RESULTS.json
+  - .planning/phases/03A-immutable-prepare-commit-control-plane/03A-REVIEW-FIX.md
+  - .planning/phases/03A-immutable-prepare-commit-control-plane/03A-PHASE3A-GATE.md
 findings:
   critical: 0
-  warning: 7
-  info: 4
-  total: 11
+  warning: 1
+  info: 3
+  total: 4
 status: issues_found
+prior_findings:
+  WR-01: fixed
+  WR-02: fixed
+  WR-03: fixed
+  WR-04: fixed
+  WR-05: fixed
+  WR-06: fixed
+  WR-07: fixed
+gate:
+  evaluated_head: 67edbd7c94283a7ba65f4ffd23fde751a3064b72
+  current_head: 7c5265edebeb4d293e14fdeddd9348cf895320cb
+  head_compatible: false
+  product_code_at_evaluated_head: true
+  prepare_commit_claim: true
+  live_neo4j_immutable_proof: pass
 ---
 
-# Phase 03A: Code Review Report
+# Phase 03A: Code Review Report (re-review after WR-01..WR-07)
 
-**Reviewed:** 2026-07-18T12:00:00Z
+**Reviewed:** 2026-07-18T15:10:00Z
 **Depth:** deep
-**Files Reviewed:** 21
+**Files Reviewed:** 12
 **Status:** issues_found
 
 ## Summary
 
-Deep adversarial review of the immutable prepare/commit control plane (models, identity/token, artifact, store CAS, service orchestration, MCP surface, capabilities, gate/tests). Cross-file focus: token auth, reassembly integrity, capacity serialization, state machine, zero domain write on prepare, zero external call on commit, restart-safe immutability, and 3B seam safety.
+Re-review of Phase 03A after WR-01..WR-07 fix commits (`565b117`..`67edbd7`) plus subsequent docs commits (`7083317` gate rebind, `7c5265e` REVIEW-FIX). Product surface for prior warnings is fixed with matching unit coverage. No new Critical product defects found on static review.
 
-No critical product security holes found in the happy-path design (opaque 256-bit token, domain-separated digest, CREATE-once root/chunks, group lock + active count, CAS table forbidding revive, commit stops at `COMMITTING` without embedder/LLM/queue). Seven warnings remain: fail-closed gaps on corrupt digests, weaker plan-schema ensure than domain schema, prepare skipping committed-batch preflight, evidence membership non-coalesce/collision, wrong store default version string, concurrent identity race error mapping, and soft live expiry assertion.
+One Warning remains: final gate ledger is **not HEAD-compatible** at current HEAD. `evaluated_head=67edbd7` (code fixes). Parent hop `7083317` (ledger-only) would pass `_head_compatible`. Child `7c5265e` adds `03A-REVIEW-FIX.md`, which is outside the allowlist — `verify_ledger` fails closed with `head-mismatch`. Claims `ready_for_phase_3b=true` / `prepare_commit=true` are true for product code at `67edbd7`, but ledger authority is stale at `7c5265e`.
+
+## Prior warning disposition
+
+| ID | Status | Evidence |
+|----|--------|----------|
+| WR-01 | **fixed** | `plan_token_matches` guards non-str/empty; wraps digest+`compare_digest` in `ValueError`/`TypeError` → `False` (`catalog_identity.py:117-129`). Behavioral tests for wrong-length/None/int digests (`test_catalog_token.py:182-191`). Commit/discard auth path uses matches post-load. |
+| WR-02 | **fixed** | `_plan_schema_lock` + `_plan_schema_ready`; double-check; post-CREATE `SHOW CONSTRAINTS` exact prop sets for plan/token/chunk constraints; fail closed `neo4j_schema_failed` (`catalog_store.py:1870-1983`). Tests: idempotent, wrong-shape fail-closed (`test_catalog_prepare_store.py:846-900`). |
+| WR-03 | **fixed** | `prepare_catalog_batch` → `check_batch_status=True` (`catalog_service.py:5137`). `committed_same` → `prepared_plan_conflict` (no token); `committed_conflict` → `batch_conflict` (`:5179-5188`, preflight `:3817-3842`). Service tests (`test_catalog_prepare_service.py:1062-1086`). |
+| WR-04 | **fixed** | Membership uses `coalesce_byte_identical_evidence_links` then rejects same `link_key` divergent content as `provenance_link_conflict` (`:5287-5315`). Coalesce + conflict tests (`:1105-1210`). |
+| WR-05 | **fixed** | Default `CANONICALIZATION_VERSION` import (`catalog_store.py:2208-2210`). Unit default test (`test_catalog_prepare_store.py:934-939`). |
+| WR-06 | **fixed** | `_is_uniqueness_constraint_race` on plan/chunk CREATE (`catalog_store.py:2299-2421`); service `except Exception` maps races to `prepared_plan_conflict` (`catalog_service.py:5492-5509`). Store + service race tests. |
+| WR-07 | **fixed** | Live expiry proof requires terminal `EXPIRED` with bound retry; residual `PREPARED` fails (`test_catalog_prepare_neo4j_int.py:619-633`). |
 
 ## Narrative Findings (AI reviewer)
 
 ## Warnings
 
-### WR-01: `plan_token_matches` raises on length-mismatched stored digest
+### WR-R01: Gate ledger HEAD binding invalid after REVIEW-FIX docs commit
 
-**File:** `mcp_server/src/services/catalog_identity.py:117-125`
-**Issue:** `hmac.compare_digest(actual, stored_digest.lower())` raises `ValueError` when `stored_digest` length ≠ 64 (corrupt Neo4j property, partial write, manual edit). Only `plan_token_digest` `ValueError` is caught. Commit/discard then surface generic MCP `ErrorResponse` instead of structured `prepared_plan_not_found`, and bypass the intended fail-closed auth path.
+**File:** `.planning/phases/03A-immutable-prepare-commit-control-plane/03A-GATE-RESULTS.json` (`evaluated_head`); `mcp_server/tests/catalog_phase3a_gate_runner.py:898-916`
+**Issue:** Ledger binds `evaluated_head=67edbd7c94283a7ba65f4ffd23fde751a3064b72` with pass claims (`local_gate_pass`, `ready_for_phase_3b`, `prepare_commit`, live proof). Current HEAD is `7c5265edebeb4d293e14fdeddd9348cf895320cb`.
 
-**Failure scenario:** Root exists with `token_digest='abc'`. Caller presents any token. `plan_token_matches` throws; MCP logs `commit_prepared_catalog_batch failed reason=ValueError`.
+`_head_compatible` allows only:
+1. exact HEAD match, or
+2. single parent hop where every file in HEAD ends with allowlisted suffixes (`03A-GATE-RESULTS.json`, `03A-PHASE3A-GATE.md`, `03A-06-SUMMARY.md`, `03A-VALIDATION.md`, `03A-EDGE-PROBE-RESOLUTION.json`).
 
-**Fix:**
-```python
-def plan_token_matches(token: str, stored_digest: str) -> bool:
-    if not isinstance(stored_digest, str) or not stored_digest:
-        return False
-    try:
-        actual = plan_token_digest(token)
-        return hmac.compare_digest(actual, stored_digest.lower())
-    except (ValueError, TypeError):
-        return False
-```
+History:
+- `7083317` (parent of current, child of `67edbd7`): only `03A-GATE-RESULTS.json` → would be `ledger-only-child` **pass**.
+- `7c5265e` (current): only `03A-REVIEW-FIX.md` → **not allowlisted** → `verify_ledger` returns `evaluated_head invalid: head-mismatch`.
 
-### WR-02: `ensure_plan_schema` lacks lock, once-ready flag, and SHOW verification
+Static invoke at this checkout: `head_compatible=False`. Gate report text still advertises pass. Product code unchanged since `67edbd7` (docs-only delta) — claim is code-true, ledger-false at HEAD.
 
-**File:** `mcp_server/src/services/catalog_store.py:1861-1889`
-**Issue:** Domain identity ensure uses `asyncio.Lock`, double-checked `_schema_ready`, and post-CREATE `SHOW CONSTRAINTS` shape verification (`:223-389`). Plan schema ensure only loops CREATE IF NOT EXISTS, continues on "already exists", never verifies UNIQUENESS shape on `(uuid,group_id)`, `token_digest`, or chunk index. Without verified uniqueness, CREATE-once and global token uniqueness are best-effort only; concurrent prepares can race past the pre-CREATE existence check (`:2250-2260`) and land on driver errors instead of deterministic `prepared_plan_conflict`.
+**Fix:** Either:
+1. Re-run Phase 3A gate on current HEAD and rewrite ledger `evaluated_head` + digests, or
+2. Extend `_head_compatible` allowlist with `03A-REVIEW.md` / `03A-REVIEW-FIX.md` if review docs are intentionally non-invalidating, or
+3. Keep REVIEW-FIX off the branch tip used for readiness (new rebind commit is enough).
 
-**Failure scenario:** Constraint create no-ops or wrong shape under restricted role; two concurrent prepares for same `plan_uuid` both pass existence MATCH and race CREATE.
-
-**Fix:** Mirror domain path: lock + once-ready; after CREATE, SHOW and require exact property sets; fail closed with `neo4j_schema_failed` if missing.
-
-### WR-03: Prepare skips committed `CatalogIngestBatch` preflight
-
-**File:** `mcp_server/src/services/catalog_service.py:5133-5137`
-**Issue:** `prepare_catalog_batch` calls `_prepare_batch_preflight(..., check_batch_status=False)`. Upsert path refuses re-entry when batch is `committed` with hash match/conflict (`:3816-3841`). Prepare can freeze a new control-plane plan for an already-committed `batch_id` (when no prior plan root exists). Phase 3B domain/status claim then collides with terminal batch status.
-
-**Failure scenario:** `upsert_catalog_batch` commits batch B. Later `prepare_catalog_batch` same B + same body succeeds, returns token. Commit claim → 3B status claim fails or double-writes.
-
-**Fix:** Use `check_batch_status=True` on prepare (or equivalent): `committed`+same hash → structured conflict/no new token; `committed`+different hash → `batch_conflict`.
-
-### WR-04: Evidence membership not coalesced; `link_key` omits excerpt → same UUID, divergent content
-
-**File:** `mcp_server/src/services/catalog_service.py:5275-5286`; `mcp_server/src/services/catalog_identity.py:209-233`
-**Issue:** Artifact membership iterates raw `evidence_links` without `coalesce_byte_identical_evidence_links` (used only in `batch_request_canonical_payload`). `evidence_link_key` excludes `excerpt`/transport hash. Two links with same identity material but different excerpts share UUID, different `content_sha256`, both enter membership. 3B evidence apply has no single authoritative row.
-
-**Failure scenario:** Prepare with two evidence rows same source/target/kind/locator, different excerpts → membership list has duplicate `uuid` with conflicting digests; commit reassembly succeeds; domain write ambiguous.
-
-**Fix:** Coalesce byte-identical links; reject same `link_key` with differing `evidence_canonical_payload` at preflight (`provenance_link_conflict` / `deterministic_uuid_conflict`) before serialize.
-
-### WR-05: Store default `canonicalization_version` is wrong sentinel `canon-v1`
-
-**File:** `mcp_server/src/services/catalog_store.py:2114-2116`
-**Issue:** `prepare_prepared_plan_params` defaults missing `canonicalization_version` to `'canon-v1'`. Authority is `CANONICALIZATION_VERSION = 'catalog-canonical-v1'`. Service currently passes the correct value; any alternate caller or partial params map persists a version that fails `_verify_frozen_plan_binding` forever (`catalog_service.py:5593-5594`).
-
-**Failure scenario:** Future/internal create omits field → root stores `canon-v1` → every commit binding check returns `prepared_plan_conflict`.
-
-**Fix:**
-```python
-'canonicalization_version': str(
-    fields.get('canonicalization_version') or 'catalog-canonical-v1'
-),
-```
-Prefer importing `CANONICALIZATION_VERSION` (or require explicit field with no wrong default).
-
-### WR-06: Concurrent same-identity prepare maps uniqueness failure to generic Neo4j error
-
-**File:** `mcp_server/src/services/catalog_store.py:2250-2268`; `mcp_server/src/services/catalog_service.py:5440-5478`
-**Issue:** Existence check then CREATE is not a single atomic Cypher predicate. Loser of a unique-constraint race raises driver exception → service `except Exception` → `neo4j_transaction_failed`, not `prepared_plan_conflict`. Clients cannot distinguish retryable identity conflict from infra failure.
-
-**Failure scenario:** Two parallel prepares identical `batch_id|request_sha256`; one succeeds; other gets constraint error wrapped as `neo4j_transaction_failed` with empty token.
-
-**Fix:** Catch constraint/client errors on plan/chunk CREATE and map to `prepared_plan_conflict`; or `MERGE`+`ON CREATE` with post-check that existing `artifact_sha256` matches (still no token re-issue).
-
-### WR-07: Live expiry proof allows residual `PREPARED` (gate softness)
-
-**File:** `mcp_server/tests/test_catalog_prepare_neo4j_int.py:599-628`
-**Issue:** After TTL sleep + commit, assertion accepts `state in ('EXPIRED', 'PREPARED')`. Documented race hedge weakens the live immutable/expiry proof the gate cites for `prepare_commit=true`. A permanent expiry CAS bug can still pass if the error code is `prepared_plan_expired` while state remains `PREPARED` without a forced second-pass requirement in all cases.
-
-**Failure scenario:** Expiry CAS no-ops; first commit returns expired via wall-clock branch without persisting `EXPIRED`; test still green when state stays `PREPARED` and optional second call also only checks error code.
-
-**Fix:** Require eventual `EXPIRED` (retry loop with bound) or assert `EXPIRED` after the access path that claims to mark expired; fail if still `PREPARED` after N attempts.
+Do not treat current HEAD as gate-green without one of the above.
 
 ## Info
 
-### IN-01: Stranded `COMMITTING` holds active capacity indefinitely
+### IN-R01: Uniqueness race classifier remains string-broad
 
-**File:** `mcp_server/src/services/catalog_store.py:1898-1905`, `2034-104`
-**Issue:** Active count always includes `COMMITTING` regardless of age. Per D-12/research, no timeout reset to `PREPARED`. Crash after claim fills `max_active_plans_per_group` until ops/3B finalizes. Intentional residual — document runbook; 3B must complete or provide bounded operator recovery that cannot revive terminals.
+**File:** `mcp_server/src/services/catalog_store.py:2299-2313`
+**Issue:** Markers include bare `already exists` and `constraint error`, so non-uniqueness messages (e.g. `Index already exists`) classify as race → `prepared_plan_conflict`. False-positive conflict is safer than infra mis-map, but clients may retry as identity conflict when the real fault is schema/index. Acceptable residual for WR-06 intent; tighten to Neo4j codes/`ConstraintValidationFailed` if ops noise appears.
 
-### IN-02: Discard does not pre-mark expired `PREPARED` as `EXPIRED`
+### IN-R02: Schema ensure failures collapse to `neo4j_transaction_failed` at service
 
-**File:** `mcp_server/src/services/catalog_service.py:5914-5948`
-**Issue:** Research CAS table lists discard condition “not expired”; implementation allows `PREPARED→DISCARDED` without expiry check. Capacity-safe (neither state counts as active after discard). Prefer access-path expire-then-conflict for consistency with commit.
+**File:** `mcp_server/src/services/catalog_service.py:5441-5457`
+**Issue:** Store raises `CatalogStoreError(code='neo4j_schema_failed')`, but outer prepare catch is bare `Exception` and always returns `neo4j_transaction_failed`. No `CatalogErrorCode.neo4j_schema_failed`. Fail-closed write avoidance holds; error taxonomy loses schema vs tx distinction.
 
-### IN-03: Token match unit test is source-string only
+### IN-R03: Coalesce membership test has vacuous count assert
 
-**File:** `mcp_server/tests/test_catalog_token.py:95-101`
-**Issue:** Asserts `'compare_digest' in src` rather than behavioral length-mismatch / non-hex stored digest cases (would have caught WR-01).
-
-### IN-04: `features.prepare_commit` hardcoded `True` in pure capabilities
-
-**File:** `mcp_server/src/services/catalog_capabilities.py:146-148`
-**Issue:** Always true at runtime regardless of Neo4j connectivity. Matches post-gate package authority (D-29), not live readiness. Acceptable if ops treat capabilities as build/contract discovery only.
+**File:** `mcp_server/tests/test_catalog_prepare_service.py:1210`
+**Issue:** `assert plan['evidence_link_count'] == 2 or plan['evidence_link_count'] == 1 or True` always passes. Membership length assert (`len(...) == 1`) is real; plan count assert is dead. Prefer assert raw request count (`2`) if counts intentionally ignore coalesce.
 
 ## Cross-file notes (no separate finding)
 
-- Token mint: `secrets.token_urlsafe(32)`; digest domain `graphiti.catalog.plan_token.v1|`; raw token not in artifact/params/logs — OK.
-- Reassembly: ordered indices, offset chain, b64 validate, per-chunk + artifact digests — fail closed — OK.
-- Commit path: no embedder/LLM/queue; stops at `COMMITTING` — OK for 3A.
-- Prepare write labels: `CatalogPreparedPlan` / `CatalogPreparedPlanChunk` / `CatalogPlanGroupLock` only in create path — OK.
-- MCP tools registered; `CATALOG_TOOL_NAMES` includes prepare/commit/discard; SAFE-08 rewrite covers them — OK.
-- Artifact body matches research membership shape; full domain fields live under `request_canonical` for 3B rebuild — OK if 3B uses that contract.
+- Token auth: digest locator + post-load `plan_token_matches`; malformed digest → not_found, not crash — OK.
+- Plan schema lock mirrors domain identity ensure; process-local once-ready is intentional (same as domain). Multi-loop lock reuse only matters if one store instance spans loops before ready — not the MCP process model.
+- Prepare still zero domain/status/evidence writes; commit still stops at `COMMITTING` without embedder/LLM/queue — OK for 3A.
+- Live expiry product path: wall-clock → CAS PREPARED→EXPIRED → `prepared_plan_expired`; test now requires persisted `EXPIRED`.
+- Prior Info residuals IN-01..IN-04 (stranded COMMITTING capacity, discard expiry path, source-string token test, capabilities hardcoded) remain out of fix scope; IN-03 partially superseded by new behavioral digest tests.
+
+## Gate / HEAD truth
+
+| Field | Value |
+|-------|-------|
+| Product code HEAD for fixes | `67edbd7` |
+| Ledger `evaluated_head` | `67edbd7` |
+| Current git HEAD | `7c5265e` |
+| Docs after code | `7083317` rebind (compatible), `7c5265e` REVIEW-FIX (breaks parent-hop allowlist) |
+| `verify_ledger` at current HEAD | **fail** (`head-mismatch`) |
+| Product WR-01..07 | fixed at `67edbd7` and unchanged since |
+| Live proof claim in ledger | pass (bound to evaluated code HEAD, not re-proven at `7c5265e`) |
 
 ---
 
-_Reviewed: 2026-07-18T12:00:00Z_
+_Reviewed: 2026-07-18T15:10:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_
+_Re-review after: 03A-REVIEW-FIX.md (WR-01..WR-07)_
