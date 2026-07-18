@@ -127,7 +127,8 @@ status: complete
 2. **Task 1 follow-up Ruff SIM102** — `a04d40c` (fix)
 3. **Task 1 follow-up scoped pyright cast** — `28e7d46` (fix)
 4. **Task 2: RESOLUTION map + gate report shell** — `f82f3c7` (docs)
-5. **Task 2: ledger/report/roadmap/state/summary** — (final docs commit)
+5. **Task 2: ledger/report/roadmap/state/summary** — `15354d5` (docs)
+6. **Rebinds** — `ac77ebb`, `b915343`, `c336fdb`, `e27f91f` (docs ledger-only child accepted by verify)
 
 ## Gate Booleans (authoritative)
 
@@ -180,4 +181,4 @@ None.
 - 02-PHASE2-GATE.md FOUND
 - 02-EDGE-PROBE-RESOLUTION.json FOUND (68 entries)
 - 02-EDGE-PROBE.json raw sha256 e515187cc229f7f24bd95444799abb900b3cf913900b3a65119e9befd6462599 unchanged
-- Commits 072362c, a04d40c, 28e7d46, f82f3c7, 15354d5 present
+- Commits 072362c..e27f91f present; verify_ledger ok=ledger-only-child; ready_for_phase_3a=true
