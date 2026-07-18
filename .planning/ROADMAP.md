@@ -117,10 +117,21 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 02-01-PLAN.md — Wave 1: Server-owned EDGE_ENDPOINT_MAP + model/service preflight + exhaustive TEST-02 matrix
 - [ ] 02-02-PLAN.md — Wave 1: CatalogEvidenceLink contract + pure identity + catalog-v2 Cartesian rejection (no service edits)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 02-03-PLAN.md — Wave 2 (after 01+02): Required catalog_sha256 + versioned request hash recipe + evidence_links service counters + dry-run hash echo
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 02-04-PLAN.md — Wave 3 (after 03): Read-only get_catalog_capabilities + imports version constants + get_status compat
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 02-05-PLAN.md — Wave 4: Phase 2 fail-closed gate runner, 02-EDGE-PROBE-RESOLUTION.json 68/68, ready_for_phase_3a ledger
 
 **Gate**: Endpoint-map, evidence-contract, and hash unit gates must pass before Phase 3A prepare/control-plane write implementation
