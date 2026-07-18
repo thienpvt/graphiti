@@ -343,7 +343,11 @@ def test_upsert_entities_rejects_invalid_group_id():
         ),
         (
             UpsertCatalogBatchRequest,
-            lambda: {'batch_id': 'batch-1', 'entities': [_entity_kwargs()]},
+            lambda: {
+                'catalog_sha256': 'a' * 64,
+                'batch_id': 'batch-1',
+                'entities': [_entity_kwargs()],
+            },
         ),
         (GetCatalogIngestStatusRequest, lambda: {'batch_id': 'batch-1'}),
     ],
@@ -927,7 +931,7 @@ def test_upsert_catalog_batch_rejects_atomic_false():
             {
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'batch-1',
-            'catalog_sha256': 'a' * 64,
+                'catalog_sha256': 'a' * 64,
                 'entities': [_entity_kwargs()],
                 'atomic': False,
             }
@@ -942,7 +946,7 @@ def test_upsert_catalog_batch_rejects_empty_all_collections():
             {
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'batch-1',
-            'catalog_sha256': 'a' * 64,
+                'catalog_sha256': 'a' * 64,
                 'entities': [],
                 'edges': [],
                 'provenance': None,
@@ -994,7 +998,7 @@ def test_nested_batch_rejects_evidence_links_over_hard_max():
                 'system_key': 'FE',
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'batch-1',
-            'catalog_sha256': 'a' * 64,
+                'catalog_sha256': 'a' * 64,
                 'entities': [],
                 'provenance': {
                     'sources': [_source_kwargs()],
@@ -1038,6 +1042,7 @@ def test_upsert_catalog_batch_required_catalog_sha256_and_optional_request_hash(
             }
         )
     with pytest.raises(ValidationError):
+        # intentionally omit catalog_sha256 — required field
         UpsertCatalogBatchRequest.model_validate(
             {
                 'identity_schema_version': 'catalog-v2',
@@ -1054,7 +1059,7 @@ def test_upsert_catalog_batch_requires_group_and_batch():
         UpsertCatalogBatchRequest.model_validate(
             {
                 'batch_id': 'batch-1',
-            'catalog_sha256': 'a' * 64,
+                'catalog_sha256': 'a' * 64,
                 'entities': [_entity_kwargs()],
             }
         )
@@ -1063,8 +1068,8 @@ def test_upsert_catalog_batch_requires_group_and_batch():
             {
                 'group_id': 'oracle-catalog-tool-test',
                 'entities': [_entity_kwargs()],
-            
-            'catalog_sha256': 'a' * 64,}
+                'catalog_sha256': 'a' * 64,
+            }
         )
 
 
@@ -1280,6 +1285,7 @@ def _loc_paths(exc: ValidationError) -> list[tuple[Any, ...]]:
         (
             UpsertCatalogBatchRequest,
             {
+                'catalog_sha256': 'a' * 64,
                 **_v2_shell(batch_id='batch-1', entities=[_entity_kwargs()]),
                 'not_a_field': True,
             },
@@ -1288,6 +1294,7 @@ def _loc_paths(exc: ValidationError) -> list[tuple[Any, ...]]:
         (
             UpsertCatalogBatchRequest,
             {
+                'catalog_sha256': 'a' * 64,
                 **_v2_shell(
                     batch_id='batch-1',
                     entities=[],
@@ -1422,7 +1429,11 @@ def test_strict_endpoints_false_rejected():
         ),
         (
             UpsertCatalogBatchRequest,
-            {**_v2_shell(batch_id='batch-1', entities=[_entity_kwargs()]), 'atomic': False},
+            {
+                'catalog_sha256': 'a' * 64,
+                **_v2_shell(batch_id='batch-1', entities=[_entity_kwargs()]),
+                'atomic': False,
+            },
         ),
     ],
 )
@@ -1479,6 +1490,7 @@ def test_atomic_false_rejected_on_entity_edge_provenance_batch_writes(model, pay
         (
             UpsertCatalogBatchRequest,
             lambda: {
+                'catalog_sha256': 'a' * 64,
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'b',
                 'entities': [_entity_kwargs()],
@@ -1588,6 +1600,7 @@ def _retarget_graph_keys_for_system(payload: dict[str, Any], system_key: str) ->
         (
             UpsertCatalogBatchRequest,
             lambda: {
+                'catalog_sha256': 'a' * 64,
                 'group_id': 'oracle-catalog-tool-test',
                 'batch_id': 'b',
                 'entities': [_entity_kwargs()],
@@ -2025,8 +2038,8 @@ def test_shell_mismatch_batch_nested_entity_path():
                     batch_id='shell-batch',
                     entities=[_entity_kwargs(graph_key='TABLE::BO::ORCL.HR.EMPLOYEES')],
                 ),
-            
-            'catalog_sha256': 'a' * 64,}
+                'catalog_sha256': 'a' * 64,
+            }
         )
     _assert_shell_system_mismatch(exc.value)
 
@@ -2241,7 +2254,10 @@ def _identity_shell_cases():
         ),
         (
             UpsertCatalogBatchRequest,
-            _v2_shell(batch_id='strict-system', entities=[_entity_kwargs()]),
+            {
+                'catalog_sha256': 'a' * 64,
+                **_v2_shell(batch_id='strict-system', entities=[_entity_kwargs()]),
+            },
         ),
     ]
 
@@ -2270,7 +2286,10 @@ def _strict_true_cases():
         ),
         (
             UpsertCatalogBatchRequest,
-            _v2_shell(batch_id='strict-true', entities=[_entity_kwargs()]),
+            {
+                'catalog_sha256': 'a' * 64,
+                **_v2_shell(batch_id='strict-true', entities=[_entity_kwargs()]),
+            },
             'atomic',
         ),
     ]
@@ -2422,36 +2441,39 @@ def _graph_key_mismatch_cases():
         ),
         (
             UpsertCatalogBatchRequest,
-            _v2_shell(batch_id='mismatch', entities=[bo_entity]),
+            {'catalog_sha256': 'a' * 64, **_v2_shell(batch_id='mismatch', entities=[bo_entity])},
             ('entities', 0, 'graph_key'),
         ),
         (
             UpsertCatalogBatchRequest,
-            _v2_shell(batch_id='mismatch', edges=[bo_edge_source]),
+            {'catalog_sha256': 'a' * 64, **_v2_shell(batch_id='mismatch', edges=[bo_edge_source])},
             ('edges', 0, 'source_graph_key'),
         ),
         (
             UpsertCatalogBatchRequest,
-            _v2_shell(batch_id='mismatch', edges=[bo_edge_target]),
+            {'catalog_sha256': 'a' * 64, **_v2_shell(batch_id='mismatch', edges=[bo_edge_target])},
             ('edges', 0, 'target_graph_key'),
         ),
         (
             UpsertCatalogBatchRequest,
-            _v2_shell(
-                batch_id='mismatch',
-                provenance={
-                    'sources': [_source_kwargs()],
-                    'evidence_links': [
-                        {
-                            'source_key': 'DOC::HR.PDF#p12',
-                            'entity_target': bo_target,
-                            'evidence_kind': 'ddl',
-                            'extractor_name': 'oracle-ddl-extractor',
-                            'extractor_version': '1.0.0',
-                        }
-                    ],
-                },
-            ),
+            {
+                'catalog_sha256': 'a' * 64,
+                **_v2_shell(
+                    batch_id='mismatch',
+                    provenance={
+                        'sources': [_source_kwargs()],
+                        'evidence_links': [
+                            {
+                                'source_key': 'DOC::HR.PDF#p12',
+                                'entity_target': bo_target,
+                                'evidence_kind': 'ddl',
+                                'extractor_name': 'oracle-ddl-extractor',
+                                'extractor_version': '1.0.0',
+                            }
+                        ],
+                    },
+                ),
+            },
             ('provenance', 'evidence_links', 0, 'entity_target', 'graph_key'),
         ),
     ]
@@ -2574,37 +2596,46 @@ def _gap_wr01_malformed_graph_key_cases():
         ),
         (
             UpsertCatalogBatchRequest,
-            _v2_shell(batch_id='wr01', entities=[bad_entity]),
+            {'catalog_sha256': 'a' * 64, **_v2_shell(batch_id='wr01', entities=[bad_entity])},
             ('entities', 0, 'graph_key'),
         ),
         (
             UpsertCatalogBatchRequest,
-            _v2_shell(batch_id='wr01', entities=[], edges=[bad_edge_source]),
+            {
+                'catalog_sha256': 'a' * 64,
+                **_v2_shell(batch_id='wr01', entities=[], edges=[bad_edge_source]),
+            },
             ('edges', 0, 'source_graph_key'),
         ),
         (
             UpsertCatalogBatchRequest,
-            _v2_shell(batch_id='wr01', entities=[], edges=[bad_edge_target]),
+            {
+                'catalog_sha256': 'a' * 64,
+                **_v2_shell(batch_id='wr01', entities=[], edges=[bad_edge_target]),
+            },
             ('edges', 0, 'target_graph_key'),
         ),
         (
             UpsertCatalogBatchRequest,
-            _v2_shell(
-                batch_id='wr01',
-                entities=[],
-                provenance={
-                    'sources': [_source_kwargs()],
-                    'evidence_links': [
-                        {
-                            'source_key': 'DOC::HR.PDF#p12',
-                            'entity_target': bad_target,
-                            'evidence_kind': 'ddl',
-                            'extractor_name': 'oracle-ddl-extractor',
-                            'extractor_version': '1.0.0',
-                        }
-                    ],
-                },
-            ),
+            {
+                'catalog_sha256': 'a' * 64,
+                **_v2_shell(
+                    batch_id='wr01',
+                    entities=[],
+                    provenance={
+                        'sources': [_source_kwargs()],
+                        'evidence_links': [
+                            {
+                                'source_key': 'DOC::HR.PDF#p12',
+                                'entity_target': bad_target,
+                                'evidence_kind': 'ddl',
+                                'extractor_name': 'oracle-ddl-extractor',
+                                'extractor_version': '1.0.0',
+                            }
+                        ],
+                    },
+                ),
+            },
             ('provenance', 'evidence_links', 0, 'entity_target', 'graph_key'),
         ),
     ]

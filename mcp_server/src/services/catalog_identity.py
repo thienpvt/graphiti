@@ -219,7 +219,9 @@ def entity_canonical_payload(item: Any) -> dict[str, Any]:
         'summary': item.summary,
         'attributes': item.attributes,
         'source_refs': (
-            [ref.model_dump(mode='json') for ref in source_refs] if source_refs is not None else None
+            [ref.model_dump(mode='json') for ref in source_refs]
+            if source_refs is not None
+            else None
         ),
         'confidence': item.confidence,
     }

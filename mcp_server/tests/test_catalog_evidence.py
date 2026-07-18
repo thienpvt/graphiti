@@ -110,9 +110,7 @@ def test_neither_target_fails():
 
 def test_incomplete_entity_target_fails():
     with pytest.raises(ValidationError):
-        CatalogEvidenceLink.model_validate(
-            _link_kwargs(entity_target={'entity_type': 'Table'})
-        )
+        CatalogEvidenceLink.model_validate(_link_kwargs(entity_target={'entity_type': 'Table'}))
     with pytest.raises(ValidationError):
         CatalogEvidenceLink.model_validate(
             _link_kwargs(entity_target={'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES'})
@@ -158,7 +156,7 @@ def test_edge_target_allowlist():
 
 
 def test_evidence_kinds_constant_exact():
-    assert EVIDENCE_KINDS == frozenset(SIX_KINDS)
+    assert frozenset(SIX_KINDS) == EVIDENCE_KINDS
 
 
 @pytest.mark.parametrize('kind', SIX_KINDS)
@@ -190,9 +188,7 @@ def test_empty_locator_allowed():
 
 def test_locator_end_before_start_fails():
     with pytest.raises(ValidationError):
-        CatalogEvidenceLink.model_validate(
-            _link_kwargs(locator={'start_line': 10, 'end_line': 5})
-        )
+        CatalogEvidenceLink.model_validate(_link_kwargs(locator={'start_line': 10, 'end_line': 5}))
 
 
 def test_locator_equal_lines_ok():
@@ -386,6 +382,7 @@ def _batch_shell(**overrides: Any) -> dict[str, Any]:
         'system_key': 'FE',
         'group_id': GROUP,
         'batch_id': 'batch-1',
+        'catalog_sha256': 'a' * 64,
         'entities': [],
         'edges': [],
     }

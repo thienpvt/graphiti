@@ -292,9 +292,7 @@ def test_byte_identical_evidence_links_coalesce_before_hash():
         provenance=NestedProvenancePayload(sources=[_source()], evidence_links=[link, twin])
     )
     two_distinct = _batch(
-        provenance=NestedProvenancePayload(
-            sources=[_source()], evidence_links=[link, different]
-        )
+        provenance=NestedProvenancePayload(sources=[_source()], evidence_links=[link, different])
     )
     assert batch_request_sha256(one) == batch_request_sha256(two_identical)
     assert batch_request_sha256(one) != batch_request_sha256(two_distinct)
@@ -332,3 +330,121 @@ def test_hash_reentrant_and_idempotent():
     assert all(r == first for r in results)
 
 
+def test_service_static_delegates_to_pure_recipe():
+    from services.catalog_service import CatalogService
+
+    req = _batch()
+    assert CatalogService.batch_request_sha256(req) == batch_request_sha256(req)
+    assert CatalogService._batch_canonical_payload(req) == batch_request_canonical_payload(req)
+    payload = CatalogService._batch_canonical_payload(req)
+    assert 'entity_targets' not in payload
+    assert 'edge_targets' not in payload
+    assert 'provenance' not in payload
+    assert canonical_sha256(payload) == batch_request_sha256(req)
+
+
+@pytest.mark.asyncio
+async def test_dry_run_echoes_authoritative_hash_fields_zero_write():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from config.schema import CatalogConfig
+    from services.catalog_service import CatalogService
+
+    client = MagicMock()
+    client.driver = MagicMock()
+    client.driver.provider = MagicMock(value='neo4j')
+    client.embedder = MagicMock()
+    client.embedder.create = AsyncMock(return_value=[0.1])
+    client.call_order = []
+
+    cfg = CatalogConfig(
+        enabled=True,
+        uuid_namespace='6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+        max_entities_per_batch=500,
+        max_edges_per_batch=2000,
+        max_provenance_links_per_batch=5000,
+    )
+    service = CatalogService(catalog_config=cfg)
+    service._store.get_batch_status = AsyncMock(return_value=None)
+    service._store.get_entity_by_uuid = AsyncMock(return_value=None)
+    service._store.ensure_uuid_uniqueness_constraints = AsyncMock()
+    service._store.upsert_batch_status = AsyncMock()
+    service._store.upsert_entity_item = AsyncMock()
+
+    req = _batch(dry_run=True)
+    expected = batch_request_sha256(req)
+    resp = await service.upsert_catalog_batch(client=client, request=req)
+    assert resp.dry_run is True
+    assert resp.status == 'validating'
+    assert resp.identity_schema_version == 'catalog-v2'
+    assert resp.canonicalization_version == CANONICALIZATION_VERSION
+    assert resp.request_sha256 == expected
+    assert resp.catalog_sha256 == req.catalog_sha256
+    assert resp.batch_uuid is not None
+    client.embedder.create.assert_not_awaited()
+    service._store.ensure_uuid_uniqueness_constraints.assert_not_awaited()
+    service._store.upsert_batch_status.assert_not_awaited()
+    service._store.upsert_entity_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_caller_request_hash_mismatch_echoes_server_hash():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from config.schema import CatalogConfig
+    from models.catalog_common import CatalogErrorCode
+    from services.catalog_service import CatalogService
+
+    client = MagicMock()
+    client.driver = MagicMock()
+    client.driver.provider = MagicMock(value='neo4j')
+    client.embedder = MagicMock()
+    client.embedder.create = AsyncMock()
+    client.call_order = []
+    cfg = CatalogConfig(
+        enabled=True,
+        uuid_namespace='6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+    )
+    service = CatalogService(catalog_config=cfg)
+    service._store.get_batch_status = AsyncMock(return_value=None)
+    req = _batch(request_sha256='b' * 64)
+    expected = batch_request_sha256(req)
+    resp = await service.upsert_catalog_batch(client=client, request=req)
+    assert resp.error_code == CatalogErrorCode.content_hash_mismatch
+    assert resp.request_sha256 == expected
+    assert resp.catalog_sha256 == req.catalog_sha256
+    assert resp.identity_schema_version == 'catalog-v2'
+    assert resp.canonicalization_version == CANONICALIZATION_VERSION
+    service._store.get_batch_status.assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+
+
+def test_batch_gate_counts_evidence_links_not_cartesian():
+    from unittest.mock import MagicMock
+
+    from config.schema import CatalogConfig
+    from services.catalog_service import CatalogService
+
+    cfg = CatalogConfig(
+        enabled=True,
+        uuid_namespace='6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+        max_provenance_links_per_batch=1,
+    )
+    service = CatalogService(catalog_config=cfg)
+    client = MagicMock()
+    client.driver = MagicMock()
+    client.driver.provider = MagicMock(value='neo4j')
+    # 2 links exceed max 1
+    req = _batch(
+        entities=[],
+        provenance=NestedProvenancePayload(
+            sources=[_source()],
+            evidence_links=[
+                _link(source_key='SRC::a', excerpt='a'),
+                _link(source_key='SRC::b', excerpt='b'),
+            ],
+        ),
+    )
+    gate = service._batch_gate_error(client, req)
+    assert gate is not None
+    assert gate[0].value == 'batch_limit_exceeded'
