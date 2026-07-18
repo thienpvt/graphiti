@@ -263,7 +263,7 @@ def test_wr01_coalesce_count_authority_in_source():
 
 
 # ---------------------------------------------------------------------------
-# Iteration 2: WR-06 / WR-07 / IN-01
+# Iteration 2/3: WR-06 / WR-07 / IN-01 / WR-R01
 # ---------------------------------------------------------------------------
 
 
@@ -284,28 +284,57 @@ class _FakeTxDriver:
             raise
 
 
-def _edge_request(*, atomic: bool = True) -> Any:
+def _entity_request(items: list[Any], *, atomic: bool = True) -> Any:
+    return _ENTITIES.UpsertTypedEntitiesRequest.model_construct(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id=BATCH,
+        entities=items,
+        dry_run=False,
+        atomic=atomic,
+    )
+
+
+def _prepared_entity(item: Any, *, index: int = 0) -> Any:
+    return _PreparedEntity(
+        index=index,
+        item=item,
+        entity_uuid=str(uuid.uuid5(FIXED_NS, f'entity-{index}')),
+        content_sha256=HEX64,
+        name_embedding=[0.1, 0.2],
+        projected_status='created',
+    )
+
+
+def _edge_request(*, atomic: bool = True, edges: list[Any] | None = None) -> Any:
     UpsertTypedEdgesRequest = _EDGES.UpsertTypedEdgesRequest
     return UpsertTypedEdgesRequest.model_construct(
         identity_schema_version='catalog-v2',
         system_key='FE',
         group_id=GROUP,
         batch_id=BATCH,
-        edges=[_edge_item()],
+        edges=edges or [_edge_item()],
         dry_run=False,
         atomic=atomic,
         strict_endpoints=True,
     )
 
 
-def _prepared_edge(*, emb: list[float] | None | object = ..., status: str = 'created') -> Any:
-    edge = _edge_item()
+def _prepared_edge(
+    *,
+    emb: list[float] | None | object = ...,
+    status: str = 'created',
+    item: Any | None = None,
+    index: int = 0,
+) -> Any:
+    edge = item or _edge_item()
     e_uuid = str(uuid.uuid5(FIXED_NS, 'entity'))
     tgt_uuid = str(uuid.uuid5(FIXED_NS, 'entity-tgt'))
-    edge_uuid = str(uuid.uuid5(FIXED_NS, 'edge'))
+    edge_uuid = str(uuid.uuid5(FIXED_NS, f'edge-{index}'))
     fact_emb: list[float] | None = [0.3, 0.4] if emb is ... else emb  # type: ignore[assignment]
     return _PreparedEdge(
-        index=0,
+        index=index,
         item=edge,
         edge_uuid=edge_uuid,
         content_sha256=HEX64,
@@ -435,6 +464,72 @@ async def test_wr07_upsert_catalog_batch_edge_endpoint_race_typed_code():
     assert resp.error_code == CatalogErrorCode.edge_identity_conflict
     assert resp.error_code != CatalogErrorCode.neo4j_transaction_failed
     store.upsert_batch_status.assert_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('kind', 'atomic'),
+    [('entity', True), ('entity', False), ('edge', True), ('edge', False)],
+)
+async def test_wr_r01_typed_writers_map_store_errors_and_preserve_tx_semantics(
+    kind: str, atomic: bool
+):
+    service = CatalogService(catalog_config=_enabled_config())
+    store = CatalogNeo4jStore()
+    service._store = store  # type: ignore[assignment]
+    client = _client()
+
+    if kind == 'entity':
+        items = [
+            _entity_item(),
+            _entity_item(
+                graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
+                name_raw='DEPARTMENTS',
+                name_canonical='departments',
+                database_qualified_name='ORCL.HR.DEPARTMENTS',
+            ),
+        ]
+        prepared = [_prepared_entity(item, index=index) for index, item in enumerate(items)]
+        request = _entity_request(items, atomic=atomic)
+        service._recheck_entity_in_tx = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        store.upsert_entity_item = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                CatalogStoreError('invalid entity params', code='validation_error'),
+                {'uuid': prepared[1].entity_uuid, 'status': 'created', 'error_code': None},
+            ]
+        )
+        writer = service._write_atomic if atomic else service._write_per_item
+    else:
+        items = [
+            _edge_item(),
+            _edge_item(
+                edge_key='FK::HR.JOBS->HR.DEPARTMENTS',
+                source_graph_key='TABLE::FE::ORCL.HR.JOBS',
+            ),
+        ]
+        prepared = [_prepared_edge(item=item, index=index) for index, item in enumerate(items)]
+        request = _edge_request(atomic=atomic, edges=items)
+        service._recheck_edge_endpoints_in_tx = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        store.upsert_edge_item = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                CatalogStoreError('invalid edge params', code='validation_error'),
+                {'uuid': prepared[1].edge_uuid, 'status': 'created', 'error_code': None},
+            ]
+        )
+        writer = service._write_edges_atomic if atomic else service._write_edges_per_item
+
+    response = await writer(client, request, prepared, {}, FIXED_TS)
+
+    assert response.results[0].status == 'error'
+    assert response.results[0].error_code == CatalogErrorCode.validation_error
+    if atomic:
+        assert response.results[1].status == 'rolled_back'
+        assert client.driver.rolled_back == 1
+        assert client.driver.tx_count == 1
+    else:
+        assert response.results[1].status == 'created'
+        assert client.driver.rolled_back == 1
+        assert client.driver.tx_count == 2
 
 
 def test_in01_params_for_rejects_empty_embedding():
