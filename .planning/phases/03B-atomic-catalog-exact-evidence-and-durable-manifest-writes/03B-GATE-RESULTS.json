@@ -263,7 +263,7 @@
     }
   ],
   "clear_graph_called": false,
-  "content_digest": "1627ae8647aa08bc444886262a00f3f27cedd5b2ac849da92189dfb7143a09a8",
+  "content_digest": "0ad0883167612cd1215d45723e205545fc11dc33bac73b3f1b82b4a0a292a2ed",
   "content_sha256_map": {
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-01-SUMMARY.md": "48dd8a0bf0d24af9af99e8f2dd8d7affe5dc532426d8721eeee9df367287adf0",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-02-SUMMARY.md": "b80c8d90bc9aaea112ab029d5f45713f54c03ec716bf9597993d2a3dd16478c8",
@@ -272,7 +272,7 @@
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-05-SUMMARY.md": "5be8619756f3f805db7474aac9ea1fc8d58e9b43fc0ff175f4c4a563eac69af7",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-06-SUMMARY.md": "5803145ffcb074455414088155cd8027c0570cdded5e6bd6ebc1452c5cd6bd97",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-CONTEXT.md": "cddae8b05ebef0e9fc862c750073f139e53f20ff1df9b3c0451604b22ed3bb9e",
-    ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-VALIDATION.md": "5315b7c5d1ed985eab550baa694d6725473079f975af0db0a1d8c75a3d723add"
+    ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-VALIDATION.md": "07614c31291b4fcf8c9fe91ab6715eb5cfc17b8b4710903360f9fc61933dc7a6"
   },
   "evaluated_head": "e5271bf2c658844cb9c9a07f9cd7e79998ff9559",
   "historical_audit": {
@@ -282,7 +282,7 @@
     "note": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; local test-policy violation on local Neo4j with no corresponding production/second-schema data; permanent audit record; never query or mutate oracle-catalog-v2 again; authorized two-axis re-gate separates history audit from current safety",
     "scope": "local_neo4j_no_corresponding_data"
   },
-  "ledger_sha256": "7a51655832572e9627548858f9ae390dd25fc55a89d800605385f690a681a5bb",
+  "ledger_sha256": "a8a520cfa411493c6ee5e3a15b70fe1b9629478b72bb741154dc4504abc97e32",
   "live_neo4j_atomic_proof": "pass",
   "live_neo4j_atomic_proof_pass": true,
   "local_gate_pass": true,

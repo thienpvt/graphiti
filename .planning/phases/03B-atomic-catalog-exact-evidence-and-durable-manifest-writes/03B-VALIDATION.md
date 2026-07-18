@@ -93,6 +93,6 @@ None. All Phase 3B behavior must be automated. Live Neo4j is mandatory for `read
 - [x] Full rollback leaves no partial domain/evidence/manifest/committed terminal state.
 - [ ] `nyquist_compliant: true` set only after post-execution audit.
 
-**Plan execution:** complete (01–06 green evidence; final gate ready/complete true).  
-**Nyquist audit:** pending — dedicated workflow required; do not flip `nyquist_compliant` here.  
+**Plan execution:** complete (01–06 green evidence; final gate ready/complete true).
+**Nyquist audit:** pending — dedicated workflow required; do not flip `nyquist_compliant` here.
 **Approval:** pending
