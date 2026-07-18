@@ -496,6 +496,8 @@ def _validate_hardened_raw_field_sets(raw: dict[str, Any]) -> None:
         )
     for index, item in enumerate(edges):
         _reject_unknown_model_fields(item, set(CatalogEdgeItem.model_fields), f'$.edges[{index}]')
+    if not isinstance(provenance, dict):
+        raise RunnerError('invalid_shape', '$.provenance must be an object')
     _reject_unknown_model_fields(
         provenance, set(NestedProvenancePayload.model_fields), '$.provenance'
     )
