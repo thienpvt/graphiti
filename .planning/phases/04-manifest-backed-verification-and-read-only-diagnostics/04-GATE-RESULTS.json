@@ -181,7 +181,7 @@
     ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-EDGE-PROBE-LEDGER.md": "a46eaeeedfd4206f3c2f59689b0507559303779c5a70b01a850c36fa7f8d6bb3",
     ".planning/phases/04-manifest-backed-verification-and-read-only-diagnostics/04-VALIDATION.md": "1b7a066f750edde0e36804c1c062bbac9e0094c320195622ce5a101ddbce5657"
   },
-  "evaluated_head": "e4681bbf24c0d6e85b4a03de2e943a6054da2ddc",
+  "evaluated_head": "f9c7ca2de80acef66411571fd44e7a50ff73c052",
   "historical_audit": {
     "class": "test_policy",
     "commit": "a67789a",
@@ -189,7 +189,7 @@
     "note": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; local test-policy violation on local Neo4j with no corresponding production/second-schema data; permanent audit record; never query or mutate oracle-catalog-v2 again; Phase 4 preserves pointer only",
     "scope": "local_neo4j_no_corresponding_data"
   },
-  "ledger_sha256": "05ecd1cec63f146e4dc982651d2b5c2b82c8eec7ba156334087613ec3e23e4e1",
+  "ledger_sha256": "8b51e70fd2209a211c9d26ccaf53b013308a2560823ff8d81537445194cc1f51",
   "local_gate_pass": true,
   "manifest_verification": true,
   "notes": {
