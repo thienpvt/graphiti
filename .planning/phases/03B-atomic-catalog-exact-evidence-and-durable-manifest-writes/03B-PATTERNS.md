@@ -107,13 +107,13 @@ Reuse Phase 3A hard chunk/payload ceilings for manifest unless live proof requir
 
 ### `mcp_server/src/services/catalog_capabilities.py` — MODIFY
 
-After Phase 3B persistence/live gate:
+After Phase 3B final live gate + coordinator flip (authorized two-axis re-gate; plan complete):
 - `prepare_commit=True` remains.
 - `explicit_evidence_links=True` remains.
-- `manifests=True`.
-- `manifest_verification=False` until Phase 4.
+- `manifests=True` after accepted live preflip + coordinator final flip (static source; no runtime GATE-RESULTS read; historical Axis A audit remains true and does not alone force current safety false).
+- `manifest_verification=False` until Phase 4 (not opened).
 
-Builder remains mutation-free.
+Builder remains mutation-free. See `03B-06-SUMMARY.md` status: complete.
 
 ### `mcp_server/src/graphiti_mcp_server.py` — TOUCH ONLY IF NEEDED
 
@@ -130,7 +130,7 @@ No new tool names. Preserve token-only commit request and thin safe wrapper. Res
 | `test_catalog_concurrency.py` | prepare CAS tests | same-token and same-batch arbitration |
 | `test_catalog_commit_neo4j_int.py` | `test_catalog_prepare_neo4j_int.py` | live atomicity/rollback/replay/search/control/isolation |
 | Phase 3B gate runner | Phase 3A gate runner | HEAD/content/spec/live fail-closed ledger |
-| capabilities extension | existing file | manifests true, verification false |
+| capabilities extension | existing file | manifests true (post-flip), verification false |
 
 Fault injection monkeypatches each store boundary and proves no partial Entity/edge/evidence/manifest/committed status/plan COMMITTED survives.
 

@@ -1,0 +1,253 @@
+{
+  "entries": [
+    {
+      "category": "adjacency",
+      "plan": "03B-01",
+      "requirement_id": "PLAN-13",
+      "resolution": "Atomic co-commit writer adjacency: domain then evidence then manifest then batch then plan CAS; unit atomic writer + live single-tx co-commit",
+      "row_index": 0,
+      "task": "03B-01-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_atomic_writer.py + test_catalog_commit_neo4j_int.py::test_live_single_tx_co_commit",
+      "verification": "live"
+    },
+    {
+      "category": "empty",
+      "plan": "03B-01",
+      "requirement_id": "PLAN-13",
+      "resolution": "Empty edges/provenance collections co-commit cleanly; no partial control nodes",
+      "row_index": 1,
+      "task": "03B-01-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_atomic_writer.py + test_catalog_commit_neo4j_int.py::test_live_configured_ceiling_smoke",
+      "verification": "live"
+    },
+    {
+      "category": "ordering",
+      "plan": "03B-01",
+      "requirement_id": "PLAN-13",
+      "resolution": "Fixed write order in _write_catalog_batch_atomic; mid-write fault proves rollback of later stages",
+      "row_index": 2,
+      "task": "03B-04-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_atomic_writer.py + test_catalog_commit_neo4j_int.py::test_live_mid_write_fault_zero_partial",
+      "verification": "live"
+    },
+    {
+      "category": "ceilings",
+      "plan": "03B-01",
+      "requirement_id": "PLAN-13",
+      "resolution": "Configured-ceiling smoke co-commit under max_entities_per_batch path; hard 500 opt-in via CATALOG_CEILING_SMOKE",
+      "row_index": 3,
+      "task": "03B-06-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_commit_neo4j_int.py::test_live_configured_ceiling_smoke",
+      "verification": "live"
+    },
+    {
+      "category": "manifest-schema",
+      "plan": "03B-02",
+      "requirement_id": "MANI-01",
+      "resolution": "Manifest root schema carries entity/edge/evidence counts including unchanged membership",
+      "row_index": 4,
+      "task": "03B-02-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_manifest.py + test_catalog_commit_neo4j_int.py::test_live_unchanged_membership_in_manifest",
+      "verification": "unit"
+    },
+    {
+      "category": "manifest-hash",
+      "plan": "03B-02",
+      "requirement_id": "MANI-02",
+      "resolution": "manifest_sha256 stable across identical replay; concurrency yields one logical hash",
+      "row_index": 5,
+      "task": "03B-02-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_manifest.py + test_catalog_commit_neo4j_int.py::test_live_identical_replay",
+      "verification": "live"
+    },
+    {
+      "category": "no-batch-membership",
+      "plan": "03B-02",
+      "requirement_id": "MANI-03",
+      "resolution": "Membership authority is manifest payload, not CatalogIngestBatch.batch_id inference",
+      "row_index": 6,
+      "task": "03B-02-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_manifest.py",
+      "verification": "unit"
+    },
+    {
+      "category": "manifest-labels",
+      "plan": "03B-02",
+      "requirement_id": "MANI-04",
+      "resolution": "CatalogBatchManifest/Chunk never carry Entity label; live label assert",
+      "row_index": 7,
+      "task": "03B-02-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_manifest.py + test_catalog_commit_neo4j_int.py::test_live_evidence_manifest_lack_entity",
+      "verification": "live"
+    },
+    {
+      "category": "evidence-model",
+      "plan": "03B-03",
+      "requirement_id": "EVID-07",
+      "resolution": "Exact evidence link identity and required fields enforced in store/models",
+      "row_index": 8,
+      "task": "03B-03-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence_store.py",
+      "verification": "unit"
+    },
+    {
+      "category": "evidence-non-cartesian",
+      "plan": "03B-03",
+      "requirement_id": "EVID-08",
+      "resolution": "Evidence writes are explicit link rows; no source×entity Cartesian expansion",
+      "row_index": 9,
+      "task": "03B-03-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence_store.py",
+      "verification": "unit"
+    },
+    {
+      "category": "evidence-conflict",
+      "plan": "03B-03",
+      "requirement_id": "EVID-09",
+      "resolution": "Evidence conflict fail-closed rolls back co-commit; no partial evidence",
+      "row_index": 10,
+      "task": "03B-03-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence_store.py + test_catalog_atomic_writer.py",
+      "verification": "unit"
+    },
+    {
+      "category": "evidence-labels",
+      "plan": "03B-03",
+      "requirement_id": "EVID-10",
+      "resolution": "CatalogEvidenceLink never Entity; live control-label exclusion",
+      "row_index": 11,
+      "task": "03B-03-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence_store.py + test_catalog_commit_neo4j_int.py::test_live_evidence_manifest_lack_entity",
+      "verification": "live"
+    },
+    {
+      "category": "evidence-encoding",
+      "plan": "03B-04",
+      "requirement_id": "EVID-11",
+      "resolution": "Empty/excerpt encoding bounds enforced; no grapheme-dependent identity; co-commit path preserves encoding",
+      "row_index": 12,
+      "task": "03B-04-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence_store.py + mcp_server/tests/test_catalog_atomic_writer.py",
+      "verification": "unit"
+    },
+    {
+      "category": "search-interop",
+      "plan": "03B-04",
+      "requirement_id": "TEST-07",
+      "resolution": "Committed catalog Entity nodes remain searchable via graphiti_core.search NODE_HYBRID_SEARCH_RRF",
+      "row_index": 13,
+      "task": "03B-04-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_commit_neo4j_int.py::test_live_entity_search_interop",
+      "verification": "live"
+    },
+    {
+      "category": "manifest-chunk",
+      "plan": "03B-04",
+      "requirement_id": "MANI-04",
+      "resolution": "Manifest chunks reassemble under same root hash; non-Entity chunk labels",
+      "row_index": 14,
+      "task": "03B-04-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_manifest.py + test_catalog_atomic_writer.py",
+      "verification": "unit"
+    },
+    {
+      "category": "atomic-fault",
+      "plan": "03B-04",
+      "requirement_id": "PLAN-14",
+      "resolution": "Mid-write fault injection yields zero partial domain/evidence/manifest/committed",
+      "row_index": 15,
+      "task": "03B-04-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_atomic_writer.py + test_catalog_commit_neo4j_int.py::test_live_mid_write_fault_zero_partial",
+      "verification": "live"
+    },
+    {
+      "category": "recovery-committing",
+      "plan": "03B-05",
+      "requirement_id": "PLAN-14",
+      "resolution": "COMMITTING not revived to PREPARED; recovery/idempotent commit paths unit-tested",
+      "row_index": 16,
+      "task": "03B-05-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_commit_recovery.py",
+      "verification": "unit"
+    },
+    {
+      "category": "replay",
+      "plan": "03B-05",
+      "requirement_id": "PLAN-15",
+      "resolution": "Identical replay returns stable receipt; single manifest root",
+      "row_index": 17,
+      "task": "03B-05-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_commit_recovery.py + test_catalog_commit_neo4j_int.py::test_live_identical_replay",
+      "verification": "live"
+    },
+    {
+      "category": "concurrency",
+      "plan": "03B-05",
+      "requirement_id": "PLAN-16",
+      "resolution": "Same-token concurrent commits yield one logical commit (unit + live)",
+      "row_index": 18,
+      "task": "03B-05-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_concurrency.py + test_catalog_commit_neo4j_int.py::test_live_same_token_concurrency",
+      "verification": "live"
+    },
+    {
+      "category": "concurrency-manifest",
+      "plan": "03B-05",
+      "requirement_id": "MANI-02",
+      "resolution": "Concurrent same-token does not fork manifest roots or membership",
+      "row_index": 19,
+      "task": "03B-05-T02",
+      "test_or_backstop": "mcp_server/tests/test_catalog_concurrency.py + test_catalog_commit_neo4j_int.py::test_live_same_token_concurrency",
+      "verification": "live"
+    },
+    {
+      "category": "gate-ready",
+      "plan": "03B-06",
+      "requirement_id": "TEST-06",
+      "resolution": "Fail-closed gate requires live same-token concurrency proof under require-neo4j",
+      "row_index": 20,
+      "task": "03B-06-T02",
+      "test_or_backstop": "mcp_server/tests/catalog_phase3b_gate_runner.py + test_catalog_commit_neo4j_int.py::test_live_same_token_concurrency",
+      "verification": "live"
+    },
+    {
+      "category": "isolation",
+      "plan": "03B-06",
+      "requirement_id": "TEST-07",
+      "resolution": "Current live suite hardcodes oracle-catalog-tool-test and does not param-query oracle-catalog-v2; historical a67789a read-only v2 probes permanent Axis A audit (oracle_catalog_v2_queried aggregate true); current Axis B safety independent; readiness gates current only",
+      "row_index": 21,
+      "task": "03B-06-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_commit_neo4j_int.py::test_live_isolation_tool_test_only + catalog_phase3b_gate_runner.derive_safety_ledger",
+      "verification": "live"
+    },
+    {
+      "category": "capability-flip",
+      "plan": "03B-06",
+      "requirement_id": "MANI-06",
+      "resolution": "features.manifests static True after accepted live preflip + coordinator final flip; no runtime GATE-RESULTS read; prepare_commit true; verification false; Phase 4 public tools still not opened",
+      "row_index": 22,
+      "task": "03B-06-T02",
+      "test_or_backstop": "mcp_server/src/services/catalog_capabilities.py + test_catalog_capabilities.py + catalog_phase3b_gate_runner.check_manifests_feature_true",
+      "verification": "structural"
+    },
+    {
+      "category": "manifest-membership-live",
+      "plan": "03B-06",
+      "requirement_id": "MANI-07",
+      "resolution": "Live unchanged membership recorded in manifest counts on second co-commit",
+      "row_index": 23,
+      "task": "03B-06-T01",
+      "test_or_backstop": "mcp_server/tests/test_catalog_commit_neo4j_int.py::test_live_unchanged_membership_in_manifest",
+      "verification": "live"
+    }
+  ],
+  "flagged_assumptions": [
+    "A1: gate --require-neo4j forces CATALOG_CEILING_SMOKE=1 so live proof runs configured max entities=500; hard-stop on failure",
+    "A5: plan lock semantics rely on existing CatalogPreparedPlan CAS; no new distributed lock",
+    "grapheme encoding not used for identity material"
+  ],
+  "no_silent_drop": true,
+  "raw_item_count": 24,
+  "raw_source": "03B-RESEARCH.md Spec-Less Probe Inventory rows 0..23 owned by PLAN_OWNERSHIP 03B-01..06",
+  "schema_version": "phase3b-edge-probe-resolution.v1"
+}
