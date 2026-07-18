@@ -1,13 +1,19 @@
-"""Pure deterministic identity and canonical hash helpers for catalog tools.
+"""Pure deterministic identity, canonical hash, and plan-token helpers for catalog tools.
 
 No network, Neo4j, embedder, LLM, or queue imports.
+
+Token ownership (PLAN-06/07): mint_plan_token / plan_token_digest /
+plan_token_matches live here with domain-separated SHA-256. Raw tokens never
+enter artifact serialization (see catalog_prepared_artifact).
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
+import secrets
 import uuid
 from typing import Any
 
@@ -16,6 +22,9 @@ from models.catalog_common import IDENTITY_SCHEMA_VERSION, CatalogErrorCode
 # Single authority for version-tagged request hashing (HASH-07).
 CANONICALIZATION_VERSION = 'catalog-canonical-v1'
 CATALOG_SCHEMA_VERSION = 'catalog-schema-v1'
+
+# Domain-separated plan-token digest (PLAN-07 / D-08).
+TOKEN_DIGEST_DOMAIN = b'graphiti.catalog.plan_token.v1|'
 
 
 def catalog_entity_uuid(
@@ -73,6 +82,73 @@ def catalog_prepared_plan_uuid(namespace: uuid.UUID, group_id: str, plan_id: str
     return str(
         uuid.uuid5(namespace, f'{group_id}|{IDENTITY_SCHEMA_VERSION}|PreparedPlan|{plan_id}')
     )
+
+
+def catalog_prepared_plan_chunk_uuid(
+    namespace: uuid.UUID, group_id: str, plan_id: str, chunk_index: int
+) -> str:
+    """Pure PreparedPlanChunk identity.
+
+    Material: group_id|catalog-v2|PreparedPlanChunk|{plan_id}|{index}
+    """
+    return str(
+        uuid.uuid5(
+            namespace,
+            f'{group_id}|{IDENTITY_SCHEMA_VERSION}|PreparedPlanChunk|{plan_id}|{chunk_index}',
+        )
+    )
+
+
+def mint_plan_token() -> str:
+    """High-entropy opaque plan token (256-bit via token_urlsafe(32)).
+
+    Never derived from plan_uuid, batch_id, or request hash (PLAN-06 / D-07).
+    """
+    return secrets.token_urlsafe(32)
+
+
+def plan_token_digest(token: str) -> str:
+    """Domain-separated SHA-256 hex digest of a plan token (PLAN-07 / D-08)."""
+    if not isinstance(token, str) or not token:
+        raise ValueError('token must be a non-empty string')
+    return hashlib.sha256(TOKEN_DIGEST_DOMAIN + token.encode('utf-8')).hexdigest()
+
+
+def plan_token_matches(token: str, stored_digest: str) -> bool:
+    """Timing-safe compare of supplied token against stored digest (PLAN-07)."""
+    if not isinstance(stored_digest, str) or not stored_digest:
+        return False
+    try:
+        actual = plan_token_digest(token)
+    except ValueError:
+        return False
+    return hmac.compare_digest(actual, stored_digest.lower())
+
+
+def plan_binding_fields(
+    *,
+    plan_uuid: str,
+    group_id: str,
+    batch_id: str,
+    identity_schema_version: str,
+    request_sha256: str,
+    catalog_sha256: str,
+    artifact_sha256: str,
+) -> dict[str, str]:
+    """Pure construct for root metadata binding fields (PLAN-17 / D-09).
+
+    Does not include raw plan_token — only fields that bind a digest-backed token
+    to immutable plan scope.
+    """
+    return {
+        'plan_uuid': plan_uuid,
+        'group_id': group_id,
+        'batch_id': batch_id,
+        'identity_schema_version': identity_schema_version,
+        'request_sha256': request_sha256,
+        'catalog_sha256': catalog_sha256,
+        'artifact_sha256': artifact_sha256,
+    }
 
 
 def _reject_non_finite(obj: Any) -> None:
