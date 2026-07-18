@@ -207,6 +207,7 @@ def _valid_plan_constraint_rows() -> list[dict]:
         },
     ]
 
+
 @pytest.mark.asyncio
 async def test_ensure_plan_schema_emits_create_constraint_only():
     store = CatalogNeo4jStore()
@@ -254,7 +255,10 @@ def test_build_create_prepared_plan_cypher_uses_create_not_merge_update():
 def test_build_create_prepared_plan_chunk_cypher_fixed_labels():
     store = CatalogNeo4jStore()
     cypher = store.build_create_prepared_plan_chunk_cypher()
-    assert 'CREATE (c:CatalogPreparedPlanChunk' in cypher or 'CREATE (:CatalogPreparedPlanChunk' in cypher
+    assert (
+        'CREATE (c:CatalogPreparedPlanChunk' in cypher
+        or 'CREATE (:CatalogPreparedPlanChunk' in cypher
+    )
     assert 'MERGE (c:CatalogPreparedPlanChunk' not in cypher
     assert '$payload_b64' in cypher
     assert '$chunk_index' in cypher
@@ -440,9 +444,7 @@ async def test_load_prepared_plan_chunks_ordered_by_index():
                 [],
             )
 
-    rows = await store.load_prepared_plan_chunks(
-        _Exec(), plan_uuid=PLAN_UUID, group_id=GROUP
-    )
+    rows = await store.load_prepared_plan_chunks(_Exec(), plan_uuid=PLAN_UUID, group_id=GROUP)
     assert [r['chunk_index'] for r in rows] == [0, 1]
     assert 'payload_b64' in rows[0]
 
@@ -613,6 +615,65 @@ async def test_cas_committing_reentry_same_token():
     assert row['state'] == PLAN_STATE_COMMITTING
     assert row.get('reentry') is True
     assert not any('SET p.state' in c for c, _ in tx.calls)
+
+
+@pytest.mark.asyncio
+async def test_cas_stale_prepared_expected_live_committing_reentry():
+    """CR-01: same-token claim with stale PREPARED expected against live COMMITTING re-enters."""
+    store = CatalogNeo4jStore()
+    current = _root(state=PLAN_STATE_COMMITTING, committing_started_at=FIXED_TS)
+    tx = _CasTx(current=current)
+    row = await store.cas_plan_state(
+        tx,
+        token_digest=TOKEN_DIGEST,
+        expected_from=PLAN_STATE_PREPARED,
+        to_state=PLAN_STATE_COMMITTING,
+        updated_at=FIXED_TS,
+        now=FIXED_TS,
+        require_not_expired=True,
+    )
+    assert row['state'] == PLAN_STATE_COMMITTING
+    assert row.get('reentry') is True
+    assert not any('SET p.state' in c for c, _ in tx.calls)
+
+
+@pytest.mark.asyncio
+async def test_cas_committed_persists_outcome_counts():
+    """WR-02: COMMITTING→COMMITTED CAS may write durable outcome counts."""
+    store = CatalogNeo4jStore()
+    current = _root(
+        state=PLAN_STATE_COMMITTING,
+        committing_started_at=FIXED_TS,
+        created_count=9,
+        updated_count=0,
+        unchanged_count=0,
+    )
+    cas_row = {
+        **current,
+        'state': PLAN_STATE_COMMITTED,
+        'created_count': 1,
+        'updated_count': 2,
+        'unchanged_count': 3,
+    }
+    tx = _CasTx(current=current, cas_row=cas_row)
+    row = await store.cas_plan_state(
+        tx,
+        token_digest=TOKEN_DIGEST,
+        expected_from=PLAN_STATE_COMMITTING,
+        to_state=PLAN_STATE_COMMITTED,
+        updated_at=FIXED_TS,
+        created_count=1,
+        updated_count=2,
+        unchanged_count=3,
+    )
+    assert row['state'] == PLAN_STATE_COMMITTED
+    set_calls = [(c, p) for c, p in tx.calls if 'SET p.state' in c]
+    assert set_calls
+    _, params = set_calls[0]
+    assert params.get('apply_outcome_counts') is True
+    assert params.get('created_count') == 1
+    assert params.get('updated_count') == 2
+    assert params.get('unchanged_count') == 3
 
 
 @pytest.mark.asyncio
@@ -840,8 +901,6 @@ def test_discard_never_detach_delete_domain():
         assert bad not in cypher
 
 
-
-
 @pytest.mark.asyncio
 async def test_ensure_plan_schema_idempotent_and_verifies_shape():
     store = CatalogNeo4jStore()
@@ -916,7 +975,10 @@ async def test_create_uniqueness_race_maps_prepared_plan_conflict():
                 return _Rows([{'active': 0}])
             if 'MATCH (p:CatalogPreparedPlan' in cypher and 'CREATE' not in cypher:
                 return _Rows([])
-            if 'CREATE (plan:CatalogPreparedPlan' in cypher or 'CREATE (p:CatalogPreparedPlan' in cypher:
+            if (
+                'CREATE (plan:CatalogPreparedPlan' in cypher
+                or 'CREATE (p:CatalogPreparedPlan' in cypher
+            ):
                 raise RuntimeError('ConstraintValidationFailed: already exists with label')
             return _Rows([])
 
@@ -937,4 +999,3 @@ def test_prepare_prepared_plan_params_default_canonicalization_version():
     params.pop('canonicalization_version', None)
     out = store.prepare_prepared_plan_params(**params)
     assert out['canonicalization_version'] == 'catalog-canonical-v1'
-

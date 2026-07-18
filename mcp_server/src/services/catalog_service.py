@@ -5199,6 +5199,7 @@ class CatalogService:
                 batch_uuid=batch_uuid,
             )
             if await self._store.terminal_commit_agrees(tx, projection=agree_projection):
+                # WR-02: durable plan outcome counts authority for short-circuit receipt.
                 return {
                     'short_circuit': True,
                     'manifest_sha256': digest_preview,
@@ -5206,6 +5207,21 @@ class CatalogService:
                     'edge_results': [],
                     'provenance_results': [],
                     'batch_uuid': batch_uuid,
+                    'committed_created': int(
+                        (snapshot or {}).get('plan_created_count')
+                        or (projection.plan or {}).get('created_count')
+                        or 0
+                    ),
+                    'committed_updated': int(
+                        (snapshot or {}).get('plan_updated_count')
+                        or (projection.plan or {}).get('updated_count')
+                        or 0
+                    ),
+                    'committed_unchanged': int(
+                        (snapshot or {}).get('plan_unchanged_count')
+                        or (projection.plan or {}).get('unchanged_count')
+                        or 0
+                    ),
                 }
             self._raise_if_partial_terminal(
                 snapshot=snapshot,
@@ -5433,7 +5449,11 @@ class CatalogService:
         if committed_row.get('status') != 'committed':
             raise self._BatchStatusConflict('commit_rejected')
 
-        # 8. Terminal plan COMMITTING→COMMITTED (prepared path only)
+        # 8. Terminal plan COMMITTING→COMMITTED with durable outcome counts (WR-02)
+        all_results = entity_results + edge_results + provenance_results
+        outcome_created = sum(1 for r in all_results if r.status == 'created')
+        outcome_updated = sum(1 for r in all_results if r.status == 'updated')
+        outcome_unchanged = sum(1 for r in all_results if r.status == 'unchanged')
         if projection.plan is not None:
             token_digest = str(projection.plan.get('token_digest') or '')
             await self._store.cas_plan_state(
@@ -5443,6 +5463,9 @@ class CatalogService:
                 to_state=PLAN_STATE_COMMITTED,
                 updated_at=request_ts,
                 now=request_ts,
+                created_count=outcome_created,
+                updated_count=outcome_updated,
+                unchanged_count=outcome_unchanged,
             )
 
         return {
@@ -5452,6 +5475,9 @@ class CatalogService:
             'edge_results': edge_results,
             'provenance_results': provenance_results,
             'batch_uuid': batch_uuid,
+            'committed_created': outcome_created,
+            'committed_updated': outcome_updated,
+            'committed_unchanged': outcome_unchanged,
         }
 
     async def upsert_catalog_batch(
@@ -6369,6 +6395,64 @@ class CatalogService:
                 'partial terminal: unexpected plan state',
             )
 
+    async def _expected_manifest_sha_from_frozen(
+        self,
+        *,
+        client: Any,
+        root: dict[str, Any],
+        art_sha: str | None,
+    ) -> str | None:
+        """Reassemble frozen membership and derive expected manifest digest (CR-02).
+
+        Never uses durable snapshot digest as expected. Failures return None
+        so callers fail closed without leaking payload.
+        """
+        plan_uuid = str(root.get('uuid') or '')
+        group_id = str(root.get('group_id') or '')
+        batch_id = str(root.get('batch_id') or '')
+        request_sha = str(root.get('request_sha256') or '')
+        catalog_sha = str(root.get('catalog_sha256') or '')
+        if not plan_uuid or not group_id or not batch_id or not request_sha or not catalog_sha:
+            return None
+        try:
+            chunks = await self._store.load_prepared_plan_chunks(
+                client.driver,
+                plan_uuid=plan_uuid,
+                group_id=group_id,
+            )
+            artifact_bytes = reassemble_artifact_bytes(
+                chunks,
+                expected_sha256=art_sha,
+                expected_length=int(root.get('payload_bytes') or 0) or None,
+            )
+            artifact = json.loads(artifact_bytes.decode('utf-8'))
+            if not isinstance(artifact, dict):
+                return None
+            membership = artifact.get('membership')
+            if not isinstance(membership, dict):
+                return None
+            body = build_manifest_body_from_membership(
+                group_id=group_id,
+                batch_id=batch_id,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                membership=membership,
+                artifact_sha256=art_sha,
+                identity_schema_version=str(
+                    root.get('identity_schema_version')
+                    or artifact.get('identity_schema_version')
+                    or IDENTITY_SCHEMA_VERSION
+                ),
+                canonicalization_version=str(
+                    root.get('canonicalization_version')
+                    or artifact.get('canonicalization_version')
+                    or CANONICALIZATION_VERSION
+                ),
+            )
+            return pure_manifest_sha256(serialize_manifest_body(body))
+        except Exception:
+            return None
+
     async def _commit_terminal_state_receipt(
         self,
         *,
@@ -6387,6 +6471,8 @@ class CatalogService:
         """Stable receipt when durable plan is already COMMITTED (D-09/D-23).
 
         Zero domain rewrite. Partial/contradictory evidence fails closed.
+        Expected manifest_sha256 is derived from frozen membership (CR-02), not
+        from the durable snapshot (which would be tautological).
         """
         batch_id = str(root.get('batch_id') or '')
         namespace = self._namespace()
@@ -6405,6 +6491,25 @@ class CatalogService:
                 evidence_link_count=evidence_link_count,
             )
         batch_uuid = catalog_batch_uuid(namespace, group_id, batch_id)
+        expected_manifest = await self._expected_manifest_sha_from_frozen(
+            client=client,
+            root=root,
+            art_sha=art_sha,
+        )
+        if not expected_manifest:
+            return self._commit_fail(
+                CatalogErrorCode.prepared_plan_already_consumed,
+                'prepared plan already consumed',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTED,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
         snapshot: dict[str, Any] | None = None
         try:
             async with client.driver.transaction() as tx:
@@ -6429,11 +6534,21 @@ class CatalogService:
                     'identity_schema_version': str(
                         root.get('identity_schema_version') or IDENTITY_SCHEMA_VERSION
                     ),
-                    'manifest_sha256': str((snapshot or {}).get('manifest_sha256') or ''),
+                    'manifest_sha256': expected_manifest,
                 }
                 if snapshot is not None and await self._store.terminal_commit_agrees(
                     tx, projection=agree_projection
                 ):
+                    # WR-02: durable plan outcome counts are authority for receipt.
+                    created = snapshot.get('plan_created_count')
+                    updated = snapshot.get('plan_updated_count')
+                    unchanged = snapshot.get('plan_unchanged_count')
+                    if created is None:
+                        created = root.get('created_count')
+                    if updated is None:
+                        updated = root.get('updated_count')
+                    if unchanged is None:
+                        unchanged = root.get('unchanged_count')
                     return CommitPreparedCatalogBatchResponse(
                         plan_uuid=plan_uuid,
                         request_sha256=request_sha,
@@ -6445,10 +6560,10 @@ class CatalogService:
                         source_count=source_count,
                         evidence_link_count=evidence_link_count,
                         batch_uuid=batch_uuid,
-                        manifest_sha256=str(snapshot.get('manifest_sha256') or '') or None,
-                        committed_created=int(root.get('created_count') or 0),
-                        committed_updated=int(root.get('updated_count') or 0),
-                        committed_unchanged=int(root.get('unchanged_count') or 0),
+                        manifest_sha256=expected_manifest,
+                        committed_created=int(created or 0),
+                        committed_updated=int(updated or 0),
+                        committed_unchanged=int(unchanged or 0),
                     )
         except CatalogStoreError as exc:
             return self._commit_fail(
@@ -6500,7 +6615,7 @@ class CatalogService:
                     'identity_schema_version': str(
                         root.get('identity_schema_version') or IDENTITY_SCHEMA_VERSION
                     ),
-                    'manifest_sha256': str((snapshot or {}).get('manifest_sha256') or ''),
+                    'manifest_sha256': expected_manifest,
                 },
             )
         except self._PartialTerminalConflict as exc:
@@ -6829,6 +6944,31 @@ class CatalogService:
                     require_not_expired=True,
                 )
         except CatalogStoreError as exc:
+            # WR-01: winner reached COMMITTED during claim → stable terminal receipt.
+            if getattr(exc, 'code', None) == 'prepared_plan_already_consumed':
+                try:
+                    latest = await self._store.load_prepared_plan_by_token_digest(
+                        client.driver,
+                        token_digest=token_digest,
+                    )
+                except Exception:
+                    latest = None
+                receipt_root = latest if isinstance(latest, dict) else root
+                return await self._commit_terminal_state_receipt(
+                    client=client,
+                    root=receipt_root,
+                    plan_uuid=str(receipt_root.get('uuid') or plan_uuid),
+                    group_id=str(receipt_root.get('group_id') or group_id),
+                    request_sha=str(receipt_root.get('request_sha256') or '') or request_sha,
+                    catalog_sha=str(receipt_root.get('catalog_sha256') or '') or catalog_sha,
+                    art_sha=str(receipt_root.get('artifact_sha256') or '') or art_sha,
+                    entity_count=int(receipt_root.get('entity_count') or entity_count),
+                    edge_count=int(receipt_root.get('edge_count') or edge_count),
+                    source_count=int(receipt_root.get('source_count') or source_count),
+                    evidence_link_count=int(
+                        receipt_root.get('evidence_link_count') or evidence_link_count
+                    ),
+                )
             return _echo_fail(
                 self._map_store_error_code(exc),
                 str(exc) or 'prepared plan claim failed',
@@ -7056,18 +7196,19 @@ class CatalogService:
                 evidence_link_count=evidence_link_count,
             )
 
-        entity_results = list(write_out.get('entity_results') or [])
-        edge_results = list(write_out.get('edge_results') or [])
-        provenance_results = list(write_out.get('provenance_results') or [])
-        all_results = entity_results + edge_results + provenance_results
-        committed_created = sum(r.status == 'created' for r in all_results)
-        committed_updated = sum(r.status == 'updated' for r in all_results)
-        committed_unchanged = sum(r.status == 'unchanged' for r in all_results)
-        if write_out.get('short_circuit'):
-            # Stable receipt counts from plan root when no rewrite.
-            committed_created = int(root.get('created_count') or 0)
-            committed_updated = int(root.get('updated_count') or 0)
-            committed_unchanged = int(root.get('unchanged_count') or 0)
+        # WR-02: prefer durable/outcome counts returned by writer (first == replay).
+        if write_out.get('committed_created') is not None or write_out.get('short_circuit'):
+            committed_created = int(write_out.get('committed_created') or 0)
+            committed_updated = int(write_out.get('committed_updated') or 0)
+            committed_unchanged = int(write_out.get('committed_unchanged') or 0)
+        else:
+            entity_results = list(write_out.get('entity_results') or [])
+            edge_results = list(write_out.get('edge_results') or [])
+            provenance_results = list(write_out.get('provenance_results') or [])
+            all_results = entity_results + edge_results + provenance_results
+            committed_created = sum(r.status == 'created' for r in all_results)
+            committed_updated = sum(r.status == 'updated' for r in all_results)
+            committed_unchanged = sum(r.status == 'unchanged' for r in all_results)
 
         logger.info(
             'catalog commit_prepared_catalog_batch committed plan_uuid=%s batch_id=%s '

@@ -41,6 +41,7 @@ _COMMON = _load('models.catalog_common')
 _PREPARE = _load('models.catalog_prepare')
 _IDENTITY = _load('services.catalog_identity')
 _ARTIFACT = _load('services.catalog_prepared_artifact')
+_MANIFEST = _load('services.catalog_manifest')
 _SERVICE = _load('services.catalog_service')
 _STORE = _load('services.catalog_store')
 
@@ -63,6 +64,9 @@ PREPARED_ARTIFACT_SERIALIZATION_VERSION = _attr(
 serialize_prepared_artifact = _attr(_ARTIFACT, 'serialize_prepared_artifact')
 artifact_sha256 = _attr(_ARTIFACT, 'artifact_sha256')
 chunk_artifact_bytes = _attr(_ARTIFACT, 'chunk_artifact_bytes')
+build_manifest_body_from_membership = _attr(_MANIFEST, 'build_manifest_body_from_membership')
+serialize_manifest_body = _attr(_MANIFEST, 'serialize_manifest_body')
+pure_manifest_sha256 = _attr(_MANIFEST, 'manifest_sha256')
 CatalogService = _attr(_SERVICE, 'CatalogService')
 CatalogStoreError = _attr(_STORE, 'CatalogStoreError')
 CatalogNeo4jStore = _attr(_STORE, 'CatalogNeo4jStore')
@@ -203,6 +207,41 @@ def _make_root(
     if overrides:
         root.update(overrides)
     return root, chunks, art_sha
+
+
+def _expected_manifest_sha(root: dict[str, Any], art_sha: str) -> str:
+    """Frozen-membership digest used by CR-02 receipt path."""
+    membership = {
+        'entities': [
+            {
+                'uuid': catalog_entity_uuid(
+                    FIXED_NS, root['group_id'], 'Table', _entity_item()['graph_key']
+                ),
+                'entity_type': 'Table',
+                'graph_key': _entity_item()['graph_key'],
+                'content_sha256': 'e' * 64,
+                'projected_status': 'created',
+                'name_embedding': [0.1, 0.2],
+            }
+        ],
+        'edges': [],
+        'sources': [],
+        'evidence_links': [],
+    }
+    return pure_manifest_sha256(
+        serialize_manifest_body(
+            build_manifest_body_from_membership(
+                group_id=root['group_id'],
+                batch_id=root['batch_id'],
+                request_sha256=root['request_sha256'],
+                catalog_sha256=root['catalog_sha256'],
+                membership=membership,
+                artifact_sha256=art_sha,
+                identity_schema_version=IDENTITY_SCHEMA_VERSION,
+                canonicalization_version=CANONICALIZATION_VERSION,
+            )
+        )
+    )
 
 
 class _FakeDriver:
@@ -375,7 +414,7 @@ async def test_terminal_agreement_returns_stable_receipt():
     token = mint_plan_token()
     root, chunks, art_sha = _make_root(token=token, state=PLAN_STATE_COMMITTED)
     batch_uuid = catalog_batch_uuid(FIXED_NS, root['group_id'], root['batch_id'])
-    manifest_sha = 'f' * 64
+    manifest_sha = _expected_manifest_sha(root, art_sha)
     snapshot = {
         'plan_state': PLAN_STATE_COMMITTED,
         'batch_status': 'committed',
@@ -386,6 +425,9 @@ async def test_terminal_agreement_returns_stable_receipt():
         'identity_schema_version': IDENTITY_SCHEMA_VERSION,
         'batch_id': root['batch_id'],
         'group_id': root['group_id'],
+        'plan_created_count': root['created_count'],
+        'plan_updated_count': root['updated_count'],
+        'plan_unchanged_count': root['unchanged_count'],
     }
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -512,7 +554,7 @@ async def test_terminal_receipt_idempotent_across_calls():
     """PLAN-15: two successive terminal-agreement reads return equal bounded receipts."""
     token = mint_plan_token()
     root, chunks, art_sha = _make_root(token=token, state=PLAN_STATE_COMMITTED)
-    manifest_sha = 'f' * 64
+    manifest_sha = _expected_manifest_sha(root, art_sha)
     snapshot = {
         'plan_state': PLAN_STATE_COMMITTED,
         'batch_status': 'committed',
@@ -523,6 +565,9 @@ async def test_terminal_receipt_idempotent_across_calls():
         'identity_schema_version': IDENTITY_SCHEMA_VERSION,
         'batch_id': root['batch_id'],
         'group_id': root['group_id'],
+        'plan_created_count': root['created_count'],
+        'plan_updated_count': root['updated_count'],
+        'plan_unchanged_count': root['unchanged_count'],
     }
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -578,3 +623,333 @@ def test_no_committing_to_prepared_in_cas_legal():
     assert PLAN_STATE_PREPARED not in legal
     assert PLAN_STATE_COMMITTED in legal
     assert PLAN_STATE_COMMITTING in legal
+
+
+@pytest.mark.asyncio
+async def test_claim_already_consumed_routes_to_stable_receipt():
+    """WR-01: claim-time prepared_plan_already_consumed → durable terminal receipt, not error."""
+    token = mint_plan_token()
+    # Stale load still shows PREPARED while live CAS sees COMMITTED.
+    root, chunks, art_sha = _make_root(token=token, state=PLAN_STATE_PREPARED)
+    root['created_count'] = 1
+    root['updated_count'] = 2
+    root['unchanged_count'] = 3
+    membership = {
+        'entities': [
+            {
+                'uuid': catalog_entity_uuid(FIXED_NS, GROUP, 'Table', _entity_item()['graph_key']),
+                'entity_type': 'Table',
+                'graph_key': _entity_item()['graph_key'],
+                'content_sha256': 'e' * 64,
+                'projected_status': 'created',
+                'name_embedding': [0.1, 0.2],
+            }
+        ],
+        'edges': [],
+        'sources': [],
+        'evidence_links': [],
+    }
+    expected_manifest = pure_manifest_sha256(
+        serialize_manifest_body(
+            build_manifest_body_from_membership(
+                group_id=root['group_id'],
+                batch_id=root['batch_id'],
+                request_sha256=root['request_sha256'],
+                catalog_sha256=root['catalog_sha256'],
+                membership=membership,
+                artifact_sha256=art_sha,
+                identity_schema_version=IDENTITY_SCHEMA_VERSION,
+                canonicalization_version=CANONICALIZATION_VERSION,
+            )
+        )
+    )
+
+    committed_root = {
+        **root,
+        'state': PLAN_STATE_COMMITTED,
+        'created_count': 1,
+        'updated_count': 2,
+        'unchanged_count': 3,
+    }
+    snapshot = {
+        'plan_state': PLAN_STATE_COMMITTED,
+        'batch_status': 'committed',
+        'manifest_sha256': expected_manifest,
+        'request_sha256': root['request_sha256'],
+        'catalog_sha256': root['catalog_sha256'],
+        'artifact_sha256': art_sha,
+        'identity_schema_version': IDENTITY_SCHEMA_VERSION,
+        'batch_id': root['batch_id'],
+        'group_id': root['group_id'],
+        'plan_created_count': 1,
+        'plan_updated_count': 2,
+        'plan_unchanged_count': 3,
+    }
+
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    counters = _wire_recovery_store(
+        service, root=root, chunks=chunks, agree=False, snapshot=snapshot
+    )
+
+    load_n = {'n': 0}
+
+    async def _load(driver, *, token_digest: str, tx=None):
+        _ = driver, token_digest, tx
+        load_n['n'] += 1
+        # First load (entry) PREPARED; post-claim reload COMMITTED.
+        if load_n['n'] == 1:
+            return dict(root)
+        return dict(committed_root)
+
+    async def _cas(tx, **kwargs):
+        _ = tx
+        counters['cas_calls'].append(dict(kwargs))
+        if kwargs.get('to_state') == PLAN_STATE_COMMITTING:
+            raise CatalogStoreError(
+                'prepared plan already consumed',
+                code='prepared_plan_already_consumed',
+            )
+        raise CatalogStoreError('unexpected cas', code='prepared_plan_conflict')
+
+    # Real agreement check (not mocked True) so CR-02 path exercises frozen digest.
+    async def _agrees(tx, *, projection: dict[str, Any]) -> bool:
+        _ = tx
+        for key in (
+            'manifest_sha256',
+            'request_sha256',
+            'catalog_sha256',
+            'identity_schema_version',
+        ):
+            if str(snapshot.get(key) or '') != str(projection.get(key) or ''):
+                return False
+        if str(snapshot.get('artifact_sha256') or '') != str(
+            projection.get('artifact_sha256') or ''
+        ):
+            return False
+        return (
+            snapshot['plan_state'] == PLAN_STATE_COMMITTED
+            and snapshot['batch_status'] == 'committed'
+        )
+
+    service._store.load_prepared_plan_by_token_digest = AsyncMock(side_effect=_load)
+    service._store.cas_plan_state = AsyncMock(side_effect=_cas)
+    service._store.terminal_commit_agrees = AsyncMock(side_effect=_agrees)
+
+    resp = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code is None, resp.error_message
+    assert resp.state == PLAN_STATE_COMMITTED
+    assert resp.manifest_sha256 == expected_manifest
+    assert resp.committed_created == 1
+    assert resp.committed_updated == 2
+    assert resp.committed_unchanged == 3
+    assert counters['entity_writes'] == 0
+    assert counters['manifest_writes'] == 0
+
+
+@pytest.mark.asyncio
+async def test_terminal_receipt_rejects_tampered_manifest_hash():
+    """CR-02: expected manifest from frozen membership; tampered durable hash fails closed."""
+    token = mint_plan_token()
+    root, chunks, art_sha = _make_root(token=token, state=PLAN_STATE_COMMITTED)
+    # Durable snapshot claims a wrong digest.
+    snapshot = {
+        'plan_state': PLAN_STATE_COMMITTED,
+        'batch_status': 'committed',
+        'manifest_sha256': '0' * 64,
+        'request_sha256': root['request_sha256'],
+        'catalog_sha256': root['catalog_sha256'],
+        'artifact_sha256': art_sha,
+        'identity_schema_version': IDENTITY_SCHEMA_VERSION,
+        'batch_id': root['batch_id'],
+        'group_id': root['group_id'],
+        'plan_created_count': 1,
+        'plan_updated_count': 0,
+        'plan_unchanged_count': 0,
+    }
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    counters = _wire_recovery_store(
+        service, root=root, chunks=chunks, agree=False, snapshot=snapshot
+    )
+
+    async def _agrees(tx, *, projection: dict[str, Any]) -> bool:
+        _ = tx
+        if str(snapshot.get('plan_state') or '') != PLAN_STATE_COMMITTED:
+            return False
+        if str(snapshot.get('batch_status') or '') != 'committed':
+            return False
+        for key in (
+            'manifest_sha256',
+            'request_sha256',
+            'catalog_sha256',
+            'identity_schema_version',
+        ):
+            if str(snapshot.get(key) or '') != str(projection.get(key) or ''):
+                return False
+        return str(snapshot.get('artifact_sha256') or '') == str(
+            projection.get('artifact_sha256') or ''
+        )
+
+    service._store.terminal_commit_agrees = AsyncMock(side_effect=_agrees)
+
+    resp = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+
+    assert resp.error_code is not None
+    assert resp.error_code in {
+        CatalogErrorCode.manifest_mismatch,
+        CatalogErrorCode.batch_conflict,
+        CatalogErrorCode.prepared_plan_conflict,
+        CatalogErrorCode.prepared_plan_already_consumed,
+    }
+    assert counters['entity_writes'] == 0
+    assert counters['manifest_writes'] == 0
+    # Agreement projection must not tautologically use snapshot digest as expected.
+    agrees_mock = service._store.terminal_commit_agrees
+    assert agrees_mock.await_count >= 1
+    await_args = agrees_mock.await_args
+    assert await_args is not None
+    call_kwargs = getattr(await_args, 'kwargs', None) or {}
+    if not call_kwargs and await_args.args:
+        # positional fallback if mock recorded projection positionally
+        call_kwargs = {'projection': await_args.args[-1]} if await_args.args else {}
+    proj = call_kwargs.get('projection') or {}
+    assert isinstance(proj, dict)
+    assert proj.get('manifest_sha256') not in {None, '0' * 64}
+    assert proj.get('manifest_sha256') != snapshot['manifest_sha256']
+
+
+@pytest.mark.asyncio
+async def test_first_and_replay_counts_match_durable_outcomes():
+    """WR-02: first success and terminal replay share durable plan outcome counts."""
+    token = mint_plan_token()
+    root, chunks, art_sha = _make_root(
+        token=token,
+        state=PLAN_STATE_PREPARED,
+        overrides={'created_count': 99, 'updated_count': 0, 'unchanged_count': 0},
+    )
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    counters = _wire_recovery_store(service, root=root, chunks=chunks, agree=False, snapshot=None)
+
+    # Capture outcome counts written on terminal CAS; mutate root to durable values.
+    async def _cas(tx, **kwargs):
+        _ = tx
+        counters['cas_calls'].append(dict(kwargs))
+        to_state = kwargs.get('to_state')
+        if to_state == PLAN_STATE_COMMITTED:
+            root['state'] = PLAN_STATE_COMMITTED
+            root['created_count'] = int(kwargs.get('created_count') or 0)
+            root['updated_count'] = int(kwargs.get('updated_count') or 0)
+            root['unchanged_count'] = int(kwargs.get('unchanged_count') or 0)
+        elif to_state == PLAN_STATE_COMMITTING:
+            root['state'] = PLAN_STATE_COMMITTING
+        base = dict(root)
+        base['state'] = to_state
+        return base
+
+    service._store.cas_plan_state = AsyncMock(side_effect=_cas)
+
+    first = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+    assert first.error_code is None, first.error_message
+    assert first.state == PLAN_STATE_COMMITTED
+    # Prepare projected 99; actual write is 1 created entity.
+    assert first.committed_created == 1
+    assert first.committed_updated == 0
+    assert first.committed_unchanged == 0
+
+    terminal_cas = [
+        c
+        for c in counters['cas_calls']
+        if c.get('to_state') == PLAN_STATE_COMMITTED
+        and c.get('expected_from') == PLAN_STATE_COMMITTING
+    ]
+    assert terminal_cas
+    assert terminal_cas[0].get('created_count') == 1
+
+    # Replay against COMMITTED durable root + agreeing terminals.
+    membership = {
+        'entities': [
+            {
+                'uuid': catalog_entity_uuid(FIXED_NS, GROUP, 'Table', _entity_item()['graph_key']),
+                'entity_type': 'Table',
+                'graph_key': _entity_item()['graph_key'],
+                'content_sha256': 'e' * 64,
+                'projected_status': 'created',
+                'name_embedding': [0.1, 0.2],
+            }
+        ],
+        'edges': [],
+        'sources': [],
+        'evidence_links': [],
+    }
+    expected_manifest = pure_manifest_sha256(
+        serialize_manifest_body(
+            build_manifest_body_from_membership(
+                group_id=root['group_id'],
+                batch_id=root['batch_id'],
+                request_sha256=root['request_sha256'],
+                catalog_sha256=root['catalog_sha256'],
+                membership=membership,
+                artifact_sha256=art_sha,
+                identity_schema_version=IDENTITY_SCHEMA_VERSION,
+                canonicalization_version=CANONICALIZATION_VERSION,
+            )
+        )
+    )
+    snapshot = {
+        'plan_state': PLAN_STATE_COMMITTED,
+        'batch_status': 'committed',
+        'manifest_sha256': expected_manifest,
+        'request_sha256': root['request_sha256'],
+        'catalog_sha256': root['catalog_sha256'],
+        'artifact_sha256': art_sha,
+        'identity_schema_version': IDENTITY_SCHEMA_VERSION,
+        'batch_id': root['batch_id'],
+        'group_id': root['group_id'],
+        'plan_created_count': root['created_count'],
+        'plan_updated_count': root['updated_count'],
+        'plan_unchanged_count': root['unchanged_count'],
+    }
+    counters2 = _wire_recovery_store(
+        service, root=dict(root), chunks=chunks, agree=False, snapshot=snapshot
+    )
+
+    async def _agrees(tx, *, projection: dict[str, Any]) -> bool:
+        _ = tx
+        for key in (
+            'manifest_sha256',
+            'request_sha256',
+            'catalog_sha256',
+            'identity_schema_version',
+        ):
+            if str(snapshot.get(key) or '') != str(projection.get(key) or ''):
+                return False
+        return (
+            snapshot['plan_state'] == PLAN_STATE_COMMITTED
+            and snapshot['batch_status'] == 'committed'
+            and str(snapshot.get('artifact_sha256') or '')
+            == str(projection.get('artifact_sha256') or '')
+        )
+
+    service._store.terminal_commit_agrees = AsyncMock(side_effect=_agrees)
+
+    replay = await service.commit_prepared_catalog_batch(
+        client=client,
+        request=CommitPreparedCatalogBatchRequest(plan_token=token),
+    )
+    assert replay.error_code is None, replay.error_message
+    assert replay.committed_created == first.committed_created
+    assert replay.committed_updated == first.committed_updated
+    assert replay.committed_unchanged == first.committed_unchanged
+    assert counters2['entity_writes'] == 0
