@@ -21,6 +21,15 @@ from models.catalog_common import (
     CATALOG_EDGE_TYPES,
     CATALOG_ENTITY_TYPES,
     ENTITY_TYPE_PREFIXES,
+    HARD_MAX_ACTIVE_PLANS_PER_GROUP,
+    HARD_MAX_CHUNKS_PER_PLAN,
+    HARD_MAX_PREPARED_PAYLOAD_BYTES,
+    PLAN_STATE_COMMITTED,
+    PLAN_STATE_COMMITTING,
+    PLAN_STATE_DISCARDED,
+    PLAN_STATE_EXPIRED,
+    PLAN_STATE_PREPARED,
+    PLAN_STATES,
     PROTECTED_ENTITY_PROPERTIES,
 )
 
@@ -61,6 +70,90 @@ _CREATE_MENTIONS_IDENTITY_UNIQUE = (
 _CREATE_BATCH_IDENTITY_UNIQUE = (
     f'CREATE CONSTRAINT {CATALOG_BATCH_IDENTITY_CONSTRAINT} IF NOT EXISTS '
     'FOR (n:CatalogIngestBatch) REQUIRE (n.uuid, n.group_id) IS UNIQUE'
+)
+
+# Prepared-plan control-plane constraints (PLAN-05/09; fixed labels only).
+CATALOG_PREPARED_PLAN_IDENTITY_CONSTRAINT = 'catalog_prepared_plan_identity_unique'
+CATALOG_PREPARED_PLAN_TOKEN_DIGEST_CONSTRAINT = 'catalog_prepared_plan_token_digest_unique'
+CATALOG_PREPARED_PLAN_CHUNK_IDENTITY_CONSTRAINT = 'catalog_prepared_plan_chunk_identity_unique'
+CATALOG_PREPARED_PLAN_CHUNK_INDEX_CONSTRAINT = 'catalog_prepared_plan_chunk_index_unique'
+
+_CREATE_PREPARED_PLAN_IDENTITY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_PREPARED_PLAN_IDENTITY_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:CatalogPreparedPlan) REQUIRE (n.uuid, n.group_id) IS UNIQUE'
+)
+_CREATE_PREPARED_PLAN_TOKEN_DIGEST_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_PREPARED_PLAN_TOKEN_DIGEST_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:CatalogPreparedPlan) REQUIRE n.token_digest IS UNIQUE'
+)
+_CREATE_PREPARED_PLAN_CHUNK_IDENTITY_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_PREPARED_PLAN_CHUNK_IDENTITY_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:CatalogPreparedPlanChunk) REQUIRE (n.uuid, n.group_id) IS UNIQUE'
+)
+_CREATE_PREPARED_PLAN_CHUNK_INDEX_UNIQUE = (
+    f'CREATE CONSTRAINT {CATALOG_PREPARED_PLAN_CHUNK_INDEX_CONSTRAINT} IF NOT EXISTS '
+    'FOR (n:CatalogPreparedPlanChunk) REQUIRE (n.plan_uuid, n.group_id, n.chunk_index) IS UNIQUE'
+)
+
+# Legal CAS edges for prepared-plan state machine (PLAN-18 / D-10..D-12).
+# Keys are expected_from; values are allowed to-states.
+_PLAN_CAS_LEGAL: dict[str, frozenset[str]] = {
+    PLAN_STATE_PREPARED: frozenset(
+        {PLAN_STATE_DISCARDED, PLAN_STATE_EXPIRED, PLAN_STATE_COMMITTING}
+    ),
+    PLAN_STATE_COMMITTING: frozenset({PLAN_STATE_COMMITTING, PLAN_STATE_COMMITTED}),
+}
+
+_PLAN_ROOT_PROP_KEYS: frozenset[str] = frozenset(
+    {
+        'uuid',
+        'group_id',
+        'batch_id',
+        'plan_id',
+        'token_digest',
+        'state',
+        'identity_schema_version',
+        'canonicalization_version',
+        'artifact_serialization_version',
+        'request_sha256',
+        'catalog_sha256',
+        'artifact_sha256',
+        'chunk_count',
+        'payload_bytes',
+        'entity_count',
+        'edge_count',
+        'source_count',
+        'evidence_link_count',
+        'created_count',
+        'updated_count',
+        'unchanged_count',
+        'expires_at',
+        'created_at',
+        'updated_at',
+        'committing_started_at',
+    }
+)
+_PLAN_CHUNK_PROP_KEYS: frozenset[str] = frozenset(
+    {
+        'uuid',
+        'group_id',
+        'plan_uuid',
+        'chunk_index',
+        'chunk_count',
+        'byte_offset',
+        'byte_length',
+        'chunk_sha256',
+        'payload_b64',
+    }
+)
+_FORBIDDEN_PLAN_PARAM_KEYS: frozenset[str] = frozenset(
+    {
+        'plan_token',
+        'raw_token',
+        'token',
+        'name_embedding',
+        'fact_embedding',
+    }
 )
 
 
@@ -1751,3 +1844,705 @@ class CatalogNeo4jStore:
                 code='neo4j_transaction_failed',
             )
         return row
+
+    # ------------------------------------------------------------------
+    # Prepared-plan control plane (PLAN-05/09/11/18/19; fixed labels only)
+    # ------------------------------------------------------------------
+
+    def plan_schema_constraint_statements(self) -> tuple[str, ...]:
+        """Fixed CREATE CONSTRAINT IF NOT EXISTS for plan/chunk uniqueness."""
+        return (
+            _CREATE_PREPARED_PLAN_IDENTITY_UNIQUE,
+            _CREATE_PREPARED_PLAN_TOKEN_DIGEST_UNIQUE,
+            _CREATE_PREPARED_PLAN_CHUNK_IDENTITY_UNIQUE,
+            _CREATE_PREPARED_PLAN_CHUNK_INDEX_UNIQUE,
+        )
+
+    async def ensure_plan_schema(self, executor: Any) -> None:
+        """Idempotent plan/chunk uniqueness constraints. CREATE only, never DROP."""
+        for stmt in self.plan_schema_constraint_statements():
+            assert 'DROP' not in stmt.upper()
+            try:
+                await self._run_schema_query(executor, stmt)
+            except CatalogStoreError:
+                raise
+            except Exception as exc:
+                msg = f'{type(exc).__name__}: {exc}'
+                if (
+                    'EquivalentSchemaRuleAlreadyExists' in msg
+                    or 'already exists' in msg.lower()
+                    or 'ConstraintAlreadyExists' in msg
+                ):
+                    continue
+                if (
+                    'ConstraintValidationFailed' in msg
+                    or 'already has' in msg.lower()
+                    or 'duplicate' in msg.lower()
+                ):
+                    raise CatalogStoreError(
+                        'prepared-plan uniqueness constraint failed: existing duplicates',
+                        code='neo4j_schema_failed',
+                    ) from exc
+                raise CatalogStoreError(
+                    f'prepared-plan schema init failed: {type(exc).__name__}',
+                    code='neo4j_schema_failed',
+                ) from exc
+
+    def build_plan_group_lock_cypher(self) -> str:
+        """MERGE group lock for capacity serialization (same-tx with create)."""
+        return """
+            MERGE (lock:CatalogPlanGroupLock {group_id: $group_id})
+            RETURN lock.group_id AS group_id, true AS locked
+            """
+
+    def build_count_active_plans_cypher(self) -> str:
+        """Count active plans: PREPARED (unexpired) or COMMITTING (D-25)."""
+        return """
+            MATCH (p:CatalogPreparedPlan {group_id: $group_id})
+            WHERE p.state IN ['PREPARED', 'COMMITTING']
+              AND (p.state = 'COMMITTING' OR p.expires_at > $now)
+            RETURN count(p) AS active
+            """
+
+    def build_existing_prepared_plan_cypher(self) -> str:
+        """MATCH existing plan root by deterministic uuid+group_id."""
+        return """
+            MATCH (p:CatalogPreparedPlan {uuid: $uuid, group_id: $group_id})
+            RETURN p.uuid AS uuid,
+                   p.group_id AS group_id,
+                   p.state AS state,
+                   p.artifact_sha256 AS artifact_sha256,
+                   p.token_digest AS token_digest,
+                   p.request_sha256 AS request_sha256,
+                   p.catalog_sha256 AS catalog_sha256,
+                   p.expires_at AS expires_at
+            """
+
+    def build_create_prepared_plan_cypher(self) -> str:
+        """CREATE-once plan root (never MERGE-update artifact bytes)."""
+        return """
+            CREATE (plan:CatalogPreparedPlan {
+                uuid: $uuid,
+                group_id: $group_id,
+                batch_id: $batch_id,
+                plan_id: $plan_id,
+                token_digest: $token_digest,
+                state: $state,
+                identity_schema_version: $identity_schema_version,
+                canonicalization_version: $canonicalization_version,
+                artifact_serialization_version: $artifact_serialization_version,
+                request_sha256: $request_sha256,
+                catalog_sha256: $catalog_sha256,
+                artifact_sha256: $artifact_sha256,
+                chunk_count: $chunk_count,
+                payload_bytes: $payload_bytes,
+                entity_count: $entity_count,
+                edge_count: $edge_count,
+                source_count: $source_count,
+                evidence_link_count: $evidence_link_count,
+                created_count: $created_count,
+                updated_count: $updated_count,
+                unchanged_count: $unchanged_count,
+                expires_at: $expires_at,
+                created_at: $created_at,
+                updated_at: $updated_at
+            })
+            RETURN plan.uuid AS uuid,
+                   plan.group_id AS group_id,
+                   plan.state AS state,
+                   plan.token_digest AS token_digest,
+                   plan.artifact_sha256 AS artifact_sha256,
+                   plan.chunk_count AS chunk_count,
+                   plan.payload_bytes AS payload_bytes,
+                   plan.expires_at AS expires_at
+            """
+
+    def build_create_prepared_plan_chunk_cypher(self) -> str:
+        """CREATE-once ordered chunk record; payload_b64 is base64 ASCII only."""
+        return """
+            CREATE (c:CatalogPreparedPlanChunk {
+                uuid: $uuid,
+                group_id: $group_id,
+                plan_uuid: $plan_uuid,
+                chunk_index: $chunk_index,
+                chunk_count: $chunk_count,
+                byte_offset: $byte_offset,
+                byte_length: $byte_length,
+                chunk_sha256: $chunk_sha256,
+                payload_b64: $payload_b64
+            })
+            RETURN c.uuid AS uuid,
+                   c.plan_uuid AS plan_uuid,
+                   c.chunk_index AS chunk_index,
+                   c.byte_offset AS byte_offset,
+                   c.byte_length AS byte_length,
+                   c.chunk_sha256 AS chunk_sha256
+            """
+
+    def build_load_prepared_plan_by_token_digest_cypher(self) -> str:
+        """Load plan root by unique token_digest (never raw token)."""
+        return """
+            MATCH (p:CatalogPreparedPlan {token_digest: $token_digest})
+            RETURN p.uuid AS uuid,
+                   p.group_id AS group_id,
+                   p.batch_id AS batch_id,
+                   p.plan_id AS plan_id,
+                   p.token_digest AS token_digest,
+                   p.state AS state,
+                   p.identity_schema_version AS identity_schema_version,
+                   p.canonicalization_version AS canonicalization_version,
+                   p.artifact_serialization_version AS artifact_serialization_version,
+                   p.request_sha256 AS request_sha256,
+                   p.catalog_sha256 AS catalog_sha256,
+                   p.artifact_sha256 AS artifact_sha256,
+                   p.chunk_count AS chunk_count,
+                   p.payload_bytes AS payload_bytes,
+                   p.entity_count AS entity_count,
+                   p.edge_count AS edge_count,
+                   p.source_count AS source_count,
+                   p.evidence_link_count AS evidence_link_count,
+                   p.created_count AS created_count,
+                   p.updated_count AS updated_count,
+                   p.unchanged_count AS unchanged_count,
+                   p.expires_at AS expires_at,
+                   p.created_at AS created_at,
+                   p.updated_at AS updated_at,
+                   p.committing_started_at AS committing_started_at
+            """
+
+    def build_load_prepared_plan_chunks_cypher(self) -> str:
+        """Load ordered chunks for a plan uuid+group_id."""
+        return """
+            MATCH (c:CatalogPreparedPlanChunk {plan_uuid: $plan_uuid, group_id: $group_id})
+            RETURN c.uuid AS uuid,
+                   c.group_id AS group_id,
+                   c.plan_uuid AS plan_uuid,
+                   c.chunk_index AS chunk_index,
+                   c.chunk_count AS chunk_count,
+                   c.byte_offset AS byte_offset,
+                   c.byte_length AS byte_length,
+                   c.chunk_sha256 AS chunk_sha256,
+                   c.payload_b64 AS payload_b64
+            ORDER BY c.chunk_index ASC
+            """
+
+    def build_cas_plan_state_cypher(self) -> str:
+        """CAS state transition: MATCH expected from-state then SET to-state."""
+        return """
+            MATCH (p:CatalogPreparedPlan {token_digest: $token_digest})
+            WHERE p.state = $expected_from
+            SET p.state = $to_state,
+                p.updated_at = $updated_at,
+                p.committing_started_at = CASE
+                    WHEN $to_state = 'COMMITTING' AND $expected_from = 'PREPARED'
+                    THEN $updated_at
+                    ELSE p.committing_started_at
+                END
+            RETURN p.uuid AS uuid,
+                   p.group_id AS group_id,
+                   p.token_digest AS token_digest,
+                   p.state AS state,
+                   p.artifact_sha256 AS artifact_sha256,
+                   p.expires_at AS expires_at,
+                   p.updated_at AS updated_at,
+                   p.committing_started_at AS committing_started_at
+            """
+
+    def prepare_prepared_plan_params(self, **fields: Any) -> dict[str, Any]:
+        """Allowlisted plan root params; reject raw token / embedding keys."""
+        for bad in _FORBIDDEN_PLAN_PARAM_KEYS:
+            if bad in fields and fields[bad] is not None:
+                raise CatalogStoreError(
+                    f'forbidden plan param key: {bad}',
+                    code='validation_error',
+                )
+        required = (
+            'uuid',
+            'group_id',
+            'batch_id',
+            'plan_id',
+            'token_digest',
+            'request_sha256',
+            'catalog_sha256',
+            'artifact_sha256',
+            'chunk_count',
+            'payload_bytes',
+            'expires_at',
+            'created_at',
+            'updated_at',
+        )
+        for key in required:
+            val = fields.get(key)
+            if val is None or (isinstance(val, str) and not str(val).strip()):
+                raise CatalogStoreError(
+                    f'plan field {key} is required',
+                    code='validation_error',
+                )
+        payload_bytes = int(fields['payload_bytes'])
+        if payload_bytes < 0 or payload_bytes > HARD_MAX_PREPARED_PAYLOAD_BYTES:
+            raise CatalogStoreError(
+                'payload_bytes out of hard ceiling',
+                code='batch_limit_exceeded',
+            )
+        chunk_count = int(fields['chunk_count'])
+        if chunk_count < 1 or chunk_count > HARD_MAX_CHUNKS_PER_PLAN:
+            raise CatalogStoreError(
+                'chunk_count out of hard ceiling',
+                code='batch_limit_exceeded',
+            )
+        state = str(fields.get('state') or PLAN_STATE_PREPARED)
+        if state not in PLAN_STATES:
+            raise CatalogStoreError(
+                f'invalid plan state {state!r}',
+                code='validation_error',
+            )
+        if state != PLAN_STATE_PREPARED:
+            raise CatalogStoreError(
+                'create path requires PREPARED state',
+                code='validation_error',
+            )
+        out: dict[str, Any] = {
+            'uuid': str(fields['uuid']),
+            'group_id': str(fields['group_id']),
+            'batch_id': str(fields['batch_id']),
+            'plan_id': str(fields['plan_id']),
+            'token_digest': str(fields['token_digest']),
+            'state': PLAN_STATE_PREPARED,
+            'identity_schema_version': str(
+                fields.get('identity_schema_version') or 'catalog-v2'
+            ),
+            'canonicalization_version': str(
+                fields.get('canonicalization_version') or 'canon-v1'
+            ),
+            'artifact_serialization_version': str(
+                fields.get('artifact_serialization_version') or 'prepared-artifact-v1'
+            ),
+            'request_sha256': str(fields['request_sha256']),
+            'catalog_sha256': str(fields['catalog_sha256']),
+            'artifact_sha256': str(fields['artifact_sha256']),
+            'chunk_count': chunk_count,
+            'payload_bytes': payload_bytes,
+            'entity_count': int(fields.get('entity_count') or 0),
+            'edge_count': int(fields.get('edge_count') or 0),
+            'source_count': int(fields.get('source_count') or 0),
+            'evidence_link_count': int(fields.get('evidence_link_count') or 0),
+            'created_count': int(fields.get('created_count') or 0),
+            'updated_count': int(fields.get('updated_count') or 0),
+            'unchanged_count': int(fields.get('unchanged_count') or 0),
+            'expires_at': fields['expires_at'],
+            'created_at': fields['created_at'],
+            'updated_at': fields['updated_at'],
+        }
+        for bad in _FORBIDDEN_PLAN_PARAM_KEYS:
+            out.pop(bad, None)
+        return out
+
+    def prepare_prepared_plan_chunk_params(self, **fields: Any) -> dict[str, Any]:
+        """Allowlisted chunk params; payload_b64 is ASCII base64 storage."""
+        for bad in _FORBIDDEN_PLAN_PARAM_KEYS:
+            if bad in fields and fields[bad] is not None:
+                raise CatalogStoreError(
+                    f'forbidden chunk param key: {bad}',
+                    code='validation_error',
+                )
+        required = (
+            'uuid',
+            'group_id',
+            'plan_uuid',
+            'chunk_index',
+            'chunk_count',
+            'byte_offset',
+            'byte_length',
+            'chunk_sha256',
+            'payload_b64',
+        )
+        for key in required:
+            if fields.get(key) is None:
+                raise CatalogStoreError(
+                    f'chunk field {key} is required',
+                    code='validation_error',
+                )
+        index = int(fields['chunk_index'])
+        if index < 0:
+            raise CatalogStoreError('chunk_index must be >= 0', code='validation_error')
+        payload_b64 = fields['payload_b64']
+        if not isinstance(payload_b64, str):
+            raise CatalogStoreError('payload_b64 must be str', code='validation_error')
+        return {
+            'uuid': str(fields['uuid']),
+            'group_id': str(fields['group_id']),
+            'plan_uuid': str(fields['plan_uuid']),
+            'chunk_index': index,
+            'chunk_count': int(fields['chunk_count']),
+            'byte_offset': int(fields['byte_offset']),
+            'byte_length': int(fields['byte_length']),
+            'chunk_sha256': str(fields['chunk_sha256']),
+            'payload_b64': payload_b64,
+        }
+
+    async def count_active_plans_for_group(
+        self,
+        tx: Any,
+        *,
+        group_id: str,
+        now: datetime,
+    ) -> int:
+        """Count PREPARED|COMMITTING active plans under group (D-25)."""
+        if not group_id:
+            raise CatalogStoreError('group_id is required', code='validation_error')
+        result = await tx.run(
+            self.build_count_active_plans_cypher(),
+            group_id=group_id,
+            now=now,
+        )
+        row = await self._first_from_tx_result(result)
+        if not row:
+            return 0
+        return int(row.get('active') or 0)
+
+    async def create_prepared_plan_with_chunks(
+        self,
+        tx: Any,
+        *,
+        plan: dict[str, Any],
+        chunks: list[dict[str, Any]],
+        max_active: int,
+        now: datetime,
+    ) -> dict[str, Any]:
+        """Capacity-locked CREATE-once of plan root + ordered chunks.
+
+        Same plan identity with any existing row → prepared_plan_conflict.
+        Capacity full → batch_limit_exceeded. Never writes Entity/domain labels.
+        """
+        plan_params = self.prepare_prepared_plan_params(**plan)
+        if not chunks:
+            raise CatalogStoreError('at least one chunk required', code='validation_error')
+        if len(chunks) != int(plan_params['chunk_count']):
+            raise CatalogStoreError(
+                'chunk_count does not match chunks length',
+                code='validation_error',
+            )
+        if max_active < 1 or max_active > HARD_MAX_ACTIVE_PLANS_PER_GROUP:
+            raise CatalogStoreError(
+                'max_active out of hard ceiling',
+                code='batch_limit_exceeded',
+            )
+        group_id = plan_params['group_id']
+
+        lock_res = await tx.run(
+            self.build_plan_group_lock_cypher(),
+            group_id=group_id,
+        )
+        lock_row = await self._first_from_tx_result(lock_res)
+        if not lock_row:
+            raise CatalogStoreError(
+                'plan group lock failed',
+                code='neo4j_transaction_failed',
+            )
+
+        active = await self.count_active_plans_for_group(tx, group_id=group_id, now=now)
+        if active >= max_active:
+            raise CatalogStoreError(
+                f'active prepared plans at capacity ({active}>={max_active})',
+                code='batch_limit_exceeded',
+            )
+
+        existing_res = await tx.run(
+            self.build_existing_prepared_plan_cypher(),
+            uuid=plan_params['uuid'],
+            group_id=group_id,
+        )
+        existing = await self._first_from_tx_result(existing_res)
+        if existing and existing.get('uuid'):
+            raise CatalogStoreError(
+                'prepared plan identity already exists',
+                code='prepared_plan_conflict',
+            )
+
+        create_res = await tx.run(self.build_create_prepared_plan_cypher(), **plan_params)
+        created = await self._first_from_tx_result(create_res)
+        if not created or not created.get('uuid'):
+            raise CatalogStoreError(
+                'prepared plan create returned no row',
+                code='neo4j_transaction_failed',
+            )
+
+        ordered = sorted(chunks, key=lambda c: int(c['chunk_index']))
+        for ch in ordered:
+            ch_params = self.prepare_prepared_plan_chunk_params(**ch)
+            if ch_params['plan_uuid'] != plan_params['uuid']:
+                raise CatalogStoreError(
+                    'chunk plan_uuid mismatch',
+                    code='validation_error',
+                )
+            if ch_params['group_id'] != group_id:
+                raise CatalogStoreError(
+                    'chunk group_id mismatch',
+                    code='validation_error',
+                )
+            ch_res = await tx.run(
+                self.build_create_prepared_plan_chunk_cypher(),
+                **ch_params,
+            )
+            ch_row = await self._first_from_tx_result(ch_res)
+            if not ch_row or not ch_row.get('uuid'):
+                raise CatalogStoreError(
+                    'prepared plan chunk create returned no row',
+                    code='neo4j_transaction_failed',
+                )
+
+        return created
+
+    async def load_prepared_plan_by_token_digest(
+        self,
+        executor: Any,
+        *,
+        token_digest: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Load plan root by token_digest only (no raw token)."""
+        if not token_digest or not str(token_digest).strip():
+            raise CatalogStoreError(
+                'token_digest is required',
+                code='validation_error',
+            )
+        return await self._read_one(
+            executor,
+            self.build_load_prepared_plan_by_token_digest_cypher(),
+            {'token_digest': str(token_digest)},
+            tx=tx,
+        )
+
+    async def load_prepared_plan_chunks(
+        self,
+        executor: Any,
+        *,
+        plan_uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Load ordered chunk records for a plan."""
+        if not plan_uuid or not group_id:
+            raise CatalogStoreError(
+                'plan_uuid and group_id are required',
+                code='validation_error',
+            )
+        return await self._read_many(
+            executor,
+            self.build_load_prepared_plan_chunks_cypher(),
+            {'plan_uuid': str(plan_uuid), 'group_id': str(group_id)},
+            tx=tx,
+        )
+
+    async def cas_plan_state(
+        self,
+        tx: Any,
+        *,
+        token_digest: str,
+        expected_from: str,
+        to_state: str,
+        updated_at: datetime,
+        now: datetime | None = None,
+        require_not_expired: bool = False,
+    ) -> dict[str, Any]:
+        """Compare-and-set plan state under legal transition table (PLAN-18/19).
+
+        Zero-row CAS maps to structured prepared-plan codes after a load.
+        COMMITTING→PREPARED is never legal. Terminal states never revive.
+        """
+        if not token_digest:
+            raise CatalogStoreError('token_digest is required', code='validation_error')
+        if expected_from not in PLAN_STATES or to_state not in PLAN_STATES:
+            raise CatalogStoreError(
+                'invalid plan state for CAS',
+                code='validation_error',
+            )
+        allowed = _PLAN_CAS_LEGAL.get(expected_from, frozenset())
+        if to_state not in allowed:
+            raise CatalogStoreError(
+                f'illegal plan transition {expected_from}->{to_state}',
+                code='prepared_plan_conflict',
+            )
+        if to_state == PLAN_STATE_PREPARED:
+            raise CatalogStoreError(
+                'transition to PREPARED is forbidden',
+                code='prepared_plan_conflict',
+            )
+
+        current = await self.load_prepared_plan_by_token_digest(
+            None, token_digest=token_digest, tx=tx
+        )
+        if current is None:
+            raise CatalogStoreError(
+                'prepared plan not found',
+                code='prepared_plan_not_found',
+            )
+
+        current_state = str(current.get('state') or '')
+        expires_at = current.get('expires_at')
+
+        if to_state == PLAN_STATE_EXPIRED:
+            if current_state != PLAN_STATE_PREPARED:
+                raise CatalogStoreError(
+                    'only PREPARED plans may expire',
+                    code='prepared_plan_conflict',
+                )
+            if now is None:
+                raise CatalogStoreError(
+                    'now is required for expiry CAS',
+                    code='validation_error',
+                )
+            if expires_at is not None and now < expires_at:
+                raise CatalogStoreError(
+                    'plan not yet expired',
+                    code='prepared_plan_conflict',
+                )
+
+        if to_state == PLAN_STATE_DISCARDED and current_state == PLAN_STATE_DISCARDED:
+            return {
+                'uuid': current.get('uuid'),
+                'group_id': current.get('group_id'),
+                'token_digest': current.get('token_digest'),
+                'state': PLAN_STATE_DISCARDED,
+                'artifact_sha256': current.get('artifact_sha256'),
+                'expires_at': expires_at,
+                'updated_at': current.get('updated_at'),
+                'idempotent': True,
+            }
+
+        if to_state == PLAN_STATE_DISCARDED:
+            if current_state in {PLAN_STATE_COMMITTING, PLAN_STATE_COMMITTED}:
+                raise CatalogStoreError(
+                    'cannot discard committing/committed plan',
+                    code='prepared_plan_conflict',
+                )
+            if current_state == PLAN_STATE_EXPIRED:
+                raise CatalogStoreError(
+                    'prepared plan expired',
+                    code='prepared_plan_expired',
+                )
+            if current_state != PLAN_STATE_PREPARED:
+                raise CatalogStoreError(
+                    'prepared plan not discardable',
+                    code='prepared_plan_conflict',
+                )
+
+        if to_state == PLAN_STATE_COMMITTING:
+            if current_state == PLAN_STATE_COMMITTED:
+                raise CatalogStoreError(
+                    'prepared plan already consumed',
+                    code='prepared_plan_already_consumed',
+                )
+            if current_state == PLAN_STATE_DISCARDED:
+                raise CatalogStoreError(
+                    'prepared plan not found',
+                    code='prepared_plan_not_found',
+                )
+            if current_state == PLAN_STATE_EXPIRED:
+                raise CatalogStoreError(
+                    'prepared plan expired',
+                    code='prepared_plan_expired',
+                )
+            if current_state not in {PLAN_STATE_PREPARED, PLAN_STATE_COMMITTING}:
+                raise CatalogStoreError(
+                    'prepared plan not claimable',
+                    code='prepared_plan_conflict',
+                )
+            if (
+                require_not_expired
+                and current_state == PLAN_STATE_PREPARED
+                and now is not None
+                and expires_at is not None
+                and now >= expires_at
+            ):
+                await self._cas_plan_state_raw(
+                    tx,
+                    token_digest=token_digest,
+                    expected_from=PLAN_STATE_PREPARED,
+                    to_state=PLAN_STATE_EXPIRED,
+                    updated_at=updated_at,
+                )
+                raise CatalogStoreError(
+                    'prepared plan expired',
+                    code='prepared_plan_expired',
+                )
+            if (
+                current_state == PLAN_STATE_COMMITTING
+                and expected_from == PLAN_STATE_COMMITTING
+            ):
+                return {
+                    'uuid': current.get('uuid'),
+                    'group_id': current.get('group_id'),
+                    'token_digest': current.get('token_digest'),
+                    'state': PLAN_STATE_COMMITTING,
+                    'artifact_sha256': current.get('artifact_sha256'),
+                    'expires_at': expires_at,
+                    'updated_at': current.get('updated_at'),
+                    'committing_started_at': current.get('committing_started_at'),
+                    'reentry': True,
+                }
+
+        if to_state == PLAN_STATE_COMMITTED:
+            if current_state == PLAN_STATE_COMMITTED:
+                raise CatalogStoreError(
+                    'prepared plan already consumed',
+                    code='prepared_plan_already_consumed',
+                )
+            if current_state != PLAN_STATE_COMMITTING:
+                raise CatalogStoreError(
+                    'only COMMITTING plans may commit',
+                    code='prepared_plan_conflict',
+                )
+
+        if current_state != expected_from:
+            if current_state == PLAN_STATE_COMMITTED:
+                raise CatalogStoreError(
+                    'prepared plan already consumed',
+                    code='prepared_plan_already_consumed',
+                )
+            if current_state == PLAN_STATE_EXPIRED:
+                raise CatalogStoreError(
+                    'prepared plan expired',
+                    code='prepared_plan_expired',
+                )
+            if current_state == PLAN_STATE_DISCARDED:
+                raise CatalogStoreError(
+                    'prepared plan not found',
+                    code='prepared_plan_not_found',
+                )
+            raise CatalogStoreError(
+                f'plan state mismatch: have {current_state}, expected {expected_from}',
+                code='prepared_plan_conflict',
+            )
+
+        row = await self._cas_plan_state_raw(
+            tx,
+            token_digest=token_digest,
+            expected_from=expected_from,
+            to_state=to_state,
+            updated_at=updated_at,
+        )
+        if not row or not row.get('uuid'):
+            raise CatalogStoreError(
+                'plan CAS returned no row',
+                code='prepared_plan_conflict',
+            )
+        return row
+
+    async def _cas_plan_state_raw(
+        self,
+        tx: Any,
+        *,
+        token_digest: str,
+        expected_from: str,
+        to_state: str,
+        updated_at: datetime,
+    ) -> dict[str, Any] | None:
+        result = await tx.run(
+            self.build_cas_plan_state_cypher(),
+            token_digest=token_digest,
+            expected_from=expected_from,
+            to_state=to_state,
+            updated_at=updated_at,
+        )
+        return await self._first_from_tx_result(result)
