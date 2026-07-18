@@ -27,6 +27,11 @@ A catalog item can be retried safely and commits as exactly one deterministic, c
 
 - ✓ Phase 0 recorded the live 14 legacy + 7 catalog MCP tool baseline and offline historical canary evidence — Phase 0
 - ✓ Phase 0 froze the catalog-v1 compatibility boundary and test-group/canary/dirty-tree/remote isolation policy — Phase 0
+- ✓ Catalog requests reject unknown fields recursively, enforce immutable execution flags, and require collision-safe catalog-v2 FE/BO/COMMON identity — Phase 1
+- ✓ Every catalog edge type enforces one finite server-owned endpoint map before side effects — Phase 2
+- ✓ Combined batch hashes cover the complete canonical domain and echo authoritative server hashes — Phase 2
+- ✓ Explicit catalog evidence links replace Cartesian batch provenance while preserving standalone legacy compatibility — Phase 2
+- ✓ Read-only capabilities expose versions, registries, topology, limits, and safe namespace fingerprint without mutation — Phase 2
 - ✓ Standard Graphiti MCP tools already expose semantic ingestion, search, triplet, maintenance, and deletion operations — existing
 - ✓ The MCP server already supports YAML configuration with environment expansion and Pydantic validation — existing
 - ✓ Neo4j is supported through an asynchronous driver with real transactions — existing
@@ -36,12 +41,7 @@ A catalog item can be retried safely and commits as exactly one deterministic, c
 
 ### Active
 
-- [ ] Catalog requests reject unknown fields recursively and enforce immutable execution flags
-- [ ] Catalog-v2 identities visibly and deterministically isolate FE, BO, and COMMON objects
-- [ ] Every catalog edge type enforces a finite server-owned endpoint type map before side effects
-- [ ] Combined batch hashes cover all domain content and expose server capabilities safely
 - [ ] Agents can prepare, commit, replay, and discard bounded restart-safe immutable batch plans
-- [ ] Provenance uses explicit deterministic evidence links without Cartesian expansion
 - [ ] Every committed batch has a durable exact manifest and manifest-backed verification
 - [ ] Read-only catalog diagnostics remain usable while catalog mutation is disabled
 - [ ] Existing legacy MCP contracts, deterministic guarantees, search interoperability, and graph isolation remain intact
@@ -148,6 +148,10 @@ Existing unrelated working-tree changes in `mcp_server/k8s/graphiti-neo4j.yaml`,
 | Use source CAS and ordered retained target locks | Close provenance validation/mutation TOCTOU under concurrent writes | ✓ Delivered |
 | Treat pre-hardening ACCEPT_TAB artifacts as offline historical evidence only | Catalog-v1 hashes and receipts cannot authorize hardened catalog-v2 behavior | ✓ Phase 0 |
 | Gate Phase 1 on recorded artifacts, safety invariants, and truthful pass/fail/skip results | Baseline failures must remain distinguishable from v1.1 regressions | ✓ Phase 0 |
+| Use one immutable server-owned endpoint registry for all 16 approved edge types | Client-supplied or divergent topology would create invalid searchable truth | ✓ Phase 2 |
+| Replace catalog-v2 Cartesian provenance with explicit one-source/one-target evidence links | Prevent implicit or inflated provenance while preserving standalone legacy behavior until Phase 3B | ✓ Phase 2 |
+| Hash the complete canonical batch domain under one versioned recipe | Omitted fields would create false idempotence and unsafe prepare/commit replay | ✓ Phase 2 |
+| Keep capability discovery mutation-free and available while writes are disabled | Agents need safe contract discovery before attempting writes | ✓ Phase 2 |
 
 ## Evolution
 
@@ -167,4 +171,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-18 after Phase 0*
+*Last updated: 2026-07-18 after Phase 2*

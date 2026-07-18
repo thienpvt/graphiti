@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-current_phase: 2
-current_phase_name: Topology Authority, Evidence Contract, Hashes, and Capabilities
-status: phase_complete
-stopped_at: Completed 02-05-PLAN.md
-last_updated: "2026-07-18T03:42:46.405Z"
+current_phase: 3A
+current_phase_name: Immutable Prepare/Commit Control Plane
+status: planning
+stopped_at: Completed 02-05-PLAN.md (Phase 2 local gate; ready_for_phase_3a=true)
+last_updated: "2026-07-18T05:02:41.915Z"
 last_activity: 2026-07-18
-last_activity_desc: Completed 02-05 gate runner + 68/68 resolution
+last_activity_desc: Phase 2 complete, transitioned to Phase 3A
 progress:
-  total_phases: 3
+  total_phases: 7
   completed_phases: 3
   total_plans: 19
   completed_plans: 19
-  percent: 100
+  percent: 43
 ---
 
 # Project State
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 2 — Topology Authority, Evidence Contract, Hashes, and Capabilities
+**Current focus:** Phase 3A — Immutable Prepare/Commit Control Plane
 
 ## Current Position
 
-Phase: 2 (Topology Authority, Evidence Contract, Hashes, and Capabilities) — COMPLETE (local gate)
-Plan: 5 of 5
-Status: Phase 2 local gate green; ready_for_phase_3a=true
-Last activity: 2026-07-18 — Completed 02-05 gate runner + 68/68 resolution
+Phase: 3A — Immutable Prepare/Commit Control Plane
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-07-18 — Phase 2 complete, transitioned to Phase 3A
 
 Progress: Phase 0+1+2 complete at local gate; Phase 3A unblocked for planning/execution
 
@@ -39,7 +39,7 @@ Progress: Phase 0+1+2 complete at local gate; Phase 3A unblocked for planning/ex
 
 **Velocity:**
 
-- Total plans completed: 26 (14 in v1.0, 12 in v1.1 Phase 0+1)
+- Total plans completed: 33 (14 in v1.0, 19 in v1.1 Phases 0–2)
 - Average duration: tracked in plan summaries
 
 **By Phase:**
@@ -50,6 +50,7 @@ Progress: Phase 0+1+2 complete at local gate; Phase 3A unblocked for planning/ex
 | v1.0 Phase 2. Provenance and Atomic Batch | 6 | 6 | see summaries |
 | Phase 0 | 2 | 2 | see summaries |
 | Phase 1 | 12 | 12 | see summaries |
+| Phase 2 | 5 | 5 | see summaries |
 
 **Prior milestone:**
 
@@ -71,14 +72,15 @@ Recent decisions affecting current work:
 - [Phase 1]: CR-01/CR-02/WR-01/WR-02 closed with no-silent-drop key equality
 - [Phase 1]: WR-R01/WR-R02 accepted residuals (edge lock parity; status default polish) — not hard blockers
 - [Phase 1]: Plan 01-12 final readiness after goal PASSED, security SECURED, Nyquist COMPLIANT, code CLEAR_WITH_RESIDUALS
-- [Session]: stop-after-phase-1 — do not discuss/plan/execute Phase 2 this session
+- [Session]: full-v1.1 autonomous request superseded the earlier stop-after-Phase-1 limit
 - [Phase 2]: Plan 02-05 tracked stdlib gate runner is sole local_gate_pass / ready_for_phase_3a authority
 - [Phase 2]: raw 02-EDGE-PROBE.json byte-stable; resolution is separate 68/68 map
+- [Phase 2]: server-owned 16-type endpoint map, explicit evidence-link contract, authoritative batch hash, and mutation-free capabilities verified
 - [Phase 2]: ready_for_phase_3a true only with local_gate_pass + safety (no canary, no oracle-catalog-v2, no prepare write path)
 
 ### Pending Todos
 
-Phase 2 local gate complete. Next: Phase 3A prepare/control-plane under separate plans; local Ollama E2E before cleanup; milestone audit/completion; explicit cleanup confirmation.
+Phase 2 fully verified: review clean, Nyquist 34/34, security 12/12, API coverage 22/22, goal 5/5. Next: Phase 3A prepare/control-plane; local Ollama E2E before cleanup; milestone audit/completion; explicit cleanup confirmation.
 
 ### Blockers/Concerns
 
@@ -111,6 +113,6 @@ Phase 2 local gate complete. Next: Phase 3A prepare/control-plane under separate
 ## Session Continuity
 
 Last session: 2026-07-18
-Stopped at: Completed 02-05-PLAN.md (Phase 2 local gate; ready_for_phase_3a=true)
+Stopped at: Phase 2 complete and independently verified; ready to discuss Phase 3A
 Resume file: None
-Next: Phase 3A prepare/control-plane planning under separate authorization
+Next: Phase 3A discussion, research, and planning
