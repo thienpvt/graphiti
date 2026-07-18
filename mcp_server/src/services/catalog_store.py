@@ -32,6 +32,7 @@ from models.catalog_common import (
     PLAN_STATES,
     PROTECTED_ENTITY_PROPERTIES,
 )
+from services.catalog_identity import CANONICALIZATION_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +204,8 @@ class CatalogNeo4jStore:
     def __init__(self) -> None:
         self._schema_lock = asyncio.Lock()
         self._schema_ready = False
+        self._plan_schema_lock = asyncio.Lock()
+        self._plan_schema_ready = False
 
     @staticmethod
     def identity_uniqueness_constraint_statements() -> tuple[str, ...]:
@@ -306,6 +309,7 @@ class CatalogNeo4jStore:
         expected_name: str,
         expected_entity_type: str,
         expected_label: str,
+        expected_properties: frozenset[str] | set[str] | None = None,
     ) -> bool:
         """True only when named constraint has UNIQUENESS shape on exact props."""
         name = str(row.get('name') or '')
@@ -321,8 +325,13 @@ class CatalogNeo4jStore:
         if expected_label not in labels:
             return False
         props = list(row.get('properties') or [])
-        # Exact composite identity properties (order-insensitive).
-        return set(props) == {'uuid', 'group_id'}
+        # Exact property set (order-insensitive). Default: composite (uuid, group_id).
+        wanted = (
+            set(expected_properties)
+            if expected_properties is not None
+            else {'uuid', 'group_id'}
+        )
+        return set(props) == wanted
 
     async def _identity_uniqueness_present(self, executor: Any) -> bool:
         """True when both catalog-named constraints have exact identity shape.
@@ -1859,7 +1868,23 @@ class CatalogNeo4jStore:
         )
 
     async def ensure_plan_schema(self, executor: Any) -> None:
-        """Idempotent plan/chunk uniqueness constraints. CREATE only, never DROP."""
+        """Idempotent plan/chunk uniqueness constraints. CREATE only, never DROP.
+
+        Mirrors domain identity ensure: process-local lock + once-ready flag and
+        post-CREATE SHOW CONSTRAINTS shape verification (fail closed).
+        """
+        if self._plan_schema_ready:
+            return
+        async with self._plan_schema_lock:
+            if self._plan_schema_ready:
+                return
+            await self._ensure_plan_schema_locked(executor)
+            self._plan_schema_ready = True
+
+    async def _ensure_plan_schema_locked(self, executor: Any) -> None:
+        if await self._plan_uniqueness_present(executor):
+            return
+
         for stmt in self.plan_schema_constraint_statements():
             assert 'DROP' not in stmt.upper()
             try:
@@ -1887,6 +1912,75 @@ class CatalogNeo4jStore:
                     f'prepared-plan schema init failed: {type(exc).__name__}',
                     code='neo4j_schema_failed',
                 ) from exc
+
+        if not await self._plan_uniqueness_present(executor):
+            raise CatalogStoreError(
+                'prepared-plan uniqueness constraints not present after init',
+                code='neo4j_schema_failed',
+            )
+        logger.info(
+            'catalog plan schema ready constraints=%s,%s,%s,%s',
+            CATALOG_PREPARED_PLAN_IDENTITY_CONSTRAINT,
+            CATALOG_PREPARED_PLAN_TOKEN_DIGEST_CONSTRAINT,
+            CATALOG_PREPARED_PLAN_CHUNK_IDENTITY_CONSTRAINT,
+            CATALOG_PREPARED_PLAN_CHUNK_INDEX_CONSTRAINT,
+        )
+
+    async def _plan_uniqueness_present(self, executor: Any) -> bool:
+        """True when all plan/chunk named constraints have exact uniqueness shape."""
+        try:
+            result = await self._run_schema_query(
+                executor,
+                """
+                SHOW CONSTRAINTS
+                YIELD name, type, entityType, labelsOrTypes, properties
+                RETURN name, type, entityType, labelsOrTypes, properties
+                """,
+            )
+        except Exception:
+            return False
+        rows = self._all_from_execute_query_result(result)
+        plan_id_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_PREPARED_PLAN_IDENTITY_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='CatalogPreparedPlan',
+                expected_properties={'uuid', 'group_id'},
+            )
+            for row in rows
+        )
+        token_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_PREPARED_PLAN_TOKEN_DIGEST_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='CatalogPreparedPlan',
+                expected_properties={'token_digest'},
+            )
+            for row in rows
+        )
+        chunk_id_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_PREPARED_PLAN_CHUNK_IDENTITY_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='CatalogPreparedPlanChunk',
+                expected_properties={'uuid', 'group_id'},
+            )
+            for row in rows
+        )
+        chunk_idx_ok = any(
+            self._constraint_row_matches(
+                row,
+                expected_name=CATALOG_PREPARED_PLAN_CHUNK_INDEX_CONSTRAINT,
+                expected_entity_type='NODE',
+                expected_label='CatalogPreparedPlanChunk',
+                expected_properties={'plan_uuid', 'group_id', 'chunk_index'},
+            )
+            for row in rows
+        )
+        return plan_id_ok and token_ok and chunk_id_ok and chunk_idx_ok
 
     def build_plan_group_lock_cypher(self) -> str:
         """MERGE group lock for capacity serialization (same-tx with create)."""
@@ -2112,7 +2206,7 @@ class CatalogNeo4jStore:
                 fields.get('identity_schema_version') or 'catalog-v2'
             ),
             'canonicalization_version': str(
-                fields.get('canonicalization_version') or 'canon-v1'
+                fields.get('canonicalization_version') or CANONICALIZATION_VERSION
             ),
             'artifact_serialization_version': str(
                 fields.get('artifact_serialization_version') or 'prepared-artifact-v1'
@@ -2200,6 +2294,24 @@ class CatalogNeo4jStore:
             return 0
         return int(row.get('active') or 0)
 
+
+    @staticmethod
+    def _is_uniqueness_constraint_race(exc: BaseException) -> bool:
+        """True when Neo4j reports a uniqueness/constraint race on CREATE."""
+        msg = f'{type(exc).__name__}: {exc}'.lower()
+        markers = (
+            'constraintvalidationfailed',
+            'constraint error',
+            'already exists with',
+            'already exists',
+            'uniqueness',
+            'unique constraint',
+            'entityalreadyexists',
+            'neo.clienterror.schema.constrainvalidationfailed',
+            'neo.clienterror.schema.constraintvalidationfailed',
+        )
+        return any(m in msg for m in markers)
+
     async def create_prepared_plan_with_chunks(
         self,
         tx: Any,
@@ -2259,8 +2371,21 @@ class CatalogNeo4jStore:
                 code='prepared_plan_conflict',
             )
 
-        create_res = await tx.run(self.build_create_prepared_plan_cypher(), **plan_params)
-        created = await self._first_from_tx_result(create_res)
+        try:
+            create_res = await tx.run(self.build_create_prepared_plan_cypher(), **plan_params)
+            created = await self._first_from_tx_result(create_res)
+        except CatalogStoreError:
+            raise
+        except Exception as exc:
+            if self._is_uniqueness_constraint_race(exc):
+                raise CatalogStoreError(
+                    'prepared plan identity already exists',
+                    code='prepared_plan_conflict',
+                ) from exc
+            raise CatalogStoreError(
+                f'prepared plan create failed: {type(exc).__name__}',
+                code='neo4j_transaction_failed',
+            ) from exc
         if not created or not created.get('uuid'):
             raise CatalogStoreError(
                 'prepared plan create returned no row',
@@ -2280,11 +2405,24 @@ class CatalogNeo4jStore:
                     'chunk group_id mismatch',
                     code='validation_error',
                 )
-            ch_res = await tx.run(
-                self.build_create_prepared_plan_chunk_cypher(),
-                **ch_params,
-            )
-            ch_row = await self._first_from_tx_result(ch_res)
+            try:
+                ch_res = await tx.run(
+                    self.build_create_prepared_plan_chunk_cypher(),
+                    **ch_params,
+                )
+                ch_row = await self._first_from_tx_result(ch_res)
+            except CatalogStoreError:
+                raise
+            except Exception as exc:
+                if self._is_uniqueness_constraint_race(exc):
+                    raise CatalogStoreError(
+                        'prepared plan chunk identity already exists',
+                        code='prepared_plan_conflict',
+                    ) from exc
+                raise CatalogStoreError(
+                    f'prepared plan chunk create failed: {type(exc).__name__}',
+                    code='neo4j_transaction_failed',
+                ) from exc
             if not ch_row or not ch_row.get('uuid'):
                 raise CatalogStoreError(
                     'prepared plan chunk create returned no row',

@@ -19,7 +19,14 @@ from models.catalog_common import (  # noqa: E402
     PLAN_STATE_EXPIRED,
     PLAN_STATE_PREPARED,
 )
-from services.catalog_store import CatalogNeo4jStore, CatalogStoreError  # noqa: E402
+from services.catalog_store import (  # noqa: E402
+    CATALOG_PREPARED_PLAN_CHUNK_IDENTITY_CONSTRAINT,
+    CATALOG_PREPARED_PLAN_CHUNK_INDEX_CONSTRAINT,
+    CATALOG_PREPARED_PLAN_IDENTITY_CONSTRAINT,
+    CATALOG_PREPARED_PLAN_TOKEN_DIGEST_CONSTRAINT,
+    CatalogNeo4jStore,
+    CatalogStoreError,
+)
 
 GROUP = 'oracle-catalog-tool-test'
 PLAN_UUID = '11111111-2222-3333-4444-555555555555'
@@ -86,7 +93,7 @@ def _plan_params(**overrides: Any) -> dict[str, Any]:
         'token_digest': TOKEN_DIGEST,
         'state': PLAN_STATE_PREPARED,
         'identity_schema_version': 'catalog-v2',
-        'canonicalization_version': 'canon-v1',
+        'canonicalization_version': 'catalog-canonical-v1',
         'artifact_serialization_version': 'prepared-artifact-v1',
         'request_sha256': REQUEST_SHA,
         'catalog_sha256': CATALOG_SHA,
@@ -168,20 +175,60 @@ def test_plan_schema_constraint_statements_fixed_labels_and_uniqueness():
     assert '${' not in joined
 
 
+def _valid_plan_constraint_rows() -> list[dict]:
+    return [
+        {
+            'name': CATALOG_PREPARED_PLAN_IDENTITY_CONSTRAINT,
+            'type': 'NODE_PROPERTY_UNIQUENESS',
+            'entityType': 'NODE',
+            'labelsOrTypes': ['CatalogPreparedPlan'],
+            'properties': ['uuid', 'group_id'],
+        },
+        {
+            'name': CATALOG_PREPARED_PLAN_TOKEN_DIGEST_CONSTRAINT,
+            'type': 'NODE_PROPERTY_UNIQUENESS',
+            'entityType': 'NODE',
+            'labelsOrTypes': ['CatalogPreparedPlan'],
+            'properties': ['token_digest'],
+        },
+        {
+            'name': CATALOG_PREPARED_PLAN_CHUNK_IDENTITY_CONSTRAINT,
+            'type': 'NODE_PROPERTY_UNIQUENESS',
+            'entityType': 'NODE',
+            'labelsOrTypes': ['CatalogPreparedPlanChunk'],
+            'properties': ['uuid', 'group_id'],
+        },
+        {
+            'name': CATALOG_PREPARED_PLAN_CHUNK_INDEX_CONSTRAINT,
+            'type': 'NODE_PROPERTY_UNIQUENESS',
+            'entityType': 'NODE',
+            'labelsOrTypes': ['CatalogPreparedPlanChunk'],
+            'properties': ['plan_uuid', 'group_id', 'chunk_index'],
+        },
+    ]
+
 @pytest.mark.asyncio
 async def test_ensure_plan_schema_emits_create_constraint_only():
     store = CatalogNeo4jStore()
     captured: list[str] = []
+    created = {'n': 0}
 
     class _Exec:
         async def execute_query(self, stmt: str, params=None, **kwargs):
             captured.append(stmt)
+            if 'SHOW CONSTRAINTS' in stmt:
+                if created['n'] < 4:
+                    return ([], None, [])
+                return (_valid_plan_constraint_rows(), None, [])
+            if 'CREATE CONSTRAINT' in stmt:
+                created['n'] += 1
             return ([], None, [])
 
     await store.ensure_plan_schema(_Exec())
     assert captured
-    for stmt in captured:
-        assert 'CREATE CONSTRAINT' in stmt
+    create_stmts = [s for s in captured if 'CREATE CONSTRAINT' in s]
+    assert create_stmts
+    for stmt in create_stmts:
         assert 'IF NOT EXISTS' in stmt
         assert 'DROP' not in stmt.upper()
         _assert_fixed_labels_only(stmt)
@@ -791,3 +838,103 @@ def test_discard_never_detach_delete_domain():
     assert 'DELETE' not in cypher
     for bad in FORBIDDEN_LABEL_SUBSTR:
         assert bad not in cypher
+
+
+
+
+@pytest.mark.asyncio
+async def test_ensure_plan_schema_idempotent_and_verifies_shape():
+    store = CatalogNeo4jStore()
+    calls: list[str] = []
+    created = {'n': 0}
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = (0 if params is None else 1) + len(kwargs)
+            calls.append(cypher.strip())
+            if 'SHOW CONSTRAINTS' in cypher:
+                if created['n'] < 4:
+                    return ([], None, [])
+                return (_valid_plan_constraint_rows(), None, [])
+            if 'CREATE CONSTRAINT' in cypher:
+                created['n'] += 1
+            return ([], None, [])
+
+    exec1 = _Exec()
+    await store.ensure_plan_schema(exec1)
+    assert store._plan_schema_ready is True
+    assert sum(1 for c in calls if 'CREATE CONSTRAINT' in c) == 4
+    assert sum(1 for c in calls if 'SHOW CONSTRAINTS' in c) >= 2
+    assert all('DROP' not in c.upper() for c in calls)
+    n_before = len(calls)
+    await store.ensure_plan_schema(exec1)
+    assert len(calls) == n_before
+
+
+@pytest.mark.asyncio
+async def test_ensure_plan_schema_fails_closed_without_verified_shape():
+    store = CatalogNeo4jStore()
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = params, kwargs
+            if 'SHOW CONSTRAINTS' in cypher:
+                return (
+                    [
+                        {
+                            'name': CATALOG_PREPARED_PLAN_IDENTITY_CONSTRAINT,
+                            'type': 'UNIQUENESS',
+                            'entityType': 'NODE',
+                            'labelsOrTypes': ['CatalogPreparedPlan'],
+                            'properties': ['uuid'],  # missing group_id
+                        }
+                    ],
+                    None,
+                    [],
+                )
+            return ([], None, [])
+
+    with pytest.raises(CatalogStoreError) as ei:
+        await store.ensure_plan_schema(_Exec())
+    assert ei.value.code == 'neo4j_schema_failed'
+    assert store._plan_schema_ready is False
+
+
+@pytest.mark.asyncio
+async def test_create_uniqueness_race_maps_prepared_plan_conflict():
+    store = CatalogNeo4jStore()
+
+    class _RaceTx:
+        def __init__(self):
+            self.n = 0
+
+        async def run(self, cypher: str, **params):
+            self.n += 1
+            if 'CatalogPlanGroupLock' in cypher:
+                return _Rows([{'locked': True}])
+            if 'RETURN count(p) AS active' in cypher or 'AS active' in cypher:
+                return _Rows([{'active': 0}])
+            if 'MATCH (p:CatalogPreparedPlan' in cypher and 'CREATE' not in cypher:
+                return _Rows([])
+            if 'CREATE (plan:CatalogPreparedPlan' in cypher or 'CREATE (p:CatalogPreparedPlan' in cypher:
+                raise RuntimeError('ConstraintValidationFailed: already exists with label')
+            return _Rows([])
+
+    with pytest.raises(CatalogStoreError) as ei:
+        await store.create_prepared_plan_with_chunks(
+            _RaceTx(),
+            plan=_plan_params(),
+            chunks=[_chunk_params()],
+            max_active=8,
+            now=FIXED_TS,
+        )
+    assert ei.value.code == 'prepared_plan_conflict'
+
+
+def test_prepare_prepared_plan_params_default_canonicalization_version():
+    store = CatalogNeo4jStore()
+    params = _plan_params()
+    params.pop('canonicalization_version', None)
+    out = store.prepare_prepared_plan_params(**params)
+    assert out['canonicalization_version'] == 'catalog-canonical-v1'
+
