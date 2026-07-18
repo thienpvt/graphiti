@@ -523,13 +523,23 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def sha256_file_lf(path: Path) -> str:
+    """SHA-256 of file bytes with newlines normalized to LF.
+
+    Windows autocrlf / text-mode writers can flip CRLF between run and apply;
+    digest identity must track semantic content, not platform newline bytes.
+    """
+    data = path.read_bytes().replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+    return hashlib.sha256(data).hexdigest()
+
+
 def content_digest_map(root: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     for rel in GATE_INPUT_RELS:
         path = root / rel
         key = rel.as_posix()
         if path.is_file():
-            out[key] = sha256_file(path)
+            out[key] = sha256_file_lf(path)
         else:
             out[key] = 'missing'
     return out
@@ -659,6 +669,13 @@ def derive_local_gate_pass(
         if r.get('exit_code') != r.get('expected_exit', 0):
             return False
     return True
+
+
+def write_text_lf(path: Path, text: str) -> None:
+    """Write UTF-8 text with LF newlines only (Windows-safe digest stability)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = text.replace('\r\n', '\n').replace('\r', '\n')
+    path.write_bytes(normalized.encode('utf-8'))
 
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -985,7 +1002,7 @@ def apply_gate(
             '- [ ] Current Nyquist compliance remains false until verified runner apply after complete green local matrix.',
             '- [x] Current Nyquist compliance derived true from verified local green ledger; independent audits still pending.',
         )
-    val_path.write_text(val_text, encoding='utf-8')
+    write_text_lf(val_path, val_text)
 
     # Update PHASE1-GATE machine fields
     gate_path = root / PHASE_DIR_REL / '01-PHASE1-GATE.md'
@@ -1024,7 +1041,7 @@ def apply_gate(
         'ready_for_phase_2=false',
         gate_text,
     )
-    gate_path.write_text(gate_text, encoding='utf-8')
+    write_text_lf(gate_path, gate_text)
 
     # Persist apply-time fields; refresh content digests after doc writes.
     ledger = dict(ledger)
