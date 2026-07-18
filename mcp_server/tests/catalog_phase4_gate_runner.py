@@ -325,6 +325,17 @@ def check_safety_no_probe(root: Path) -> None:
             raise AssertionError('runner must not import neo4j driver')
 
 
+def _manifest_verification_true_marker(src: str) -> bool:
+    """True when source text sets features.manifest_verification to True.
+
+    Markers built without nested quote soup so parsers cannot report a false
+    unterminated-string diagnostic on this check.
+    """
+    single = chr(39) + 'manifest_verification' + chr(39) + ': True'
+    double = chr(34) + 'manifest_verification' + chr(34) + ': True'
+    return single in src or double in src
+
+
 def check_manifest_verification_not_flipped(root: Path) -> None:
     """Wave 0 / until 04-06: features.manifest_verification must remain False."""
     capa = root / 'mcp_server/src/services/catalog_capabilities.py'
@@ -643,17 +654,6 @@ def derive_safety_ledger(
         'current_source_v2_param_query': current_source_v2_param,
         'historical_violation_note': HISTORICAL_V2_VIOLATION_NOTE,
     }
-
-
-def _manifest_verification_true_marker(src: str) -> bool:
-    """True when source text sets features.manifest_verification to True.
-
-    Markers built without nested quote soup so parsers cannot report a false
-    unterminated-string diagnostic on this check.
-    """
-    single = chr(39) + 'manifest_verification' + chr(39) + ': True'
-    double = chr(34) + 'manifest_verification' + chr(34) + ': True'
-    return single in src or double in src
 
 
 def read_manifest_verification_feature(root: Path) -> bool:
