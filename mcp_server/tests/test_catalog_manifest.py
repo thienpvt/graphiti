@@ -157,7 +157,9 @@ def test_manifest_serialization_version_constant():
 
 def test_manifest_empty_membership():
     """MANI-01: empty four-category membership is valid and stable."""
-    mod = _require('build_manifest_body_from_membership', 'serialize_manifest_body', 'manifest_sha256')
+    mod = _require(
+        'build_manifest_body_from_membership', 'serialize_manifest_body', 'manifest_sha256'
+    )
     body = mod.build_manifest_body_from_membership(**_build_kwargs(_empty_membership()))
     assert body['manifest_serialization_version'] == 'catalog-manifest-v1'
     assert body['counts'] == {
@@ -187,7 +189,9 @@ def test_manifest_empty_membership():
 
 def test_manifest_single_member():
     """MANI-01: single entity membership serializes deterministically; embeddings stripped."""
-    mod = _require('build_manifest_body_from_membership', 'serialize_manifest_body', 'manifest_sha256')
+    mod = _require(
+        'build_manifest_body_from_membership', 'serialize_manifest_body', 'manifest_sha256'
+    )
     body = mod.build_manifest_body_from_membership(**_build_kwargs(_single_member_membership()))
     assert body['counts']['entities'] == 1
     assert len(body['entities']) == 1
@@ -211,7 +215,9 @@ def test_manifest_single_member():
 
 def test_manifest_four_category_membership():
     """MANI-01: entities+edges+sources+evidence_links all participate; unchanged kept."""
-    mod = _require('build_manifest_body_from_membership', 'serialize_manifest_body', 'manifest_sha256')
+    mod = _require(
+        'build_manifest_body_from_membership', 'serialize_manifest_body', 'manifest_sha256'
+    )
     membership = _four_category_membership()
     body = mod.build_manifest_body_from_membership(**_build_kwargs(membership))
     assert body['counts'] == {
@@ -260,7 +266,9 @@ def test_manifest_four_category_membership():
 
 def test_manifest_canonical_bytes_stable():
     """MANI-01/02: equal membership yields byte-identical canonical serialization."""
-    mod = _require('build_manifest_body_from_membership', 'serialize_manifest_body', 'manifest_sha256')
+    mod = _require(
+        'build_manifest_body_from_membership', 'serialize_manifest_body', 'manifest_sha256'
+    )
     m = _four_category_membership()
     # reverse entity input order; output must still be key-sorted and identical
     m2 = copy.deepcopy(m)
@@ -387,7 +395,7 @@ def test_manifest_adjacency_equal_graph_key_ordering():
     assert [e['uuid'] for e in body['entities']] == ['aa', 'bb']
     assert [e['uuid'] for e in body['edges']] == ['r-a', 'r-b']
     assert [s['uuid'] for s in body['sources']] == ['s-a', 's-b']
-    assert [l['uuid'] for l in body['evidence_links']] == ['l-a', 'l-b']
+    assert [link['uuid'] for link in body['evidence_links']] == ['l-a', 'l-b']
 
 
 def test_manifest_chunk_exact_default_boundary():
@@ -413,7 +421,12 @@ def test_manifest_chunk_exact_default_boundary():
 
 def test_manifest_chunk_hard_plus_one_fails():
     """MANI-04: chunk_size HARD_CHUNK_BYTES+1 fails closed (no silent truncate)."""
-    mod = _require('chunk_manifest_bytes', 'HARD_CHUNK_BYTES', 'chunk_manifest_body')
+    mod = _require(
+        'chunk_manifest_bytes',
+        'HARD_CHUNK_BYTES',
+        'chunk_manifest_body',
+        'build_manifest_body_from_membership',
+    )
     assert mod.HARD_CHUNK_BYTES == HARD_CHUNK_BYTES
     with pytest.raises(ValueError):
         mod.chunk_manifest_bytes(b'abc', chunk_size=HARD_CHUNK_BYTES + 1)
@@ -423,13 +436,9 @@ def test_manifest_chunk_hard_plus_one_fails():
     assert len(chunks) == 1
     assert chunks[0]['byte_length'] == HARD_CHUNK_BYTES
     # body path also rejects oversized chunk_size
+    body = mod.build_manifest_body_from_membership(**_build_kwargs(_empty_membership()))
     with pytest.raises(ValueError):
-        mod.chunk_manifest_body(
-            mod.build_manifest_body_from_membership(**_build_kwargs(_empty_membership()))
-            if hasattr(mod, 'build_manifest_body_from_membership')
-            else {'manifest_serialization_version': 'catalog-manifest-v1'},
-            chunk_size=HARD_CHUNK_BYTES + 1,
-        )
+        mod.chunk_manifest_body(body, chunk_size=HARD_CHUNK_BYTES + 1)
 
 
 def test_manifest_no_self_hash_field():
@@ -505,9 +514,7 @@ def test_catalog_manifest_chunk_uuid_deterministic():
     c = catalog_manifest_chunk_uuid(FIXED_NS, GROUP, BATCH_ID, 1)
     assert a == b
     assert a != c
-    expected = str(
-        uuid.uuid5(FIXED_NS, f'{GROUP}|catalog-v2|ManifestChunk|{BATCH_ID}|0')
-    )
+    expected = str(uuid.uuid5(FIXED_NS, f'{GROUP}|catalog-v2|ManifestChunk|{BATCH_ID}|0'))
     assert a == expected
 
 
