@@ -68,6 +68,34 @@ def test_build_capabilities_disabled_writes_missing_namespace():
     assert caps.connectivity == 'unknown'
 
 
+def test_build_capabilities_reads_enabled_follows_config():
+    """GATE-01/02: catalog_reads_enabled tracks config.reads_enabled (not hardcoded)."""
+    from services.catalog_capabilities import HARD_MAX_PAGE_SIZE, build_catalog_capabilities
+
+    off = build_catalog_capabilities(
+        config=CatalogConfig(enabled=False, reads_enabled=False, uuid_namespace=None),
+        client=None,
+    )
+    assert off.catalog_writes_enabled is False
+    assert off.catalog_reads_enabled is False
+    assert off.features['manifest_verification'] is False
+    assert off.limits['hard']['max_page_size'] == HARD_MAX_PAGE_SIZE == 500
+    assert off.limits['configured']['max_page_size'] == 100
+
+    on = build_catalog_capabilities(
+        config=CatalogConfig(
+            enabled=False,
+            reads_enabled=True,
+            max_page_size=50,
+            uuid_namespace=None,
+        ),
+        client=None,
+    )
+    assert on.catalog_reads_enabled is True
+    assert on.limits['configured']['max_page_size'] == 50
+    assert on.limits['hard']['max_page_size'] == 500
+
+
 def test_build_capabilities_versions_from_identity_constants():
     from services.catalog_capabilities import build_catalog_capabilities
 
@@ -132,7 +160,7 @@ def test_build_capabilities_limits_configured_and_hard():
         'max_active_plans': DEFAULT_MAX_ACTIVE_PLANS_PER_GROUP,
         'plan_ttl_seconds': DEFAULT_PLAN_TTL_SECONDS,
         'prepared_chunk_bytes': DEFAULT_PREPARED_CHUNK_BYTES,
-        'max_page_size': 0,
+        'max_page_size': 100,
     }
     assert caps.limits['hard'] == {
         'max_entities_per_batch': HARD_MAX_ENTITIES_PER_BATCH,
@@ -141,7 +169,7 @@ def test_build_capabilities_limits_configured_and_hard():
         'max_prepared_payload_bytes': HARD_MAX_PREPARED_PAYLOAD_BYTES,
         'max_active_plans': HARD_MAX_ACTIVE_PLANS_PER_GROUP,
         'plan_ttl_seconds': HARD_PLAN_TTL_SECONDS,
-        'max_page_size': 0,
+        'max_page_size': 500,
     }
     # Module re-exports match catalog_common hard ceilings (non-zero).
     assert CAP_HARD_PAYLOAD == HARD_MAX_PREPARED_PAYLOAD_BYTES == 16_777_216
@@ -158,8 +186,9 @@ def test_build_capabilities_exposes_pagination_limits():
         config=CatalogConfig(enabled=False, uuid_namespace=None),
         client=None,
     )
-    assert caps.limits['configured']['max_page_size'] == HARD_MAX_PAGE_SIZE
-    assert caps.limits['hard']['max_page_size'] == HARD_MAX_PAGE_SIZE
+    # Configured default 100; hard ceiling 500 (D-04 / GATE page authority).
+    assert caps.limits['configured']['max_page_size'] == 100
+    assert caps.limits['hard']['max_page_size'] == HARD_MAX_PAGE_SIZE == 500
 
 
 def test_build_capabilities_features_phase_truthful():
@@ -179,7 +208,7 @@ def test_build_capabilities_features_phase_truthful():
     assert caps.features['prepare_commit'] is True
     assert caps.features['manifests'] is True
     assert caps.features['manifest_verification'] is False
-    assert caps.limits['hard']['max_page_size'] == 0
+    assert caps.limits['hard']['max_page_size'] == 500
 
 
 def test_build_capabilities_plan_limits_nonzero_prepare_commit_true():
@@ -225,7 +254,7 @@ def test_build_capabilities_plan_limits_nonzero_prepare_commit_true():
     assert caps.features['prepare_commit'] is True
     assert caps.features['manifests'] is True
     assert caps.features['manifest_verification'] is False
-    assert caps.limits['hard']['max_page_size'] == 0
+    assert caps.limits['hard']['max_page_size'] == 500
 
 
 def test_build_capabilities_redacts_namespace_and_secrets():

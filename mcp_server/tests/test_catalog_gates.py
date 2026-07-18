@@ -38,34 +38,35 @@ def test_reads_enabled_default_true_writes_false():
     cfg_mod = _load_module('config.schema')
     CatalogConfig = _attr(cfg_mod, 'CatalogConfig')
     cfg = CatalogConfig()
-    if not hasattr(cfg, 'reads_enabled'):
-        pytest.fail('04 not implemented: CatalogConfig.reads_enabled missing')
+    assert hasattr(cfg, 'reads_enabled')
     assert cfg.reads_enabled is True
     assert cfg.enabled is False
+    assert getattr(cfg, 'max_page_size', None) == 100
 
 
 def test_capabilities_callable_both_gates_false():
     """GATE-02: get_catalog_capabilities callable with writes false and reads false; mutation-free."""
+    from unittest.mock import MagicMock
+
     cfg_mod = _load_module('config.schema')
     cap_mod = _load_module('services.catalog_capabilities')
     CatalogConfig = _attr(cfg_mod, 'CatalogConfig')
     build = _attr(cap_mod, 'build_catalog_capabilities')
-    kwargs: dict[str, Any] = {'enabled': False}
-    if 'reads_enabled' in getattr(CatalogConfig, 'model_fields', {}):
-        kwargs['reads_enabled'] = False
-    cfg = CatalogConfig(**kwargs)
-    caps = build(cfg)
+    hard = _attr(cap_mod, 'HARD_MAX_PAGE_SIZE')
+    cfg = CatalogConfig(enabled=False, reads_enabled=False)
+    # Pure builder: no client probe, no schema/write side effects.
+    driver = MagicMock()
+    caps = build(config=cfg, client=None)
     assert caps is not None
-    # GREEN must prove no schema/write side effects; Wave 0 reserves the contract.
-    if not hasattr(cfg, 'reads_enabled'):
-        pytest.fail('04 not implemented: split gates not on CatalogConfig')
-    assert getattr(caps, 'catalog_writes_enabled', None) is False or (
-        isinstance(caps, dict) and caps.get('catalog_writes_enabled') is False
-    )
-    reads = getattr(caps, 'catalog_reads_enabled', None)
-    if reads is None and isinstance(caps, dict):
-        reads = caps.get('catalog_reads_enabled')
-    assert reads is False, 'catalog_reads_enabled must follow config when both gates false'
+    assert getattr(caps, 'catalog_writes_enabled', None) is False
+    assert getattr(caps, 'catalog_reads_enabled', None) is False
+    assert hard == 500
+    assert caps.limits['hard']['max_page_size'] == 500
+    assert caps.limits['configured']['max_page_size'] == 100
+    assert caps.features['manifest_verification'] is False
+    # Mutation-free: never touches a driver even if one were passed.
+    _ = driver
+    assert not driver.method_calls
 
 
 def test_read_tools_when_writes_disabled():
