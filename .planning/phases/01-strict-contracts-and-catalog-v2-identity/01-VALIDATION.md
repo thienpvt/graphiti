@@ -2,7 +2,7 @@
 phase: 1
 slug: strict-contracts-and-catalog-v2-identity
 status: in_progress
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: true
 created: 2026-07-18
 updated: 2026-07-18
@@ -12,7 +12,7 @@ updated: 2026-07-18
 
 > Current-HEAD commands are serialized argv contracts. Each command is decoded with `json.loads` and executed from repository root using `subprocess.run(argv, shell=False)`. Historical TDD failures are ancestry evidence only.
 >
-> `nyquist_compliant` remains false until Plan 01-11 runner `apply` verifies a complete green local ledger. Independent audits remain pending regardless of local green.
+> `nyquist_compliant: true` derived only from verified Plan 01-11 runner apply on a complete green local ledger. Independent audits remain pending; `ready_for_phase_2` stays false.
 >
 > **2026-07-18 evidence refresh:** Plans 01-09 and 01-10 closed CR-02/WR-01 and CR-01/WR-02 respectively. Rows below include 01-09/01-10/01-11 current-HEAD argv contracts. Local readiness may flip only via verified runner apply; final readiness stays false while independent audits are pending.
 
@@ -52,8 +52,8 @@ updated: 2026-07-18
 | 01-08-T1 | 01-08 | 8 | exact 138-ID ownership | structural | `{"argv":["uv","run","--project","mcp_server","python","-c","import re; from collections import Counter; from pathlib import Path; req=Path('.planning/REQUIREMENTS.md').read_text(encoding='utf-8'); road=Path('.planning/ROADMAP.md').read_text(encoding='utf-8'); defs=re.findall(r'^\\s*-\\s*\\[[ x]\\]\\s*\\*\\*([A-Z]{4}-\\d{2})\\*\\*:',req,re.M); rows=re.findall(r'^\\|\\s*([A-Z]{4}-\\d{2})\\s*\\|\\s*(Phase\\s+(?:0|1|2|3A|3B|4|5))\\s*\\|',req,re.M); ids=[i for i,_ in rows]; expected={'Phase 0':8,'Phase 1':23,'Phase 2':34,'Phase 3A':18,'Phase 3B':17,'Phase 4':21,'Phase 5':17}; assert len(defs)==len(set(defs))==len(rows)==len(set(ids))==138 and set(defs)==set(ids); assert Counter(p for _,p in rows)==Counter(expected); mapping=dict(rows); assert mapping['IDEN-08']=='Phase 4' and mapping['IDEN-13']=='Phase 5'; sections=list(re.finditer(r'(?m)^### (Phase (?:0|1|2|3A|3B|4|5)):',road)); road_by={m.group(1):set(re.findall(r'\\b([A-Z]{4}-\\d{2})\\b',re.search(r'(?m)^\\*\\*Requirements\\*\\*:\\s*(.+)$',road[m.end():sections[j+1].start() if j+1<len(sections) else len(road)]).group(1))) for j,m in enumerate(sections)}; req_by={p:{i for i,q in rows if q==p} for p in expected}; assert road_by==req_by and sum(map(len,road_by.values()))==138; assert re.search(r'Mapped:\\s*138/138',road) and re.search(r'Orphans:\\s*0',road) and re.search(r'Duplicates:\\s*0',road)"],"expected_exit":0}` | REQUIREMENTS + ROADMAP | green |
 | 01-08-T2 | 01-08 | 8 | validation, probes, ASVS ledger | structural | `{"argv":["uv","run","--project","mcp_server","python","-c","import json,re; from pathlib import Path; base=Path('.planning/phases/01-strict-contracts-and-catalog-v2-identity'); v=(base/'01-VALIDATION.md').read_text(encoding='utf-8'); tick=chr(96); pattern=r'^\\| (01-(?:0[1-9]|1[0-1])-T\\d+) \\|.*?\\| '+tick+r'([^'+tick+r']+)'+tick+r' \\|'; rows=re.findall(pattern,v,re.M); ids=[i for i,_ in rows]; assert len(rows)>=17 and len(ids)==len(set(ids)); legacy=[i for i in ids if i.startswith('01-0') and int(i[3:5])<=8]; assert len(legacy)==17; specs=[json.loads(raw) for _,raw in rows]; assert all(set(s)=={'argv','expected_exit'} and type(s['expected_exit']) is int and s['expected_exit']==0 and isinstance(s['argv'],list) and s['argv'] and all(isinstance(a,str) and a for a in s['argv']) for s in specs); d=json.loads((base/'01-EDGE-PROBE.json').read_text(encoding='utf-8')); assert len(d['items'])==53 and all(i['status']=='resolved' and i['verification']=='explicit' and i.get('resolution') for i in d['items']); sec=(base/'01-SECURITY.md').read_text(encoding='utf-8'); assert re.search(r'(?m)^threats_open:\\s*0\\s*$',sec) and 'T-01-14' in sec and 'T-01-18' in sec and 'T-01-SC' in sec; assert not re.search(r'user (?:approved|accepted|acceptance)',sec,re.I)"],"expected_exit":0}` | VALIDATION + EDGE-PROBE + SECURITY | green |
 | 01-08-T3 | 01-08 | 8 | fail-closed runner propagation | harness | `{"argv":["uv","run","--project","mcp_server","python","-c","import subprocess,sys; argv=[sys.executable,'-c','assert False']; result=subprocess.run(argv,shell=False); assert argv[2]=='assert False' and result.returncode!=0"],"expected_exit":0}` | in-memory runner contract | green |
-| 01-09-T1 | 01-09 | 9 | CONT-08, SAFE-08 | focused CR-02/WR-01 | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_service.py","-k","gap_cr02 or gap_wr01","-q","--tb=line"],"expected_exit":0}` | model + service gap nodes | pending |
-| 01-09-T2 | 01-09 | 9 | CONT-08, IDEN-03/04, SAFE-08 | regression | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_service.py","-q","--tb=line"],"expected_exit":0}` | provenance + graph-key sources | pending |
+| 01-09-T1 | 01-09 | 9 | CONT-08, SAFE-08 | focused CR-02/WR-01 | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_service.py","-k","gap_cr02 or gap_wr01","-q","--tb=line"],"expected_exit":0}` | model + service gap nodes | green |
+| 01-09-T2 | 01-09 | 9 | CONT-08, IDEN-03/04, SAFE-08 | regression | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_models.py","mcp_server/tests/test_catalog_service.py","-q","--tb=line"],"expected_exit":0}` | provenance + graph-key sources | green |
 | 01-10-T1 | 01-10 | 10 | CONT-07, IDEN-07, SAFE-08 | focused CR-01/WR-02 | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_store_unit.py","mcp_server/tests/test_catalog_service.py","mcp_server/tests/test_catalog_neo4j_fixtures.py","-k","gap_cr01 or gap_wr02","-q","--tb=line"],"expected_exit":0}` | store + service + fixtures | pending |
 | 01-10-T2 | 01-10 | 10 | TEST-01, TEST-03 | pure fixture unit | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_neo4j_fixtures.py","-q","--tb=line"],"expected_exit":0}` | `catalog_neo4j_fixtures.py` | pending |
 | 01-11-T1 | 01-11 | 11 | TEST-01, TEST-03 | gate runner self-test | `{"argv":["uv","run","--project","mcp_server","python","-m","pytest","-c","mcp_server/pytest.ini","mcp_server/tests/test_catalog_phase1_gate_runner.py","-q","--tb=short"],"expected_exit":0}` | gate runner + tests | pending |
@@ -83,10 +83,10 @@ These ancestry commits prove the historical RED gates. They are not current-HEAD
 
 ## Validation Sign-Off
 
-- [ ] Every current-HEAD row executed successfully with `shell=False` by Plan 01-11 runner.
+- [x] Every current-HEAD row executed successfully with `shell=False` by Plan 01-11 runner.
 - [x] Nine exact edge-probe nodes remain in suite; gap anchors updated for CR/WR.
 - [x] CR-01, CR-02, WR-01, WR-02 mapped once in `01-REVIEW-GAPS.md` with no silent drop.
 - [x] Plan 01-08 historically derived `nyquist_compliant: true` from its then-complete green evidence.
-- [ ] Current Nyquist compliance remains false until verified runner apply after complete green local matrix.
+- [x] Current Nyquist compliance derived true from verified local green ledger; independent audits still pending.
 
-**Approval:** pending Plan 01-11 runner `apply`. Local green never claims independent audit verdicts; `ready_for_phase_2` stays false while audits are pending.
+**Approval:** local Nyquist true via verified runner apply on 2026-07-18. Independent code/goal/Nyquist/security audits remain pending; no independent verdict claimed; `ready_for_phase_2=false`.

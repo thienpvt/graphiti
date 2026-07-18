@@ -82,39 +82,23 @@ Plans:
   4. Caller UUIDs never control identity; structured errors expose safe diagnostics only
   5. Unit coverage for recursive forbid, immutable flags, full entity grammar, FE/BO/overload separation, and UUID material versioning passes before Phase 2 write-adjacent work
 
-**Plans**: 10/11 plans executed
+**Plans**: 11/11 plans executed (local gate green; independent audits pending)
 
 Plans:
 
-- [x] 01-09-PLAN.md
-- [x] 01-10-PLAN.md
-- [ ] 01-11-PLAN.md
-
-- [x] 01-06-PLAN.md
-- [x] 01-07-PLAN.md
-- [x] 01-08-PLAN.md
-
-**Wave 1**
-
 - [x] 01-01-PLAN.md — Strict CatalogStrictModel shells, Literal flags, version/system_key, CONT-08 codes, models suite
-
-**Wave 2** *(after 01-01)*
-
 - [x] 01-02-PLAN.md — Graph-key grammar registry (18 types), FE/BO scope, overload, v1 reject, IDEN-08 echo
-
-**Wave 3** *(serial after 01-02; depends_on [01-01, 01-02] — no parallel with grammar)*
-
 - [x] 01-03-PLAN.md — Versioned UUIDv5 materials + pure future-kind helpers; identity goldens; service graph_key echo
-
-**Wave 4** *(blocked on Wave 3)*
-
 - [x] 01-04-PLAN.md — Structured safe errors + mandatory FastMCP typed CONT-07 production boundary + spies
-
-**Wave 5** *(blocked on Wave 4)*
-
 - [x] 01-05-PLAN.md — Truthful 01-PHASE1-GATE.md hard gate, VALIDATION refresh, edge-probe 53/53 assert
+- [x] 01-06-PLAN.md — Strict contract gap closure
+- [x] 01-07-PLAN.md — Catalog logging scrub + nine edge probes
+- [x] 01-08-PLAN.md — Requirement remap + historical fail-closed gate
+- [x] 01-09-PLAN.md — CR-02/WR-01 provenance timestamp + graph-key locations
+- [x] 01-10-PLAN.md — CR-01/WR-02 locked entity conflicts + offline fixtures
+- [x] 01-11-PLAN.md — Tracked local gate runner, evidence ledger, audit handoff
 
-**Gate**: Fail closed (`01-PHASE1-GATE.md` ready_for_phase_2=false) pending Plans 01-07 and 01-08
+**Gate**: Local matrix green (`local_gate_pass=true`, `nyquist_compliant=true`) via `01-GATE-RESULTS.json`. `ready_for_phase_2=false` while independent code/goal/Nyquist/security audits remain pending. Orchestrator must run those four audits; only after all four green may a tiny 01-12 finalization plan flip final readiness. Phase 2 not started.
 
 ### Phase 2: Topology Authority, Evidence Contract, Hashes, and Capabilities
 
@@ -209,7 +193,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | v1.0 Phase 1. Typed Catalog Primitives | 8/8 | Complete | 2026-07-17 |
 | v1.0 Phase 2. Provenance and Atomic Batch | 6/6 | Complete | 2026-07-17 |
 | Phase 0. Baseline, Inventory, and Compatibility Policy | 2/2 | Complete | 2026-07-17 |
-| Phase 1. Strict Contracts and Catalog-v2 Identity | 6/8 | In Progress | - |
+| Phase 1. Strict Contracts and Catalog-v2 Identity | 11/11 | Local green; audits pending | - |
 | Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 0/TBD | Not started | - |
 | Phase 3A. Immutable Prepare/Commit Control Plane | 0/TBD | Not started | - |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 0/TBD | Not started | - |

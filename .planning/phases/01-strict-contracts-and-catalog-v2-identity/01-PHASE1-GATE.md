@@ -7,10 +7,10 @@
 
 ## Readiness Derivation
 
-- **2026-07-18 invalidation:** CR-01, CR-02, WR-01, and WR-02 are open.
+- **2026-07-18 local closure:** CR-01, CR-02, WR-01, and WR-02 mapped COVERED; local_gate_pass=true; independent audits pending.
 - Plan 01-08 failure-propagation and 9/9 mandatory-check outcomes remain historical evidence only, not current authorization.
 - Catalog Neo4j integration remains skip — Phase 1 unit policy; availability not probed.
-- Current derivation is false. Local readiness may be reconsidered only by Plan 01-11 after Plans 01-09 and 01-10 pass their mandatory checks.
+- Local derivation is green via verified 01-GATE-RESULTS.json; final readiness remains false while independent audits are pending.
 - No Phase 2 work is authorized or started.
 
 ## Check Ledger
@@ -87,9 +87,9 @@ ready_for_phase_2=false
 resolved=53
 unresolved=0
 
-local_gate_pass=false
+local_gate_pass=true
 
-nyquist_compliant=false
+nyquist_compliant=true
 
 independent_code_review=pending
 
@@ -103,4 +103,4 @@ availability_probed=false
 
 ## Scope Stop
 
-Plan 01-08's green ledger is superseded as current authorization. Plans 01-09 and 01-10 must close CR-02/WR-01 and CR-01/WR-02 respectively; Plan 01-11 alone may reconsider local readiness. Independent audits remain mandatory, so Phase 2 stays blocked.
+Plan 01-11 local matrix is green (`local_gate_pass=true`, `nyquist_compliant=true`) via tracked runner ledger `01-GATE-RESULTS.json`. CR-01/CR-02/WR-01/WR-02 are COVERED with no silent drop. Independent code, goal, Nyquist, and security audits remain pending. `ready_for_phase_2=false`. Orchestrator must run the four independent audits; only after all four green may a tiny 01-12 finalization plan flip final readiness. Phase 2 is not started.
