@@ -166,6 +166,19 @@ status: complete
 - **Commit:** `de71c5d`
 - **Checks:** `py_compile` OK; ruff All checks passed; scoped pyright 0 errors; 15 gate unit tests passed; AST parse OK
 
+**3. [Rule 1 - Bug] Helper defined after first call site**
+- **Found during:** Post-return diagnostic (`_manifest_verification_true_marker` undefined at ~334)
+- **Issue:** helper lived after `derive_safety_ledger`; first call in `check_manifest_verification_not_flipped` precedes definition in source order (static analyzers / partial eval)
+- **Fix:** move `_manifest_verification_true_marker` immediately above first call site
+- **Files modified:** `catalog_phase4_gate_runner.py`
+- **Commit:** `176a33d`
+- **Checks:**
+  - `py_compile` COMPILE_OK
+  - pytest 15 passed
+  - ruff All checks passed
+  - pyright explicit-file: 0 errors, 0 warnings, 0 informations
+  - `def_at < first_call_at` order_ok=True
+
 ## TDD Gate Compliance
 
 - RED gate: Task 1 commit `febca35` (`test(04-01): ...`) — five failing product suites
@@ -195,6 +208,13 @@ uv run --project mcp_server python -m py_compile mcp_server/tests/catalog_phase4
 uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_phase4_gate_runner.py -q  # 15 passed
 uv run --project mcp_server ruff check mcp_server/tests/catalog_phase4_gate_runner.py mcp_server/tests/test_catalog_phase4_gate_runner.py  # All checks passed
 uv run --project mcp_server pyright mcp_server/tests/catalog_phase4_gate_runner.py mcp_server/tests/test_catalog_phase4_gate_runner.py  # 0 errors
+
+# Helper-order fix recheck (176a33d)
+uv run --project mcp_server python -m py_compile mcp_server/tests/catalog_phase4_gate_runner.py  # COMPILE_OK
+uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_phase4_gate_runner.py -q  # 15 passed
+uv run --project mcp_server ruff check mcp_server/tests/catalog_phase4_gate_runner.py mcp_server/tests/test_catalog_phase4_gate_runner.py  # All checks passed!
+uv run --project mcp_server pyright mcp_server/tests/catalog_phase4_gate_runner.py mcp_server/tests/test_catalog_phase4_gate_runner.py  # 0 errors, 0 warnings, 0 informations
+# order_ok=True (def before first call); count_def=1; count_name=3
 ```
 
 ## Next
@@ -215,4 +235,5 @@ uv run --project mcp_server pyright mcp_server/tests/catalog_phase4_gate_runner.
 - FOUND: commit `febca35`
 - FOUND: commit `e9993a2`
 - FOUND: commit `de71c5d`
+- FOUND: commit `176a33d`
 - FOUND: commit `29f1322` (initial SUMMARY; this file re-committed after diagnostics)
