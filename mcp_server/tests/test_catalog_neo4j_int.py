@@ -60,20 +60,42 @@ from services.catalog_identity import (  # noqa: E402
 )
 from services.catalog_service import CatalogService  # noqa: E402
 
+from catalog_neo4j_fixtures import (  # noqa: E402
+    ACCEPT_TAB_BATCH,
+    ACCEPT_TAB_FIXTURE,
+    BATCH,
+    EDGE_BATCH,
+    FIXED_NS,
+    FORBIDDEN_GROUP,
+    GROUP,
+    build_accept_tab_request,
+    build_conflicting_entity_pair,
+    build_doc_entity,
+    build_edge,
+    build_entity,
+    build_extra_table,
+    build_six_entities,
+    build_structural_and_fk_edges,
+    build_upsert_edges_request,
+    build_upsert_entities_request,
+)
+
+# Back-compat local aliases used throughout this module.
+_entity = build_entity
+_six_entities = build_six_entities
+_extra_table = build_extra_table
+_doc_entity = build_doc_entity
+_edge = build_edge
+_structural_and_fk_edges = build_structural_and_fk_edges
+
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_neo4j,
     pytest.mark.asyncio,
 ]
 
-GROUP = 'oracle-catalog-tool-test'
-FORBIDDEN_GROUP = 'oracle-catalog-v2'
-FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 EMBED_DIM = 8
-BATCH = 'gate02-batch-001'
-EDGE_BATCH = 'gate02-edge-batch-001'
-ACCEPT_TAB_BATCH = 'accept-tab-batch-001'
-ACCEPT_TAB_FIXTURE = Path(__file__).parent / 'fixtures' / 'accept_tab_sanitized.json'
 
 
 def _catalog_int_required() -> bool:
@@ -147,154 +169,6 @@ class CommunityLLM:
 def _enabled_config() -> CatalogConfig:
     return CatalogConfig(enabled=True, uuid_namespace=str(FIXED_NS))
 
-
-def _entity(
-    entity_type: str,
-    graph_key: str,
-    name_raw: str,
-    name_canonical: str,
-    dqn: str,
-    summary: str,
-    **extra: Any,
-) -> CatalogEntityItem:
-    data: dict[str, Any] = {
-        'entity_type': entity_type,
-        'graph_key': graph_key,
-        'name_raw': name_raw,
-        'name_canonical': name_canonical,
-        'database_qualified_name': dqn,
-        'summary': summary,
-        'attributes': {'src': 'gate02'},
-        'confidence': 0.95,
-    }
-    data.update(extra)
-    return CatalogEntityItem.model_validate(data)
-
-
-def _six_entities() -> list[CatalogEntityItem]:
-    return [
-        _entity('Database', 'DATABASE::ORCL', 'ORCL', 'orcl', 'ORCL', 'Oracle database'),
-        _entity('Schema', 'SCHEMA::HR', 'HR', 'hr', 'ORCL.HR', 'HR schema'),
-        _entity(
-            'Table', 'TABLE::HR.EMPLOYEES', 'EMPLOYEES', 'employees', 'HR.EMPLOYEES', 'Employees'
-        ),
-        _entity('Column', 'COLUMN::HR.EMPLOYEES.ID', 'ID', 'id', 'HR.EMPLOYEES.ID', 'PK column'),
-        _entity(
-            'Constraint',
-            'CONSTRAINT::HR.EMPLOYEES.PK_EMP',
-            'PK_EMP',
-            'pk_emp',
-            'HR.EMPLOYEES.PK_EMP',
-            'Primary key',
-        ),
-        _entity(
-            'Index',
-            'INDEX::HR.EMPLOYEES.IX_EMP_NAME',
-            'IX_EMP_NAME',
-            'ix_emp_name',
-            'HR.EMPLOYEES.IX_EMP_NAME',
-            'Name index',
-        ),
-    ]
-
-
-def _extra_table(key: str = 'TABLE::HR.DEPARTMENTS') -> CatalogEntityItem:
-    name = key.split('::', 1)[1].split('.')[-1]
-    return _entity('Table', key, name, name.lower(), key.split('::', 1)[1], f'Table {name}')
-
-
-def _doc_entity() -> CatalogEntityItem:
-    return _entity(
-        'DictionaryDocument',
-        'DOC::HR.EMPLOYEES.DOC',
-        'EMP_DOC',
-        'emp_doc',
-        'HR.EMPLOYEES.DOC',
-        'Employee documentation',
-    )
-
-
-def _edge(
-    edge_type: str,
-    edge_key: str,
-    source_graph_key: str,
-    source_entity_type: str,
-    target_graph_key: str,
-    target_entity_type: str,
-    fact: str,
-    **extra: Any,
-) -> CatalogEdgeItem:
-    data: dict[str, Any] = {
-        'edge_type': edge_type,
-        'edge_key': edge_key,
-        'source_graph_key': source_graph_key,
-        'source_entity_type': source_entity_type,
-        'target_graph_key': target_graph_key,
-        'target_entity_type': target_entity_type,
-        'fact': fact,
-        'confidence': 0.9,
-    }
-    data.update(extra)
-    return CatalogEdgeItem.model_validate(data)
-
-
-def _structural_and_fk_edges() -> list[CatalogEdgeItem]:
-    return [
-        _edge(
-            'Contains',
-            'CONTAINS::SCHEMA::HR->TABLE::HR.EMPLOYEES',
-            'SCHEMA::HR',
-            'Schema',
-            'TABLE::HR.EMPLOYEES',
-            'Table',
-            'schema HR contains table EMPLOYEES',
-        ),
-        _edge(
-            'PrimaryKeyOf',
-            'PK::CONSTRAINT::HR.EMPLOYEES.PK_EMP->TABLE::HR.EMPLOYEES',
-            'CONSTRAINT::HR.EMPLOYEES.PK_EMP',
-            'Constraint',
-            'TABLE::HR.EMPLOYEES',
-            'Table',
-            'PK_EMP is primary key of EMPLOYEES',
-        ),
-        _edge(
-            'UniqueKeyOf',
-            'UK::CONSTRAINT::HR.EMPLOYEES.PK_EMP->COLUMN::HR.EMPLOYEES.ID',
-            'CONSTRAINT::HR.EMPLOYEES.PK_EMP',
-            'Constraint',
-            'COLUMN::HR.EMPLOYEES.ID',
-            'Column',
-            'PK_EMP uniquely keys column ID',
-        ),
-        _edge(
-            'DocumentedBy',
-            'DOCUMENTED::TABLE::HR.EMPLOYEES->DOC::HR.EMPLOYEES.DOC',
-            'TABLE::HR.EMPLOYEES',
-            'Table',
-            'DOC::HR.EMPLOYEES.DOC',
-            'DictionaryDocument',
-            'EMPLOYEES documented by EMP_DOC',
-        ),
-        _edge(
-            'ForeignKeyTo',
-            'FK::HR.EMPLOYEES.DEPT_ID->HR.DEPARTMENTS.DEPT_ID',
-            'TABLE::HR.EMPLOYEES',
-            'Table',
-            'TABLE::HR.DEPARTMENTS',
-            'Table',
-            'employees.dept_id references departments.dept_id',
-        ),
-        _edge(
-            'ForeignKeyTo',
-            'FK::HR.EMPLOYEES.MGR_ID->HR.DEPARTMENTS.MGR_DEPT',
-            'TABLE::HR.EMPLOYEES',
-            'Table',
-            'TABLE::HR.DEPARTMENTS',
-            'Table',
-            'employees.mgr_id references departments via alternate FK key',
-        ),
-    ]
 
 
 async def _count_group_nodes(driver: Any, group_id: str = GROUP) -> int:
@@ -535,25 +409,25 @@ async def catalog_client(neo4j_driver: Any):
 
 
 async def _upsert_entities(ctx, entities: list[CatalogEntityItem], **kw: Any):
-    req = UpsertTypedEntitiesRequest(
-        group_id=GROUP,
+    req = build_upsert_entities_request(
+        entities,
         batch_id=kw.pop('batch_id', BATCH),
-        entities=entities,
         dry_run=kw.pop('dry_run', False),
-        atomic=kw.pop('atomic', True),
+        group_id=kw.pop('group_id', GROUP),
     )
+    kw.pop('atomic', None)
     return await ctx.service.upsert_typed_entities(client=ctx.client, request=req)
 
 
 async def _upsert_edges(ctx, edges: list[CatalogEdgeItem], **kw: Any):
-    req = UpsertTypedEdgesRequest(
-        group_id=GROUP,
+    req = build_upsert_edges_request(
+        edges,
         batch_id=kw.pop('batch_id', EDGE_BATCH),
-        edges=edges,
         dry_run=kw.pop('dry_run', False),
-        atomic=kw.pop('atomic', True),
-        strict_endpoints=kw.pop('strict_endpoints', True),
+        group_id=kw.pop('group_id', GROUP),
     )
+    kw.pop('atomic', None)
+    kw.pop('strict_endpoints', None)
     return await ctx.service.upsert_typed_edges(client=ctx.client, request=req)
 
 
@@ -580,28 +454,7 @@ def _accept_tab_request(
     dry_run: bool = False,
     batch_id: str = ACCEPT_TAB_BATCH,
 ) -> UpsertCatalogBatchRequest:
-    payload = json.loads(ACCEPT_TAB_FIXTURE.read_text(encoding='utf-8'))
-    assert payload['batch_id'] == ACCEPT_TAB_BATCH
-    return UpsertCatalogBatchRequest(
-        group_id=GROUP,
-        batch_id=batch_id,
-        entities=[CatalogEntityItem.model_validate(item) for item in payload['entities']],
-        edges=[CatalogEdgeItem.model_validate(item) for item in payload['edges']],
-        provenance=NestedProvenancePayload(
-            sources=[
-                CatalogSourceItem.model_validate(item) for item in payload['provenance']['sources']
-            ],
-            entity_targets=[
-                CatalogProvenanceEntityTarget.model_validate(item)
-                for item in payload['provenance']['entity_targets']
-            ],
-            edge_targets=[
-                CatalogProvenanceEdgeTarget.model_validate(item)
-                for item in payload['provenance']['edge_targets']
-            ],
-        ),
-        dry_run=dry_run,
-    )
+    return build_accept_tab_request(dry_run=dry_run, batch_id=batch_id)
 
 
 async def _upsert_accept_tab(ctx, *, dry_run: bool = False, batch_id: str = ACCEPT_TAB_BATCH):
@@ -722,6 +575,8 @@ async def test_accept_tab_commit_retry_conflict_status_reinitialization_and_veri
     verified = await restarted.verify_catalog_batch(
         client=ctx.client,
         request=VerifyCatalogBatchRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
             group_id=GROUP,
             batch_id=request.batch_id,
             entities=[
@@ -787,6 +642,8 @@ async def test_concurrent_conflicting_source_updates_only_one_commits(catalog_cl
         return await service.upsert_provenance(
             client=client,
             request=UpsertProvenanceRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
                 group_id=GROUP,
                 batch_id=batch_id,
                 sources=[source],
@@ -836,8 +693,8 @@ async def test_accept_tab_missing_endpoint_batch_has_no_partial_domain_write(cat
     good = _accept_tab_request()
     missing = good.edges[1].model_copy(
         update={
-            'target_graph_key': 'TABLE::APP.MISSING_PARENT',
-            'edge_key': 'FK::APP.ACCEPT_TAB.ACCEPT_ID->APP.MISSING_PARENT.ACCEPT_ID',
+            'target_graph_key': 'TABLE::FE::ORCL.APP.MISSING_PARENT',
+            'edge_key': 'FK::ORCL.APP.ACCEPT_TAB.ACCEPT_ID->ORCL.APP.MISSING_PARENT.ACCEPT_ID',
         }
     )
     request = good.model_copy(
@@ -970,13 +827,17 @@ async def test_resolve_and_verify_found(catalog_client):
     ]
     rresp = await ctx.service.resolve_typed_entities(
         client=ctx.client,
-        request=ResolveTypedEntitiesRequest(group_id=GROUP, entities=refs),
+        request=ResolveTypedEntitiesRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',group_id=GROUP, entities=refs),
     )
     assert all(r.found for r in rresp.results), [r.model_dump() for r in rresp.results]
 
     vresp = await ctx.service.verify_catalog_batch(
         client=ctx.client,
         request=VerifyCatalogBatchRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
             group_id=GROUP,
             batch_id=BATCH,
             entities=[
@@ -1034,6 +895,8 @@ async def test_verify_typed_entity_twin_anomalies_are_not_hidden(catalog_client)
     resp = await ctx.service.verify_catalog_batch(
         client=ctx.client,
         request=VerifyCatalogBatchRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
             group_id=GROUP,
             entities=[VerifyEntityRef(entity_type='Table', graph_key=entity.graph_key)],
         ),
@@ -1078,6 +941,8 @@ async def test_resolve_mixed_twin_anomalies_are_not_hidden(catalog_client):
     resp = await ctx.service.resolve_typed_entities(
         client=ctx.client,
         request=ResolveTypedEntitiesRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
             group_id=GROUP,
             entities=[ResolveEntityRef(entity_type='Table', graph_key=entity.graph_key)],
         ),
@@ -1117,6 +982,8 @@ async def test_verify_wrong_type_sibling_with_typed_present_live(catalog_client)
     resp = await ctx.service.verify_catalog_batch(
         client=ctx.client,
         request=VerifyCatalogBatchRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
             group_id=GROUP,
             entities=[VerifyEntityRef(entity_type='Table', graph_key=entity.graph_key)],
         ),
@@ -1158,6 +1025,8 @@ async def test_verify_physical_duplicate_edge_is_preserved_and_reported(catalog_
     resp = await ctx.service.verify_catalog_batch(
         client=ctx.client,
         request=VerifyCatalogBatchRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
             group_id=GROUP,
             batch_id='verify-duplicate-live',
             edges=[VerifyEdgeRef(edge_type=edge.edge_type, edge_key=edge.edge_key)],
@@ -1193,12 +1062,14 @@ async def test_verify_edge_endpoint_and_type_mismatch_live(catalog_client):
     endpoint_resp = await ctx.service.verify_catalog_batch(
         client=ctx.client,
         request=VerifyCatalogBatchRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
             group_id=GROUP,
             edges=[
                 VerifyEdgeRef(
                     edge_type=edge.edge_type,
                     edge_key=edge.edge_key,
-                    expected_source_graph_key='SCHEMA::WRONG',
+                    expected_source_uuid='00000000-0000-0000-0000-000000000001',
                 )
             ],
         ),
@@ -1209,6 +1080,8 @@ async def test_verify_edge_endpoint_and_type_mismatch_live(catalog_client):
     type_resp = await ctx.service.verify_catalog_batch(
         client=ctx.client,
         request=VerifyCatalogBatchRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
             group_id=GROUP,
             edges=[VerifyEdgeRef(edge_type='DependsOn', edge_key=edge.edge_key)],
         ),
@@ -1395,7 +1268,7 @@ async def test_update_changes_summary_preserves_identity_names(catalog_client):
 async def test_name_raw_canonical_in_hash_identity_stable(catalog_client):
     """Changed name_raw/name_canonical same graph_key → deterministic_uuid_conflict; originals preserved."""
     ctx = catalog_client
-    e1 = _entity('Table', 'TABLE::HR.T', 'T', 't', 'HR.T', 'table t')
+    e1 = _entity('Table', 'TABLE::FE::ORCL.HR.T', 'T', 't', 'ORCL.HR.T', 'table t')
     r1 = await _upsert_entities(ctx, [e1])
     u = r1.results[0].uuid
     assert u
@@ -1403,7 +1276,7 @@ async def test_name_raw_canonical_in_hash_identity_stable(catalog_client):
     assert before is not None
     before_hash = before['content_sha256']
     before_batch = before['batch_id']
-    e2 = _entity('Table', 'TABLE::HR.T', 'T_RAW', 't_raw', 'HR.T', 'table t')
+    e2 = _entity('Table', 'TABLE::FE::ORCL.HR.T', 'T_RAW', 't_raw', 'ORCL.HR.T', 'table t')
     r2 = await _upsert_entities(ctx, [e2], batch_id='b-name')
     assert any(r.error_code == CatalogErrorCode.deterministic_uuid_conflict for r in r2.results)
     after = await _fetch_entity(ctx.driver, u)
@@ -1417,8 +1290,8 @@ async def test_name_raw_canonical_in_hash_identity_stable(catalog_client):
 
 async def test_wrong_graph_key_is_different_identity(catalog_client):
     ctx = catalog_client
-    e1 = _entity('Table', 'TABLE::HR.A', 'A', 'a', 'HR.A', 'a')
-    e2 = _entity('Table', 'TABLE::HR.B', 'A', 'a', 'HR.A', 'a')  # same names, different key
+    e1 = _entity('Table', 'TABLE::FE::ORCL.HR.A', 'A', 'a', 'ORCL.HR.A', 'a')
+    e2 = _entity('Table', 'TABLE::FE::ORCL.HR.B', 'A', 'a', 'ORCL.HR.A', 'a')  # same names, different key
     r = await _upsert_entities(ctx, [e1, e2])
     assert r.created == 2
     assert r.results[0].uuid != r.results[1].uuid
@@ -1470,9 +1343,9 @@ async def test_missing_endpoint_and_type_and_generic(catalog_client):
     missing = _edge(
         'ForeignKeyTo',
         'FK::missing',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
-        'TABLE::HR.NOPE',
+        'TABLE::FE::ORCL.HR.NOPE',
         'Table',
         'missing target',
     )
@@ -1481,12 +1354,12 @@ async def test_missing_endpoint_and_type_and_generic(catalog_client):
     assert await _count_group_edges(ctx.driver) == 0
 
     # Wrong type endpoint
-    wrong_name = 'TABLE::HR.WRONGTYPE'
+    wrong_name = 'TABLE::FE::ORCL.HR.WRONGTYPE'
     await _seed_wrong_type_entity(ctx.driver, wrong_name, 'View')
     wrong = _edge(
         'ForeignKeyTo',
         'FK::wrongtype',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
         wrong_name,
         'Table',
@@ -1496,12 +1369,12 @@ async def test_missing_endpoint_and_type_and_generic(catalog_client):
     assert any(r.error_code == CatalogErrorCode.endpoint_type_mismatch for r in r_wrong.results)
 
     # Generic endpoint
-    gen_name = 'TABLE::HR.GENERIC'
+    gen_name = 'TABLE::FE::ORCL.HR.GENERIC'
     await _seed_generic_entity(ctx.driver, gen_name)
     gen = _edge(
         'ForeignKeyTo',
         'FK::generic',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
         gen_name,
         'Table',
@@ -1517,7 +1390,7 @@ async def test_typed_duplicate_endpoint_does_not_bind_wrong_uuid(catalog_client)
     ctx = catalog_client
     # Source only — target is not product-created.
     await _upsert_entities(ctx, [_six_entities()[2]])
-    target_key = 'TABLE::HR.DEPARTMENTS'
+    target_key = 'TABLE::FE::ORCL.HR.DEPARTMENTS'
     expected_tgt = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', target_key)
 
     # Case 1: single exact-typed row with non-deterministic uuid → conflict, no edge.
@@ -1539,7 +1412,7 @@ async def test_typed_duplicate_endpoint_does_not_bind_wrong_uuid(catalog_client)
     edge = _edge(
         'ForeignKeyTo',
         'FK::decoy-wrong-only',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
         target_key,
         'Table',
@@ -1570,7 +1443,7 @@ async def test_typed_duplicate_endpoint_does_not_bind_wrong_uuid(catalog_client)
     edge2 = _edge(
         'ForeignKeyTo',
         'FK::decoy-with-expected',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
         target_key,
         'Table',
@@ -1599,9 +1472,9 @@ async def test_edge_identity_conflict(catalog_client):
     e = _edge(
         'ForeignKeyTo',
         'FK::ident',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
-        'TABLE::HR.DEPARTMENTS',
+        'TABLE::FE::ORCL.HR.DEPARTMENTS',
         'Table',
         'original fact',
     )
@@ -1636,6 +1509,8 @@ async def test_concurrent_identical_entity_one_node(catalog_client):
             driver=ctx.driver, embedder=FakeEmbedder(), llm_client=RecordingLLM()
         )
         req = UpsertTypedEntitiesRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
             group_id=GROUP,
             batch_id=f'conc-e-{i}',
             entities=[entity],
@@ -1657,9 +1532,9 @@ async def test_concurrent_identical_edge_one_rel(catalog_client):
     edge = _edge(
         'ForeignKeyTo',
         'FK::conc',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
-        'TABLE::HR.DEPARTMENTS',
+        'TABLE::FE::ORCL.HR.DEPARTMENTS',
         'Table',
         'concurrent fk',
     )
@@ -1671,6 +1546,8 @@ async def test_concurrent_identical_edge_one_rel(catalog_client):
             driver=ctx.driver, embedder=FakeEmbedder(), llm_client=RecordingLLM()
         )
         req = UpsertTypedEdgesRequest(
+            identity_schema_version='catalog-v2',
+            system_key='FE',
             group_id=GROUP,
             batch_id=f'conc-ed-{i}',
             edges=[edge],
@@ -1686,13 +1563,13 @@ async def test_concurrent_identical_edge_one_rel(catalog_client):
 
 async def test_atomic_entity_rollback(catalog_client):
     ctx = catalog_client
-    good = _entity('Table', 'TABLE::HR.GOOD', 'GOOD', 'good', 'HR.GOOD', 'good table')
+    good = _entity('Table', 'TABLE::FE::ORCL.HR.GOOD', 'GOOD', 'good', 'HR.GOOD', 'good table')
     # Canonical payload must be hashable (sanity before atomic conflict path).
     payload = CatalogService.entity_canonical_payload(good)
     assert payload['graph_key'] == good.graph_key
     assert payload['entity_type'] == 'Table'
     # Force second conflict with pre-seeded wrong type on second identity
-    bad = _entity('Table', 'TABLE::HR.BAD', 'BAD', 'bad', 'HR.BAD', 'bad table')
+    bad = _entity('Table', 'TABLE::FE::ORCL.HR.BAD', 'BAD', 'bad', 'HR.BAD', 'bad table')
     bad_uuid = catalog_entity_uuid(FIXED_NS, GROUP, bad.entity_type, bad.graph_key)
     await ctx.driver.execute_query(
         """
@@ -1725,24 +1602,24 @@ async def test_atomic_edge_rollback(catalog_client):
         [
             _six_entities()[2],
             _extra_table(),
-            _extra_table('TABLE::HR.LOCATIONS'),
+            _extra_table('TABLE::FE::ORCL.HR.LOCATIONS'),
         ],
     )
     ok = _edge(
         'ForeignKeyTo',
         'FK::ok',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
-        'TABLE::HR.DEPARTMENTS',
+        'TABLE::FE::ORCL.HR.DEPARTMENTS',
         'Table',
         'ok fk',
     )
     bad = _edge(
         'ForeignKeyTo',
         'FK::bad',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
-        'TABLE::HR.MISSING',
+        'TABLE::FE::ORCL.HR.MISSING',
         'Table',
         'bad fk',
     )
@@ -1833,9 +1710,9 @@ async def test_edge_update_heals_null_episodes_for_search(catalog_client):
     edge = _edge(
         'ForeignKeyTo',
         'FK::null-episodes-heal',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
-        'TABLE::HR.DEPARTMENTS',
+        'TABLE::FE::ORCL.HR.DEPARTMENTS',
         'Table',
         'employees.dept_id references departments.dept_id original',
     )
@@ -1867,9 +1744,9 @@ async def test_edge_update_heals_null_episodes_for_search(catalog_client):
     updated = _edge(
         'ForeignKeyTo',
         'FK::null-episodes-heal',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
-        'TABLE::HR.DEPARTMENTS',
+        'TABLE::FE::ORCL.HR.DEPARTMENTS',
         'Table',
         'employees.dept_id references departments.dept_id healed',
     )
@@ -1969,9 +1846,9 @@ async def test_edge_update_preserves_existing_provenance_episodes(catalog_client
     edge = _edge(
         'ForeignKeyTo',
         'FK::episodes-preserved',
-        'TABLE::HR.EMPLOYEES',
+        'TABLE::FE::ORCL.HR.EMPLOYEES',
         'Table',
-        'TABLE::HR.DEPARTMENTS',
+        'TABLE::FE::ORCL.HR.DEPARTMENTS',
         'Table',
         'original fact',
     )
@@ -2000,3 +1877,49 @@ async def test_edge_update_preserves_existing_provenance_episodes(catalog_client
         params={'u': edge_uuid, 'g': GROUP},
     )
     assert stored[0][0]['episodes'] == [source_uuid]
+
+
+async def test_concurrent_conflicting_entity_names_only_winner_persists(catalog_client):
+    """Live concurrent conflicting-name race: only winner persists (skipped with module).
+
+    Two service instances submit one deterministic identity with divergent
+    raw/canonical/mutable/hash/vector values. Eventual assertions: one logical
+    success, one deterministic conflict, one physical entity, winner-consistent
+    identity/payload/hash/vector, preserved original created_at, loser values absent.
+    """
+    ctx = catalog_client
+    winner, loser = build_conflicting_entity_pair()
+    service_a = CatalogService(catalog_config=_enabled_config(), queue_service=ctx.queue)
+    service_b = CatalogService(catalog_config=_enabled_config(), queue_service=ctx.queue)
+    client_a = ctx.client
+    client_b = ctx.client
+
+    req_a = build_upsert_entities_request([winner], batch_id='race-winner')
+    req_b = build_upsert_entities_request([loser], batch_id='race-loser')
+
+    results = await asyncio.gather(
+        service_a.upsert_typed_entities(client=client_a, request=req_a),
+        service_b.upsert_typed_entities(client=client_b, request=req_b),
+        return_exceptions=False,
+    )
+    statuses = [r.results[0].status for r in results]
+    codes = [r.results[0].error_code for r in results]
+    success_statuses = {'created', 'updated', 'unchanged'}
+    assert sum(1 for s in statuses if s in success_statuses) == 1
+    assert any(c == CatalogErrorCode.deterministic_uuid_conflict for c in codes)
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, winner.entity_type, winner.graph_key)
+    assert await _count_entity_uuid(ctx.driver, ent_uuid) == 1
+    stored = await _fetch_entity(ctx.driver, ent_uuid)
+    assert stored is not None
+    assert stored['graph_key'] == winner.graph_key
+    winner_side = stored['name_raw'] == winner.name_raw
+    loser_side = stored['name_raw'] == loser.name_raw
+    assert winner_side ^ loser_side
+    if winner_side:
+        assert stored['name_canonical'] == winner.name_canonical
+        assert stored['summary'] == winner.summary
+    else:
+        assert stored['name_canonical'] == loser.name_canonical
+        assert stored['summary'] == loser.summary
+    assert stored['created_at'] is not None
+    assert stored['has_emb'] is True

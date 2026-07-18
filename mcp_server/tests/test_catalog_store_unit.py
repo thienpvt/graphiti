@@ -1376,3 +1376,68 @@ async def test_get_batch_status_returns_row_or_none():
             return ([], None, None)
 
     assert await store.get_batch_status(_Empty(), uuid=UUID, group_id=GROUP) is None
+
+
+# ---------------------------------------------------------------------------
+# gap_cr01: lock-authoritative entity conflict Cypher structure
+# ---------------------------------------------------------------------------
+
+
+def test_gap_cr01_entity_upsert_cypher_lock_order_and_conflict_gating():
+    store = CatalogNeo4jStore()
+    label = store.resolve_entity_label('Table')
+    cypher = store.build_entity_upsert_cypher('Table')
+
+    merge_idx = cypher.index('MERGE (n:Entity {uuid: $uuid, group_id: $group_id})')
+    lock_idx = cypher.index('SET n.uuid = n.uuid')
+    assert merge_idx < lock_idx
+
+    assert 'deterministic_uuid_conflict' in cypher
+    assert 'error_code' in cypher
+    assert "'Entity' IN labels(n)" in cypher
+    assert f"'{label}' IN labels(n)" in cypher
+    assert "size([label IN labels(n) WHERE label <> 'Entity']) = 1" in cypher
+    assert 'n.labels' in cypher
+
+    error_status_idx = cypher.index("WHEN error_code IS NOT NULL THEN 'error'")
+    foreach_idx = cypher.index("status = 'updated'")
+    vector_idx = cypher.index("status IN ['created', 'updated']")
+    return_idx = cypher.index('RETURN')
+    assert lock_idx < error_status_idx < foreach_idx
+    assert error_status_idx < vector_idx < return_idx
+
+    set_block = cypher.split('FOREACH')[1].split('REMOVE')[0]
+    for forbidden in (
+        'n.created_at',
+        'n.name =',
+        'n.graph_key =',
+        'n.name_raw =',
+        'n.name_canonical =',
+        'n.labels =',
+        'name_embedding',
+    ):
+        assert forbidden not in set_block
+
+    for field in (
+        'error_code',
+        'n.name AS name',
+        'n.graph_key AS graph_key',
+        'n.name_raw AS name_raw',
+        'n.name_canonical AS name_canonical',
+        'n.labels AS labels',
+        'labels(n) AS neo4j_labels',
+        'n.content_sha256 AS content_sha256',
+        'n.summary AS summary',
+        'n.name_embedding IS NOT NULL AS has_name_embedding',
+    ):
+        assert field in cypher, field
+
+
+def test_gap_cr01_entity_upsert_type_contract_covers_label_mismatch_cases():
+    store = CatalogNeo4jStore()
+    cypher = store.build_entity_upsert_cypher('Table')
+    assert "'Entity' IN labels(n)" in cypher
+    assert "size([label IN labels(n) WHERE label <> 'Entity']) = 1" in cypher
+    assert 'n.labels' in cypher
+    assert ':Table' in cypher
+    assert 'deterministic_uuid_conflict' in cypher

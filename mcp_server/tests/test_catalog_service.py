@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import ast
 import importlib
 import logging
@@ -5113,3 +5115,374 @@ async def test_gap_wr01_fastmcp_shell_mismatch_keeps_invalid_system_key():
         _assert_no_backend_side_effects(spies, body_entered)
     finally:
         tool.fn = original_fn
+
+
+# ---------------------------------------------------------------------------
+# gap_cr01: barrier-driven entity race across three write routes
+# ---------------------------------------------------------------------------
+
+
+class _RaceEntityStore:
+    """Event/barrier-driven fake store for concurrent conflicting-name entity races."""
+
+    def __init__(self, *, loser_name_raw: str | None = None) -> None:
+        self.entities: dict[tuple[str, str], dict[str, Any]] = {}
+        self.checkpoints: list[str] = []
+        self._lock = asyncio.Lock()
+        self._pre_reads_done = 0
+        self._both_pre_read = asyncio.Event()
+        self._loser_at_merge = asyncio.Event()
+        self._winner_committed = asyncio.Event()
+        self.loser_name_raw = loser_name_raw
+        self.upsert_calls = 0
+        self.batch_status_writes: list[dict[str, Any]] = []
+
+    async def ensure_uuid_uniqueness_constraints(self, driver: Any) -> None:
+        _ = driver
+        return None
+
+    async def get_entity_by_uuid(
+        self,
+        executor: Any,
+        *,
+        uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        _ = executor
+        if tx is None:
+            row = self.entities.get((uuid, group_id))
+            self.checkpoints.append(f'pre_read:{"hit" if row else "miss"}:{uuid[:8]}')
+            self._pre_reads_done += 1
+            if self._pre_reads_done >= 2:
+                self._both_pre_read.set()
+            # Concurrent race: both pre-reads observe absence before either commits.
+            if self.loser_name_raw is not None:
+                await self._both_pre_read.wait()
+                return None
+            return None if row is None else dict(row)
+        row = self.entities.get((uuid, group_id))
+        self.checkpoints.append(f'in_tx_recheck:{"hit" if row else "miss"}:{uuid[:8]}')
+        return None if row is None else dict(row)
+
+    def prepare_entity_params(self, **kwargs: Any) -> dict[str, Any]:
+        from services.catalog_store import CatalogNeo4jStore
+
+        return CatalogNeo4jStore().prepare_entity_params(**kwargs)
+
+    def resolve_entity_label(self, entity_type: str) -> str:
+        from services.catalog_store import CatalogNeo4jStore
+
+        return CatalogNeo4jStore().resolve_entity_label(entity_type)
+
+    def _conflict_row(self, existing: dict[str, Any]) -> dict[str, Any]:
+        return {
+            'uuid': existing['uuid'],
+            'status': 'error',
+            'error_code': CatalogErrorCode.deterministic_uuid_conflict.value,
+            'name': existing['name'],
+            'graph_key': existing['graph_key'],
+            'name_raw': existing['name_raw'],
+            'name_canonical': existing['name_canonical'],
+            'labels': existing['labels'],
+            'neo4j_labels': existing['neo4j_labels'],
+            'content_sha256': existing['content_sha256'],
+            'summary': existing['summary'],
+            'batch_id': existing['batch_id'],
+            'created_at': existing['created_at'],
+            'updated_at': existing['updated_at'],
+            'has_name_embedding': True,
+        }
+
+    def _identity_conflict(self, existing: dict[str, Any], params: dict[str, Any]) -> bool:
+        return any(
+            existing.get(field) != params.get(field)
+            for field in ('name', 'graph_key', 'name_raw', 'name_canonical')
+        )
+
+    async def upsert_entity_item(
+        self,
+        tx: Any,
+        *,
+        entity_type: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        _ = tx, entity_type
+        self.upsert_calls += 1
+        key = (params['uuid'], params['group_id'])
+        self.checkpoints.append(f'merge_enter:{params["name_raw"]}')
+
+        # Loser reaches MERGE and blocks until winner commits (real checkpoint order).
+        if self.loser_name_raw is not None and params['name_raw'] == self.loser_name_raw:
+            self._loser_at_merge.set()
+            self.checkpoints.append(f'merge_block:{params["name_raw"]}')
+            await self._winner_committed.wait()
+
+        async with self._lock:
+            existing = self.entities.get(key)
+            if existing is not None:
+                if self._identity_conflict(existing, params):
+                    self.checkpoints.append(f'merge_conflict:{params["name_raw"]}')
+                    return self._conflict_row(existing)
+                self.checkpoints.append(f'merge_unchanged:{params["name_raw"]}')
+                return {
+                    'uuid': existing['uuid'],
+                    'status': 'unchanged',
+                    'error_code': None,
+                    'name': existing['name'],
+                    'graph_key': existing['graph_key'],
+                    'name_raw': existing['name_raw'],
+                    'name_canonical': existing['name_canonical'],
+                    'labels': existing['labels'],
+                    'neo4j_labels': existing['neo4j_labels'],
+                    'content_sha256': existing['content_sha256'],
+                    'summary': existing['summary'],
+                    'batch_id': existing['batch_id'],
+                    'created_at': existing['created_at'],
+                    'updated_at': existing['updated_at'],
+                    'has_name_embedding': True,
+                }
+
+            # Winner may wait until loser is parked at MERGE.
+            if (
+                self.loser_name_raw is not None
+                and params['name_raw'] != self.loser_name_raw
+                and not self._winner_committed.is_set()
+            ):
+                await self._loser_at_merge.wait()
+
+            created = {
+                'uuid': params['uuid'],
+                'group_id': params['group_id'],
+                'name': params['name'],
+                'graph_key': params['graph_key'],
+                'name_raw': params['name_raw'],
+                'name_canonical': params['name_canonical'],
+                'labels': params['labels'],
+                'neo4j_labels': list(params['labels']),
+                'content_sha256': params['content_sha256'],
+                'summary': params['summary'],
+                'batch_id': params['batch_id'],
+                'created_at': params['created_at'],
+                'updated_at': params['updated_at'],
+                'attributes': params.get('attributes'),
+                'has_name_embedding': True,
+            }
+            self.entities[key] = created
+            self.checkpoints.append(f'merge_commit:{params["name_raw"]}')
+            self._winner_committed.set()
+            return {
+                'uuid': created['uuid'],
+                'status': 'created',
+                'error_code': None,
+                'name': created['name'],
+                'graph_key': created['graph_key'],
+                'name_raw': created['name_raw'],
+                'name_canonical': created['name_canonical'],
+                'labels': created['labels'],
+                'neo4j_labels': created['neo4j_labels'],
+                'content_sha256': created['content_sha256'],
+                'summary': created['summary'],
+                'batch_id': created['batch_id'],
+                'created_at': created['created_at'],
+                'updated_at': created['updated_at'],
+                'has_name_embedding': True,
+            }
+
+    def prepare_batch_status_params(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+    async def claim_batch_status(self, tx: Any, *, params: dict[str, Any]) -> dict[str, Any]:
+        _ = tx
+        return {
+            'uuid': params['uuid'],
+            'status': 'running',
+            'request_sha256': params['request_sha256'],
+        }
+
+    async def upsert_batch_status(self, tx: Any, *, params: dict[str, Any]) -> dict[str, Any]:
+        _ = tx
+        self.batch_status_writes.append(dict(params))
+        self.checkpoints.append(f'batch_status:{params.get("status")}')
+        return dict(params)
+
+    async def get_edge_by_uuid(self, *args: Any, **kwargs: Any) -> None:
+        _ = args, kwargs
+        return None
+
+    async def upsert_edge_item(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        _ = args, kwargs
+        raise AssertionError('edge write not expected in entity race tests')
+
+    async def upsert_source_episode(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        _ = args, kwargs
+        raise AssertionError('source write not expected in entity race tests')
+
+
+@pytest.mark.asyncio
+async def test_gap_cr01_write_status_from_row_error_never_falls_back_to_updated():
+    row = {
+        'status': 'error',
+        'error_code': CatalogErrorCode.deterministic_uuid_conflict.value,
+        'uuid': 'u',
+    }
+    status = CatalogService._write_status_from_row(row, 'created')
+    assert status != 'updated'
+    assert status != 'created'
+
+
+@pytest.mark.asyncio
+async def test_gap_cr01_atomic_route_race_rolls_back_typed_conflict():
+    winner = _entity(
+        graph_key='TABLE::FE::ORCL.HR.RACE',
+        name_raw='RACE_WIN',
+        name_canonical='race_win',
+        summary='winner',
+        database_qualified_name='ORCL.HR.RACE',
+    )
+    loser = _entity(
+        graph_key='TABLE::FE::ORCL.HR.RACE',
+        name_raw='RACE_LOSE',
+        name_canonical='race_lose',
+        summary='loser',
+        database_qualified_name='ORCL.HR.RACE',
+    )
+    store = _RaceEntityStore(loser_name_raw=loser.name_raw)
+    client_a = _make_client()
+    client_b = _make_client()
+    service_a = CatalogService(catalog_config=_enabled_config())
+    service_b = CatalogService(catalog_config=_enabled_config())
+    service_a._store = store  # type: ignore[method-assign]
+    service_b._store = store  # type: ignore[method-assign]
+    service_a._ensure_schema = AsyncMock()  # type: ignore[method-assign]
+    service_b._ensure_schema = AsyncMock()  # type: ignore[method-assign]
+
+    req_a = _request([winner], batch_id='race-a')
+    req_b = _request([loser], batch_id='race-b')
+    task_a = asyncio.create_task(service_a.upsert_typed_entities(client=client_a, request=req_a))
+    task_b = asyncio.create_task(service_b.upsert_typed_entities(client=client_b, request=req_b))
+    await store._both_pre_read.wait()
+    # Loser remains pending at MERGE until winner commits.
+    await store._loser_at_merge.wait()
+    assert not task_b.done() or not task_a.done()
+    results = await asyncio.gather(task_a, task_b)
+    statuses = [r.results[0].status for r in results]
+    codes = [r.results[0].error_code for r in results]
+    success = [s for s in statuses if s in ('created', 'updated', 'unchanged')]
+    assert len(success) == 1
+    assert any(c == CatalogErrorCode.deterministic_uuid_conflict for c in codes)
+    assert all(c != CatalogErrorCode.neo4j_transaction_failed for c in codes if c is not None)
+    assert len(store.entities) == 1
+    stored = next(iter(store.entities.values()))
+    if stored['name_raw'] == winner.name_raw:
+        assert stored['name_canonical'] == winner.name_canonical
+        assert stored['summary'] == winner.summary
+    else:
+        assert stored['name_canonical'] == loser.name_canonical
+        assert stored['summary'] == loser.summary
+    assert any(cp.startswith('merge_commit:') for cp in store.checkpoints)
+
+
+@pytest.mark.asyncio
+async def test_gap_cr01_per_item_route_returns_exact_conflict_not_tx_failed():
+    from datetime import datetime, timezone
+
+    from services.catalog_service import _PreparedEntity
+
+    loser = _entity(
+        graph_key='TABLE::FE::ORCL.HR.RACE2',
+        name_raw='L',
+        name_canonical='l',
+        summary='loser',
+        database_qualified_name='ORCL.HR.RACE2',
+    )
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._ensure_schema = AsyncMock()  # type: ignore[method-assign]
+    service._store.get_entity_by_uuid = AsyncMock(return_value=None)
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, loser.entity_type, loser.graph_key)
+    service._store.upsert_entity_item = AsyncMock(
+        return_value={
+            'uuid': ent_uuid,
+            'status': 'error',
+            'error_code': CatalogErrorCode.deterministic_uuid_conflict.value,
+            'name': 'TABLE::FE::ORCL.HR.RACE2',
+            'graph_key': 'TABLE::FE::ORCL.HR.RACE2',
+            'name_raw': 'W',
+            'name_canonical': 'w',
+            'content_sha256': 'a' * 64,
+            'summary': 'winner',
+            'has_name_embedding': True,
+        }
+    )
+    prep = _PreparedEntity(
+        index=0,
+        item=loser,
+        entity_uuid=ent_uuid,
+        content_sha256=canonical_sha256(service.entity_canonical_payload(loser)),
+        projected_status='created',
+        name_embedding=[0.1, 0.2, 0.3],
+    )
+    req = _request([loser], batch_id='l1')
+    resp = await service._write_per_item(
+        client,
+        req,
+        [prep],
+        {},
+        datetime.now(timezone.utc),
+    )
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.deterministic_uuid_conflict
+    assert resp.results[0].error_code != CatalogErrorCode.neo4j_transaction_failed
+
+
+@pytest.mark.asyncio
+async def test_gap_cr01_combined_batch_rolls_back_and_returns_typed_conflict():
+    winner = _entity(
+        graph_key='TABLE::FE::ORCL.HR.RACE3',
+        name_raw='W',
+        name_canonical='w',
+        summary='winner',
+        database_qualified_name='ORCL.HR.RACE3',
+    )
+    loser = _entity(
+        graph_key='TABLE::FE::ORCL.HR.RACE3',
+        name_raw='L',
+        name_canonical='l',
+        summary='loser',
+        database_qualified_name='ORCL.HR.RACE3',
+    )
+    store = _RaceEntityStore()
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store = store  # type: ignore[method-assign]
+    service._ensure_schema = AsyncMock()  # type: ignore[method-assign]
+
+    # Seed winner under lock so batch loser hits MERGE conflict row, not preflight only.
+    await service.upsert_typed_entities(client=client, request=_request([winner], batch_id='seed'))
+    store.batch_status_writes.clear()
+    # Force batch pre-read to treat entity as absent so write path reaches MERGE.
+    original_get = store.get_entity_by_uuid
+
+    async def _absent_pre_read(executor, *, uuid, group_id, tx=None):
+        if tx is None:
+            return None
+        return await original_get(executor, uuid=uuid, group_id=group_id, tx=tx)
+
+    store.get_entity_by_uuid = _absent_pre_read  # type: ignore[method-assign]
+
+    batch_req = UpsertCatalogBatchRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id='batch-race',
+        entities=[loser],
+    )
+    resp = await service.upsert_catalog_batch(client=client, request=batch_req)
+    assert resp.status == 'failed'
+    assert resp.error_code == CatalogErrorCode.deterministic_uuid_conflict
+    assert resp.error_code != CatalogErrorCode.neo4j_transaction_failed
+    assert any(w.get('status') == 'failed' for w in store.batch_status_writes)
+    stored = next(iter(store.entities.values()))
+    assert stored['name_raw'] == winner.name_raw
+    assert stored['summary'] == winner.summary
