@@ -108,4 +108,4 @@ availability_probed=false
 
 ## Scope Stop
 
-Plan 01-11 local matrix is green (`local_gate_pass=true`, `nyquist_compliant=true`) via tracked runner ledger `01-GATE-RESULTS.json` rebound to primary HEAD `63f7fe8ff044`. CR-01/CR-02/WR-01/WR-02 are COVERED with no silent drop. Independent code, goal, Nyquist, and security audits remain pending. `ready_for_phase_2=false`. Orchestrator must run the four independent audits; only after all four green may a tiny 01-12 finalization plan flip final readiness. Phase 2 is not started.
+Plan 01-11 local matrix is green (`local_gate_pass=true`, `nyquist_compliant=true`) via tracked runner ledger `01-GATE-RESULTS.json` rebound to primary HEAD `acaea8edebce`. CR-01/CR-02/WR-01/WR-02 are COVERED with no silent drop. Independent code, goal, Nyquist, and security audits remain pending. `ready_for_phase_2=false`. Orchestrator must run the four independent audits; only after all four green may a tiny 01-12 finalization plan flip final readiness. Phase 2 is not started.
