@@ -134,10 +134,12 @@ async def test_read_tools_when_writes_disabled():
     service._store.match_entities_for_resolve = AsyncMock(return_value=[])
     service._store.match_edges_for_resolve = AsyncMock(return_value=[])
     service._store.get_batch_status = AsyncMock(return_value=None)
-    service._store.load_batch_manifest_payload = AsyncMock(return_value=None)
+    # Optional helpers may be absent on CatalogNeo4jStore; assign via Any store.
+    store: Any = service._store
+    store.load_batch_manifest_payload = AsyncMock(return_value=None)
     service._store.match_evidence_links_for_target = AsyncMock(return_value=[])
-    service._store.find_entity_for_evidence = AsyncMock(return_value=None)
-    service._store.find_edge_for_evidence = AsyncMock(return_value=None)
+    store.find_entity_for_evidence = AsyncMock(return_value=None)
+    store.find_edge_for_evidence = AsyncMock(return_value=None)
 
     resolve_resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
     assert resolve_resp.group_id == GROUP
@@ -218,10 +220,11 @@ async def test_reads_no_schema_write_embed():
     service._store.match_entities_for_resolve = AsyncMock(return_value=[])
     service._store.match_edges_for_resolve = AsyncMock(return_value=[])
     service._store.get_batch_status = AsyncMock(return_value=None)
-    service._store.load_batch_manifest_payload = AsyncMock(return_value=None)
+    store: Any = service._store
+    store.load_batch_manifest_payload = AsyncMock(return_value=None)
     service._store.match_evidence_links_for_target = AsyncMock(return_value=[])
-    service._store.find_entity_for_evidence = AsyncMock(return_value=None)
-    service._store.find_edge_for_evidence = AsyncMock(return_value=None)
+    store.find_entity_for_evidence = AsyncMock(return_value=None)
+    store.find_edge_for_evidence = AsyncMock(return_value=None)
 
     await service.resolve_typed_entities(client=client, request=_resolve_request())
     await service.get_catalog_ingest_status(client=client, request=_status_request())

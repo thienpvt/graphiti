@@ -462,6 +462,22 @@ class GraphitiService:
             self.client = None
 
 
+def require_initialized_client(service: GraphitiService | None) -> Graphiti | None:
+    """Return already-initialized Graphiti client without lazy init (GATE-04 / D-21).
+
+    Catalog read tools must never call get_client()/initialize()/build_indices.
+    Writes keep get_client() so first-write may still bootstrap.
+    Returns None when service or client is absent (caller emits structured ErrorResponse).
+    """
+    if service is None:
+        return None
+    # getattr: log-safety fixtures may use SimpleNamespace without .client
+    client = getattr(service, 'client', None)
+    if client is None:
+        return None
+    return client
+
+
 @mcp.tool()
 async def add_memory(
     name: str,
@@ -1353,13 +1369,16 @@ async def resolve_typed_entities(
     """Read-only resolve of typed catalog entities (no writes, no embeddings)."""
     global graphiti_service, catalog_service
 
-    if graphiti_service is None:
+    service = graphiti_service
+    if service is None:
         return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
     if catalog_service is None:
-        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
 
     try:
-        client = await graphiti_service.get_client()
         return await catalog_service.resolve_typed_entities(client=client, request=request)
     except Exception as e:
         logger.error(
@@ -1377,13 +1396,16 @@ async def verify_catalog_batch(
     """Read-only catalog batch verification (no writes, no embeddings)."""
     global graphiti_service, catalog_service
 
-    if graphiti_service is None:
+    service = graphiti_service
+    if service is None:
         return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
     if catalog_service is None:
-        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
 
     try:
-        client = await graphiti_service.get_client()
         return await catalog_service.verify_catalog_batch(client=client, request=request)
     except Exception as e:
         logger.error(
@@ -1464,13 +1486,16 @@ async def get_catalog_ingest_status(
     """
     global graphiti_service, catalog_service
 
-    if graphiti_service is None:
+    service = graphiti_service
+    if service is None:
         return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
     if catalog_service is None:
-        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
 
     try:
-        client = await graphiti_service.get_client()
         return await catalog_service.get_catalog_ingest_status(client=client, request=request)
     except Exception as e:
         logger.error(
@@ -1601,13 +1626,16 @@ async def get_catalog_batch_manifest(
     """Read-only paginated durable catalog membership (no writes, no embeddings)."""
     global graphiti_service, catalog_service
 
-    if graphiti_service is None:
+    service = graphiti_service
+    if service is None:
         return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
     if catalog_service is None:
-        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
 
     try:
-        client = await graphiti_service.get_client()
         return await catalog_service.get_catalog_batch_manifest(client=client, request=request)
     except Exception as e:
         logger.error(
@@ -1625,13 +1653,16 @@ async def resolve_typed_edges(
     """Read-only resolve of typed catalog edges (no writes, no embeddings)."""
     global graphiti_service, catalog_service
 
-    if graphiti_service is None:
+    service = graphiti_service
+    if service is None:
         return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
     if catalog_service is None:
-        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
 
     try:
-        client = await graphiti_service.get_client()
         return await catalog_service.resolve_typed_edges(client=client, request=request)
     except Exception as e:
         logger.error(
@@ -1649,13 +1680,16 @@ async def get_catalog_evidence(
     """Read-only compact evidence links for one entity/edge target (no writes)."""
     global graphiti_service, catalog_service
 
-    if graphiti_service is None:
+    service = graphiti_service
+    if service is None:
         return ErrorResponse(error='Graphiti service not initialized')
+    client = require_initialized_client(service)
+    if client is None:
+        return ErrorResponse(error='Graphiti client not initialized')
     if catalog_service is None:
-        catalog_service = CatalogService(catalog_config=graphiti_service.config.catalog_upsert)
+        catalog_service = CatalogService(catalog_config=service.config.catalog_upsert)
 
     try:
-        client = await graphiti_service.get_client()
         return await catalog_service.get_catalog_evidence(client=client, request=request)
     except Exception as e:
         logger.error(

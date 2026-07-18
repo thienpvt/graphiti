@@ -62,17 +62,37 @@ GATE_INPUT_RELS = (
     PHASE_DIR_REL / '04-06-SUMMARY.md',
 )
 
+# Exact 10-file Phase 4 focused suite from 04-06 plan line 225 (D-31).
 FOCUS_TEST_FILES = (
-    'mcp_server/tests/test_catalog_gates.py',
+    'mcp_server/tests/test_catalog_manifest.py',
     'mcp_server/tests/test_catalog_manifest_read.py',
     'mcp_server/tests/test_catalog_verify_manifest.py',
     'mcp_server/tests/test_catalog_resolve_edges.py',
     'mcp_server/tests/test_catalog_evidence_read.py',
-    'mcp_server/tests/test_catalog_phase4_gate_runner.py',
-    'mcp_server/tests/test_catalog_capabilities.py',
+    'mcp_server/tests/test_catalog_gates.py',
     'mcp_server/tests/test_catalog_service.py',
+    'mcp_server/tests/test_catalog_capabilities.py',
     'mcp_server/tests/test_catalog_store_unit.py',
+    'mcp_server/tests/test_catalog_phase4_gate_runner.py',
+)
+
+# Phase 4 product/test sources scanned for current v2 param/query usage (no DB).
+PHASE4_SAFETY_SCAN_RELS = (
+    'mcp_server/src/graphiti_mcp_server.py',
+    'mcp_server/src/services/catalog_capabilities.py',
+    'mcp_server/src/services/catalog_service.py',
+    'mcp_server/src/services/catalog_store.py',
+    'mcp_server/tests/test_catalog_gates.py',
     'mcp_server/tests/test_catalog_manifest.py',
+    'mcp_server/tests/test_catalog_manifest_read.py',
+    'mcp_server/tests/test_catalog_verify_manifest.py',
+    'mcp_server/tests/test_catalog_resolve_edges.py',
+    'mcp_server/tests/test_catalog_evidence_read.py',
+    'mcp_server/tests/test_catalog_service.py',
+    'mcp_server/tests/test_catalog_capabilities.py',
+    'mcp_server/tests/test_catalog_store_unit.py',
+    'mcp_server/tests/catalog_phase4_gate_runner.py',
+    'mcp_server/tests/test_catalog_phase4_gate_runner.py',
 )
 
 # Plan ownership for research probe rows 0..41 (42 probes).
@@ -288,24 +308,76 @@ def _non_comment_lines(src: str) -> list[str]:
     return [ln for ln in src.splitlines() if ln.strip() and not ln.lstrip().startswith('#')]
 
 
+def scan_current_source_v2_param_query(root: Path) -> dict[str, Any]:
+    """Static scan: forbidden group used as current query/group parameter (no DB).
+
+    Allows historical constants, FORBIDDEN_GROUP bindings, comments, and ban-check
+    string literals. Hits bare GROUP/group_id/TEST_GROUP assignments or call kwargs
+    that target oracle-catalog-v2 as an active parameter.
+    """
+    hits: list[str] = []
+    # Build patterns without embedding contiguous forbidden assignment literals.
+    _q = chr(39)
+    _dq = chr(34)
+    _needle = FORBIDDEN_GROUP  # 'oracle-catalog-v2' alone is ok (ban constant)
+    assign_re = re.compile(
+        rf'(?<![A-Za-z_])(GROUP|group_id|TEST_GROUP)\s*=\s*[{_q}{_dq}]'
+        + re.escape(_needle)
+        + rf'[{_q}{_dq}]'
+    )
+    # Call/keyword forms: group_id=<quote>FORBIDDEN_GROUP<quote> (dynamic only).
+    kw_re = re.compile(
+        rf'(?<![A-Za-z_])group_id\s*=\s*[{_q}{_dq}]' + re.escape(_needle) + rf'[{_q}{_dq}]'
+    )
+    for rel in PHASE4_SAFETY_SCAN_RELS:
+        path = root / rel
+        if not path.is_file():
+            continue
+        src = path.read_text(encoding='utf-8')
+        for i, line in enumerate(src.splitlines(), start=1):
+            stripped = line.lstrip()
+            if stripped.startswith('#'):
+                continue
+            # Allow FORBIDDEN_GROUP / HISTORICAL_* bindings and ban-check construction.
+            if 'FORBIDDEN_GROUP' in line or re.search(r'\bHISTORICAL_', line):
+                continue
+            if assign_re.search(line) or kw_re.search(line):
+                hits.append(f'{rel}:{i}')
+    return {
+        'current_oracle_catalog_v2_queried': bool(hits),
+        'current_source_v2_param_query': bool(hits),
+        'hits': hits,
+    }
+
+
 def check_safety_no_probe(root: Path) -> None:
-    """No canary, no clear_graph, no oracle-catalog-v2 as write/query target in Phase 4 scaffolds."""
+    """No canary, no clear_graph, no oracle-catalog-v2 as current write/query target."""
+    _q = chr(39)
+    _dq = chr(34)
+    assign_ban = re.compile(
+        rf'(?<![A-Za-z_])(GROUP|group_id|TEST_GROUP)\s*=\s*[{_q}{_dq}]'
+        + re.escape(FORBIDDEN_GROUP)
+        + rf'[{_q}{_dq}]'
+    )
     for rel in WAVE0_REQUIRED:
         path = root / rel
         if not path.is_file():
             raise AssertionError(f'missing {rel}')
         src = path.read_text(encoding='utf-8')
-        # Require bare GROUP/TEST_GROUP/group_id — not FORBIDDEN_GROUP / ALLOWED_TEST_GROUP.
-        if re.search(
-            rf"(?<![A-Za-z_])(GROUP|group_id|TEST_GROUP)\s*=\s*['\"]{re.escape(FORBIDDEN_GROUP)}['\"]",
-            src,
-        ):
+        # Skip pure comment lines so ban docs cannot self-match.
+        code_src = '\n'.join(_non_comment_lines(src))
+        if assign_ban.search(code_src):
             raise AssertionError(f'{rel} assigns forbidden group as write target')
         if re.search(r'\bclear_graph\s*\(', src):
             raise AssertionError(f'{rel} calls clear_graph')
-        code = '\n'.join(_non_comment_lines(src))
-        if re.search(r'\bcanary\s*\(', code, re.IGNORECASE):
+        if re.search(r'\bcanary\s*\(', code_src, re.IGNORECASE):
             raise AssertionError(f'{rel} references canary execution')
+
+    scan = scan_current_source_v2_param_query(root)
+    if scan['current_source_v2_param_query']:
+        raise AssertionError(
+            f'current source uses forbidden group as query/param: {scan["hits"][:8]}'
+        )
 
     runner_src = (root / 'mcp_server/tests/catalog_phase4_gate_runner.py').read_text(
         encoding='utf-8'
@@ -455,7 +527,11 @@ def validate_specs(specs: list[dict[str, Any]], root: Path | None = None) -> Non
 
 
 def canonical_specs(root: Path, *, include_live: bool = False) -> list[dict[str, Any]]:
-    """Canonical argv specs. Live suite intentionally absent in Wave 0 (no Neo4j)."""
+    """Canonical argv specs. Live suite intentionally absent (no Neo4j).
+
+    Mandatory focused_pytest is the exact 10-file suite from 04-06 plan line 225.
+    Structural scaffolds remain; unit_service_pass derives from focused_pytest only.
+    """
     root = root.resolve()
     _ = include_live  # reserved; Phase 4 unit gate does not require live
     specs: list[dict[str, Any]] = [
@@ -464,6 +540,15 @@ def canonical_specs(root: Path, *, include_live: bool = False) -> list[dict[str,
             'argv': _uv_pytest(
                 ['mcp_server/tests/test_catalog_phase4_gate_runner.py'], ['--tb=short']
             ),
+            'expected_exit': 0,
+            'mandatory': True,
+            'kind': 'pytest',
+        },
+        {
+            # Real unit/service proof (D-31). Includes gate-runner unit tests; nested
+            # full gate is skipped via CATALOG_PHASE4_GATE_SKIP_SELF when present.
+            'id': 'focused_pytest',
+            'argv': _uv_pytest(list(FOCUS_TEST_FILES), ['--tb=short']),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'pytest',
@@ -659,7 +744,11 @@ def derive_safety_ledger(
     results: list[dict[str, Any]],
     root: Path | None = None,
 ) -> dict[str, Any]:
-    """Two-axis safety: permanent historical audit + current execution safety."""
+    """Two-axis safety: permanent historical audit + current execution/source safety.
+
+    Top-level oracle_catalog_v2_queried is CURRENT only (false when clean).
+    Historical a67789a lives under historical_* / historical_audit only.
+    """
     safety_ids = {'safety_no_probe'}
     by_id = {r.get('id'): r for r in results}
     current_safety_ok = all(
@@ -668,13 +757,22 @@ def derive_safety_ledger(
     )
     canary_executed = False
     clear_called = False
-    current_source_v2_param = False
-    # Aggregate audit includes permanent history.
-    v2_queried = HISTORICAL_ORACLE_CATALOG_V2_QUERIED or current_source_v2_param
-    _ = root
+    if root is not None:
+        scan = scan_current_source_v2_param_query(root)
+        current_source_v2_param = bool(scan['current_source_v2_param_query'])
+        current_v2_queried = bool(scan['current_oracle_catalog_v2_queried'])
+        v2_hits = list(scan.get('hits') or [])
+    else:
+        current_source_v2_param = False
+        current_v2_queried = False
+        v2_hits = []
+    if current_source_v2_param or current_v2_queried:
+        current_safety_ok = False
     return {
         'canary_executed': canary_executed,
-        'oracle_catalog_v2_queried': v2_queried,
+        # CURRENT axis only — do not OR with historical (D-30 / no-v2 current).
+        'oracle_catalog_v2_queried': current_v2_queried,
+        'current_oracle_catalog_v2_queried': current_v2_queried,
         'clear_graph_called': clear_called,
         'safety_checks_pass': current_safety_ok,
         'test_group': ALLOWED_TEST_GROUP,
@@ -684,6 +782,7 @@ def derive_safety_ledger(
         'historical_v2_class': HISTORICAL_V2_CLASS,
         'historical_v2_scope': HISTORICAL_V2_SCOPE,
         'current_source_v2_param_query': current_source_v2_param,
+        'current_source_v2_hits': v2_hits,
         'historical_violation_note': HISTORICAL_V2_VIOLATION_NOTE,
     }
 
@@ -718,6 +817,11 @@ def derive_ready_for_phase_5(
         return False
     if safety.get('current_source_v2_param_query') is not False:
         return False
+    if safety.get('current_oracle_catalog_v2_queried') is not False:
+        return False
+    # Current-axis top-level mirror (must not be true on clean HEAD).
+    if safety.get('oracle_catalog_v2_queried') is not False:
+        return False
     if safety.get('safety_checks_pass') is not True:
         return False
     return bool(manifest_verification)
@@ -734,7 +838,13 @@ def derive_cli_exit_code(ledger: dict[str, Any]) -> int:
         return 1
     if ledger.get('clear_graph_called') is not False:
         return 1
+    if ledger.get('oracle_catalog_v2_queried') is not False:
+        return 1
+    if ledger.get('current_oracle_catalog_v2_queried') is not False:
+        return 1
     if safety.get('current_source_v2_param_query') is not False:
+        return 1
+    if safety.get('current_oracle_catalog_v2_queried') is not False:
         return 1
     return 0
 
@@ -755,59 +865,68 @@ def run_gate(
     head = git_head(root)
 
     results: list[dict[str, Any]] = []
-    for spec in specs:
-        if (
-            spec['id'] == 'runner_self_tests'
-            and os.environ.get('CATALOG_PHASE4_GATE_SKIP_SELF') == '1'
-        ):
-            results.append(
-                {
-                    'id': spec['id'],
-                    'argv': spec['argv'],
-                    'expected_exit': spec['expected_exit'],
-                    'exit_code': 0,
-                    'status': 'pass',
-                    'mandatory': True,
-                    'kind': spec.get('kind'),
-                    'counts': {},
-                    'stdout': 'skipped-nested-self',
-                    'stderr': '',
-                    'note': 'nested self-test skipped',
-                }
-            )
-            continue
-        try:
-            outcome = run_argv(spec['argv'], root)
-            status = 'pass' if outcome['exit_code'] == spec['expected_exit'] else 'fail'
-            results.append(
-                {
-                    'id': spec['id'],
-                    'argv': spec['argv'],
-                    'expected_exit': spec['expected_exit'],
-                    'exit_code': outcome['exit_code'],
-                    'status': status,
-                    'mandatory': bool(spec.get('mandatory', True)),
-                    'kind': spec.get('kind'),
-                    'counts': outcome['counts'],
-                    'stdout': outcome['stdout'],
-                    'stderr': outcome['stderr'],
-                }
-            )
-        except Exception as exc:
-            results.append(
-                {
-                    'id': spec['id'],
-                    'argv': spec['argv'],
-                    'expected_exit': spec['expected_exit'],
-                    'exit_code': -1,
-                    'status': 'fail',
-                    'mandatory': bool(spec.get('mandatory', True)),
-                    'kind': spec.get('kind'),
-                    'counts': {},
-                    'stdout': '',
-                    'stderr': bound_output(str(exc)),
-                }
-            )
+    # Nested full-gate recursion guard: when focused_pytest includes gate-runner
+    # unit tests that call run_gate, skip both runner_self_tests and focused_pytest.
+    nested_skip = os.environ.get('CATALOG_PHASE4_GATE_SKIP_SELF') == '1'
+    # Prevent focused_pytest subprocess from re-entering full gate via nested run_gate.
+    prev_skip = os.environ.get('CATALOG_PHASE4_GATE_SKIP_SELF')
+    os.environ['CATALOG_PHASE4_GATE_SKIP_SELF'] = '1'
+    try:
+        for spec in specs:
+            if nested_skip and spec['id'] in ('runner_self_tests', 'focused_pytest'):
+                results.append(
+                    {
+                        'id': spec['id'],
+                        'argv': spec['argv'],
+                        'expected_exit': spec['expected_exit'],
+                        'exit_code': 0,
+                        'status': 'pass',
+                        'mandatory': True,
+                        'kind': spec.get('kind'),
+                        'counts': {},
+                        'stdout': 'skipped-nested-self',
+                        'stderr': '',
+                        'note': 'nested self/focused suite skipped',
+                    }
+                )
+                continue
+            try:
+                outcome = run_argv(spec['argv'], root)
+                status = 'pass' if outcome['exit_code'] == spec['expected_exit'] else 'fail'
+                results.append(
+                    {
+                        'id': spec['id'],
+                        'argv': spec['argv'],
+                        'expected_exit': spec['expected_exit'],
+                        'exit_code': outcome['exit_code'],
+                        'status': status,
+                        'mandatory': bool(spec.get('mandatory', True)),
+                        'kind': spec.get('kind'),
+                        'counts': outcome['counts'],
+                        'stdout': outcome['stdout'],
+                        'stderr': outcome['stderr'],
+                    }
+                )
+            except Exception as exc:
+                results.append(
+                    {
+                        'id': spec['id'],
+                        'argv': spec['argv'],
+                        'expected_exit': spec['expected_exit'],
+                        'exit_code': -1,
+                        'status': 'fail',
+                        'mandatory': bool(spec.get('mandatory', True)),
+                        'kind': spec.get('kind'),
+                        'counts': {},
+                        'stdout': '',
+                        'stderr': bound_output(str(exc)),
+                    }
+                )
+    finally:
+        if prev_skip is None:
+            os.environ.pop('CATALOG_PHASE4_GATE_SKIP_SELF', None)
+        else:
+            os.environ['CATALOG_PHASE4_GATE_SKIP_SELF'] = prev_skip
 
     if injected_overrides:
         for r in results:
@@ -827,15 +946,8 @@ def run_gate(
         row = by_id.get(spec_id) or {}
         return row.get('status') == 'pass' and row.get('exit_code') == row.get('expected_exit', 0)
 
-    # Product unit/service proofs: Phase 4 scaffold suites green (no nested full re-pytest).
-    unit_service_ids = (
-        'gates_scaffold',
-        'manifest_read_scaffold',
-        'verify_manifest_scaffold',
-        'resolve_edges_scaffold',
-        'evidence_read_scaffold',
-    )
-    unit_service_pass = all(_spec_pass(sid) for sid in unit_service_ids)
+    # D-31: unit_service_pass requires real focused suite, not structural scaffolds only.
+    unit_service_pass = _spec_pass('focused_pytest')
     registration_pass = _spec_pass('registration_contract')
     ready = derive_ready_for_phase_5(
         local_gate_pass,
@@ -848,6 +960,7 @@ def run_gate(
     ledger: dict[str, Any] = {
         'schema_version': SCHEMA_VERSION,
         'evaluated_head': head,
+        'proof_head': head,
         'canonical_specs': json.loads(specs_json),
         'spec_sha256': spec_sha,
         'content_sha256_map': content_map,
@@ -863,7 +976,9 @@ def run_gate(
         'unit_service_pass': unit_service_pass,
         'registration_pass': registration_pass,
         'canary_executed': safety['canary_executed'],
+        # Current axis only (false when clean). History under historical_audit.
         'oracle_catalog_v2_queried': safety['oracle_catalog_v2_queried'],
+        'current_oracle_catalog_v2_queried': safety['current_oracle_catalog_v2_queried'],
         'clear_graph_called': safety['clear_graph_called'],
         'api_coverage_detector': False,
         'safety': safety,
@@ -879,8 +994,13 @@ def run_gate(
             'forbidden_group': FORBIDDEN_GROUP,
             'resolution_policy': '42/42 research probe map; no silent drop',
             'd31_policy': (
-                'ready_for_phase_5 true only after unit/service/registration + safety + '
-                'manifest_verification proven; fail-closed otherwise'
+                'ready_for_phase_5 true only after focused_pytest unit/service + '
+                'registration + safety + manifest_verification; fail-closed otherwise'
+            ),
+            'unit_service_source': 'focused_pytest exact 10-file suite (04-06 plan line 225)',
+            'v2_axes': (
+                'oracle_catalog_v2_queried/current_* = current HEAD source scan; '
+                'historical_audit preserves a67789a permanently'
             ),
             'historical_v2_policy': HISTORICAL_V2_VIOLATION_NOTE,
             'no_canary': 'Phase 4 never executes canary; canary_executed always false',
@@ -888,6 +1008,9 @@ def run_gate(
             'api_coverage_detector': 'detected=false; no COVERAGE.md required',
             'production_claim': False,
             'canary_claim': False,
+            'evaluated_head_policy': (
+                'evaluated_head/proof_head = HEAD at proof time; ledger commit may tip after'
+            ),
         },
     }
     ledger['ledger_sha256'] = sha256_text(

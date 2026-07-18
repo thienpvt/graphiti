@@ -6,6 +6,7 @@ isolation (D-30), and historical a67789a pointer preservation.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from unittest import mock
@@ -26,7 +27,9 @@ def _root() -> Path:
 def _current_clean_safety(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
         'canary_executed': False,
-        'oracle_catalog_v2_queried': True,  # aggregate includes permanent history
+        # Top-level/current axis is false on clean HEAD; history is separate.
+        'oracle_catalog_v2_queried': False,
+        'current_oracle_catalog_v2_queried': False,
         'clear_graph_called': False,
         'safety_checks_pass': True,
         'current_source_v2_param_query': False,
@@ -173,8 +176,13 @@ def test_canonical_specs_shape_and_reject_shell():
     assert 'wave0_files' in ids
     assert 'safety_no_probe' in ids
     assert 'gates_scaffold' in ids
+    assert 'focused_pytest' in ids
     assert 'manifest_verification_true' in ids
     assert 'registration_contract' in ids
+    focused = next(s for s in specs if s['id'] == 'focused_pytest')
+    for rel in gate.FOCUS_TEST_FILES:
+        assert rel in focused['argv']
+    assert len(gate.FOCUS_TEST_FILES) == 10
     for s in specs:
         gate.validate_spec(s, root)
         assert s['expected_exit'] == 0
@@ -266,12 +274,17 @@ def test_run_gate_post_proof_ready_true(tmp_path: Path, monkeypatch: pytest.Monk
     ledger = gate.run_gate(root, ledger_path)
     assert ledger['canary_executed'] is False
     assert ledger['clear_graph_called'] is False
-    assert ledger['oracle_catalog_v2_queried'] is True  # historical aggregate
+    # Current axis false; permanent history only under historical_audit.
+    assert ledger['oracle_catalog_v2_queried'] is False
+    assert ledger['current_oracle_catalog_v2_queried'] is False
+    assert ledger['safety']['current_source_v2_param_query'] is False
+    assert ledger['safety']['historical_oracle_catalog_v2_queried'] is True
     assert ledger['historical_audit']['commit'] == 'a67789a'
+    assert ledger['historical_audit']['historical_oracle_catalog_v2_queried'] is True
     assert ledger['manifest_verification'] is True
     assert ledger['schema_version'] == gate.SCHEMA_VERSION
     assert ledger['raw_edge_probe_count'] == 42
-    assert ledger['unit_service_pass'] is True
+    assert ledger['unit_service_pass'] is True  # focused_pytest (nested skip path)
     assert ledger['registration_pass'] is True
     assert ledger['ready_for_phase_5'] is True
     assert ledger['phase_4_complete'] is True
@@ -319,3 +332,54 @@ def test_derive_local_gate_pass_requires_all_mandatory():
     results[1]['status'] = 'pass'
     results[1]['exit_code'] = 0
     assert gate.derive_local_gate_pass(results, sentinel) is True
+
+
+def test_scan_current_source_v2_param_query_clean():
+    """Current source scan proves no forbidden group as query/param on HEAD."""
+    root = _root()
+    scan = gate.scan_current_source_v2_param_query(root)
+    assert scan['current_source_v2_param_query'] is False
+    assert scan['current_oracle_catalog_v2_queried'] is False
+    assert scan['hits'] == []
+    safety = gate.derive_safety_ledger(
+        [{'id': 'safety_no_probe', 'status': 'pass', 'exit_code': 0}],
+        root,
+    )
+    assert safety['oracle_catalog_v2_queried'] is False
+    assert safety['current_oracle_catalog_v2_queried'] is False
+    assert safety['current_source_v2_param_query'] is False
+    assert safety['historical_oracle_catalog_v2_queried'] is True
+    assert safety['historical_v2_commit'] == 'a67789a'
+
+
+def test_ready_false_when_current_v2_axis_true():
+    safety = _current_clean_safety(
+        oracle_catalog_v2_queried=True,
+        current_oracle_catalog_v2_queried=True,
+    )
+    assert (
+        gate.derive_ready_for_phase_5(
+            True,
+            safety,
+            manifest_verification=True,
+            registration_pass=True,
+            unit_service_pass=True,
+        )
+        is False
+    )
+
+
+def test_scan_detects_synthetic_v2_param_without_source_literal():
+    """Scanner hits synthetic text; runner source must not embed contiguous assignment."""
+    _q = chr(39)
+    synthetic = f'group_id={_q}{gate.FORBIDDEN_GROUP}{_q}'
+    assign_re = re.compile(
+        rf'(?<![A-Za-z_])(GROUP|group_id|TEST_GROUP)\s*=\s*[{_q}"]'
+        + re.escape(gate.FORBIDDEN_GROUP)
+        + rf'[{_q}"]'
+    )
+    assert assign_re.search(synthetic)
+    # Runner itself must not contain contiguous group_id='<forbidden>'.
+    runner = Path(gate.__file__).read_text(encoding='utf-8')
+    contiguous = 'group_id=' + _q + gate.FORBIDDEN_GROUP + _q
+    assert contiguous not in runner
