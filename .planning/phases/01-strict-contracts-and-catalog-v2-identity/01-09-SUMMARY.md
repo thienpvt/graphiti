@@ -131,7 +131,7 @@ status: complete
 3. **Task 3: Implement safe timestamp validation and exact graph-key locations** - `72deb07` (feat GREEN)
 4. **Follow-up: Drop over-strict space-separator timestamp case** - `f63a663` (test)
 
-**Plan metadata:** pending final docs commit
+**Plan metadata:** `253e87e` (docs: complete plan)
 
 _Note: RED commit `9f5599c` preserved independently; not amended into GREEN._
 
