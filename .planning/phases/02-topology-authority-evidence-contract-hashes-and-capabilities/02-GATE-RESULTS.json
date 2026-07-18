@@ -254,8 +254,8 @@
     ".planning/phases/02-topology-authority-evidence-contract-hashes-and-capabilities/02-PHASE2-GATE.md": "ed0e9bc8354fe17226ab297238fd290ff6f0092909d9d1a8fe35f2fd6ab527ef",
     ".planning/phases/02-topology-authority-evidence-contract-hashes-and-capabilities/02-VALIDATION.md": "0c6f5640ad996816e3f5c07b442c667b36612a1f157a74824d5fce2d98195f8c"
   },
-  "evaluated_head": "a4dbf5fb34e27c022ca896586e2238759e787bb7",
-  "ledger_sha256": "0e8c43d66b5b30ce54afc9556413d8254c4cf0f6d1ccbdc6dfdb3e746537afa1",
+  "evaluated_head": "d26fe809a4370fc96e126021b44dfddfdd1d567b",
+  "ledger_sha256": "67479427d9615aa09ee05633328aed88fed962a88d14a75b2f0b4cbff0c1ce19",
   "local_gate_pass": true,
   "no_new_store_or_control_plane_write_path": true,
   "notes": {
@@ -300,7 +300,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 15 items\n\nmcp_server\\tests\\test_catalog_phase2_gate_runner.py ...............      [100%]\n\n============================= 15 passed in 0.48s ==============================\n"
+      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 15 items\n\nmcp_server\\tests\\test_catalog_phase2_gate_runner.py ...............      [100%]\n\n============================= 15 passed in 0.45s ==============================\n"
     },
     {
       "argv": [
@@ -328,7 +328,7 @@
         "deselected": 0,
         "errors": 0,
         "failed": 0,
-        "passed": 918,
+        "passed": 927,
         "skipped": 0
       },
       "exit_code": 0,
@@ -338,7 +338,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 918 items\n\nmcp_server\\tests\\test_catalog_topology.py .............................. [  3%]\n........................................................................ [ 11%]\n........................................................................ [ 18%]\n........................................................................ [ 26%]\n.....................................................................    [ 34%]\nmcp_server\\tests\\test_catalog_evidence.py .............................. [ 37%]\n.............                                                            [ 38%]\nmcp_server\\tests\\test_catalog_hash.py ..............                     [ 40%]\nmcp_server\\tests\\test_catalog_capabilities.py ..................         [ 42%]\nmcp_server\\tests\\test_catalog_models.py ................................ [ 45%]\n........................................................................ [ 53%]\n........................................................................ [ 61%]\n........................................................................ [ 69%]\n.....                                                                    [ 70%]\nmcp_server\\tests\\test_catalog_identity.py ............................   [ 73%]\nmcp_server\\tests\\test_catalog_service.py ............................... [ 76%]\n........................................................................ [ 84%]\n........................................................................ [ 92%]\n..........                                                               [ 93%]\nmcp_server\\tests\\test_catalog_store_unit.py ............................ [ 96%]\n..................................                                       [100%]\n\n============================= 918 passed in 3.14s =============================\n"
+      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 927 items\n\nmcp_server\\tests\\test_catalog_topology.py .............................. [  3%]\n........................................................................ [ 11%]\n........................................................................ [ 18%]\n........................................................................ [ 26%]\n.....................................................................    [ 33%]\nmcp_server\\tests\\test_catalog_evidence.py .............................. [ 37%]\n.............                                                            [ 38%]\nmcp_server\\tests\\test_catalog_hash.py ...................                [ 40%]\nmcp_server\\tests\\test_catalog_capabilities.py ...................        [ 42%]\nmcp_server\\tests\\test_catalog_models.py ................................ [ 46%]\n........................................................................ [ 53%]\n........................................................................ [ 61%]\n........................................................................ [ 69%]\n.....                                                                    [ 70%]\nmcp_server\\tests\\test_catalog_identity.py ............................   [ 73%]\nmcp_server\\tests\\test_catalog_service.py ............................... [ 76%]\n........................................................................ [ 84%]\n........................................................................ [ 91%]\n.............                                                            [ 93%]\nmcp_server\\tests\\test_catalog_store_unit.py ............................ [ 96%]\n..................................                                       [100%]\n\n============================= 927 passed in 3.43s =============================\n"
     },
     {
       "argv": [
@@ -362,7 +362,7 @@
         "deselected": 0,
         "errors": 0,
         "failed": 0,
-        "passed": 390,
+        "passed": 396,
         "skipped": 0
       },
       "exit_code": 0,
@@ -372,7 +372,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 390 items\n\nmcp_server\\tests\\test_catalog_topology.py .............................. [  7%]\n........................................................................ [ 26%]\n........................................................................ [ 44%]\n........................................................................ [ 63%]\n.....................................................................    [ 80%]\nmcp_server\\tests\\test_catalog_evidence.py .............................. [ 88%]\n.............                                                            [ 91%]\nmcp_server\\tests\\test_catalog_hash.py ..............                     [ 95%]\nmcp_server\\tests\\test_catalog_capabilities.py ..................         [100%]\n\n============================= 390 passed in 1.32s =============================\n"
+      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 396 items\n\nmcp_server\\tests\\test_catalog_topology.py .............................. [  7%]\n........................................................................ [ 25%]\n........................................................................ [ 43%]\n........................................................................ [ 62%]\n.....................................................................    [ 79%]\nmcp_server\\tests\\test_catalog_evidence.py .............................. [ 87%]\n.............                                                            [ 90%]\nmcp_server\\tests\\test_catalog_hash.py ...................                [ 95%]\nmcp_server\\tests\\test_catalog_capabilities.py ...................        [100%]\n\n============================= 396 passed in 1.31s =============================\n"
     },
     {
       "argv": [
