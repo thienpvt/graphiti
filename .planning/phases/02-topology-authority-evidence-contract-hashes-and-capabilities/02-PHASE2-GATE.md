@@ -36,7 +36,7 @@
 ## Edge-Probe Proof
 
 - Raw source: `02-EDGE-PROBE.json` (byte-stable; never rewritten for resolution).
-- Raw sha256: `e515187cc229f7f24bd95444799abb900b3cf913900b3a65119e9befd6462599`
+- Raw sha256 (LF-normalized SHA-256): `16144e5ebc2ae9a46cda9b45ce0206e1290b954988c227ce97ec0a05f6149ce0`
 - Applicable raw items=68; resolution entries=68; unresolved raw coverage preserved.
 - Explicit verification bindings=68; backstop=0; null dispositions=0; no silent drops.
 - Plan ownership: 02-01 rows 0-11+61-64; 02-02 rows 43-60; 02-03 rows 12-32+65-67; 02-04 rows 33-42.

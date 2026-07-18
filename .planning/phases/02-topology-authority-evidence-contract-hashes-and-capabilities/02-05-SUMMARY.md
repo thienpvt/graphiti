@@ -115,7 +115,7 @@ status: complete
 
 - Phase 2 gate runner (`catalog_phase2_gate_runner.py` + `run_phase2_gate.py`) with `shell=False` argv, sentinel excluded, fail-closed `ready_for_phase_3a`.
 - Unit tests cover injected mandatory failure, tamper/stale ledger refusal, ownership 0..67, safety constants.
-- `02-EDGE-PROBE-RESOLUTION.json`: 68 unique `row_index` entries; raw `02-EDGE-PROBE.json` byte-identical (`e515187cc229f7f24bd95444799abb900b3cf913900b3a65119e9befd6462599`).
+- `02-EDGE-PROBE-RESOLUTION.json`: 68 unique `row_index` entries; raw `02-EDGE-PROBE.json` byte-stable (LF-normalized SHA-256 `16144e5ebc2ae9a46cda9b45ce0206e1290b954988c227ce97ec0a05f6149ce0`).
 - Full gate matrix green: runner_self_tests 11; focused_pytest 918; topology/evidence/hash/capabilities 390; ruff; pyright; structural/safety checks.
 - Safety: `canary_executed=false`, `oracle_catalog_v2_queried=false`, `no_new_store_or_control_plane_write_path=true`, `catalog_neo4j_int=skip`, `availability_probed=false`.
 - VALIDATION `nyquist_compliant: true`, `wave_0_complete: true`, `status: validated`.
@@ -180,5 +180,5 @@ None.
 - 02-GATE-RESULTS.json FOUND
 - 02-PHASE2-GATE.md FOUND
 - 02-EDGE-PROBE-RESOLUTION.json FOUND (68 entries)
-- 02-EDGE-PROBE.json raw sha256 e515187cc229f7f24bd95444799abb900b3cf913900b3a65119e9befd6462599 unchanged
+- 02-EDGE-PROBE.json LF-normalized SHA-256 16144e5ebc2ae9a46cda9b45ce0206e1290b954988c227ce97ec0a05f6149ce0 (raw artifact untouched)
 - Commits 072362c..e27f91f present; verify_ledger ok=ledger-only-child; ready_for_phase_3a=true
