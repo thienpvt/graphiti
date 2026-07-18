@@ -17,6 +17,10 @@ from config.schema import CatalogConfig
 from models.catalog_batch import GetCatalogIngestStatusRequest, UpsertCatalogBatchRequest
 from models.catalog_common import (
     IDENTITY_SCHEMA_VERSION,
+    PLAN_STATE_COMMITTED,
+    PLAN_STATE_COMMITTING,
+    PLAN_STATE_DISCARDED,
+    PLAN_STATE_EXPIRED,
     PLAN_STATE_PREPARED,
     CatalogErrorCode,
 )
@@ -28,7 +32,11 @@ from models.catalog_entities import (
     UpsertTypedEntitiesRequest,
     VerifyCatalogBatchRequest,
 )
-from models.catalog_prepare import PrepareCatalogBatchRequest
+from models.catalog_prepare import (
+    CommitPreparedCatalogBatchRequest,
+    DiscardPreparedCatalogBatchRequest,
+    PrepareCatalogBatchRequest,
+)
 from models.catalog_provenance import CatalogSourceItem, UpsertProvenanceRequest
 from models.catalog_responses import (
     CatalogBatchWriteResponse,
@@ -36,6 +44,8 @@ from models.catalog_responses import (
     CatalogIngestStatusResponse,
     CatalogItemResult,
     CatalogWriteResponse,
+    CommitPreparedCatalogBatchResponse,
+    DiscardPreparedCatalogBatchResponse,
     PrepareCatalogBatchResponse,
     ResolveEntityResult,
     ResolveTypedEntitiesResponse,
@@ -62,6 +72,7 @@ from services.catalog_identity import (
     evidence_link_key,
     mint_plan_token,
     plan_token_digest,
+    plan_token_matches,
 )
 from services.catalog_identity import (
     batch_request_sha256 as pure_batch_request_sha256,
@@ -79,6 +90,7 @@ from services.catalog_prepared_artifact import (
     PREPARED_ARTIFACT_SERIALIZATION_VERSION,
     artifact_sha256,
     chunk_artifact_bytes,
+    reassemble_artifact_bytes,
     serialize_prepared_artifact,
 )
 from services.catalog_store import CatalogNeo4jStore, CatalogStoreError
@@ -5490,6 +5502,479 @@ class CatalogService:
             projected_created=projected_created,
             projected_updated=projected_updated,
             projected_unchanged=projected_unchanged,
+        )
+
+    def _map_store_error_code(self, exc: CatalogStoreError) -> CatalogErrorCode:
+        code_text = getattr(exc, 'code', None) or 'neo4j_transaction_failed'
+        try:
+            return CatalogErrorCode(code_text)
+        except ValueError:
+            return CatalogErrorCode.neo4j_transaction_failed
+
+    def _commit_fail(
+        self,
+        code: CatalogErrorCode,
+        message: str,
+        *,
+        plan_uuid: str = '',
+        request_sha256: str | None = None,
+        catalog_sha256: str | None = None,
+        artifact_sha256: str | None = None,
+        state: str = '',
+        entity_count: int = 0,
+        edge_count: int = 0,
+        source_count: int = 0,
+        evidence_link_count: int = 0,
+    ) -> CommitPreparedCatalogBatchResponse:
+        return CommitPreparedCatalogBatchResponse(
+            plan_uuid=plan_uuid,
+            request_sha256=request_sha256,
+            catalog_sha256=catalog_sha256,
+            artifact_sha256=artifact_sha256,
+            state=state,
+            entity_count=entity_count,
+            edge_count=edge_count,
+            source_count=source_count,
+            evidence_link_count=evidence_link_count,
+            error_code=code,
+            error_message=message,
+        )
+
+    def _discard_fail(
+        self,
+        code: CatalogErrorCode,
+        message: str,
+        *,
+        plan_uuid: str | None = None,
+        state: str = '',
+    ) -> DiscardPreparedCatalogBatchResponse:
+        return DiscardPreparedCatalogBatchResponse(
+            plan_uuid=plan_uuid,
+            state=state,
+            error_code=code,
+            error_message=message,
+        )
+
+    def _verify_frozen_plan_binding(
+        self,
+        root: dict[str, Any],
+        artifact: dict[str, Any],
+        *,
+        expected_request_sha256: str | None,
+    ) -> str | None:
+        """Return conflict message if root/artifact binding fails; None if ok (D-21)."""
+        root_group = str(root.get('group_id') or '')
+        art_group = str(artifact.get('group_id') or '')
+        root_batch = str(root.get('batch_id') or '')
+        art_batch = str(artifact.get('batch_id') or '')
+        root_req = str(root.get('request_sha256') or '')
+        art_req = str(artifact.get('request_sha256') or '')
+        root_cat = str(root.get('catalog_sha256') or '')
+        art_cat = str(artifact.get('catalog_sha256') or '')
+        root_art = str(root.get('artifact_sha256') or '')
+        root_id_ver = str(root.get('identity_schema_version') or '')
+        art_id_ver = str(artifact.get('identity_schema_version') or '')
+        root_canon = str(root.get('canonicalization_version') or '')
+        art_canon = str(artifact.get('canonicalization_version') or '')
+        root_art_ver = str(root.get('artifact_serialization_version') or '')
+        art_art_ver = str(artifact.get('artifact_serialization_version') or '')
+        art_cat_ver = str(artifact.get('catalog_schema_version') or '')
+
+        if root_group != art_group:
+            return 'plan group_id binding mismatch'
+        if root_batch != art_batch:
+            return 'plan batch_id binding mismatch'
+        if root_req != art_req or not root_req:
+            return 'plan request_sha256 binding mismatch'
+        if root_cat != art_cat or not root_cat:
+            return 'plan catalog_sha256 binding mismatch'
+        if root_id_ver != art_id_ver or root_id_ver != IDENTITY_SCHEMA_VERSION:
+            return 'plan identity_schema_version binding mismatch'
+        if root_canon != art_canon or root_canon != CANONICALIZATION_VERSION:
+            return 'plan canonicalization_version binding mismatch'
+        if root_art_ver != art_art_ver or root_art_ver != PREPARED_ARTIFACT_SERIALIZATION_VERSION:
+            return 'plan artifact_serialization_version binding mismatch'
+        if art_cat_ver != CATALOG_SCHEMA_VERSION:
+            return 'plan catalog_schema_version binding mismatch'
+        if expected_request_sha256 is not None and expected_request_sha256 != root_req:
+            return 'expected_request_sha256 mismatch'
+        if not root_art:
+            return 'plan artifact_sha256 missing'
+
+        raw_counts = artifact.get('counts')
+        counts: dict[str, Any] = raw_counts if isinstance(raw_counts, dict) else {}
+        if int(root.get('entity_count') or 0) != int(counts.get('entities') or 0):
+            return 'plan entity_count mismatch'
+        if int(root.get('edge_count') or 0) != int(counts.get('edges') or 0):
+            return 'plan edge_count mismatch'
+        if int(root.get('source_count') or 0) != int(counts.get('sources') or 0):
+            return 'plan source_count mismatch'
+        if int(root.get('evidence_link_count') or 0) != int(counts.get('evidence_links') or 0):
+            return 'plan evidence_link_count mismatch'
+        return None
+
+    async def commit_prepared_catalog_batch(
+        self,
+        *,
+        client: Any,
+        request: CommitPreparedCatalogBatchRequest,
+    ) -> CommitPreparedCatalogBatchResponse:
+        """Token-only claim/load seam: verify frozen plan, CAS → COMMITTING (PLAN-10/11/12).
+
+        Digest is a locator only. Authorization is post-load plan_token_matches
+        (hmac.compare_digest). Stops at COMMITTING — zero domain/embedder/LLM/queue/HTTP.
+        """
+        raw_token = request.plan_token
+        try:
+            token_digest = plan_token_digest(raw_token)
+        except ValueError:
+            return self._commit_fail(
+                CatalogErrorCode.prepared_plan_not_found,
+                'prepared plan not found',
+            )
+
+        try:
+            root = await self._store.load_prepared_plan_by_token_digest(
+                client.driver,
+                token_digest=token_digest,
+            )
+        except CatalogStoreError as exc:
+            return self._commit_fail(
+                self._map_store_error_code(exc),
+                str(exc) or 'prepared plan load failed',
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog commit_prepared_catalog_batch load_failed reason=%s',
+                type(exc).__name__,
+            )
+            return self._commit_fail(
+                CatalogErrorCode.neo4j_transaction_failed,
+                'prepared plan load failed',
+            )
+
+        if root is None:
+            return self._commit_fail(
+                CatalogErrorCode.prepared_plan_not_found,
+                'prepared plan not found',
+            )
+
+        stored_digest = str(root.get('token_digest') or '')
+        if not plan_token_matches(raw_token, stored_digest):
+            return self._commit_fail(
+                CatalogErrorCode.prepared_plan_not_found,
+                'prepared plan not found',
+            )
+
+        plan_uuid = str(root.get('uuid') or '')
+        group_id = str(root.get('group_id') or '')
+        request_sha = str(root.get('request_sha256') or '') or None
+        catalog_sha = str(root.get('catalog_sha256') or '') or None
+        art_sha = str(root.get('artifact_sha256') or '') or None
+        entity_count = int(root.get('entity_count') or 0)
+        edge_count = int(root.get('edge_count') or 0)
+        source_count = int(root.get('source_count') or 0)
+        evidence_link_count = int(root.get('evidence_link_count') or 0)
+        state = str(root.get('state') or '')
+
+        def _echo_fail(code: CatalogErrorCode, message: str) -> CommitPreparedCatalogBatchResponse:
+            return self._commit_fail(
+                code,
+                message,
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=state,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+
+        if state == PLAN_STATE_DISCARDED:
+            return _echo_fail(
+                CatalogErrorCode.prepared_plan_not_found,
+                'prepared plan not found',
+            )
+        if state == PLAN_STATE_COMMITTED:
+            return _echo_fail(
+                CatalogErrorCode.prepared_plan_already_consumed,
+                'prepared plan already consumed',
+            )
+        if state == PLAN_STATE_EXPIRED:
+            return _echo_fail(
+                CatalogErrorCode.prepared_plan_expired,
+                'prepared plan expired',
+            )
+        if state not in {PLAN_STATE_PREPARED, PLAN_STATE_COMMITTING}:
+            return _echo_fail(
+                CatalogErrorCode.prepared_plan_conflict,
+                'prepared plan not claimable',
+            )
+
+        now = datetime.now(timezone.utc)
+        expires_at = root.get('expires_at')
+        if state == PLAN_STATE_PREPARED and expires_at is not None and now >= expires_at:
+            try:
+                async with client.driver.transaction() as tx:
+                    await self._store.cas_plan_state(
+                        tx,
+                        token_digest=token_digest,
+                        expected_from=PLAN_STATE_PREPARED,
+                        to_state=PLAN_STATE_EXPIRED,
+                        updated_at=now,
+                        now=now,
+                    )
+            except CatalogStoreError as exc:
+                code = self._map_store_error_code(exc)
+                if code == CatalogErrorCode.prepared_plan_expired:
+                    return _echo_fail(code, str(exc) or 'prepared plan expired')
+                # Race: still report expired for due PREPARED plans.
+                return _echo_fail(
+                    CatalogErrorCode.prepared_plan_expired,
+                    'prepared plan expired',
+                )
+            except Exception as exc:
+                logger.error(
+                    'catalog commit_prepared_catalog_batch expire_failed plan_uuid=%s reason=%s',
+                    plan_uuid,
+                    type(exc).__name__,
+                )
+                return _echo_fail(
+                    CatalogErrorCode.neo4j_transaction_failed,
+                    'prepared plan expiry update failed',
+                )
+            return _echo_fail(
+                CatalogErrorCode.prepared_plan_expired,
+                'prepared plan expired',
+            )
+
+        if not group_id or not plan_uuid:
+            return _echo_fail(
+                CatalogErrorCode.prepared_plan_conflict,
+                'prepared plan missing scope identity',
+            )
+
+        try:
+            chunks = await self._store.load_prepared_plan_chunks(
+                client.driver,
+                plan_uuid=plan_uuid,
+                group_id=group_id,
+            )
+        except CatalogStoreError as exc:
+            return _echo_fail(
+                self._map_store_error_code(exc),
+                str(exc) or 'prepared plan chunk load failed',
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog commit_prepared_catalog_batch chunks_failed plan_uuid=%s reason=%s',
+                plan_uuid,
+                type(exc).__name__,
+            )
+            return _echo_fail(
+                CatalogErrorCode.neo4j_transaction_failed,
+                'prepared plan chunk load failed',
+            )
+
+        expected_chunk_count = int(root.get('chunk_count') or 0)
+        if expected_chunk_count and len(chunks) != expected_chunk_count:
+            return _echo_fail(
+                CatalogErrorCode.prepared_plan_conflict,
+                'prepared plan chunk count mismatch',
+            )
+
+        try:
+            artifact_bytes = reassemble_artifact_bytes(
+                chunks,
+                expected_sha256=art_sha,
+                expected_length=int(root.get('payload_bytes') or 0) or None,
+            )
+            artifact = json.loads(artifact_bytes.decode('utf-8'))
+            if not isinstance(artifact, dict):
+                raise ValueError('artifact body must be object')
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            return _echo_fail(
+                CatalogErrorCode.prepared_plan_conflict,
+                f'prepared plan artifact reassembly failed: {exc}',
+            )
+
+        binding_err = self._verify_frozen_plan_binding(
+            root,
+            artifact,
+            expected_request_sha256=request.expected_request_sha256,
+        )
+        if binding_err is not None:
+            return _echo_fail(
+                CatalogErrorCode.prepared_plan_conflict,
+                binding_err,
+            )
+
+        expected_from = (
+            PLAN_STATE_COMMITTING if state == PLAN_STATE_COMMITTING else PLAN_STATE_PREPARED
+        )
+        try:
+            async with client.driver.transaction() as tx:
+                claimed = await self._store.cas_plan_state(
+                    tx,
+                    token_digest=token_digest,
+                    expected_from=expected_from,
+                    to_state=PLAN_STATE_COMMITTING,
+                    updated_at=now,
+                    now=now,
+                    require_not_expired=True,
+                )
+        except CatalogStoreError as exc:
+            return _echo_fail(
+                self._map_store_error_code(exc),
+                str(exc) or 'prepared plan claim failed',
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog commit_prepared_catalog_batch cas_failed plan_uuid=%s reason=%s',
+                plan_uuid,
+                type(exc).__name__,
+            )
+            return _echo_fail(
+                CatalogErrorCode.neo4j_transaction_failed,
+                'prepared plan claim transaction failed',
+            )
+
+        logger.info(
+            'catalog commit_prepared_catalog_batch claimed plan_uuid=%s state=%s reentry=%s',
+            plan_uuid,
+            PLAN_STATE_COMMITTING,
+            bool(claimed.get('reentry')),
+        )
+        return CommitPreparedCatalogBatchResponse(
+            plan_uuid=plan_uuid,
+            request_sha256=request_sha,
+            catalog_sha256=catalog_sha,
+            artifact_sha256=art_sha,
+            state=PLAN_STATE_COMMITTING,
+            entity_count=entity_count,
+            edge_count=edge_count,
+            source_count=source_count,
+            evidence_link_count=evidence_link_count,
+        )
+
+    async def discard_prepared_catalog_batch(
+        self,
+        *,
+        client: Any,
+        request: DiscardPreparedCatalogBatchRequest,
+    ) -> DiscardPreparedCatalogBatchResponse:
+        """Token-only discard: PREPARED→DISCARDED idempotent; no domain deletes (PLAN-19)."""
+        raw_token = request.plan_token
+        try:
+            token_digest = plan_token_digest(raw_token)
+        except ValueError:
+            return self._discard_fail(
+                CatalogErrorCode.prepared_plan_not_found,
+                'prepared plan not found',
+            )
+
+        try:
+            root = await self._store.load_prepared_plan_by_token_digest(
+                client.driver,
+                token_digest=token_digest,
+            )
+        except CatalogStoreError as exc:
+            return self._discard_fail(
+                self._map_store_error_code(exc),
+                str(exc) or 'prepared plan load failed',
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog discard_prepared_catalog_batch load_failed reason=%s',
+                type(exc).__name__,
+            )
+            return self._discard_fail(
+                CatalogErrorCode.neo4j_transaction_failed,
+                'prepared plan load failed',
+            )
+
+        if root is None:
+            return self._discard_fail(
+                CatalogErrorCode.prepared_plan_not_found,
+                'prepared plan not found',
+            )
+
+        stored_digest = str(root.get('token_digest') or '')
+        if not plan_token_matches(raw_token, stored_digest):
+            return self._discard_fail(
+                CatalogErrorCode.prepared_plan_not_found,
+                'prepared plan not found',
+            )
+
+        plan_uuid = str(root.get('uuid') or '') or None
+        state = str(root.get('state') or '')
+
+        if state in {PLAN_STATE_COMMITTING, PLAN_STATE_COMMITTED}:
+            return self._discard_fail(
+                CatalogErrorCode.prepared_plan_conflict,
+                'cannot discard committing/committed plan',
+                plan_uuid=plan_uuid,
+                state=state,
+            )
+        if state == PLAN_STATE_EXPIRED:
+            return self._discard_fail(
+                CatalogErrorCode.prepared_plan_expired,
+                'prepared plan expired',
+                plan_uuid=plan_uuid,
+                state=state,
+            )
+        if state not in {PLAN_STATE_PREPARED, PLAN_STATE_DISCARDED}:
+            return self._discard_fail(
+                CatalogErrorCode.prepared_plan_conflict,
+                'prepared plan not discardable',
+                plan_uuid=plan_uuid,
+                state=state,
+            )
+
+        now = datetime.now(timezone.utc)
+        expected_from = (
+            PLAN_STATE_DISCARDED if state == PLAN_STATE_DISCARDED else PLAN_STATE_PREPARED
+        )
+        try:
+            async with client.driver.transaction() as tx:
+                discarded = await self._store.cas_plan_state(
+                    tx,
+                    token_digest=token_digest,
+                    expected_from=expected_from,
+                    to_state=PLAN_STATE_DISCARDED,
+                    updated_at=now,
+                    now=now,
+                )
+        except CatalogStoreError as exc:
+            return self._discard_fail(
+                self._map_store_error_code(exc),
+                str(exc) or 'prepared plan discard failed',
+                plan_uuid=plan_uuid,
+                state=state,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog discard_prepared_catalog_batch cas_failed plan_uuid=%s reason=%s',
+                plan_uuid,
+                type(exc).__name__,
+            )
+            return self._discard_fail(
+                CatalogErrorCode.neo4j_transaction_failed,
+                'prepared plan discard transaction failed',
+                plan_uuid=plan_uuid,
+                state=state,
+            )
+
+        logger.info(
+            'catalog discard_prepared_catalog_batch discarded plan_uuid=%s idempotent=%s',
+            plan_uuid,
+            bool(discarded.get('idempotent')),
+        )
+        return DiscardPreparedCatalogBatchResponse(
+            plan_uuid=plan_uuid or str(discarded.get('uuid') or '') or None,
+            state=PLAN_STATE_DISCARDED,
         )
 
     class _BatchStatusConflict(Exception):
