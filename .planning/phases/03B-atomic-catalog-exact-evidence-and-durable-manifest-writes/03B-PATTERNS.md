@@ -107,13 +107,13 @@ Reuse Phase 3A hard chunk/payload ceilings for manifest unless live proof requir
 
 ### `mcp_server/src/services/catalog_capabilities.py` — MODIFY
 
-After Phase 3B persistence/live gate (authorized two-axis re-gate; plan incomplete pre-live):
+After Phase 3B final live gate + coordinator flip (authorized two-axis re-gate; plan complete):
 - `prepare_commit=True` remains.
 - `explicit_evidence_links=True` remains.
-- `manifests=False` pre-live (flip only after accepted live proof + coordinator; historical Axis A audit remains true and does not alone force current safety false).
+- `manifests=True` after accepted live preflip + coordinator final flip (static source; no runtime GATE-RESULTS read; historical Axis A audit remains true and does not alone force current safety false).
 - `manifest_verification=False` until Phase 4 (not opened).
 
-Builder remains mutation-free. See `03B-06-SUMMARY.md` status: incomplete.
+Builder remains mutation-free. See `03B-06-SUMMARY.md` status: complete.
 
 ### `mcp_server/src/graphiti_mcp_server.py` — TOUCH ONLY IF NEEDED
 

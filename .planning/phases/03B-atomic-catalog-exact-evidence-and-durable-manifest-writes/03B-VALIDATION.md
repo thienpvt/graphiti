@@ -53,7 +53,7 @@ Aligned to six executable plans (03B-01 … 03B-06).
 | 03B-05-T1 | 05 | 5 | PLAN-14/15, MANI-07 | T-03B-REVIVE | COMMITTING resume; terminal agreement; no PREPARED revival | service | `pytest test_catalog_commit_recovery.py` | ❌ W0 | ⬜ pending |
 | 03B-05-T2 | 05 | 5 | PLAN-16, TEST-06, D-24/25 | T-03B-02/DUP | Concurrent same-token one logical; no dup manifest | concurrency | `pytest test_catalog_concurrency.py test_catalog_commit_recovery.py` | ❌ W0 | ⬜ pending |
 | 03B-06-T1 | 06 | 6 | PLAN-13..16, EVID-07..11, MANI-01..07 | T-03B-01/ISO | Live single-tx co-commit, rollback, search, isolation | integration | `pytest test_catalog_commit_neo4j_int.py` | ❌ W0 | ⬜ pending |
-| 03B-06-T2 | 06 | 6 | TEST-06/07, D-32/33 | T-03B-GATE/CAP | Fail-closed schema-v2 two-axis gate; manifests=False pre-live; history permanent audit; current safety independent; CLI nonzero only on current-axis fail | gate/unit | `pytest test_catalog_phase3b_gate_runner.py test_catalog_capabilities.py` | ✅ | ⚠️ incomplete pre-live |
+| 03B-06-T2 | 06 | 6 | TEST-06/07, D-32/33 | T-03B-GATE/CAP | Fail-closed schema-v2 two-axis gate; manifests=True post-flip; history permanent audit; current safety independent; CLI 0 under require-neo4j when ready | gate/unit | `pytest test_catalog_phase3b_gate_runner.py test_catalog_capabilities.py` + final `gate run --require-neo4j` | ✅ | ✅ complete |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
