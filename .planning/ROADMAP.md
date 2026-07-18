@@ -149,11 +149,11 @@ Plans:
   4. Token is bound to one immutable group/batch/schema/hash/payload; expired/discarded/consumed plans cannot revive; discard terminates only unconsumed plans without deleting domain data
   5. Dry-run remains zero-write; existing `upsert_catalog_batch` remains available
 
-**Plans**: 2/6 plans executed
+**Plans**: 3/6 plans executed
 
 - [x] 03A-01-PLAN.md
 - [x] 03A-02-PLAN.md
-- [ ] 03A-03-PLAN.md
+- [x] 03A-03-PLAN.md
 - [ ] 03A-04-PLAN.md
 - [ ] 03A-05-PLAN.md
 - [ ] 03A-06-PLAN.md
