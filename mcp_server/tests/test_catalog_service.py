@@ -2343,6 +2343,158 @@ async def test_edge_in_tx_endpoint_race_rolls_back():
 
 
 @pytest.mark.asyncio
+async def test_edge_topology_disallowed_pair_skips_resolve_embed_write():
+    """EDGE-08/09: illegal topology fails before resolve/embed/write."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock()
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock()
+    service._ensure_schema = AsyncMock()
+
+    # Bypass CatalogEdgeItem model topology so service preflight is the gate under test.
+    bad = CatalogEdgeItem.model_construct(
+        edge_type='ForeignKeyTo',
+        edge_key='FK::COL->TABLE',
+        source_graph_key='COLUMN::FE::ORCL.HR.EMPLOYEES.DEPT_ID',
+        source_entity_type='Column',
+        target_graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
+        target_entity_type='Table',
+        fact='illegal column-table foreign key topology',
+        evidence=None,
+        attributes=None,
+        content_sha256=None,
+        confidence=None,
+    )
+    request = UpsertTypedEdgesRequest.model_construct(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id=EDGE_BATCH,
+        edges=[bad],
+        dry_run=False,
+        atomic=True,
+        strict_endpoints=True,
+    )
+
+    resp = await service.upsert_typed_edges(client=client, request=request)
+
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
+    service._store.resolve_endpoint_typed.assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    service._store.upsert_edge_item.assert_not_awaited()
+    service._ensure_schema.assert_not_awaited()
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_edge_topology_dry_run_invalid_pair_no_side_effects():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock()
+    service._store.upsert_edge_item = AsyncMock()
+    service._ensure_schema = AsyncMock()
+
+    bad = CatalogEdgeItem.model_construct(
+        edge_type='Calls',
+        edge_key='CALLS::TABLE->PROC',
+        source_graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+        source_entity_type='Table',
+        target_graph_key='PROCEDURE::FE::ORCL.HR.EMP_PKG.HIRE#1',
+        target_entity_type='Procedure',
+        fact='table cannot call procedure',
+        evidence=None,
+        attributes=None,
+        content_sha256=None,
+        confidence=None,
+    )
+    request = UpsertTypedEdgesRequest.model_construct(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id=EDGE_BATCH,
+        edges=[bad],
+        dry_run=True,
+        atomic=True,
+        strict_endpoints=True,
+    )
+
+    resp = await service.upsert_typed_edges(client=client, request=request)
+
+    assert resp.results[0].error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
+    service._store.resolve_endpoint_typed.assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    service._store.upsert_edge_item.assert_not_awaited()
+    service._ensure_schema.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_batch_topology_disallowed_edge_skips_resolve_embed_write():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    service._ensure_schema = AsyncMock()
+
+    bad = CatalogEdgeItem.model_construct(
+        edge_type='ForeignKeyTo',
+        edge_key='FK::COL->TABLE',
+        source_graph_key='COLUMN::FE::ORCL.HR.EMPLOYEES.DEPT_ID',
+        source_entity_type='Column',
+        target_graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
+        target_entity_type='Table',
+        fact='illegal topology in batch',
+        evidence=None,
+        attributes=None,
+        content_sha256=None,
+        confidence=None,
+    )
+    # model_construct shell so nested edge skips CatalogEdgeItem model_validate
+    request = UpsertCatalogBatchRequest.model_construct(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id=BATCH_ATOMIC,
+        entities=[],
+        edges=[bad],
+        provenance=None,
+        dry_run=False,
+        request_sha256=None,
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.status == 'failed'
+    assert any(
+        r.error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed for r in (resp.results or [])
+    ) or resp.error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
+    service._store.resolve_endpoint_typed.assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    client.embedder.create_batch.assert_not_awaited()
+    service._store.upsert_edge_item.assert_not_awaited()
+    service._ensure_schema.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_edge_valid_table_table_foreign_key_still_reaches_resolve():
+    """Fixture compatibility: Table-Table ForeignKeyTo remains accepted."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock(return_value=('missing_endpoint', None))
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+
+    assert any(r.error_code == CatalogErrorCode.missing_endpoint for r in resp.results)
+    service._store.resolve_endpoint_typed.assert_awaited()
+    service._store.upsert_edge_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_entity_empty_upsert_row_fails_not_created():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())

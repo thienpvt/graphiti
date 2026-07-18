@@ -283,3 +283,77 @@ def test_map_lookup_order_stable_and_reentrant():
     for _ in range(3):
         validate_edge_endpoint_pair('Contains', 'Schema', 'Table')
         assert is_edge_endpoint_pair_allowed('Contains', 'Schema', 'Table') is True
+
+
+# ---------------------------------------------------------------------------
+# CatalogEdgeItem model preflight (Task 2)
+# ---------------------------------------------------------------------------
+
+
+from models.catalog_edges import CatalogEdgeItem  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
+
+
+def _edge_payload(**overrides):
+    data = {
+        'edge_type': 'ForeignKeyTo',
+        'edge_key': 'FK::HR.EMPLOYEES->HR.DEPARTMENTS',
+        'source_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+        'source_entity_type': 'Table',
+        'target_graph_key': 'TABLE::FE::ORCL.HR.DEPARTMENTS',
+        'target_entity_type': 'Table',
+        'fact': 'employees.dept_id references departments.dept_id',
+    }
+    data.update(overrides)
+    return data
+
+
+def test_catalog_edge_item_accepts_table_table_foreign_key():
+    item = CatalogEdgeItem.model_validate(_edge_payload())
+    assert item.edge_type == 'ForeignKeyTo'
+    assert item.source_entity_type == 'Table'
+    assert item.target_entity_type == 'Table'
+
+
+def test_catalog_edge_item_rejects_disallowed_endpoint_pair():
+    with pytest.raises(ValidationError) as exc_info:
+        CatalogEdgeItem.model_validate(
+            _edge_payload(
+                edge_type='ForeignKeyTo',
+                source_entity_type='Column',
+                source_graph_key='COLUMN::FE::ORCL.HR.EMPLOYEES.DEPT_ID',
+                target_entity_type='Table',
+                target_graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
+            )
+        )
+    assert CatalogErrorCode.edge_endpoint_pair_not_allowed.value in str(exc_info.value)
+
+
+def test_catalog_edge_item_enforced_by_still_requires_evidence():
+    with pytest.raises(ValidationError, match='EnforcedBy requires non-empty evidence'):
+        CatalogEdgeItem.model_validate(
+            _edge_payload(
+                edge_type='EnforcedBy',
+                edge_key='ENF::HR.EMP_PK',
+                source_entity_type='Constraint',
+                source_graph_key='CONSTRAINT::FE::ORCL.HR.EMP_PK',
+                target_entity_type='Table',
+                target_graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+                evidence=None,
+            )
+        )
+
+
+def test_catalog_edge_item_enforced_by_valid_pair_with_evidence():
+    item = CatalogEdgeItem.model_validate(
+        _edge_payload(
+            edge_type='EnforcedBy',
+            edge_key='ENF::HR.EMP_PK',
+            source_entity_type='Constraint',
+            source_graph_key='CONSTRAINT::FE::ORCL.HR.EMP_PK',
+            target_entity_type='Table',
+            target_graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+            evidence='ALL_CONSTRAINTS row',
+        )
+    )
+    assert item.edge_type == 'EnforcedBy'
