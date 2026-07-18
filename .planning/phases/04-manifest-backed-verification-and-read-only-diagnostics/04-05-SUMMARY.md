@@ -174,13 +174,20 @@ status: complete
 
 ## Deviations from Plan
 
-None - plan executed as written. Implementation + GREEN tests landed together (Wave 0 RED scaffolds replaced).
+### Auto-fixed Issues
+
+**1. [Rule 1 - Bug] Scoped Pyright on resolve-edge tests**
+- **Found during:** Wave 5 gate after GREEN
+- **Issue:** `_row` endpoint params typed `str` but anomaly fixtures pass `None`; `execute_write` assigned on store though attr unknown
+- **Fix:** `source_uuid`/`target_uuid: str | None`; spy real `upsert_edge_item` only (no invented write attr)
+- **Files modified:** `mcp_server/tests/test_catalog_resolve_edges.py`
+- **Verification:** scoped pyright 0; 90 tests; ruff clean
 
 ## Verification Results
 
-- `pytest test_catalog_resolve_edges + evidence_read + store -k evidence|resolve_edge` → **24 passed**
+- `pytest tests/test_catalog_resolve_edges.py tests/test_catalog_evidence_read.py tests/test_catalog_store_unit.py` → **90 passed**
 - `ruff check` on modified files → **All checks passed**
-- `pyright` on modified sources → **0 errors**
+- `pyright` on sources + `test_catalog_resolve_edges.py` → **0 errors**
 
 ## Known Stubs
 
@@ -194,6 +201,7 @@ None new. Mitigations T-04-ISO/READ/INFO/BOUND/INJ covered by unit suite (group_
 
 - RED existed as Wave 0 `pytest.fail` scaffolds in plan 04-01
 - GREEN: Task 1 `1bb96d4` (resolve + models + store); Task 2 `c739071` (evidence suite)
+- Fix: scoped Pyright on resolve-edge tests (new commit, no amend)
 
 ## Self-Check: PASSED
 
