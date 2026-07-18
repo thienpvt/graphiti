@@ -139,17 +139,13 @@ async def test_read_tools_when_writes_disabled():
     service._store.find_entity_for_evidence = AsyncMock(return_value=None)
     service._store.find_edge_for_evidence = AsyncMock(return_value=None)
 
-    resolve_resp = await service.resolve_typed_entities(
-        client=client, request=_resolve_request()
-    )
+    resolve_resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
     assert resolve_resp.group_id == GROUP
     assert resolve_resp.results
     assert all(r.error_code != CatalogErrorCode.feature_disabled for r in resolve_resp.results)
     service._store.match_entities_for_resolve.assert_awaited()
 
-    status_resp = await service.get_catalog_ingest_status(
-        client=client, request=_status_request()
-    )
+    status_resp = await service.get_catalog_ingest_status(client=client, request=_status_request())
     assert status_resp.found is False
     assert status_resp.error_code is None
     service._store.get_batch_status.assert_awaited()
@@ -295,9 +291,7 @@ async def test_missing_status_found_false():
         )
     )
     gated._store.get_batch_status = AsyncMock(return_value={'status': 'committed'})
-    gated_resp = await gated.get_catalog_ingest_status(
-        client=client, request=_status_request()
-    )
+    gated_resp = await gated.get_catalog_ingest_status(client=client, request=_status_request())
     assert gated_resp.found is False
     assert gated_resp.error_code == CatalogErrorCode.feature_disabled
 
@@ -415,8 +409,8 @@ def test_cypher_binds_group_id():
 
     # Service status/resolve call sites pass group_id kwarg (source-level).
     svc_src = Path(_load_module('services.catalog_service').__file__).read_text(encoding='utf-8')
-    assert 'group_id=group_id' in svc_src or "group_id=request.group_id" in svc_src
-    assert "group_id=request.group_id" in svc_src
+    assert 'group_id=group_id' in svc_src or 'group_id=request.group_id' in svc_src
+    assert 'group_id=request.group_id' in svc_src
 
 
 @pytest.mark.asyncio

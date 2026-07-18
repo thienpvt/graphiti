@@ -24,9 +24,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 'phase4-gate-results.v1'
-PHASE_DIR_REL = Path(
-    '.planning/phases/04-manifest-backed-verification-and-read-only-diagnostics'
-)
+PHASE_DIR_REL = Path('.planning/phases/04-manifest-backed-verification-and-read-only-diagnostics')
 DEFAULT_LEDGER_REL = PHASE_DIR_REL / '04-GATE-RESULTS.json'
 OUTPUT_BOUND = 4000
 FORBIDDEN_GROUP = 'oracle-catalog-v2'

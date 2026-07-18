@@ -283,9 +283,7 @@ def test_no_forbidden_group_as_test_target_in_scaffolds():
     import re
 
     root = _root()
-    ban = re.compile(
-        r"(?<![A-Za-z_])(GROUP|group_id|TEST_GROUP)\s*=\s*['\"]oracle-catalog-v2['\"]"
-    )
+    ban = re.compile(r"(?<![A-Za-z_])(GROUP|group_id|TEST_GROUP)\s*=\s*['\"]oracle-catalog-v2['\"]")
     for rel in gate.WAVE0_REQUIRED:
         src = (root / rel).read_text(encoding='utf-8')
         # Bare GROUP/TEST_GROUP assignment to v2 forbidden; FORBIDDEN_GROUP = '...' is ok.
