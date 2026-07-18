@@ -5848,6 +5848,24 @@ class CatalogService:
                 error_message='provenance invariant changed in write transaction',
                 **hash_echo,
             )
+        except self._EdgeEndpointRace as exc:
+            logger.error(
+                'catalog upsert_catalog_batch edge_endpoint_race batch_id=%s code=%s',
+                request.batch_id,
+                exc.code.value,
+            )
+            await _record_failed_status(exc.code.value)
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges) + len(provenance_sources), 1),
+                rolled_back=len(entity_results) + len(edge_results) + len(provenance_results),
+                error_code=exc.code,
+                error_message=f'edge under-lock conflict: {exc.code.value}',
+                **hash_echo,
+            )
         except Exception as exc:
             logger.error(
                 'catalog upsert_catalog_batch neo4j_transaction_failed batch_id=%s entities=%s edges=%s provenance=%s reason=%s',
