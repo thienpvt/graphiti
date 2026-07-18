@@ -175,7 +175,7 @@ Plans:
   4. Manifest membership is exact for created, updated, and unchanged objects and is never inferred from `entity.batch_id` / `edge.batch_id`
   5. Search interoperability for catalog entities/edges remains; fault injection between persistence steps leaves neither a partial graph nor a partial manifest
 
-**Plans:** 1/6 plans executed
+**Plans:** 2/6 plans executed
 
 Plans:
 **Wave 1**
@@ -184,7 +184,7 @@ Plans:
 
 **Wave 2**
 
-- [ ] 03B-02-PLAN.md — Pure manifest canonicalize/chunk + additive commit response fields
+- [x] 03B-02-PLAN.md — Pure manifest canonicalize/chunk + additive commit response fields
 
 **Wave 3** *(blocked on Wave 2)*
 
