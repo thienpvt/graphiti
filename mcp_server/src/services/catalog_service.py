@@ -10,12 +10,16 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from config.schema import CatalogConfig
 from models.catalog_batch import GetCatalogIngestStatusRequest, UpsertCatalogBatchRequest
-from models.catalog_common import IDENTITY_SCHEMA_VERSION, CatalogErrorCode
+from models.catalog_common import (
+    IDENTITY_SCHEMA_VERSION,
+    PLAN_STATE_PREPARED,
+    CatalogErrorCode,
+)
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest
 from models.catalog_entities import (
     CatalogEntityItem,
@@ -24,6 +28,7 @@ from models.catalog_entities import (
     UpsertTypedEntitiesRequest,
     VerifyCatalogBatchRequest,
 )
+from models.catalog_prepare import PrepareCatalogBatchRequest
 from models.catalog_provenance import CatalogSourceItem, UpsertProvenanceRequest
 from models.catalog_responses import (
     CatalogBatchWriteResponse,
@@ -31,6 +36,7 @@ from models.catalog_responses import (
     CatalogIngestStatusResponse,
     CatalogItemResult,
     CatalogWriteResponse,
+    PrepareCatalogBatchResponse,
     ResolveEntityResult,
     ResolveTypedEntitiesResponse,
     VerifyCatalogBatchResponse,
@@ -40,14 +46,22 @@ from models.catalog_responses import (
 from models.catalog_topology import validate_edge_endpoint_pair
 from services.catalog_identity import (
     CANONICALIZATION_VERSION,
+    CATALOG_SCHEMA_VERSION,
     assert_optional_client_hash,
     batch_request_canonical_payload,
     canonical_sha256,
     catalog_batch_uuid,
     catalog_edge_uuid,
     catalog_entity_uuid,
+    catalog_evidence_link_uuid,
     catalog_mentions_uuid,
+    catalog_prepared_plan_chunk_uuid,
+    catalog_prepared_plan_uuid,
     catalog_source_uuid,
+    evidence_canonical_payload,
+    evidence_link_key,
+    mint_plan_token,
+    plan_token_digest,
 )
 from services.catalog_identity import (
     batch_request_sha256 as pure_batch_request_sha256,
@@ -60,6 +74,12 @@ from services.catalog_identity import (
 )
 from services.catalog_identity import (
     source_canonical_payload as pure_source_canonical_payload,
+)
+from services.catalog_prepared_artifact import (
+    PREPARED_ARTIFACT_SERIALIZATION_VERSION,
+    artifact_sha256,
+    chunk_artifact_bytes,
+    serialize_prepared_artifact,
 )
 from services.catalog_store import CatalogNeo4jStore, CatalogStoreError
 
@@ -119,6 +139,29 @@ class _PreparedSource:
     links_checked: bool = False
     missing_links: bool = False  # True when any MENTIONS/episode attach still needed
     coalesced_indices: list[int] = field(default_factory=list)
+
+
+@dataclass
+class _BatchPreflightOutcome:
+    """Shared preflight result for upsert_catalog_batch and prepare_catalog_batch.
+
+    early_kind is None when projection succeeded (errors empty). Non-None values
+    map to structured early exits that must not embed or open domain/plan writes.
+    """
+
+    namespace: uuid.UUID | None
+    batch_uuid: str | None
+    server_hash: str
+    hash_echo: dict[str, Any]
+    entity_prepared: list[_PreparedEntity] = field(default_factory=list)
+    edge_prepared: list[_PreparedEdge] = field(default_factory=list)
+    provenance_sources: list[_PreparedSource] = field(default_factory=list)
+    edge_offset: int = 0
+    request_entity_uuids: dict[tuple[str, str], str] = field(default_factory=dict)
+    errors: list[CatalogItemResult] = field(default_factory=list)
+    early_kind: str | None = None
+    early_code: CatalogErrorCode | None = None
+    early_message: str | None = None
 
 
 class CatalogService:
@@ -3687,13 +3730,19 @@ class CatalogService:
             details={'kind': 'edge'},
         )
 
-    async def upsert_catalog_batch(
+    async def _prepare_batch_preflight(
         self,
         *,
         client: Any,
-        request: UpsertCatalogBatchRequest,
-    ) -> CatalogBatchWriteResponse:
-        """Preflight a nested deterministic catalog batch before any embedding/write."""
+        request: Any,
+        check_batch_status: bool = True,
+        log_label: str = 'upsert_catalog_batch',
+    ) -> _BatchPreflightOutcome:
+        """Shared identity/topology/hash/projection preflight (PLAN-02, D-16).
+
+        Used by upsert_catalog_batch and prepare_catalog_batch. Does not embed,
+        open write transactions, or mutate domain/plan nodes.
+        """
         namespace = self._namespace()
         batch_uuid = (
             catalog_batch_uuid(namespace, request.group_id, request.batch_id)
@@ -3701,86 +3750,83 @@ class CatalogService:
             else None
         )
         # HASH-05: request hash is pure over the validated model; echo on gate failures too.
-        server_hash = self.batch_request_sha256(request)
+        server_hash = pure_batch_request_sha256(request)
         hash_echo = self._batch_hash_echo_fields(request, server_hash)
-        gate = self._batch_gate_error(client, request)
-        if gate is not None:
-            code, message = gate
-            return CatalogBatchWriteResponse(
+
+        def _early(
+            kind: str,
+            *,
+            code: CatalogErrorCode | None = None,
+            message: str | None = None,
+        ) -> _BatchPreflightOutcome:
+            return _BatchPreflightOutcome(
+                namespace=namespace,
+                batch_uuid=batch_uuid,
+                server_hash=server_hash,
+                hash_echo=hash_echo,
+                early_kind=kind,
+                early_code=code,
+                early_message=message,
+            )
+
+        # Gate accepts UpsertCatalogBatchRequest shape; prepare shares domain fields.
+        if isinstance(request, UpsertCatalogBatchRequest):
+            gate_request = request
+        else:
+            gate_request = UpsertCatalogBatchRequest(
+                identity_schema_version=request.identity_schema_version,
+                system_key=request.system_key,
                 group_id=request.group_id,
                 batch_id=request.batch_id,
-                batch_uuid=batch_uuid,
-                dry_run=request.dry_run,
-                status='failed',
-                failed=max(len(request.entities) + len(request.edges), 1),
-                error_code=code,
-                error_message=message,
-                **hash_echo,
+                entities=list(request.entities),
+                edges=list(request.edges),
+                provenance=request.provenance,
+                catalog_sha256=request.catalog_sha256,
+                request_sha256=request.request_sha256,
+                dry_run=False,
+                atomic=True,
             )
+        gate = self._batch_gate_error(client, gate_request)
+        if gate is not None:
+            code, message = gate
+            return _early('gate', code=code, message=message)
         assert namespace is not None and batch_uuid is not None
         try:
             assert_optional_client_hash(request.request_sha256, server_hash)
         except ValueError as exc:
-            return CatalogBatchWriteResponse(
-                group_id=request.group_id,
-                batch_id=request.batch_id,
-                batch_uuid=batch_uuid,
-                dry_run=request.dry_run,
-                status='failed',
-                failed=max(len(request.entities) + len(request.edges), 1),
-                error_code=CatalogErrorCode.content_hash_mismatch,
-                error_message=str(exc),
-                **hash_echo,
+            return _early(
+                'hash_mismatch',
+                code=CatalogErrorCode.content_hash_mismatch,
+                message=str(exc),
             )
         effective_hash = server_hash
 
-        try:
-            prior_status = await self._store.get_batch_status(
-                client.driver,
-                uuid=batch_uuid,
-                group_id=request.group_id,
-            )
-        except Exception as exc:
-            logger.error(
-                'catalog batch_status_pre_read_failed batch_id=%s reason=%s',
-                request.batch_id,
-                type(exc).__name__,
-            )
-            return CatalogBatchWriteResponse(
-                group_id=request.group_id,
-                batch_id=request.batch_id,
-                batch_uuid=batch_uuid,
-                dry_run=request.dry_run,
-                status='failed',
-                failed=max(len(request.entities) + len(request.edges), 1),
-                error_code=CatalogErrorCode.internal_error,
-                error_message='batch status pre-read failed',
-                **hash_echo,
-            )
-        if prior_status is not None and prior_status.get('status') == 'committed':
-            if prior_status.get('request_sha256') == effective_hash:
-                return CatalogBatchWriteResponse(
+        if check_batch_status:
+            try:
+                prior_status = await self._store.get_batch_status(
+                    client.driver,
+                    uuid=batch_uuid,
                     group_id=request.group_id,
-                    batch_id=request.batch_id,
-                    batch_uuid=batch_uuid,
-                    dry_run=request.dry_run,
-                    status='committed',
-                    entity_unchanged=len(request.entities),
-                    edge_unchanged=len(request.edges),
-                    provenance_unchanged=self._batch_provenance_item_count(request),
-                    **hash_echo,
                 )
-            return CatalogBatchWriteResponse(
-                group_id=request.group_id,
-                batch_id=request.batch_id,
-                batch_uuid=batch_uuid,
-                dry_run=request.dry_run,
-                status='failed',
-                failed=max(len(request.entities) + len(request.edges), 1),
-                error_code=CatalogErrorCode.batch_conflict,
-                error_message='committed batch_id has different request_sha256',
-                **hash_echo,
-            )
+            except Exception as exc:
+                logger.error(
+                    'catalog batch_status_pre_read_failed batch_id=%s reason=%s',
+                    request.batch_id,
+                    type(exc).__name__,
+                )
+                return _early(
+                    'status_read',
+                    code=CatalogErrorCode.internal_error,
+                    message='batch status pre-read failed',
+                )
+            if prior_status is not None and prior_status.get('status') == 'committed':
+                if prior_status.get('request_sha256') == effective_hash:
+                    return _early('committed_same')
+                return _early(
+                    'committed_conflict',
+                    code=CatalogErrorCode.batch_conflict,
+                    message='committed batch_id has different request_sha256',
+                )
 
         entity_prepared: list[_PreparedEntity] = []
         entity_by_identity: dict[tuple[str, str], _PreparedEntity] = {}
@@ -4444,31 +4490,150 @@ class CatalogService:
         if errors:
             errors.sort(key=lambda item: item.index)
             logger.info(
-                'catalog upsert_catalog_batch preflight_failed batch_id=%s entities=%s edges=%s errors=%s',
+                'catalog %s preflight_failed batch_id=%s entities=%s edges=%s errors=%s',
+                log_label,
                 request.batch_id,
                 len(request.entities),
                 len(request.edges),
                 len(errors),
             )
+            early_code = (
+                CatalogErrorCode.batch_conflict
+                if any(
+                    result.error_code == CatalogErrorCode.deterministic_uuid_conflict
+                    for result in errors
+                )
+                else errors[0].error_code
+            )
+            return _BatchPreflightOutcome(
+                namespace=namespace,
+                batch_uuid=batch_uuid,
+                server_hash=effective_hash,
+                hash_echo=hash_echo,
+                entity_prepared=entity_prepared,
+                edge_prepared=edge_prepared,
+                provenance_sources=provenance_sources,
+                edge_offset=edge_offset,
+                request_entity_uuids=request_entity_uuids,
+                errors=errors,
+                early_kind='preflight_failed',
+                early_code=early_code,
+                early_message='batch preflight failed',
+            )
+
+        return _BatchPreflightOutcome(
+            namespace=namespace,
+            batch_uuid=batch_uuid,
+            server_hash=effective_hash,
+            hash_echo=hash_echo,
+            entity_prepared=entity_prepared,
+            edge_prepared=edge_prepared,
+            provenance_sources=provenance_sources,
+            edge_offset=edge_offset,
+            request_entity_uuids=request_entity_uuids,
+            errors=[],
+            early_kind=None,
+        )
+
+    async def upsert_catalog_batch(
+        self,
+        *,
+        client: Any,
+        request: UpsertCatalogBatchRequest,
+    ) -> CatalogBatchWriteResponse:
+        """Preflight a nested deterministic catalog batch before any embedding/write."""
+        pre = await self._prepare_batch_preflight(
+            client=client,
+            request=request,
+            check_batch_status=True,
+            log_label='upsert_catalog_batch',
+        )
+        dry_run = bool(getattr(request, 'dry_run', False))
+        hash_echo = pre.hash_echo
+        batch_uuid = pre.batch_uuid
+        server_hash = pre.server_hash
+        effective_hash = server_hash
+
+        if pre.early_kind == 'gate':
             return CatalogBatchWriteResponse(
                 group_id=request.group_id,
                 batch_id=request.batch_id,
                 batch_uuid=batch_uuid,
-                dry_run=request.dry_run,
+                dry_run=dry_run,
                 status='failed',
-                results=errors,
-                failed=len(errors),
-                error_code=(
-                    CatalogErrorCode.batch_conflict
-                    if any(
-                        result.error_code == CatalogErrorCode.deterministic_uuid_conflict
-                        for result in errors
-                    )
-                    else errors[0].error_code
-                ),
-                error_message='batch preflight failed',
+                failed=max(len(request.entities) + len(request.edges), 1),
+                error_code=pre.early_code,
+                error_message=pre.early_message,
                 **hash_echo,
             )
+        if pre.early_kind == 'hash_mismatch':
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                dry_run=dry_run,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges), 1),
+                error_code=pre.early_code,
+                error_message=pre.early_message,
+                **hash_echo,
+            )
+        if pre.early_kind == 'status_read':
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                dry_run=dry_run,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges), 1),
+                error_code=pre.early_code,
+                error_message=pre.early_message,
+                **hash_echo,
+            )
+        if pre.early_kind == 'committed_same':
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                dry_run=dry_run,
+                status='committed',
+                entity_unchanged=len(request.entities),
+                edge_unchanged=len(request.edges),
+                provenance_unchanged=self._batch_provenance_item_count(request),
+                **hash_echo,
+            )
+        if pre.early_kind == 'committed_conflict':
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                dry_run=dry_run,
+                status='failed',
+                failed=max(len(request.entities) + len(request.edges), 1),
+                error_code=pre.early_code,
+                error_message=pre.early_message,
+                **hash_echo,
+            )
+        if pre.early_kind == 'preflight_failed':
+            return CatalogBatchWriteResponse(
+                group_id=request.group_id,
+                batch_id=request.batch_id,
+                batch_uuid=batch_uuid,
+                dry_run=dry_run,
+                status='failed',
+                results=pre.errors,
+                failed=len(pre.errors),
+                error_code=pre.early_code,
+                error_message=pre.early_message,
+                **hash_echo,
+            )
+
+        assert batch_uuid is not None
+        entity_prepared = pre.entity_prepared
+        edge_prepared = pre.edge_prepared
+        provenance_sources = pre.provenance_sources
+        edge_offset = pre.edge_offset
+        request_entity_uuids = pre.request_entity_uuids
 
         if request.dry_run:
             entity_results: list[CatalogItemResult] = []
@@ -4940,6 +5105,392 @@ class CatalogService:
             len(provenance_sources),
         )
         return response
+
+    async def prepare_catalog_batch(
+        self,
+        *,
+        client: Any,
+        request: PrepareCatalogBatchRequest,
+    ) -> PrepareCatalogBatchResponse:
+        """Validate/project/embed then persist control-plane plan only (PLAN-02/03/04/06).
+
+        Order: shared preflight → embed all required → serialize artifact →
+        ensure_plan_schema → single plan/chunk tx. Never writes Entity/RELATES_TO/
+        Episodic/evidence/manifest/CatalogIngestBatch. Raw token returned once.
+        """
+        pre = await self._prepare_batch_preflight(
+            client=client,
+            request=request,
+            check_batch_status=False,
+            log_label='prepare_catalog_batch',
+        )
+        server_hash = pre.server_hash
+
+        def _fail(
+            code: CatalogErrorCode,
+            message: str,
+            *,
+            plan_uuid: str = '',
+            artifact_sha: str = '',
+            expires_at: str = '',
+            projected_created: int = 0,
+            projected_updated: int = 0,
+            projected_unchanged: int = 0,
+        ) -> PrepareCatalogBatchResponse:
+            return PrepareCatalogBatchResponse(
+                plan_token='',
+                plan_uuid=plan_uuid,
+                request_sha256=server_hash,
+                catalog_sha256=request.catalog_sha256,
+                artifact_sha256=artifact_sha,
+                identity_schema_version=request.identity_schema_version,
+                expires_at=expires_at,
+                entity_count=len(request.entities),
+                edge_count=len(request.edges),
+                source_count=len(request.provenance.sources) if request.provenance else 0,
+                evidence_link_count=(
+                    len(request.provenance.evidence_links) if request.provenance else 0
+                ),
+                projected_created=projected_created,
+                projected_updated=projected_updated,
+                projected_unchanged=projected_unchanged,
+                error_code=code,
+                error_message=message,
+            )
+
+        if pre.early_kind in ('gate', 'hash_mismatch', 'status_read'):
+            return _fail(
+                pre.early_code or CatalogErrorCode.validation_error,
+                pre.early_message or 'prepare preflight failed',
+            )
+        if pre.early_kind == 'preflight_failed':
+            return _fail(
+                pre.early_code or CatalogErrorCode.validation_error,
+                pre.early_message or 'batch preflight failed',
+            )
+        assert pre.namespace is not None
+        namespace = pre.namespace
+        entity_prepared = pre.entity_prepared
+        edge_prepared = pre.edge_prepared
+        provenance_sources = pre.provenance_sources
+
+        def _status_counts(items: list[Any]) -> tuple[int, int, int]:
+            created = updated = unchanged = 0
+            for prep in items:
+                st = prep.projected_status
+                if st == 'created':
+                    created += 1
+                elif st == 'updated':
+                    updated += 1
+                elif st == 'unchanged':
+                    unchanged += 1
+            return created, updated, unchanged
+
+        e_c, e_u, e_x = _status_counts(entity_prepared)
+        g_c, g_u, g_x = _status_counts(edge_prepared)
+        s_c, s_u, s_x = _status_counts(provenance_sources)
+        projected_created = e_c + g_c + s_c
+        projected_updated = e_u + g_u + s_u
+        projected_unchanged = e_x + g_x + s_x
+
+        entity_to_embed = [p for p in entity_prepared if p.projected_status != 'unchanged']
+        edge_to_embed = [p for p in edge_prepared if p.projected_status != 'unchanged']
+        try:
+            for prep in entity_to_embed:
+                text_in = ' '.join(
+                    [prep.item.graph_key, prep.item.database_qualified_name, prep.item.summary]
+                ).replace('\n', ' ')
+                prep.name_embedding = await client.embedder.create(input_data=[text_in])
+            for prep in edge_to_embed:
+                prep.fact_embedding = await client.embedder.create(
+                    input_data=[prep.item.fact.replace('\n', ' ')]
+                )
+        except Exception as exc:
+            logger.error(
+                'catalog prepare_catalog_batch embedding_failed batch_id=%s entities=%s edges=%s reason=%s',
+                request.batch_id,
+                len(entity_to_embed),
+                len(edge_to_embed),
+                type(exc).__name__,
+            )
+            return _fail(
+                CatalogErrorCode.embedding_failed,
+                'embedding generation failed',
+                projected_created=projected_created,
+                projected_updated=projected_updated,
+                projected_unchanged=projected_unchanged,
+            )
+
+        membership_entities = [
+            {
+                'uuid': prep.entity_uuid,
+                'entity_type': prep.item.entity_type,
+                'graph_key': prep.item.graph_key,
+                'content_sha256': prep.content_sha256,
+                'projected_status': prep.projected_status,
+                'name_embedding': prep.name_embedding,
+            }
+            for prep in sorted(
+                entity_prepared,
+                key=lambda p: (p.item.entity_type, p.item.graph_key),
+            )
+        ]
+        membership_edges = [
+            {
+                'uuid': prep.edge_uuid,
+                'edge_type': prep.item.edge_type,
+                'edge_key': prep.item.edge_key,
+                'source_uuid': prep.source_uuid,
+                'target_uuid': prep.target_uuid,
+                'content_sha256': prep.content_sha256,
+                'projected_status': prep.projected_status,
+                'fact_embedding': prep.fact_embedding,
+            }
+            for prep in sorted(
+                edge_prepared,
+                key=lambda p: (p.item.edge_type, p.item.edge_key),
+            )
+        ]
+        membership_sources = [
+            {
+                'uuid': prep.source_uuid,
+                'source_key': prep.item.source_key,
+                'content_sha256': prep.content_sha256,
+                'projected_status': prep.projected_status,
+            }
+            for prep in sorted(provenance_sources, key=lambda p: p.item.source_key)
+        ]
+        evidence_links_raw = list(getattr(request.provenance, 'evidence_links', None) or [])
+        membership_evidence = []
+        for link in evidence_links_raw:
+            link_key = evidence_link_key(link)
+            membership_evidence.append(
+                {
+                    'uuid': catalog_evidence_link_uuid(namespace, request.group_id, link_key),
+                    'link_key': link_key,
+                    'content_sha256': canonical_sha256(evidence_canonical_payload(link)),
+                }
+            )
+        membership_evidence.sort(key=lambda d: d['link_key'])
+
+        plan_id = f'{request.batch_id}|{server_hash}'
+        plan_uuid = catalog_prepared_plan_uuid(namespace, request.group_id, plan_id)
+        artifact_body = {
+            'artifact_serialization_version': PREPARED_ARTIFACT_SERIALIZATION_VERSION,
+            'canonicalization_version': CANONICALIZATION_VERSION,
+            'identity_schema_version': request.identity_schema_version,
+            'catalog_schema_version': CATALOG_SCHEMA_VERSION,
+            'group_id': request.group_id,
+            'batch_id': request.batch_id,
+            'system_key': request.system_key,
+            'request_sha256': server_hash,
+            'catalog_sha256': request.catalog_sha256,
+            'plan_id': plan_id,
+            'membership': {
+                'entities': membership_entities,
+                'edges': membership_edges,
+                'sources': membership_sources,
+                'evidence_links': membership_evidence,
+            },
+            'request_canonical': batch_request_canonical_payload(request),
+            'counts': {
+                'entities': len(request.entities),
+                'edges': len(request.edges),
+                'sources': len(request.provenance.sources) if request.provenance else 0,
+                'evidence_links': (
+                    len(request.provenance.evidence_links) if request.provenance else 0
+                ),
+                'created': projected_created,
+                'updated': projected_updated,
+                'unchanged': projected_unchanged,
+            },
+        }
+        try:
+            artifact_bytes = serialize_prepared_artifact(artifact_body)
+        except ValueError as exc:
+            return _fail(
+                CatalogErrorCode.validation_error,
+                f'prepared artifact serialization failed: {exc}',
+                plan_uuid=plan_uuid,
+                projected_created=projected_created,
+                projected_updated=projected_updated,
+                projected_unchanged=projected_unchanged,
+            )
+        payload_bytes = len(artifact_bytes)
+        max_payload = int(self.catalog_config.max_prepared_payload_bytes)
+        if payload_bytes > max_payload:
+            return _fail(
+                CatalogErrorCode.batch_limit_exceeded,
+                f'prepared payload exceeds max_prepared_payload_bytes ({max_payload})',
+                plan_uuid=plan_uuid,
+                projected_created=projected_created,
+                projected_updated=projected_updated,
+                projected_unchanged=projected_unchanged,
+            )
+        art_sha = artifact_sha256(artifact_bytes)
+        chunk_size = int(self.catalog_config.prepared_chunk_bytes)
+        try:
+            chunk_records = chunk_artifact_bytes(artifact_bytes, chunk_size=chunk_size)
+        except ValueError as exc:
+            return _fail(
+                CatalogErrorCode.batch_limit_exceeded,
+                f'prepared artifact chunking failed: {exc}',
+                plan_uuid=plan_uuid,
+                artifact_sha=art_sha,
+                projected_created=projected_created,
+                projected_updated=projected_updated,
+                projected_unchanged=projected_unchanged,
+            )
+
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(seconds=int(self.catalog_config.plan_ttl_seconds))
+        expires_at_str = expires_at.isoformat()
+        raw_token = mint_plan_token()
+        token_digest = plan_token_digest(raw_token)
+
+        chunk_params: list[dict[str, Any]] = []
+        for ch in chunk_records:
+            idx = int(ch['chunk_index'])
+            chunk_params.append(
+                {
+                    'uuid': catalog_prepared_plan_chunk_uuid(
+                        namespace, request.group_id, plan_id, idx
+                    ),
+                    'group_id': request.group_id,
+                    'plan_uuid': plan_uuid,
+                    'chunk_index': idx,
+                    'chunk_count': len(chunk_records),
+                    'byte_offset': int(ch['byte_offset']),
+                    'byte_length': int(ch['byte_length']),
+                    'chunk_sha256': ch['chunk_sha256'],
+                    'payload_b64': ch['payload_b64'],
+                }
+            )
+
+        plan_params = {
+            'uuid': plan_uuid,
+            'group_id': request.group_id,
+            'batch_id': request.batch_id,
+            'plan_id': plan_id,
+            'token_digest': token_digest,
+            'state': PLAN_STATE_PREPARED,
+            'identity_schema_version': request.identity_schema_version,
+            'canonicalization_version': CANONICALIZATION_VERSION,
+            'artifact_serialization_version': PREPARED_ARTIFACT_SERIALIZATION_VERSION,
+            'request_sha256': server_hash,
+            'catalog_sha256': request.catalog_sha256,
+            'artifact_sha256': art_sha,
+            'chunk_count': len(chunk_records),
+            'payload_bytes': payload_bytes,
+            'entity_count': len(request.entities),
+            'edge_count': len(request.edges),
+            'source_count': len(request.provenance.sources) if request.provenance else 0,
+            'evidence_link_count': (
+                len(request.provenance.evidence_links) if request.provenance else 0
+            ),
+            'created_count': projected_created,
+            'updated_count': projected_updated,
+            'unchanged_count': projected_unchanged,
+            'expires_at': expires_at,
+            'created_at': now,
+            'updated_at': now,
+        }
+
+        try:
+            await self._store.ensure_plan_schema(client.driver)
+        except Exception as exc:
+            logger.error(
+                'catalog prepare_catalog_batch schema_failed batch_id=%s reason=%s',
+                request.batch_id,
+                type(exc).__name__,
+            )
+            return _fail(
+                CatalogErrorCode.neo4j_transaction_failed,
+                'prepared plan schema initialization failed',
+                plan_uuid=plan_uuid,
+                artifact_sha=art_sha,
+                expires_at=expires_at_str,
+                projected_created=projected_created,
+                projected_updated=projected_updated,
+                projected_unchanged=projected_unchanged,
+            )
+
+        max_active = int(self.catalog_config.max_active_plans_per_group)
+        try:
+            async with client.driver.transaction() as tx:
+                await self._store.create_prepared_plan_with_chunks(
+                    tx,
+                    plan=plan_params,
+                    chunks=chunk_params,
+                    max_active=max_active,
+                    now=now,
+                )
+        except CatalogStoreError as exc:
+            code_text = getattr(exc, 'code', None) or 'neo4j_transaction_failed'
+            try:
+                err_code = CatalogErrorCode(code_text)
+            except ValueError:
+                err_code = CatalogErrorCode.neo4j_transaction_failed
+            logger.info(
+                'catalog prepare_catalog_batch plan_write_failed batch_id=%s plan_uuid=%s code=%s',
+                request.batch_id,
+                plan_uuid,
+                err_code.value,
+            )
+            return _fail(
+                err_code,
+                str(exc) or 'prepared plan write failed',
+                plan_uuid=plan_uuid,
+                artifact_sha=art_sha,
+                expires_at=expires_at_str,
+                projected_created=projected_created,
+                projected_updated=projected_updated,
+                projected_unchanged=projected_unchanged,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog prepare_catalog_batch neo4j_transaction_failed batch_id=%s plan_uuid=%s reason=%s',
+                request.batch_id,
+                plan_uuid,
+                type(exc).__name__,
+            )
+            return _fail(
+                CatalogErrorCode.neo4j_transaction_failed,
+                'prepared plan write transaction failed',
+                plan_uuid=plan_uuid,
+                artifact_sha=art_sha,
+                expires_at=expires_at_str,
+                projected_created=projected_created,
+                projected_updated=projected_updated,
+                projected_unchanged=projected_unchanged,
+            )
+
+        logger.info(
+            'catalog prepare_catalog_batch prepared batch_id=%s plan_uuid=%s entities=%s edges=%s chunks=%s',
+            request.batch_id,
+            plan_uuid,
+            len(request.entities),
+            len(request.edges),
+            len(chunk_records),
+        )
+        return PrepareCatalogBatchResponse(
+            plan_token=raw_token,
+            plan_uuid=plan_uuid,
+            request_sha256=server_hash,
+            catalog_sha256=request.catalog_sha256,
+            artifact_sha256=art_sha,
+            identity_schema_version=request.identity_schema_version,
+            expires_at=expires_at_str,
+            entity_count=len(request.entities),
+            edge_count=len(request.edges),
+            source_count=len(request.provenance.sources) if request.provenance else 0,
+            evidence_link_count=(
+                len(request.provenance.evidence_links) if request.provenance else 0
+            ),
+            projected_created=projected_created,
+            projected_updated=projected_updated,
+            projected_unchanged=projected_unchanged,
+        )
 
     class _BatchStatusConflict(Exception):
         def __init__(self, reason: str):
