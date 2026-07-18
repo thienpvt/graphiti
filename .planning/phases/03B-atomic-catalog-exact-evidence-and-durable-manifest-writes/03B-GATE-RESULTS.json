@@ -239,34 +239,42 @@
     }
   ],
   "clear_graph_called": false,
-  "content_digest": "0f6f5680a6e745a7645b16e9e3363c75bf526962563bf4f55c2a981a0b33b77c",
+  "content_digest": "857307ee510fd5395a93c58798e8511fdc6703bde4fb317525832aa9dbc65793",
   "content_sha256_map": {
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-01-SUMMARY.md": "48dd8a0bf0d24af9af99e8f2dd8d7affe5dc532426d8721eeee9df367287adf0",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-02-SUMMARY.md": "b80c8d90bc9aaea112ab029d5f45713f54c03ec716bf9597993d2a3dd16478c8",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-03-SUMMARY.md": "e4588e44f38cec692a7e44eb78a7018388e69fa3b7ee6a4cb0b12746d40b62b5",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-04-SUMMARY.md": "23a47b787975df98767bd829e70418acd4f23dbf199b98ec57801bdf4994097f",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-05-SUMMARY.md": "5be8619756f3f805db7474aac9ea1fc8d58e9b43fc0ff175f4c4a563eac69af7",
-    ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-06-SUMMARY.md": "552ac322d9efadf65ddbe9a5014147d16950cd56ccb043dec8bdbbe55d7f8247",
+    ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-06-SUMMARY.md": "be1962ae0447f8824a199cde48c30f63341eb1668b77016de9afc8ae7713e008",
     ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-CONTEXT.md": "cddae8b05ebef0e9fc862c750073f139e53f20ff1df9b3c0451604b22ed3bb9e",
-    ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-VALIDATION.md": "7d3848ee7f19e197d7605c1c4df39b3c68d7cc1a8e765a69db01f6b376fdc745"
+    ".planning/phases/03B-atomic-catalog-exact-evidence-and-durable-manifest-writes/03B-VALIDATION.md": "a0d26cf1f010424a58bbefad9da3666c3d0606d2377774c60b7803d8801a2c71"
   },
-  "evaluated_head": "280a607af1c0d68ff2d08837755561db390a9269",
-  "ledger_sha256": "4aa6c4ef67d1eb9a3001ead6b441d505f92ee0076f4414be62edbbd51cc88a57",
+  "evaluated_head": "056f9600320a8fdb9cb5acb82febb41c1d59a8c7",
+  "historical_audit": {
+    "class": "test_policy",
+    "commit": "a67789a",
+    "historical_oracle_catalog_v2_queried": true,
+    "note": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; local test-policy violation on local Neo4j with no corresponding production/second-schema data; permanent audit record; never query or mutate oracle-catalog-v2 again; authorized two-axis re-gate separates history audit from current safety",
+    "scope": "local_neo4j_no_corresponding_data"
+  },
+  "ledger_sha256": "0c70f7aa97d911521da7ffaa16b36f2a800bed2d45c3d0004d5b3c28b6044786",
   "live_neo4j_atomic_proof": "skip",
   "live_neo4j_atomic_proof_pass": false,
   "local_gate_pass": true,
   "manifests": false,
   "notes": {
-    "cli_exit_policy": "CLI run exits nonzero unless local_gate_pass and safety_checks_pass and no canary/v2/clear_graph; require-neo4j also needs ready_for_phase_4",
-    "d32_policy": "ready_for_phase_4 true only after live+safety+manifests",
+    "cli_exit_policy": "CLI run exits nonzero unless local_gate_pass and current safety_checks_pass and no canary/clear_graph/current_source_v2; aggregate historical v2 does not force nonzero; require-neo4j also needs ready_for_phase_4",
+    "d32_policy": "ready_for_phase_4 true only after live+current_safety+manifests; never gates on aggregate historical v2 field",
     "forbidden_group": "oracle-catalog-v2",
-    "historical_v2_policy": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; historical violation permanent; current source remediated",
+    "historical_v2_policy": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; local test-policy violation on local Neo4j with no corresponding production/second-schema data; permanent audit record; never query or mutate oracle-catalog-v2 again; authorized two-axis re-gate separates history audit from current safety",
     "integration_policy": "live suite invoked only under --require-neo4j; skip/fail blocks readiness",
     "local_gate_pass_meaning": "local_gate_pass means mandatory non-live command checks only (pytest/ruff/pyright/structural). It is NOT overall gate success and does NOT include historical/current safety or Phase 4 readiness.",
-    "phase4_transition": "blocked; no Phase 4 while historical v2 probe recorded",
+    "phase4_transition": "authorized two-axis re-gate; Phase 4 still requires live+manifests; history remains on audit axis; never query/mutate oracle-catalog-v2 again",
     "resolution_policy": "24/24 research probe map; no silent drop",
-    "safety_meaning": "safety.safety_checks_pass and top-level canary/v2/clear_graph are separate from local_gate_pass; historical v2 permanently fails safety",
-    "test_group": "oracle-catalog-tool-test"
+    "safety_meaning": "safety.safety_checks_pass is CURRENT axis only (not forced false by history). Top-level oracle_catalog_v2_queried is aggregate audit (history OR current dirty). canary/clear_graph are current-axis.",
+    "test_group": "oracle-catalog-tool-test",
+    "two_axis_policy": "schema v2: Axis A permanent historical audit (oracle_catalog_v2_queried aggregate true); Axis B current safety (safety_checks_pass from safety_no_probe/canary/clear_graph/current_source_v2_param only). Readiness/CLI gate on Axis B only."
   },
   "nyquist_compliant": false,
   "oracle_catalog_v2_queried": true,
@@ -326,7 +334,7 @@
         "deselected": 0,
         "errors": 0,
         "failed": 0,
-        "passed": 107,
+        "passed": 112,
         "skipped": 0
       },
       "exit_code": 0,
@@ -336,7 +344,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "\u001b[1m============================= test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 107 items\n\nmcp_server\\tests\\test_catalog_manifest.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                [ 14%]\u001b[0m\nmcp_server\\tests\\test_catalog_evidence_store.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m [ 36%]\n\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                                                      [ 39%]\u001b[0m\nmcp_server\\tests\\test_catalog_atomic_writer.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m              [ 50%]\u001b[0m\nmcp_server\\tests\\test_catalog_commit_recovery.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m             [ 60%]\u001b[0m\nmcp_server\\tests\\test_catalog_concurrency.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                        [ 64%]\u001b[0m\nmcp_server\\tests\\test_catalog_phase3b_gate_runner.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m  [ 81%]\u001b[0m\nmcp_server\\tests\\test_catalog_capabilities.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m       [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m107 passed\u001b[0m\u001b[32m in 1.68s\u001b[0m\u001b[32m =============================\u001b[0m\n"
+      "stdout": "\u001b[1m============================= test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-a68ef8db5431d96b3\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 112 items\n\nmcp_server\\tests\\test_catalog_manifest.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                [ 13%]\u001b[0m\nmcp_server\\tests\\test_catalog_evidence_store.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m [ 34%]\n\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                                                      [ 37%]\u001b[0m\nmcp_server\\tests\\test_catalog_atomic_writer.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m              [ 48%]\u001b[0m\nmcp_server\\tests\\test_catalog_commit_recovery.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m             [ 58%]\u001b[0m\nmcp_server\\tests\\test_catalog_concurrency.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                        [ 61%]\u001b[0m\nmcp_server\\tests\\test_catalog_phase3b_gate_runner.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m [ 78%]\n\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                                                     [ 82%]\u001b[0m\nmcp_server\\tests\\test_catalog_capabilities.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m       [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m112 passed\u001b[0m\u001b[32m in 1.84s\u001b[0m\u001b[32m =============================\u001b[0m\n"
     },
     {
       "argv": [
@@ -589,12 +597,15 @@
     "current_source_v2_param_query": false,
     "forbidden_group": "oracle-catalog-v2",
     "historical_oracle_catalog_v2_queried": true,
-    "historical_violation_note": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; historical violation permanent; current source remediated",
+    "historical_v2_class": "test_policy",
+    "historical_v2_commit": "a67789a",
+    "historical_v2_scope": "local_neo4j_no_corresponding_data",
+    "historical_violation_note": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; local test-policy violation on local Neo4j with no corresponding production/second-schema data; permanent audit record; never query or mutate oracle-catalog-v2 again; authorized two-axis re-gate separates history audit from current safety",
     "oracle_catalog_v2_queried": true,
-    "safety_checks_pass": false,
+    "safety_checks_pass": true,
     "test_group": "oracle-catalog-tool-test"
   },
-  "schema_version": "phase3b-gate-results.v1",
+  "schema_version": "phase3b-gate-results.v2",
   "sentinel": {
     "argv": [
       "<sys.executable>",
