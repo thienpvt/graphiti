@@ -96,8 +96,8 @@ def _row(
     edge_key: str = EDGE_KEY,
     content_sha256: str | None = 'a' * 64,
     has_fact_embedding: bool = True,
-    source_uuid: str = 'src-uuid',
-    target_uuid: str = 'tgt-uuid',
+    source_uuid: str | None = 'src-uuid',
+    target_uuid: str | None = 'tgt-uuid',
     source_graph_key: str = SRC_KEY,
     target_graph_key: str = TGT_KEY,
     source_labels: list[str] | None = None,
@@ -317,13 +317,13 @@ async def test_no_repair():
             )
         ]
     )
-    # Ensure store has no write methods invoked
-    service._store.upsert_edge_item = AsyncMock()
-    service._store.execute_write = AsyncMock()
+    # Spy real write-capable store methods only (no inventing unknown attrs).
+    upsert_spy = AsyncMock()
+    service._store.upsert_edge_item = upsert_spy
     resp = await service.resolve_typed_edges(client=client, request=_request())
     assert resp.results[0].found is True
     assert 'uuid_mismatch' in resp.results[0].anomalies
-    service._store.upsert_edge_item.assert_not_awaited()
+    upsert_spy.assert_not_awaited()
     assert 'transaction' not in client.call_order
     client.embedder.create.assert_not_awaited()
     client.embedder.create_batch.assert_not_awaited()
