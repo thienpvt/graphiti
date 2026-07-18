@@ -171,6 +171,13 @@ None new beyond plan register T-02-11 (ledger integrity mitigated by digests).
 
 None.
 
-## Self-Check
+## Self-Check: PASSED
 
-Pending final HEAD rebind commit; artifacts exist on disk.
+- catalog_phase2_gate_runner.py FOUND
+- run_phase2_gate.py FOUND
+- test_catalog_phase2_gate_runner.py FOUND
+- 02-GATE-RESULTS.json FOUND
+- 02-PHASE2-GATE.md FOUND
+- 02-EDGE-PROBE-RESOLUTION.json FOUND (68 entries)
+- 02-EDGE-PROBE.json raw sha256 e515187cc229f7f24bd95444799abb900b3cf913900b3a65119e9befd6462599 unchanged
+- Commits 072362c, a04d40c, 28e7d46, f82f3c7, 15354d5 present
