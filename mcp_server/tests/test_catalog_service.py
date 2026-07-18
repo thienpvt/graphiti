@@ -6367,27 +6367,98 @@ async def test_gap_cr01_combined_batch_rolls_back_and_returns_typed_conflict():
     assert stored['name_raw'] == winner.name_raw
     assert stored['summary'] == winner.summary
 
+
 # ---------------------------------------------------------------------------
-# Phase 5 Wave 0 RED scaffolds (SAFE-04/06) — GREEN in 05-02
+# Phase 5 SAFE-04/06 service boundary proofs (05-02 GREEN)
 # ---------------------------------------------------------------------------
 
 
-def test_phase5_same_batch_endpoint_union_no_extra_creation():
+@pytest.mark.asyncio
+async def test_phase5_same_batch_endpoint_union_no_extra_creation():
     """SAFE-04: same-batch endpoints resolve from request entity union only."""
-    import pytest
+    employee = _entity()
+    department = _entity(
+        graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
+        name_raw='DEPARTMENTS',
+        name_canonical='departments',
+        database_qualified_name='ORCL.HR.DEPARTMENTS',
+        summary='Department master table',
+    )
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(
+            entities=[employee, department],
+            edges=[_edge()],
+            dry_run=True,
+        ),
+    )
+    assert resp.dry_run is True
+    assert resp.failed == 0
+    cast(AsyncMock, service._store.resolve_endpoint_typed).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_entity_item).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_edge_item).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_batch_status).assert_not_awaited()
+    assert 'transaction' not in client.call_order
 
-    pytest.fail('05 not implemented: service endpoint_union')
 
-
-def test_phase5_missing_endpoint_structured_error_zero_writes():
+@pytest.mark.asyncio
+async def test_phase5_missing_endpoint_structured_error_zero_writes():
     """SAFE-04: missing persisted endpoints return missing_endpoint; zero writes."""
-    import pytest
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock(return_value=('missing_endpoint', None))
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.upsert_entity_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
 
-    pytest.fail('05 not implemented: service missing_endpoint zero writes')
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert any(r.error_code == CatalogErrorCode.missing_endpoint for r in resp.results)
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+    service._store.upsert_edge_item.assert_not_awaited()
+    service._store.upsert_entity_item.assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+
+    service2 = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service2)
+    batch_resp = await service2.upsert_catalog_batch(
+        client=_make_client(),
+        request=_batch_request(entities=[], edges=[_edge()]),
+    )
+    assert batch_resp.error_code in (
+        CatalogErrorCode.missing_endpoint,
+        CatalogErrorCode.batch_conflict,
+    )
+    cast(AsyncMock, service2._store.upsert_entity_item).assert_not_awaited()
+    cast(AsyncMock, service2._store.upsert_edge_item).assert_not_awaited()
 
 
-def test_phase5_fail_closed_conflict_no_silent_merge():
+@pytest.mark.asyncio
+async def test_phase5_fail_closed_conflict_no_silent_merge():
     """SAFE-06: conflict paths return structured codes; zero silent repair/merge."""
-    import pytest
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
 
-    pytest.fail('05 not implemented: service fail_closed conflicts')
+    mismatch = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(request_sha256='b' * 64),
+    )
+    assert mismatch.error_code == CatalogErrorCode.content_hash_mismatch
+    cast(AsyncMock, service._store.upsert_entity_item).assert_not_awaited()
+
+    service2 = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service2)
+    dup = await service2.upsert_catalog_batch(
+        client=_make_client(),
+        request=_batch_request(
+            entities=[_entity(summary='first'), _entity(summary='second')],
+        ),
+    )
+    assert dup.error_code == CatalogErrorCode.batch_conflict
+    assert all(r.error_code == CatalogErrorCode.deterministic_uuid_conflict for r in dup.results)
+    cast(AsyncMock, service2._store.upsert_entity_item).assert_not_awaited()
+    cast(AsyncMock, service2._store.upsert_edge_item).assert_not_awaited()
