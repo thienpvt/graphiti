@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -19,12 +19,9 @@ from models.catalog_common import (
 )
 from models.catalog_edges import CatalogEdgeItem
 from models.catalog_entities import CatalogEntityItem
+from models.catalog_evidence import CatalogEvidenceLink
 from models.catalog_graph_key import validate_entity_graph_key_at
-from models.catalog_provenance import (
-    CatalogProvenanceEdgeTarget,
-    CatalogProvenanceEntityTarget,
-    CatalogSourceItem,
-)
+from models.catalog_provenance import CatalogSourceItem
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -37,20 +34,38 @@ def _validate_group_id(group_id: str | None) -> bool:
 
 
 class NestedProvenancePayload(CatalogStrictModel):
-    """Provenance nested under UpsertCatalogBatchRequest."""
+    """Non-Cartesian provenance nested under UpsertCatalogBatchRequest (EVID-06/14).
+
+    Catalog-v2 batch uses explicit evidence_links only. Legacy multi-target
+    entity_targets/edge_targets Cartesian fields are rejected without conversion.
+    """
 
     sources: list[CatalogSourceItem] = Field(
-        ..., min_length=1, max_length=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
+        default_factory=list, max_length=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
     )
-    entity_targets: list[CatalogProvenanceEntityTarget] = Field(default_factory=list)
-    edge_targets: list[CatalogProvenanceEdgeTarget] = Field(default_factory=list)
+    evidence_links: list[CatalogEvidenceLink] = Field(
+        default_factory=list, max_length=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
+    )
+
+    @model_validator(mode='before')
+    @classmethod
+    def _reject_cartesian_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            legacy = [k for k in ('entity_targets', 'edge_targets') if k in data]
+            if legacy:
+                raise ValueError(
+                    'Cartesian entity_targets/edge_targets rejected for catalog-v2 batch; '
+                    'use explicit evidence_links (no auto-conversion)'
+                )
+        return data
 
     @model_validator(mode='after')
-    def _link_collection_bounds(self) -> NestedProvenancePayload:
-        total_links = len(self.sources) * (len(self.entity_targets) + len(self.edge_targets))
-        if total_links > HARD_MAX_PROVENANCE_LINKS_PER_BATCH:
+    def _require_work_and_bounds(self) -> NestedProvenancePayload:
+        if not self.sources and not self.evidence_links:
+            raise ValueError('provenance requires at least one of sources or evidence_links')
+        if len(self.evidence_links) > HARD_MAX_PROVENANCE_LINKS_PER_BATCH:
             raise ValueError(
-                f'provenance links exceed hard max ({HARD_MAX_PROVENANCE_LINKS_PER_BATCH})'
+                f'evidence_links exceed hard max ({HARD_MAX_PROVENANCE_LINKS_PER_BATCH})'
             )
         return self
 
@@ -93,10 +108,12 @@ class UpsertCatalogBatchRequest(CatalogStrictModel):
     def _require_non_empty_work_and_system_scope(self) -> UpsertCatalogBatchRequest:
         has_entities = bool(self.entities)
         has_edges = bool(self.edges)
-        has_prov = self.provenance is not None and bool(self.provenance.sources)
-        if not (has_entities or has_edges or has_prov):
+        has_sources = self.provenance is not None and bool(self.provenance.sources)
+        has_links = self.provenance is not None and bool(self.provenance.evidence_links)
+        if not (has_entities or has_edges or has_sources or has_links):
             raise ValueError(
-                'batch requires at least one of entities, edges, or provenance sources'
+                'batch requires at least one of entities, edges, provenance sources, '
+                'or evidence_links'
             )
         for index, item in enumerate(self.entities):
             validate_entity_graph_key_at(
@@ -122,14 +139,21 @@ class UpsertCatalogBatchRequest(CatalogStrictModel):
                 loc=('edges', index, 'target_graph_key'),
             )
         if self.provenance is not None:
-            for index, target in enumerate(self.provenance.entity_targets):
-                validate_entity_graph_key_at(
-                    entity_type=target.entity_type,
-                    graph_key=target.graph_key,
-                    system_key=self.system_key,
-                    title=type(self).__name__,
-                    loc=('provenance', 'entity_targets', index, 'graph_key'),
-                )
+            for index, link in enumerate(self.provenance.evidence_links):
+                if link.entity_target is not None:
+                    validate_entity_graph_key_at(
+                        entity_type=link.entity_target.entity_type,
+                        graph_key=link.entity_target.graph_key,
+                        system_key=self.system_key,
+                        title=type(self).__name__,
+                        loc=(
+                            'provenance',
+                            'evidence_links',
+                            index,
+                            'entity_target',
+                            'graph_key',
+                        ),
+                    )
         return self
 
 

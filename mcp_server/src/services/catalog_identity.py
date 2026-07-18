@@ -108,3 +108,96 @@ def assert_optional_client_hash(client_hash: str | None, server_hash: str) -> No
     if client_hash.lower() != server_hash.lower():
         code = _error_code_text(CatalogErrorCode.content_hash_mismatch)
         raise ValueError(f'{code}: client hash mismatch')
+
+
+def _locator_canonical(locator: Any) -> str:
+    """Stable pipe-delimited locator material for link_key (empty when absent)."""
+    if locator is None:
+        return ''
+    object_name = getattr(locator, 'object_name', None) or ''
+    start_line = getattr(locator, 'start_line', None)
+    end_line = getattr(locator, 'end_line', None)
+    statement_index = getattr(locator, 'statement_index', None)
+    return (
+        f'{object_name}|'
+        f'{"" if start_line is None else start_line}|'
+        f'{"" if end_line is None else end_line}|'
+        f'{"" if statement_index is None else statement_index}'
+    )
+
+
+def evidence_link_key(link: Any) -> str:
+    """Deterministic identity key for CatalogEvidenceLink (excludes transport hash/excerpt).
+
+    Material:
+    source_key|target_kind|target_type|target_key|evidence_kind|
+    extractor_name|extractor_version|rule_id|locator_canonical
+    """
+    entity = getattr(link, 'entity_target', None)
+    edge = getattr(link, 'edge_target', None)
+    if entity is not None:
+        target_kind = 'entity'
+        target_type = entity.entity_type
+        target_key = entity.graph_key
+    elif edge is not None:
+        target_kind = 'edge'
+        target_type = edge.edge_type
+        target_key = edge.edge_key
+    else:
+        raise ValueError('evidence link requires exactly one target')
+    rule_id = getattr(link, 'rule_id', None) or ''
+    return (
+        f'{link.source_key}|{target_kind}|{target_type}|{target_key}|'
+        f'{link.evidence_kind}|{link.extractor_name}|{link.extractor_version}|'
+        f'{rule_id}|{_locator_canonical(getattr(link, "locator", None))}'
+    )
+
+
+def evidence_canonical_payload(link: Any) -> dict[str, Any]:
+    """Canonical content fields for evidence hashing (includes excerpt bytes).
+
+    Excludes client transport-only content_sha256. Nested targets/locator dumped
+    with mode=json for stable structure.
+    """
+    entity = getattr(link, 'entity_target', None)
+    edge = getattr(link, 'edge_target', None)
+    locator = getattr(link, 'locator', None)
+
+    def _dump(model: Any) -> dict[str, Any] | None:
+        if model is None:
+            return None
+        dump = getattr(model, 'model_dump', None)
+        if callable(dump):
+            raw = dump(mode='json')
+            if not isinstance(raw, dict):
+                raise TypeError('model_dump must return a dict')
+            return raw
+        return dict(model)
+
+    return {
+        'source_key': link.source_key,
+        'entity_target': _dump(entity),
+        'edge_target': _dump(edge),
+        'evidence_kind': link.evidence_kind,
+        'locator': _dump(locator),
+        'excerpt': link.excerpt,
+        'extractor_name': link.extractor_name,
+        'extractor_version': link.extractor_version,
+        'rule_id': link.rule_id,
+        'confidence': link.confidence,
+    }
+
+
+def coalesce_byte_identical_evidence_links(links: list[Any]) -> list[Any]:
+    """Collapse links with equal evidence_canonical_payload; stable sort by link_key.
+
+    Retains multiplicity of non-identical payloads. Pure and reentrant.
+    """
+    if not links:
+        return []
+    seen: dict[str, Any] = {}
+    for link in links:
+        digest = canonical_sha256(evidence_canonical_payload(link))
+        if digest not in seen:
+            seen[digest] = link
+    return sorted(seen.values(), key=evidence_link_key)
