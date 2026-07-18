@@ -665,6 +665,79 @@ def test_wave0_files_check_passes_after_scaffolds():
     gate.check_edge_resolution_complete(root)
 
 
+def _write_capabilities_fixture(
+    root: Path,
+    *,
+    manifests: bool,
+    prepare_commit: bool,
+    manifest_verification: bool,
+) -> None:
+    """Minimal catalog_capabilities.py source for staged feature-flag checks."""
+    path = root / 'mcp_server' / 'src' / 'services' / 'catalog_capabilities.py'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        (
+            'def get_catalog_capabilities(config=None):\n'
+            '    return type("C", (), {"features": {\n'
+            f"        'prepare_commit': {prepare_commit},\n"
+            f"        'manifests': {manifests},\n"
+            f"        'manifest_verification': {manifest_verification},\n"
+            '    }})()\n'
+        ),
+        encoding='utf-8',
+    )
+
+
+def test_check_manifests_feature_true_accepts_verification_false(tmp_path: Path):
+    """Historical Phase 3B head: manifests True, verification still False."""
+    _write_capabilities_fixture(
+        tmp_path,
+        manifests=True,
+        prepare_commit=True,
+        manifest_verification=False,
+    )
+    gate.check_manifests_feature_true(tmp_path)
+
+
+def test_check_manifests_feature_true_accepts_verification_true(tmp_path: Path):
+    """Post Phase 4 truthful flip: manifests True and verification True coexist."""
+    _write_capabilities_fixture(
+        tmp_path,
+        manifests=True,
+        prepare_commit=True,
+        manifest_verification=True,
+    )
+    gate.check_manifests_feature_true(tmp_path)
+
+
+def test_check_manifests_feature_true_rejects_manifests_false(tmp_path: Path):
+    _write_capabilities_fixture(
+        tmp_path,
+        manifests=False,
+        prepare_commit=True,
+        manifest_verification=False,
+    )
+    with pytest.raises(AssertionError, match='features.manifests'):
+        gate.check_manifests_feature_true(tmp_path)
+
+
+def test_check_manifests_feature_true_rejects_missing_verification(tmp_path: Path):
+    path = tmp_path / 'mcp_server' / 'src' / 'services' / 'catalog_capabilities.py'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        (
+            'def get_catalog_capabilities(config=None):\n'
+            "    return type('C', (), {'features': {\n"
+            "        'prepare_commit': True,\n"
+            "        'manifests': True,\n"
+            '    }})()\n'
+        ),
+        encoding='utf-8',
+    )
+    with pytest.raises(AssertionError, match='manifest_verification'):
+        gate.check_manifests_feature_true(tmp_path)
+
+
 def test_default_ready_for_phase_4_constant_contract():
     """Empty/default ledger path: ready_for_phase_4 must not be assumed true."""
     safety_ok = _current_clean_safety()
