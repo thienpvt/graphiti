@@ -419,6 +419,81 @@ async def test_caller_request_hash_mismatch_echoes_server_hash():
     client.embedder.create.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'case,provider,error_code',
+    [
+        ('feature_disabled', 'neo4j', 'feature_disabled'),
+        ('invalid_uuid_namespace', 'neo4j', 'invalid_uuid_namespace'),
+        ('backend_unavailable', 'falkordb', 'backend_unavailable'),
+        ('batch_limit_exceeded', 'neo4j', 'batch_limit_exceeded'),
+    ],
+)
+async def test_batch_gate_failure_echoes_request_hash(case, provider, error_code):
+    """HASH-05: gate failures still echo authoritative request hash fields."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from config.schema import CatalogConfig
+    from models.catalog_common import CatalogErrorCode
+    from services.catalog_service import CatalogService
+
+    client = MagicMock()
+    client.driver = MagicMock()
+    client.driver.provider = MagicMock(value=provider)
+    client.embedder = MagicMock()
+    client.embedder.create = AsyncMock()
+    client.call_order = []
+
+    if case == 'feature_disabled':
+        cfg = CatalogConfig(
+            enabled=False,
+            uuid_namespace='6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+        )
+    elif case == 'invalid_uuid_namespace':
+        # Bypass pydantic: enabled + valid-looking construction then corrupt namespace.
+        cfg = CatalogConfig(enabled=False, uuid_namespace=None)
+        object.__setattr__(cfg, 'enabled', True)
+        object.__setattr__(cfg, 'uuid_namespace', 'not-a-uuid')
+    elif case == 'backend_unavailable':
+        cfg = CatalogConfig(
+            enabled=True,
+            uuid_namespace='6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+        )
+    else:
+        cfg = CatalogConfig(
+            enabled=True,
+            uuid_namespace='6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+            max_entities_per_batch=1,
+        )
+
+    service = CatalogService(catalog_config=cfg)
+    service._store.get_batch_status = AsyncMock(return_value=None)
+    service._store.ensure_uuid_uniqueness_constraints = AsyncMock()
+    service._store.upsert_batch_status = AsyncMock()
+    service._store.upsert_entity_item = AsyncMock()
+
+    entities = (
+        [_entity(), _entity(graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS')]
+        if case == 'batch_limit_exceeded'
+        else [_entity()]
+    )
+    req = _batch(entities=entities)
+    expected = batch_request_sha256(req)
+    resp = await service.upsert_catalog_batch(client=client, request=req)
+
+    assert resp.status == 'failed'
+    assert resp.error_code == CatalogErrorCode(error_code)
+    assert resp.request_sha256 == expected
+    assert resp.canonicalization_version == CANONICALIZATION_VERSION
+    assert resp.identity_schema_version == IDENTITY_SCHEMA_VERSION
+    assert resp.catalog_sha256 == req.catalog_sha256
+    client.embedder.create.assert_not_awaited()
+    service._store.get_batch_status.assert_not_awaited()
+    service._store.ensure_uuid_uniqueness_constraints.assert_not_awaited()
+    service._store.upsert_batch_status.assert_not_awaited()
+    service._store.upsert_entity_item.assert_not_awaited()
+
+
 def test_batch_gate_counts_evidence_links_not_cartesian():
     from unittest.mock import MagicMock
 

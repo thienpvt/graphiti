@@ -3684,6 +3684,9 @@ class CatalogService:
             if namespace is not None
             else None
         )
+        # HASH-05: request hash is pure over the validated model; echo on gate failures too.
+        server_hash = self.batch_request_sha256(request)
+        hash_echo = self._batch_hash_echo_fields(request, server_hash)
         gate = self._batch_gate_error(client, request)
         if gate is not None:
             code, message = gate
@@ -3696,13 +3699,9 @@ class CatalogService:
                 failed=max(len(request.entities) + len(request.edges), 1),
                 error_code=code,
                 error_message=message,
-                identity_schema_version=IDENTITY_SCHEMA_VERSION,
-                catalog_sha256=request.catalog_sha256,
+                **hash_echo,
             )
         assert namespace is not None and batch_uuid is not None
-
-        server_hash = self.batch_request_sha256(request)
-        hash_echo = self._batch_hash_echo_fields(request, server_hash)
         try:
             assert_optional_client_hash(request.request_sha256, server_hash)
         except ValueError as exc:
