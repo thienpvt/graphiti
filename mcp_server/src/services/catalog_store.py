@@ -3638,9 +3638,7 @@ class CatalogNeo4jStore:
                 )
             for idx, ch in enumerate(expected_chunks):
                 row = existing_chunks[idx]
-                if int(
-                    row['chunk_index'] if row.get('chunk_index') is not None else -1
-                ) != int(ch['chunk_index']):
+                if int(row['chunk_index'] if row.get('chunk_index') is not None else -1) != int(ch['chunk_index']):
                     raise CatalogStoreError(
                         'manifest chunk order mismatch on idempotent path',
                         code='batch_conflict',
