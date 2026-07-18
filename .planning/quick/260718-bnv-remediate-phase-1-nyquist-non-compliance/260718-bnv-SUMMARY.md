@@ -11,7 +11,7 @@ Rebound Phase 1 gate ledger from stale worktree HEAD `1c4c5f9` onto primary line
 
 ## Key fields
 
-- evaluated_head: `455dc14dcc00a5e5e1d9c3dfff0f23b49bab534c`
+- evaluated_head: `6728672b8822623bdfcf1724a605c3b8ebd27be5`
 - local_gate_pass: true (12/12 mandatory checks)
 - nyquist_compliant: true (local derivation only)
 - ready_for_phase_2: false
