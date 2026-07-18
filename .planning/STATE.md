@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-current_phase: 03A
-current_phase_name: Immutable Prepare/Commit Control Plane
-status: executing
-stopped_at: Phase 3A context gathered
-last_updated: "2026-07-18T05:56:15.159Z"
+current_phase: 03B
+current_phase_name: Atomic Catalog, Exact Evidence, Durable Manifest Writes
+status: pending discussion/planning
+stopped_at: Phase 3A verified; Phase 3B pending discussion/planning
+last_updated: "2026-07-18T12:00:00.000Z"
 last_activity: 2026-07-18
-last_activity_desc: Phase 03A execution started
+last_activity_desc: Phase 3A verified 6/6; ready_for_phase_3b=true; tracking advanced to Phase 3B
 progress:
-  total_phases: 4
-  completed_phases: 3
+  total_phases: 7
+  completed_phases: 4
   total_plans: 25
-  completed_plans: 19
-  percent: 75
+  completed_plans: 25
+  percent: 57
 ---
 
 # Project State
@@ -24,22 +24,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 03A — Immutable Prepare/Commit Control Plane
+**Current focus:** Phase 03B — Atomic Catalog, Exact Evidence, Durable Manifest Writes (pending discussion/planning)
 
 ## Current Position
 
-Phase: 03A (Immutable Prepare/Commit Control Plane) — EXECUTING
-Plan: 1 of 6
-Status: Executing Phase 03A
-Last activity: 2026-07-18 — Phase 03A execution started
+Phase: 03B (Atomic Catalog, Exact Evidence, Durable Manifest Writes) — PENDING DISCUSSION/PLANNING
+Plan: not planned
+Status: Phase 3A verified; Phase 3B awaiting discussion/planning
+Last activity: 2026-07-18 — Phase 3A verified 6/6; ready_for_phase_3b=true
 
-Progress: Phase 0+1+2 complete at local gate; Phase 3A unblocked for planning/execution
+Progress: Phase 0+1+2+3A complete at local gate (25 v1.1 plans: 2+12+5+6); Phase 3B pending discussion/planning
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 33 (14 in v1.0, 19 in v1.1 Phases 0–2)
+- Total plans completed: 39 (14 in v1.0, 25 in v1.1 Phases 0–3A)
 - Average duration: tracked in plan summaries
 
 **By Phase:**
@@ -51,6 +51,7 @@ Progress: Phase 0+1+2 complete at local gate; Phase 3A unblocked for planning/ex
 | Phase 0 | 2 | 2 | see summaries |
 | Phase 1 | 12 | 12 | see summaries |
 | Phase 2 | 5 | 5 | see summaries |
+| Phase 3A | 6 | 6 | see summaries |
 
 **Prior milestone:**
 
@@ -77,17 +78,18 @@ Recent decisions affecting current work:
 - [Phase 2]: raw 02-EDGE-PROBE.json byte-stable; resolution is separate 68/68 map
 - [Phase 2]: server-owned 16-type endpoint map, explicit evidence-link contract, authoritative batch hash, and mutation-free capabilities verified
 - [Phase 2]: ready_for_phase_3a true only with local_gate_pass + safety (no canary, no oracle-catalog-v2, no prepare write path)
+- [Phase 3A]: 6/6 plans complete; prepare/discard/token control plane verified; ready_for_phase_3b=true
 
 ### Pending Todos
 
-Phase 2 fully verified: review clean, Nyquist 34/34, security 12/12, API coverage 22/22, goal 5/5. Next: Phase 3A prepare/control-plane; local Ollama E2E before cleanup; milestone audit/completion; explicit cleanup confirmation.
+Phase 3A fully verified 6/6; ready_for_phase_3b=true. Next: Phase 3B discussion/planning (domain+evidence+manifest co-commit); local Ollama E2E before cleanup; milestone audit/completion; explicit cleanup confirmation.
 
 ### Blockers/Concerns
 
 - Never mutate `oracle-catalog-v2` without separate approval
 - Preserve unrelated working-tree dirt: `.planning/config.json`, docker/k8s configs, `.codegraph/`, `catalog/`, `mcp_server/sample_catalog.json`
 - Do not push, merge, deploy, or tag without separate approval
-- Neo4j property-size / single-tx limits for prepared payloads and manifests must be validated in Phase 3A/3B planning
+- Neo4j single-transaction and manifest property-size limits must be validated in Phase 3B planning
 
 ### Quick Tasks Completed
 
@@ -112,7 +114,7 @@ Phase 2 fully verified: review clean, Nyquist 34/34, security 12/12, API coverag
 
 ## Session Continuity
 
-Last session: 2026-07-18T05:15:12.223Z
-Stopped at: Phase 3A context gathered
-Resume file: .planning/phases/03A-immutable-prepare-commit-control-plane/03A-CONTEXT.md
-Next: Phase 3A discussion, research, and planning
+Last session: 2026-07-18
+Stopped at: Phase 3A verified; Phase 3B pending discussion/planning
+Resume file: None
+Next: Phase 3B discussion, research, and planning

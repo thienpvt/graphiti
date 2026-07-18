@@ -24,7 +24,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **SAFE-08**: Every new failure returns a documented structured code, bounded non-sensitive message, retryability, field path when applicable, and safe correlation identifier without leaking stack traces or internals.
 - [ ] **SAFE-09**: Existing 14 legacy MCP tools retain their names and public contracts; existing seven catalog tool names remain registered while catalog-v2 request contracts may break explicitly as documented.
 - [ ] **SAFE-10**: Every catalog read and write remains constrained by `group_id`; catalog writes remain Neo4j 5.26+ only with no unsupported backend-portability claim.
-- [ ] **SAFE-11**: Prepare computes required embeddings before persisting the immutable artifact; commit performs no external embedding, LLM, queue, or network call and embedding failure cannot leave a prepared artifact or any domain, provenance, manifest, status, or plan-terminal partial write.
+- [x] **SAFE-11**: Prepare computes required embeddings before persisting the immutable artifact; commit performs no external embedding, LLM, queue, or network call and embedding failure cannot leave a prepared artifact or any domain, provenance, manifest, status, or plan-terminal partial write.
 - [ ] **SAFE-12**: Unrelated dirty-worktree files and user changes remain unmodified and excluded from task commits unless separately approved.
 - [ ] **SAFE-13**: No task action pushes, merges, deploys, tags, or otherwise modifies remote state.
 
@@ -91,26 +91,26 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 
 ### Immutable Prepare, Commit, and Discard
 
-- [ ] **PLAN-01**: `prepare_catalog_batch` accepts the complete canonical catalog-v2 domain batch without `dry_run`, plan-token, or caller hash authority.
-- [ ] **PLAN-02**: Prepare validates identity/version, graph-key grammar, allowlists, endpoint pairs, limits, duplicates/coalescing, canonical hashes, existing identity conflicts, existing and same-batch endpoints, and provenance targets before persisting a plan.
-- [ ] **PLAN-03**: Prepare computes projected created, updated, and unchanged counts plus all required embeddings without mutating Entity, RELATES_TO, Episodic provenance, evidence relationships, manifests, or CatalogIngestBatch status.
-- [ ] **PLAN-04**: Prepare persists only bounded non-Entity control-plane state containing the immutable canonical payload, deterministic identities, resolved membership, and required embeddings for token-only, external-call-free commit; hashes and counts alone are insufficient.
-- [ ] **PLAN-05**: Prepared payload storage is restart-safe, group-isolated, size-bounded, immutable after creation, and chunked into bounded server-owned control records when required.
-- [ ] **PLAN-06**: Prepare returns an opaque one-time-visible `plan_token`, deterministic `plan_uuid`, request and catalog hashes, identity schema version, entity/edge/source/evidence-link counts, projected result counts, and `expires_at`.
-- [ ] **PLAN-07**: Raw plan tokens are never logged or stored; only a secure token digest is persisted and compared using a timing-safe mechanism.
-- [ ] **PLAN-08**: Configurable TTL, maximum prepared payload bytes, and maximum active prepared plans per group are enforced together with immutable hard ceilings.
-- [ ] **PLAN-09**: Prepared-plan and payload-chunk nodes never carry the Entity label, embeddings, or properties that place them in normal search or community clustering.
-- [ ] **PLAN-10**: `commit_prepared_catalog_batch` accepts only `plan_token` and optional `expected_request_sha256`; it cannot accept group, batch, entities, edges, sources, evidence links, or replacement payload content.
-- [ ] **PLAN-11**: Commit loads and revalidates the immutable prepared payload server-side and rejects missing, expired, changed, discarded, consumed, or conflicting plans with the specific prepared-plan error code.
-- [ ] **PLAN-12**: Commit uses only embeddings frozen in the stored prepared artifact and makes no external embedding, LLM, queue, or network call before or during the domain write transaction.
+- [x] **PLAN-01**: `prepare_catalog_batch` accepts the complete canonical catalog-v2 domain batch without `dry_run`, plan-token, or caller hash authority.
+- [x] **PLAN-02**: Prepare validates identity/version, graph-key grammar, allowlists, endpoint pairs, limits, duplicates/coalescing, canonical hashes, existing identity conflicts, existing and same-batch endpoints, and provenance targets before persisting a plan.
+- [x] **PLAN-03**: Prepare computes projected created, updated, and unchanged counts plus all required embeddings without mutating Entity, RELATES_TO, Episodic provenance, evidence relationships, manifests, or CatalogIngestBatch status.
+- [x] **PLAN-04**: Prepare persists only bounded non-Entity control-plane state containing the immutable canonical payload, deterministic identities, resolved membership, and required embeddings for token-only, external-call-free commit; hashes and counts alone are insufficient.
+- [x] **PLAN-05**: Prepared payload storage is restart-safe, group-isolated, size-bounded, immutable after creation, and chunked into bounded server-owned control records when required.
+- [x] **PLAN-06**: Prepare returns an opaque one-time-visible `plan_token`, deterministic `plan_uuid`, request and catalog hashes, identity schema version, entity/edge/source/evidence-link counts, projected result counts, and `expires_at`.
+- [x] **PLAN-07**: Raw plan tokens are never logged or stored; only a secure token digest is persisted and compared using a timing-safe mechanism.
+- [x] **PLAN-08**: Configurable TTL, maximum prepared payload bytes, and maximum active prepared plans per group are enforced together with immutable hard ceilings.
+- [x] **PLAN-09**: Prepared-plan and payload-chunk nodes never carry the Entity label, embeddings, or properties that place them in normal search or community clustering.
+- [x] **PLAN-10**: `commit_prepared_catalog_batch` accepts only `plan_token` and optional `expected_request_sha256`; it cannot accept group, batch, entities, edges, sources, evidence links, or replacement payload content.
+- [x] **PLAN-11**: Commit loads and revalidates the immutable prepared payload server-side and rejects missing, expired, changed, discarded, consumed, or conflicting plans with the specific prepared-plan error code.
+- [x] **PLAN-12**: Commit uses only embeddings frozen in the stored prepared artifact and makes no external embedding, LLM, queue, or network call before or during the domain write transaction.
 - [ ] **PLAN-13**: A successful commit writes all domain data, exact evidence, durable manifest, terminal batch status, and terminal prepared-plan state in one Neo4j transaction where supported.
 - [ ] **PLAN-14**: A commit failure rolls back the complete success transaction; an optional separate post-rollback status transaction may record only bounded failure metadata and never imply domain success; a process restart from `COMMITTING` follows a deterministic documented recovery rule.
 - [ ] **PLAN-15**: Identical replay after successful commit returns the committed logical result with unchanged outcomes rather than duplicating data or failing ambiguously.
 - [ ] **PLAN-16**: Concurrent commits using the same token yield one logical committed batch and one stable replay/conflict outcome without duplicate domain, evidence, manifest, or status records.
-- [ ] **PLAN-17**: A token is cryptographically and persistently bound to one immutable group, batch, identity schema, request hash, and payload; it cannot commit another scope.
-- [ ] **PLAN-18**: Expired, discarded, or consumed plans cannot be revived or repurposed.
-- [ ] **PLAN-19**: `discard_prepared_catalog_batch` accepts a valid token, idempotently terminates only an unconsumed plan, and never deletes domain graph data, evidence, manifests, or committed batch status.
-- [ ] **PLAN-20**: Existing `upsert_catalog_batch` remains available for compatibility and retains zero-write `dry_run=true`; prepare/commit is documented as the preferred agent path.
+- [x] **PLAN-17**: A token is cryptographically and persistently bound to one immutable group, batch, identity schema, request hash, and payload; it cannot commit another scope.
+- [x] **PLAN-18**: Expired, discarded, or consumed plans cannot be revived or repurposed.
+- [x] **PLAN-19**: `discard_prepared_catalog_batch` accepts a valid token, idempotently terminates only an unconsumed plan, and never deletes domain graph data, evidence, manifests, or committed batch status.
+- [x] **PLAN-20**: Existing `upsert_catalog_batch` remains available for compatibility and retains zero-write `dry_run=true`; prepare/commit is documented as the preferred agent path.
 
 ### Exact Provenance Evidence
 
@@ -163,7 +163,7 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **TEST-02**: Exhaustive table-driven tests cover every allowed and rejected endpoint pair for all 16 edge types.
 - [x] **TEST-03**: Identity tests prove FE/BO separation, overload separation, graph-key grammar, unsupported-version rejection, and UUID/hash changes when identity schema version changes.
 - [x] **TEST-04**: Hash tests prove `catalog_sha256` changes `request_sha256`, every included domain field is covered, excluded transport fields are stable, and dry-run returns authoritative hashes with zero writes.
-- [ ] **TEST-05**: Prepare tests prove no domain/status mutation, immutable persisted payloads, token-only commit, restart safety, TTL/size/cardinality limits, and missing/expired/discarded/consumed/conflicting behavior.
+- [x] **TEST-05**: Prepare tests prove no domain/status mutation, immutable persisted payloads, token-only commit, restart safety, TTL/size/cardinality limits, and missing/expired/discarded/consumed/conflicting behavior.
 - [ ] **TEST-06**: Concurrency tests prove one logical result for identical concurrent commit, token scope cannot change, expired plans cannot revive, and no duplicate manifest/evidence/domain records appear.
 - [ ] **TEST-07**: Evidence tests prove multiple sources link only to explicitly declared targets, no Cartesian provenance occurs, exact link verification works, and conflicting immutable link targets fail closed.
 - [ ] **TEST-08**: Manifest and resolver tests prove unchanged shared entities remain members, missing manifest items/count drift are detected, missing manifests fail, and edge twins/endpoint mismatches are reported.
@@ -229,7 +229,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | SAFE-08 | Phase 1 | Complete |
 | SAFE-09 | Phase 5 | Pending |
 | SAFE-10 | Phase 5 | Pending |
-| SAFE-11 | Phase 3A | Pending |
+| SAFE-11 | Phase 3A | Complete |
 | SAFE-12 | Phase 0 | Pending |
 | SAFE-13 | Phase 0 | Pending |
 | CONT-01 | Phase 1 | Complete |
@@ -278,26 +278,26 @@ Deferred until the deterministic substrate is implemented and verified.
 | CAPA-07 | Phase 2 | Complete |
 | CAPA-08 | Phase 2 | Complete |
 | CAPA-09 | Phase 2 | Complete |
-| PLAN-01 | Phase 3A | Pending |
-| PLAN-02 | Phase 3A | Pending |
-| PLAN-03 | Phase 3A | Pending |
-| PLAN-04 | Phase 3A | Pending |
-| PLAN-05 | Phase 3A | Pending |
-| PLAN-06 | Phase 3A | Pending |
-| PLAN-07 | Phase 3A | Pending |
-| PLAN-08 | Phase 3A | Pending |
-| PLAN-09 | Phase 3A | Pending |
-| PLAN-10 | Phase 3A | Pending |
-| PLAN-11 | Phase 3A | Pending |
-| PLAN-12 | Phase 3A | Pending |
+| PLAN-01 | Phase 3A | Complete |
+| PLAN-02 | Phase 3A | Complete |
+| PLAN-03 | Phase 3A | Complete |
+| PLAN-04 | Phase 3A | Complete |
+| PLAN-05 | Phase 3A | Complete |
+| PLAN-06 | Phase 3A | Complete |
+| PLAN-07 | Phase 3A | Complete |
+| PLAN-08 | Phase 3A | Complete |
+| PLAN-09 | Phase 3A | Complete |
+| PLAN-10 | Phase 3A | Complete |
+| PLAN-11 | Phase 3A | Complete |
+| PLAN-12 | Phase 3A | Complete |
 | PLAN-13 | Phase 3B | Pending |
 | PLAN-14 | Phase 3B | Pending |
 | PLAN-15 | Phase 3B | Pending |
 | PLAN-16 | Phase 3B | Pending |
-| PLAN-17 | Phase 3A | Pending |
-| PLAN-18 | Phase 3A | Pending |
-| PLAN-19 | Phase 3A | Pending |
-| PLAN-20 | Phase 3A | Pending |
+| PLAN-17 | Phase 3A | Complete |
+| PLAN-18 | Phase 3A | Complete |
+| PLAN-19 | Phase 3A | Complete |
+| PLAN-20 | Phase 3A | Complete |
 | EVID-01 | Phase 2 | Complete |
 | EVID-02 | Phase 2 | Complete |
 | EVID-03 | Phase 2 | Complete |
@@ -338,7 +338,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | TEST-02 | Phase 2 | Complete |
 | TEST-03 | Phase 1 | Complete |
 | TEST-04 | Phase 2 | Complete |
-| TEST-05 | Phase 3A | Pending |
+| TEST-05 | Phase 3A | Complete |
 | TEST-06 | Phase 3B | Pending |
 | TEST-07 | Phase 3B | Pending |
 | TEST-08 | Phase 4 | Pending |
@@ -374,4 +374,4 @@ Deferred until the deterministic substrate is implemented and verified.
 
 ---
 *Requirements defined: 2026-07-17*
-*Last updated: 2026-07-17 reconciled to graphiti_mcp_pre_canary_roadmap_en.md (Phase 0/1/2/3A/3B/4/5)*
+*Last updated: 2026-07-18 Phase 3A complete — PLAN-01..12, PLAN-17..20, SAFE-11, TEST-05*

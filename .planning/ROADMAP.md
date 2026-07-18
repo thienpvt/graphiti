@@ -29,7 +29,7 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 - [ ] **Phase 0: Baseline, Inventory, and Compatibility Policy** - Live baseline, isolation policy, worktree/remote safety
 - [ ] **Phase 1: Strict Contracts and Catalog-v2 Identity** - Recursive forbid contracts, FE/BO/COMMON grammar, fail-closed identity
 - [x] **Phase 2: Topology Authority, Evidence Contract, Hashes, Capabilities** - Endpoint map, exact evidence schema, authoritative hashes, capabilities; local gate ready_for_phase_3a=true
-- [ ] **Phase 3A: Immutable Prepare/Commit Control Plane** - Prepare/discard/token, immutable payload, zero domain write on prepare
+- [x] **Phase 3A: Immutable Prepare/Commit Control Plane** - Prepare/discard/token, immutable payload, zero domain write on prepare; local gate ready_for_phase_3b=true
 - [ ] **Phase 3B: Atomic Catalog, Exact Evidence, Durable Manifest Writes** - Domain+evidence+manifest co-commit, rollback, search interop
 - [ ] **Phase 4: Manifest-Backed Verification and Read-Only Diagnostics** - Manifest reads, verify, edge resolve, split gates
 - [ ] **Phase 5: Verification, Security, Compatibility, and Migration Docs** - Exhaustive tests, isolation, docs, final report without canary
@@ -160,7 +160,7 @@ Plans:
 
 **Research**: required during planning (payload chunking, property limits, token CAS)
 **Stop condition**: If Neo4j cannot store immutable prepared payloads, stop and report — do not weaken the contract
-**Gate**: Prepare/discard zero-domain-write and token/control-plane tests must pass before Phase 3B domain co-commit
+**Gate**: Phase 3A verified 6/6; prepare/discard zero-domain-write and token/control-plane tests passed; `ready_for_phase_3b=true`; Phase 3B domain co-commit unblocked for discussion/planning
 
 ### Phase 3B: Atomic Catalog, Exact Evidence, and Durable Manifest Writes
 
@@ -223,7 +223,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 0. Baseline, Inventory, and Compatibility Policy | 2/2 | Complete | 2026-07-17 |
 | Phase 1. Strict Contracts and Catalog-v2 Identity | 12/12 | Complete; ready_for_phase_2=true | 2026-07-18 |
 | Phase 2. Topology Authority, Evidence Contract, Hashes, Capabilities | 5/5 | Complete; ready_for_phase_3a=true | 2026-07-18 |
-| Phase 3A. Immutable Prepare/Commit Control Plane | 0/TBD | Not started | - |
+| Phase 3A. Immutable Prepare/Commit Control Plane | 6/6 | Complete; ready_for_phase_3b=true | 2026-07-18 |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 0/TBD | Not started | - |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 0/TBD | Not started | - |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 0/TBD | Not started | - |
