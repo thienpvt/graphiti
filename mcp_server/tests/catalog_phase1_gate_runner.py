@@ -359,12 +359,18 @@ def validate_spec(spec: dict[str, Any], root: Path) -> None:
     sid = spec.get('id')
     if not isinstance(sid, str) or not sid:
         raise ValueError('spec.id required')
-    argv = spec.get('argv')
-    if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
+    raw_argv = spec.get('argv')
+    if (
+        not isinstance(raw_argv, list)
+        or not raw_argv
+        or not all(isinstance(a, str) and a for a in raw_argv)
+    ):
         raise ValueError('%s: argv must be nonempty list[str]' % sid)
-    if not isinstance(spec.get('expected_exit'), int):
+    argv: list[str] = [str(a) for a in raw_argv]
+    expected_exit = spec.get('expected_exit')
+    if not isinstance(expected_exit, int):
         raise ValueError('%s: expected_exit must be int' % sid)
-    if spec['expected_exit'] != 0:
+    if expected_exit != 0:
         raise ValueError('%s: current-HEAD expected_exit must be 0' % sid)
     first = Path(argv[0]).name.lower()
     if first in SHELL_EXECUTABLES:

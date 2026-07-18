@@ -145,6 +145,11 @@ def test_continue_after_failure_via_injected_override(tmp_path: Path, monkeypatc
     # Use temp ledger + copy minimal docs into temp tree is heavy; instead monkeypatch
     # run_argv for non-sentinel specs to return pass quickly, then inject one failure.
     phase = root / gate.PHASE_DIR_REL
+    doc_paths = [
+        phase / '01-VALIDATION.md',
+        phase / '01-PHASE1-GATE.md',
+    ]
+    originals = {p: p.read_text(encoding='utf-8') for p in doc_paths if p.is_file()}
     ledger_path = tmp_path / '01-GATE-RESULTS.json'
 
     def fake_run_argv(argv, root_arg, timeout=1800):  # noqa: ARG001
@@ -275,6 +280,9 @@ def test_continue_after_failure_via_injected_override(tmp_path: Path, monkeypatc
     gtxt = (phase / '01-PHASE1-GATE.md').read_text(encoding='utf-8')
     assert 'ready_for_phase_2=false' in gtxt
     assert 'local_gate_pass=false' in gtxt or 'local_gate_pass=true' not in gtxt.split('## Gate Contract')[-1]
+    # Restore gate docs so content digests for later real runs stay stable.
+    for p, text in originals.items():
+        p.write_text(text, encoding='utf-8')
 
 
 def test_injected_mandatory_failure():
@@ -295,7 +303,9 @@ def test_injected_mandatory_failure():
 
 
 def test_no_integration_import_in_runner_source():
-    src = Path(gate.__file__).read_text(encoding='utf-8')
+    module_file = gate.__file__
+    assert module_file is not None
+    src = Path(module_file).read_text(encoding='utf-8')
     import_lines = [
         ln
         for ln in src.splitlines()
