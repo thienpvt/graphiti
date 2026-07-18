@@ -319,9 +319,10 @@ def check_safety_no_probe(root: Path) -> None:
     if HISTORICAL_V2_COMMIT not in runner_src:
         raise AssertionError('runner must preserve a67789a historical pointer')
     for line in runner_src.splitlines():
-        if line.startswith('import ') or line.startswith('from '):
-            if 'neo4j' in line.lower() and 'driver' in line.lower():
-                raise AssertionError('runner must not import neo4j driver')
+        if (line.startswith('import ') or line.startswith('from ')) and (
+            'neo4j' in line.lower() and 'driver' in line.lower()
+        ):
+            raise AssertionError('runner must not import neo4j driver')
 
 
 def check_manifest_verification_not_flipped(root: Path) -> None:
@@ -330,7 +331,7 @@ def check_manifest_verification_not_flipped(root: Path) -> None:
     if not capa.is_file():
         raise AssertionError('catalog_capabilities.py missing')
     src = capa.read_text(encoding='utf-8')
-    if "'manifest_verification': True" in src or '"manifest_verification": True' in src:
+    if _manifest_verification_true_marker(src):
         raise AssertionError(
             'features.manifest_verification must remain false until plan 06 proofs (D-24)'
         )
@@ -644,11 +645,20 @@ def derive_safety_ledger(
     }
 
 
+def _manifest_verification_true_marker(src: str) -> bool:
+    """True when source text sets features.manifest_verification to True.
+
+    Markers built without nested quote soup so parsers cannot report a false
+    unterminated-string diagnostic on this check.
+    """
+    single = chr(39) + 'manifest_verification' + chr(39) + ': True'
+    double = chr(34) + 'manifest_verification' + chr(34) + ': True'
+    return single in src or double in src
+
+
 def read_manifest_verification_feature(root: Path) -> bool:
     src = (root / 'mcp_server/src/services/catalog_capabilities.py').read_text(encoding='utf-8')
-    return (
-        "'manifest_verification': True" in src or '"manifest_verification": True' in src
-    )
+    return _manifest_verification_true_marker(src)
 
 
 def derive_ready_for_phase_5(
@@ -678,9 +688,7 @@ def derive_ready_for_phase_5(
         return False
     if safety.get('safety_checks_pass') is not True:
         return False
-    if not manifest_verification:
-        return False
-    return True
+    return bool(manifest_verification)
 
 
 def derive_cli_exit_code(ledger: dict[str, Any]) -> int:
