@@ -1418,7 +1418,12 @@ class CatalogNeo4jStore:
             """
 
     def build_batch_status_claim_cypher(self) -> str:
-        """Create/recheck a transaction-local batch claim before domain writes."""
+        """CAS-style create/reclaim of batch claim before domain writes.
+
+        ON CREATE seeds status=writing. ON MATCH with same request_sha256 reclaims
+        only from writing|failed by re-stamping status=writing. Committed and
+        unknown statuses are returned unchanged for caller fail-closed handling.
+        """
         return """
             MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})
             ON CREATE SET
@@ -1429,6 +1434,19 @@ class CatalogNeo4jStore:
                 b.status = 'writing',
                 b.created_at = $created_at,
                 b.updated_at = $updated_at
+            ON MATCH SET
+                b.updated_at = CASE
+                    WHEN b.request_sha256 = $request_sha256
+                         AND b.status IN ['writing', 'failed']
+                    THEN $updated_at
+                    ELSE b.updated_at
+                END,
+                b.status = CASE
+                    WHEN b.request_sha256 = $request_sha256
+                         AND b.status IN ['writing', 'failed']
+                    THEN 'writing'
+                    ELSE b.status
+                END
             RETURN b.uuid AS uuid,
                    b.status AS status,
                    b.request_sha256 AS request_sha256

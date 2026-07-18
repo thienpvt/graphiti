@@ -1208,6 +1208,9 @@ def test_batch_status_claim_and_terminal_write_are_conflict_guarded():
     assert 'MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})' in claim
     assert "b.status = 'writing'" in claim
     assert 'b.request_sha256 = $request_sha256' in claim
+    # WR-03: CAS reclaim only from writing|failed; never blind rewrite committed/unknown.
+    assert 'ON MATCH SET' in claim
+    assert "b.status IN ['writing', 'failed']" in claim
     assert "coalesce(b.status, '') = 'committed' AS already_committed" in terminal
     assert 'b.request_sha256 <> $request_sha256 AS hash_conflict' in terminal
     assert 'NOT already_committed AND NOT hash_conflict' in terminal
@@ -1441,3 +1444,17 @@ def test_gap_cr01_entity_upsert_type_contract_covers_label_mismatch_cases():
     assert 'n.labels' in cypher
     assert ':Table' in cypher
     assert 'deterministic_uuid_conflict' in cypher
+
+
+# --- 03B REVIEW WR focused unit contracts ---
+
+
+def test_wr03_claim_cypher_reclaims_writing_failed_only():
+    store = CatalogNeo4jStore()
+    claim = store.build_batch_status_claim_cypher()
+    assert 'ON CREATE SET' in claim
+    assert 'ON MATCH SET' in claim
+    assert "b.status IN ['writing', 'failed']" in claim
+    # committed path must not be rewritten to writing
+    assert "THEN 'writing'" in claim
+    assert 'b.request_sha256 = $request_sha256' in claim

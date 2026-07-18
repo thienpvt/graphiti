@@ -5168,12 +5168,21 @@ class CatalogService:
             },
         )
         claimed_hash = claim.get('request_sha256')
-        claimed_status = claim.get('status')
+        claimed_status = str(claim.get('status') or '')
         if claimed_hash != effective_hash:
             raise self._BatchStatusConflict('different_hash')
-        if claimed_status == 'committed' and projection.plan is None:
-            # Direct upsert already-committed same hash short-circuit via conflict path.
-            raise self._BatchStatusConflict('already_committed')
+        if claimed_status == 'committed':
+            # Same-hash committed: plan path may short-circuit via terminal agreement;
+            # direct upsert short-circuits via conflict path.
+            if projection.plan is None:
+                raise self._BatchStatusConflict('already_committed')
+            # Plan path continues into terminal agreement matrix below.
+        elif claimed_status not in ('writing', 'failed'):
+            # Unknown/non-reclaimable statuses fail closed (no concurrent rewrite).
+            raise CatalogStoreError(
+                f'batch status claim rejected for status={claimed_status!r}',
+                code='batch_conflict',
+            )
 
         # Recovery matrix (D-07..D-11, D-23): classify durable terminal evidence.
         # Never CAS COMMITTING→PREPARED; never repair partial terminals.

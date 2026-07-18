@@ -80,7 +80,7 @@ class _RecordingStore:
         self.order: list[str] = []
         self.agree = False
         self.snapshot: dict[str, Any] | None = None
-        self.claim_status = 'open'
+        self.claim_status = 'writing'
         self.claim_hash = HEX64
 
     def begin(self) -> None:
