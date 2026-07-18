@@ -94,3 +94,31 @@ All Phase 2 behaviors have automated verification. Live Neo4j is deliberately no
 - [x] `nyquist_compliant: true` set only after evidence exists.
 
 **Approval:** local gate green via 02-GATE-RESULTS.json
+
+## Validation Audit — 2026-07-18 (Nyquist re-audit @ HEAD d78924a)
+
+| Metric | Value |
+|--------|-------|
+| **HEAD** | `d78924aee44b148f3e789cf129acacdd58e2f183` |
+| **status** | `validated` (retained) |
+| **nyquist_compliant** | `true` (retained) |
+| **wave_0_complete** | `true` (retained) |
+| **Requirements audited** | **34/34** (EDGE-01..09, HASH-01..07, CAPA-01..09, EVID-01..06, EVID-14, TEST-02, TEST-04) |
+| **Gaps found** | 0 |
+| **focused_pytest** | **927 passed** (8 files) |
+| **topology/evidence/hash/capabilities** | **396 passed** |
+| **runner_self_tests** | **15 passed** |
+| **Review-fix regressions** | present (`test_batch_in_tx_already_committed_counts_evidence_links_as_unchanged`, `test_batch_status_provenance_count_includes_evidence_links`, gate-hash echo, sources-cap, pagination) |
+| **Safety** | canary=false; oracle-catalog-v2=false; no_new_store_or_control_plane_write_path=true |
+| **Ledger** | `02-GATE-RESULTS.json` local_gate_pass=true; re-run unit suites green at audit HEAD |
+
+**Coverage map (requirement → automated surface):**
+
+| Family | Count | Primary tests |
+|--------|------:|---------------|
+| EDGE-01..09 + TEST-02 | 10 | `test_catalog_topology.py` (exhaustive matrix + deferred types + pre-side-effect) |
+| EVID-01..06, EVID-14 | 7 | `test_catalog_evidence.py` (+ models/service non-Cartesian) |
+| HASH-01..07 + TEST-04 | 8 | `test_catalog_hash.py` (+ service dry-run / mismatch / gate echo) |
+| CAPA-01..09 | 9 | `test_catalog_capabilities.py` (+ MCP registration / get_status) |
+
+No implementation or test-file changes required this audit.
