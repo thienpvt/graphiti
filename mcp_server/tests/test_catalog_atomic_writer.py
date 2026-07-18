@@ -30,6 +30,7 @@ def _red(reason: str = '03B not implemented') -> None:
 
 def test_shared_writer_used_by_upsert_and_commit_paths():
     """PLAN-13: direct upsert and prepared commit share one atomic writer."""
+    assert GROUP == 'oracle-catalog-tool-test'
     mod = _service_mod()
     if mod is not None:
         # Symbol reserved for GREEN; absence keeps RED via _red below.

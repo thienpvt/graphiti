@@ -38,6 +38,7 @@ def _red(reason: str = '03B not implemented') -> None:
 def test_evidence_create_once_conflict():
     """EVID-07/08: create-once same content is idempotent; divergent content_sha256
     raises provenance_link_conflict (named primary RED case)."""
+    assert GROUP == 'oracle-catalog-tool-test'
     _red('test_evidence_create_once_conflict')
 
 

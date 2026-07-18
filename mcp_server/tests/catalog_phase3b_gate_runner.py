@@ -341,15 +341,19 @@ def run_named_check(root: Path, check_id: str) -> None:
     func(root)
 
 
-def validate_spec(spec: dict[str, Any], root: Path | None = None) -> None:
-    """Validate one argv spec. `root` retained for API parity with Phase 3A."""
+def validate_spec(spec: object, root: Path | None = None) -> None:
+    """Validate one argv spec. `root` retained for API parity with Phase 3A.
+
+    Accepts object so the dict runtime guard is not dead under typed callers.
+    """
     _ = root  # reserved for future path-bound argv checks
     if not isinstance(spec, dict):
         raise ValueError('spec must be dict')
-    sid = spec.get('id')
+    payload: dict[str, Any] = spec
+    sid = payload.get('id')
     if not isinstance(sid, str) or not sid:
         raise ValueError('spec.id required')
-    raw_argv = spec.get('argv')
+    raw_argv = payload.get('argv')
     if (
         not isinstance(raw_argv, list)
         or not raw_argv
@@ -357,7 +361,7 @@ def validate_spec(spec: dict[str, Any], root: Path | None = None) -> None:
     ):
         raise ValueError(f'{sid}: argv must be nonempty list[str]')
     argv: list[str] = [str(a) for a in raw_argv]
-    expected_exit = spec.get('expected_exit')
+    expected_exit = payload.get('expected_exit')
     if not isinstance(expected_exit, int):
         raise ValueError(f'{sid}: expected_exit must be int')
     if expected_exit != 0:
@@ -370,7 +374,7 @@ def validate_spec(spec: dict[str, Any], root: Path | None = None) -> None:
             raise ValueError(f'{sid}: shell metacharacter token forbidden: {a}')
         if a in ('/bin/sh', '/bin/bash', 'cmd.exe'):
             raise ValueError(f'{sid}: shell path forbidden')
-    if spec.get('kind') not in ('live', 'tool') and 'pytest' in argv:
+    if payload.get('kind') not in ('live', 'tool') and 'pytest' in argv:
         for a in argv:
             norm = a.replace('\\', '/')
             if norm.endswith(INTEGRATION_MODULE) or norm.endswith('/' + INTEGRATION_MODULE):

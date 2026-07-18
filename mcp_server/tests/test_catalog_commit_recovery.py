@@ -31,6 +31,7 @@ def _red(reason: str = '03B not implemented') -> None:
 def test_terminal_agreement_returns_stable_receipt():
     """PLAN-15/MANI-07: plan COMMITTED + batch committed + manifest digest agree
     → stable receipt on re-commit (primary named RED case)."""
+    assert GROUP == 'oracle-catalog-tool-test'
     mod = _service_mod()
     if mod is not None:
         _ = getattr(mod, 'commit_prepared_catalog_batch', None)

@@ -116,7 +116,8 @@ def _four_category_membership() -> dict:
 
 def test_manifest_canonical_bytes_stable():
     """MANI-01/02: equal membership yields byte-identical canonical serialization."""
-    _ = _PRODUCT_SYMBOLS  # reserved for GREEN plans
+    assert GROUP == 'oracle-catalog-tool-test'
+    assert 'build_manifest_body_from_membership' in _PRODUCT_SYMBOLS
     _red('test_manifest_canonical_bytes_stable')
 
 
