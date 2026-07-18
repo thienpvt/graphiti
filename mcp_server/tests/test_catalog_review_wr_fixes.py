@@ -522,6 +522,7 @@ async def test_wr_r01_typed_writers_map_store_errors_and_preserve_tx_semantics(
 
     assert response.results[0].status == 'error'
     assert response.results[0].error_code == CatalogErrorCode.validation_error
+    assert response.results[0].error_message == 'catalog store error: validation_error'
     if atomic:
         assert response.results[1].status == 'rolled_back'
         assert client.driver.rolled_back == 1
@@ -530,6 +531,56 @@ async def test_wr_r01_typed_writers_map_store_errors_and_preserve_tx_semantics(
         assert response.results[1].status == 'created'
         assert client.driver.rolled_back == 1
         assert client.driver.tx_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('kind', 'atomic'),
+    [('entity', True), ('entity', False), ('edge', True), ('edge', False)],
+)
+async def test_wr_r02_typed_writers_sanitize_store_error_messages(
+    kind: str, atomic: bool
+):
+    service = CatalogService(catalog_config=_enabled_config())
+    store = CatalogNeo4jStore()
+    service._store = store  # type: ignore[assignment]
+    client = _client()
+    secret = 'password=super-secret-' + 'x' * 2_000
+
+    if kind == 'entity':
+        item = _entity_item()
+        prepared = [_prepared_entity(item)]
+        request = _entity_request([item], atomic=atomic)
+        service._recheck_entity_in_tx = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        store.upsert_entity_item = AsyncMock(  # type: ignore[method-assign]
+            side_effect=CatalogStoreError(secret, code='validation_error')
+        )
+        writer = service._write_atomic if atomic else service._write_per_item
+    else:
+        item = _edge_item()
+        prepared = [_prepared_edge(item=item)]
+        request = _edge_request(atomic=atomic, edges=[item])
+        service._recheck_edge_endpoints_in_tx = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        store.upsert_edge_item = AsyncMock(  # type: ignore[method-assign]
+            side_effect=CatalogStoreError(secret, code='validation_error')
+        )
+        writer = service._write_edges_atomic if atomic else service._write_edges_per_item
+
+    response = await writer(client, request, prepared, {}, FIXED_TS)
+
+    error = response.results[0]
+    assert error.error_code == CatalogErrorCode.validation_error
+    assert error.error_message == 'catalog store error: validation_error'
+    assert secret not in error.model_dump_json()
+    assert len(error.error_message) < 100
+
+
+def test_wr_r02_preserves_embedding_failed_message():
+    service = CatalogService(catalog_config=_enabled_config())
+    assert (
+        service._store_error_message(CatalogErrorCode.embedding_failed)
+        == 'embedding generation failed'
+    )
 
 
 def test_in01_params_for_rejects_empty_embedding():

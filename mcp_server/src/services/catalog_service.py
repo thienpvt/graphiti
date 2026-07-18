@@ -727,11 +727,7 @@ class CatalogService:
                 graph_key=trigger.item.graph_key if trigger is not None else None,
                 entity_type=trigger.item.entity_type if trigger is not None else None,
                 error_code=mapped,
-                error_message=(
-                    'embedding generation failed'
-                    if mapped == CatalogErrorCode.embedding_failed
-                    else str(exc) or mapped.value
-                ),
+                error_message=self._store_error_message(mapped),
             )
             return self._atomic_fail_response(
                 request,
@@ -884,11 +880,7 @@ class CatalogService:
                         )
             except CatalogStoreError as exc:
                 mapped = self._map_store_error_code(exc)
-                message = (
-                    'embedding generation failed'
-                    if mapped == CatalogErrorCode.embedding_failed
-                    else str(exc) or mapped.value
-                )
+                message = self._store_error_message(mapped)
                 written[prep.index] = CatalogItemResult(
                     index=prep.index,
                     status='error',
@@ -2682,11 +2674,7 @@ class CatalogService:
                 edge_key=trigger.item.edge_key if trigger is not None else None,
                 edge_type=trigger.item.edge_type if trigger is not None else None,
                 error_code=mapped,
-                error_message=(
-                    'embedding generation failed'
-                    if mapped == CatalogErrorCode.embedding_failed
-                    else str(exc) or mapped.value
-                ),
+                error_message=self._store_error_message(mapped),
             )
             return self._edge_atomic_fail_response(
                 request, early_errors, trigger_indices={trigger_idx}
@@ -2809,11 +2797,7 @@ class CatalogService:
                         )
             except CatalogStoreError as exc:
                 mapped = self._map_store_error_code(exc)
-                message = (
-                    'embedding generation failed'
-                    if mapped == CatalogErrorCode.embedding_failed
-                    else str(exc) or mapped.value
-                )
+                message = self._store_error_message(mapped)
                 written[prep.index] = CatalogItemResult(
                     index=prep.index,
                     status='error',
@@ -6472,6 +6456,12 @@ class CatalogService:
             projected_updated=projected_updated,
             projected_unchanged=projected_unchanged,
         )
+
+    @staticmethod
+    def _store_error_message(code: CatalogErrorCode) -> str:
+        if code == CatalogErrorCode.embedding_failed:
+            return 'embedding generation failed'
+        return f'catalog store error: {code.value}'
 
     def _map_store_error_code(self, exc: CatalogStoreError) -> CatalogErrorCode:
         code_text = getattr(exc, 'code', None) or 'neo4j_transaction_failed'
