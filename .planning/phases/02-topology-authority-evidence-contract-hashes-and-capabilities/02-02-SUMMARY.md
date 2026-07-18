@@ -99,12 +99,13 @@ status: complete
 
 1. **Task 1: CatalogEvidenceLink models + pure identity helpers** - `c3f8d6f` (feat)
 2. **Task 2: Batch non-Cartesian evidence_links + legacy shape reject** - `f3d395f` (feat)
-3. **Follow-up: Pyright cast on evidence `_dump`** - `76fe3c7` (fix)
+3. **Follow-up: Pyright cast on evidence `_dump`** - `76fe3c7` (fix, superseded)
+4. **Follow-up: isinstance narrow on model_dump** - `a86bcef` (fix)
 
 ## Files Created/Modified
 
 - `mcp_server/src/models/catalog_evidence.py` - EVIDENCE_KINDS, locator, targets, CatalogEvidenceLink
-- `mcp_server/src/services/catalog_identity.py` - link_key, canonical payload, coalesce; `cast(dict[str, Any], dump(...))` for pyright
+- `mcp_server/src/services/catalog_identity.py` - link_key, canonical payload, coalesce; runtime `isinstance(raw, dict)` after model_dump
 - `mcp_server/src/models/catalog_batch.py` - non-Cartesian NestedProvenancePayload + system_key on evidence entity targets
 - `mcp_server/tests/test_catalog_evidence.py` - EVID-01..06/14 unit coverage
 - `mcp_server/tests/test_catalog_models.py` - batch provenance fixtures updated to evidence_links
@@ -114,7 +115,7 @@ status: complete
 - Link key omits excerpt and client `content_sha256` (transport); content hash includes excerpt bytes as submitted
 - Coalesce by payload digest equality only; non-identical multiplicity retained; order-stable via link_key sort
 - Smallest batch change: replace nested target arrays with `evidence_links`; sources may be empty when links alone provide work
-- `getattr(model_dump)` types as object; cast dump result rather than change runtime path
+- Prefer runtime `isinstance` narrowing over `cast` for model_dump return (trust-boundary shape check)
 
 ## Deviations from Plan
 
@@ -122,11 +123,11 @@ status: complete
 
 **1. [Rule 1 - Bug] Pyright return type on evidence `_dump`**
 - **Found during:** post-plan diagnostics on `catalog_identity.py`
-- **Issue:** `getattr(..., 'model_dump')` callable return typed `object`, not assignable to `dict[str, Any] | None`
-- **Fix:** `cast(dict[str, Any], dump(mode='json'))`; import `cast`
+- **Issue:** `getattr(..., 'model_dump')` callable return typed `object`, not assignable to `dict[str, Any] | None`; intermediate `cast` left unused-import noise for some checkers
+- **Fix:** `raw = dump(mode='json'); if not isinstance(raw, dict): raise TypeError(...); return raw` — no cast
 - **Files modified:** `mcp_server/src/services/catalog_identity.py`
-- **Verification:** `uv run --project mcp_server pyright -p mcp_server` on identity/evidence/batch → 0 errors; 71 evidence+identity tests pass; 99 filtered models tests pass
-- **Committed in:** `76fe3c7`
+- **Verification:** `uv run --project mcp_server pyright -p mcp_server` on identity/evidence/batch → 0 errors; ruff clean; 71 evidence+identity tests pass
+- **Committed in:** `a86bcef` (supersedes `76fe3c7` cast approach)
 
 ## Threat Flags
 
@@ -136,14 +137,14 @@ None new beyond plan threat model (Cartesian reject, safe errors, bounds).
 
 1. RED: `test_catalog_evidence.py` failed collection (missing module)
 2. GREEN: models + helpers landed (`c3f8d6f`), then batch migration (`f3d395f`)
-3. Follow-up type fix (`76fe3c7`)
-4. Verify: 71 evidence+identity tests pass; 99 filtered evidence/provenance/batch tests pass; scoped pyright 0 errors
+3. Type follow-ups: cast (`76fe3c7`) then isinstance narrow (`a86bcef`)
+4. Verify: 71 evidence+identity tests pass; scoped pyright 0 errors; ruff clean on identity module
 
 ## Self-Check: PASSED
 
 - FOUND: `mcp_server/src/models/catalog_evidence.py`
 - FOUND: `mcp_server/src/services/catalog_identity.py` helpers
 - FOUND: `mcp_server/src/models/catalog_batch.py` evidence_links
-- FOUND: commits `c3f8d6f`, `f3d395f`, `76fe3c7`
+- FOUND: commits `c3f8d6f`, `f3d395f`, `76fe3c7`, `a86bcef`
 - FOUND: `02-02-SUMMARY.md`
 - STATE.md / ROADMAP.md not modified (orchestrator-owned)
