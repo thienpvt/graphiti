@@ -37,10 +37,15 @@ key-decisions:
   - "Different-token same-batch arbitration reuses batch_conflict/prepared_plan_conflict/prepared_plan_already_consumed — no new error codes"
   - "COMMITTED plan roots attempt durable agreement receipt before prepared_plan_already_consumed fallback"
   - "No process-local lock authority in product code; tests use asyncio.Lock only as Neo4j serialization stand-in"
+  - "CR-01: same-token stale PREPARED expected against live COMMITTING is deterministic re-entry, not prepared_plan_conflict"
+  - "CR-02: expected manifest_sha256 always from frozen membership reassembly, never durable snapshot (non-tautological)"
+  - "WR-01: claim-time prepared_plan_already_consumed routes to stable terminal receipt"
+  - "WR-02: COMMITTING→COMMITTED CAS persists actual outcome counts; first response and replay both read durable authority"
 
 patterns-established:
   - "Pattern: after plan lock + batch claim, snapshot terminals → agree short-circuit OR partial fail-closed OR full idempotent writer"
   - "Pattern: recovery never CAS to PREPARED; COMMITTING ignores TTL for resume"
+  - "Pattern: terminal receipt expected digest = pure_manifest_sha256(serialize(build_manifest_body_from_membership(...)))"
 
 requirements-completed: [PLAN-14, PLAN-15, PLAN-16, MANI-07, TEST-06]
 
@@ -126,20 +131,23 @@ status: complete
 - Implemented RESEARCH §C recovery matrix inside `_write_catalog_batch_atomic` after plan lock + batch claim: terminal agreement short-circuit, partial-terminal fail-closed, else full idempotent writer.
 - COMMITTED plan roots now attempt durable agreement receipt (`_commit_terminal_state_receipt`) before already-consumed fallback; identical replays return equal bounded receipts.
 - Permanent domain conflicts leave plan `COMMITTING`; `_PLAN_CAS_LEGAL` still forbids `COMMITTING→PREPARED`.
-- GREEN recovery suite (7) + concurrency suite (4); regressions in atomic writer / prepare service green.
+- GREEN recovery suite (10) + concurrency suite (4); prepare-store CAS + atomic/prepare regressions green (90 total).
 - Different-token same-batch arbitration documents reuse of `batch_conflict` / `prepared_plan_conflict` / `prepared_plan_already_consumed` (no new codes).
+- Adversarial review gaps closed: CR-01 stale PREPARED→live COMMITTING re-entry; CR-02 frozen expected manifest; WR-01 claim already_consumed→receipt; WR-02 durable outcome counts first==replay.
 
 ## Task Commits
 
 1. **Task 1: Stranded COMMITTING recovery + stable replay** - `8094e5c` (feat)
 2. **Task 2: Same-token and same-batch concurrency** - `fd33827` (test)
+3. **Adversarial fix: CR-01/02 WR-01/02** - `e9c96b5` (fix)
 
 ## Files Created/Modified
 
-- `mcp_server/src/services/catalog_service.py` — recovery matrix, partial-terminal exception, COMMITTED stable receipt path, `_PartialTerminalConflict`
-- `mcp_server/src/services/catalog_store.py` — `read_terminal_commit_snapshot` group-scoped recovery read
-- `mcp_server/tests/test_catalog_commit_recovery.py` — GREEN recovery matrix
-- `mcp_server/tests/test_catalog_concurrency.py` — GREEN concurrency arbitration
+- `mcp_server/src/services/catalog_service.py` — recovery matrix, partial-terminal, frozen expected manifest, claim→receipt, durable outcome counts
+- `mcp_server/src/services/catalog_store.py` — terminal snapshot, stale PREPARED re-entry, outcome-count CAS, plan count fields on snapshot
+- `mcp_server/tests/test_catalog_commit_recovery.py` — recovery matrix + CR/WR real-store-semantics tests
+- `mcp_server/tests/test_catalog_concurrency.py` — concurrency arbitration
+- `mcp_server/tests/test_catalog_prepare_store.py` — CR-01/WR-02 CAS unit proofs
 - `mcp_server/tests/test_catalog_atomic_writer.py` — snapshot double for shared writer
 - `mcp_server/tests/test_catalog_prepare_service.py` — snapshot stub on commit wire
 
@@ -148,6 +156,8 @@ status: complete
 - Prefer existing error registry over new codes for partial terminals and multi-token races.
 - Product authority remains Neo4j lock/CAS/uniqueness; test asyncio locks are serialization stand-ins only.
 - Internal recovery reads stay non-public (no Phase 4 MCP tools).
+- Expected manifest digest authority is frozen membership reassembly (CR-02), never snapshot echo.
+- Durable plan `created_count`/`updated_count`/`unchanged_count` written only on COMMITTING→COMMITTED (WR-02).
 
 ## Deviations from Plan
 
@@ -167,6 +177,34 @@ status: complete
 - **Files modified:** `mcp_server/src/services/catalog_service.py`, `catalog_store.py`
 - **Commit:** `8094e5c`
 
+**3. [Rule 1 - Bug] CR-01 stale PREPARED vs live COMMITTING**
+- **Found during:** Adversarial review
+- **Issue:** `cas_plan_state` only re-entered when `expected_from==COMMITTING`; stale PREPARED expected raised `prepared_plan_conflict`.
+- **Fix:** Same-token re-entry when live is COMMITTING and expected is PREPARED or COMMITTING.
+- **Files modified:** `catalog_store.py`, `test_catalog_prepare_store.py`
+- **Commit:** `e9c96b5`
+
+**4. [Rule 1 - Bug] CR-02 tautological expected manifest**
+- **Found during:** Adversarial review
+- **Issue:** Receipt used snapshot `manifest_sha256` as expected, so agreement always passed when snapshot present.
+- **Fix:** `_expected_manifest_sha_from_frozen` reassembles membership and derives digest; compare durable snapshot to that.
+- **Files modified:** `catalog_service.py`, recovery tests
+- **Commit:** `e9c96b5`
+
+**5. [Rule 2 - Missing critical functionality] WR-01 claim already_consumed**
+- **Found during:** Adversarial review
+- **Issue:** Winner COMMITTED before follower claim returned error instead of stable receipt.
+- **Fix:** Claim path routes `prepared_plan_already_consumed` to `_commit_terminal_state_receipt`.
+- **Files modified:** `catalog_service.py`, recovery tests
+- **Commit:** `e9c96b5`
+
+**6. [Rule 2 - Missing critical functionality] WR-02 durable outcome counts**
+- **Found during:** Adversarial review
+- **Issue:** First response used live write statuses; replay used prepare-projected plan counts — could diverge.
+- **Fix:** Persist actual counts on terminal CAS; short-circuit and receipt read durable plan counts.
+- **Files modified:** `catalog_service.py`, `catalog_store.py`, recovery/store tests
+- **Commit:** `e9c96b5`
+
 ## Flagged assumptions (discharged)
 
 - Different-token conflict codes: **reused** `batch_conflict`, `prepared_plan_conflict`, `prepared_plan_already_consumed` — no new registry members.
@@ -174,16 +212,17 @@ status: complete
 ## Verification
 
 ```text
-uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini \
+uv run --project mcp_server pytest \
   mcp_server/tests/test_catalog_commit_recovery.py \
   mcp_server/tests/test_catalog_concurrency.py \
+  mcp_server/tests/test_catalog_prepare_store.py \
   mcp_server/tests/test_catalog_atomic_writer.py \
   mcp_server/tests/test_catalog_prepare_service.py -q
-# 53 passed
+# 90 passed
 
 ruff check (changed files): clean
+ruff format --check: clean
 project-config pyright (catalog_service.py, catalog_store.py): 0 errors
-IDE-root import diagnostics on config/models/services: baseline vs e55f9d4 (no new import lines)
 ```
 
 ## Threat Flags
@@ -197,6 +236,7 @@ None.
 ## Self-Check: PASSED
 
 - FOUND: product + test files for plan 05
-- FOUND: commits `8094e5c`, `fd33827`
+- FOUND: commits `8094e5c`, `fd33827`, `e9c96b5`
 - No COMMITTING→PREPARED in `_PLAN_CAS_LEGAL`
 - No process-local lock authority in `catalog_service.py`
+- CR-01/02 WR-01/02 covered by real-store-semantics unit tests
