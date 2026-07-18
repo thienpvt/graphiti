@@ -263,6 +263,41 @@ def _schema_execute_query(cypher: str, params=None, **kwargs):
                     'labelsOrTypes': ['CatalogIngestBatch'],
                     'properties': ['uuid', 'group_id'],
                 },
+                {
+                    'name': 'catalog_evidence_link_identity_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogEvidenceLink'],
+                    'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_evidence_link_key_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogEvidenceLink'],
+                    'properties': ['group_id', 'link_key'],
+                },
+                {
+                    'name': 'catalog_batch_manifest_identity_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogBatchManifest'],
+                    'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_batch_manifest_chunk_identity_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogBatchManifestChunk'],
+                    'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_batch_manifest_chunk_index_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogBatchManifestChunk'],
+                    'properties': ['manifest_uuid', 'group_id', 'chunk_index'],
+                },
             ],
             None,
             None,
@@ -2824,6 +2859,7 @@ def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = Fa
         side_effect=_lock_targets
     )
     service._store.ensure_uuid_uniqueness_constraints = AsyncMock(return_value=None)
+    service._store.ensure_evidence_manifest_schema = AsyncMock(return_value=None)
 
     async def _source_upsert(tx, *, params):
         _ = tx
@@ -2845,6 +2881,20 @@ def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = Fa
         return_value={'uuid': 'e1', 'episodes': [src_uuid]}
     )
     service._store.prepare_source_episode_params = CatalogNeo4jStore().prepare_source_episode_params
+    # Evidence/manifest co-write path (03B-04): default no-op success stubs.
+    service._store.write_evidence_links = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    service._store.write_manifest_root_and_chunks = AsyncMock(  # type: ignore[method-assign]
+        return_value={'uuid': 'manifest-1', 'manifest_sha256': 'a' * 64, 'chunk_count': 1}
+    )
+    service._store.prepare_evidence_link_params = (  # type: ignore[method-assign]
+        CatalogNeo4jStore().prepare_evidence_link_params
+    )
+    service._store.prepare_manifest_root_params = (  # type: ignore[method-assign]
+        CatalogNeo4jStore().prepare_manifest_root_params
+    )
+    service._store.prepare_manifest_chunk_params = (  # type: ignore[method-assign]
+        CatalogNeo4jStore().prepare_manifest_chunk_params
+    )
     return src_uuid, ent_uuid
 
 
@@ -3406,17 +3456,83 @@ def _wire_batch_preflight(service: CatalogService) -> None:
     service._store.ensure_uuid_uniqueness_constraints = AsyncMock(  # type: ignore[method-assign]
         return_value=None
     )
-    service._store.claim_batch_status = AsyncMock(  # type: ignore[method-assign]
-        return_value={'uuid': 'claim', 'status': 'writing'}
+    service._store.ensure_evidence_manifest_schema = AsyncMock(  # type: ignore[method-assign]
+        return_value=None
     )
-    service._store.upsert_batch_status = AsyncMock()  # type: ignore[method-assign]
-    service._store.upsert_entity_item = AsyncMock()  # type: ignore[method-assign]
-    service._store.upsert_edge_item = AsyncMock()  # type: ignore[method-assign]
-    service._store.upsert_source_episode = AsyncMock()  # type: ignore[method-assign]
+
+    async def _claim(tx, *, params):
+        _ = tx
+        return {
+            'uuid': params.get('uuid') or 'claim',
+            'status': 'writing',
+            'request_sha256': params.get('request_sha256'),
+            'group_id': params.get('group_id'),
+            'batch_id': params.get('batch_id'),
+        }
+
+    async def _upsert_status(tx, *, params):
+        _ = tx
+        return {
+            'uuid': params.get('uuid') or 'claim',
+            'status': params.get('status') or 'committed',
+            'request_sha256': params.get('request_sha256'),
+        }
+
+    service._store.claim_batch_status = AsyncMock(side_effect=_claim)  # type: ignore[method-assign]
+    service._store.upsert_batch_status = AsyncMock(  # type: ignore[method-assign]
+        side_effect=_upsert_status
+    )
+    service._store.upsert_entity_item = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 'e1',
+            'status': 'created',
+            'content_sha256': 'a' * 64,
+            'error_code': None,
+        }
+    )
+    service._store.upsert_edge_item = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 'r1',
+            'status': 'created',
+            'content_sha256': 'a' * 64,
+            'error_code': None,
+        }
+    )
+    service._store.upsert_source_episode = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 's1',
+            'status': 'created',
+            'source_key': 'SRC',
+            'content_sha256': 'a' * 64,
+            'error_code': None,
+        }
+    )
     service._store.upsert_mentions_link = AsyncMock()  # type: ignore[method-assign]
     service._store.append_edge_episode = AsyncMock()  # type: ignore[method-assign]
     service._store.lock_provenance_targets = AsyncMock(  # type: ignore[method-assign]
         return_value=[]
+    )
+    service._store.write_evidence_links = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    service._store.write_manifest_root_and_chunks = AsyncMock(  # type: ignore[method-assign]
+        return_value={'uuid': 'manifest-1', 'manifest_sha256': 'a' * 64, 'chunk_count': 1}
+    )
+    real_store = CatalogNeo4jStore()
+    service._store.prepare_entity_params = real_store.prepare_entity_params  # type: ignore[method-assign]
+    service._store.prepare_edge_params = real_store.prepare_edge_params  # type: ignore[method-assign]
+    service._store.prepare_source_episode_params = (  # type: ignore[method-assign]
+        real_store.prepare_source_episode_params
+    )
+    service._store.prepare_batch_status_params = (  # type: ignore[method-assign]
+        real_store.prepare_batch_status_params
+    )
+    service._store.prepare_evidence_link_params = (  # type: ignore[method-assign]
+        real_store.prepare_evidence_link_params
+    )
+    service._store.prepare_manifest_root_params = (  # type: ignore[method-assign]
+        real_store.prepare_manifest_root_params
+    )
+    service._store.prepare_manifest_chunk_params = (  # type: ignore[method-assign]
+        real_store.prepare_manifest_chunk_params
     )
 
 
@@ -4465,7 +4581,10 @@ def _v2_request_payload(tool_name: str, **overrides):
         payload = {'group_id': GROUP, 'batch_id': 'cont07-status'}
     elif tool_name == 'upsert_catalog_batch' or tool_name == 'prepare_catalog_batch':
         payload = {**base, 'entities': [_minimal_entity_dict()], 'catalog_sha256': 'a' * 64}
-    elif tool_name == 'commit_prepared_catalog_batch' or tool_name == 'discard_prepared_catalog_batch':
+    elif (
+        tool_name == 'commit_prepared_catalog_batch'
+        or tool_name == 'discard_prepared_catalog_batch'
+    ):
         payload = {'plan_token': 'x' * 32}
     else:
         raise AssertionError(f'unknown tool {tool_name}')
@@ -5514,6 +5633,35 @@ class _RaceEntityStore:
     async def ensure_uuid_uniqueness_constraints(self, driver: Any) -> None:
         _ = driver
         return None
+
+    async def ensure_evidence_manifest_schema(self, driver: Any) -> None:
+        _ = driver
+        return None
+
+    async def write_evidence_links(
+        self, tx: Any, *, links: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        _ = tx
+        return list(links)
+
+    async def write_manifest_root_and_chunks(
+        self, tx: Any, *, root: dict[str, Any], chunks: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        _ = tx, chunks
+        return {
+            'uuid': root.get('uuid'),
+            'manifest_sha256': root.get('manifest_sha256'),
+            'chunk_count': len(chunks),
+        }
+
+    def prepare_evidence_link_params(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+    def prepare_manifest_root_params(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+    def prepare_manifest_chunk_params(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
 
     async def get_entity_by_uuid(
         self,

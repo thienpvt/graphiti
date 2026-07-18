@@ -11,6 +11,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from config.schema import CatalogConfig
@@ -32,6 +33,7 @@ from models.catalog_entities import (
     UpsertTypedEntitiesRequest,
     VerifyCatalogBatchRequest,
 )
+from models.catalog_evidence import CatalogEvidenceLink
 from models.catalog_prepare import (
     CommitPreparedCatalogBatchRequest,
     DiscardPreparedCatalogBatchRequest,
@@ -64,6 +66,8 @@ from services.catalog_identity import (
     catalog_edge_uuid,
     catalog_entity_uuid,
     catalog_evidence_link_uuid,
+    catalog_manifest_chunk_uuid,
+    catalog_manifest_uuid,
     catalog_mentions_uuid,
     catalog_prepared_plan_chunk_uuid,
     catalog_prepared_plan_uuid,
@@ -86,6 +90,14 @@ from services.catalog_identity import (
 )
 from services.catalog_identity import (
     source_canonical_payload as pure_source_canonical_payload,
+)
+from services.catalog_manifest import (
+    build_manifest_body_from_membership,
+    chunk_manifest_bytes,
+    serialize_manifest_body,
+)
+from services.catalog_manifest import (
+    manifest_sha256 as pure_manifest_sha256,
 )
 from services.catalog_prepared_artifact import (
     PREPARED_ARTIFACT_SERIALIZATION_VERSION,
@@ -175,6 +187,39 @@ class _BatchPreflightOutcome:
     early_kind: str | None = None
     early_code: CatalogErrorCode | None = None
     early_message: str | None = None
+
+
+@dataclass
+class CatalogWriteProjection:
+    """Internal projection for one atomic domain+evidence+manifest success tx.
+
+    Built from preflight (upsert) or frozen prepared artifact (commit). Never
+    rebuilt from live client re-embed on the prepared-commit path (D-06).
+    """
+
+    group_id: str
+    batch_id: str
+    batch_uuid: str
+    request_sha256: str
+    catalog_sha256: str
+    identity_schema_version: str
+    canonicalization_version: str
+    namespace: uuid.UUID
+    request_ts: datetime
+    entity_prepared: list[_PreparedEntity]
+    edge_prepared: list[_PreparedEdge]
+    provenance_sources: list[_PreparedSource]
+    request_entity_uuids: dict[tuple[str, str], str]
+    evidence_link_params: list[dict[str, Any]]
+    membership: dict[str, Any]
+    entity_count: int
+    edge_count: int
+    provenance_count: int
+    edge_offset: int
+    request_entity_count: int
+    artifact_sha256: str | None = None
+    plan: dict[str, Any] | None = None
+    request_for_edge_recheck: Any | None = None
 
 
 class CatalogService:
@@ -272,6 +317,8 @@ class CatalogService:
     async def _ensure_schema(self, client: Any) -> None:
         """Await product catalog schema readiness immediately before real write tx."""
         await self._store.ensure_uuid_uniqueness_constraints(client.driver)
+        # Evidence/manifest constraints outside success tx (same pattern as identity).
+        await self._store.ensure_evidence_manifest_schema(client.driver)
 
     def _schema_fail_entity_response(
         self,
@@ -4548,6 +4595,854 @@ class CatalogService:
             early_kind=None,
         )
 
+    def _membership_from_prepared(
+        self,
+        *,
+        entity_prepared: list[_PreparedEntity],
+        edge_prepared: list[_PreparedEdge],
+        provenance_sources: list[_PreparedSource],
+        evidence_membership: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Compact membership including unchanged (MANI-02); no batch_id authority."""
+        return {
+            'entities': [
+                {
+                    'uuid': prep.entity_uuid,
+                    'entity_type': prep.item.entity_type,
+                    'graph_key': prep.item.graph_key,
+                    'content_sha256': prep.content_sha256,
+                    'projected_status': prep.projected_status,
+                }
+                for prep in sorted(
+                    entity_prepared,
+                    key=lambda p: (p.item.entity_type, p.item.graph_key),
+                )
+            ],
+            'edges': [
+                {
+                    'uuid': prep.edge_uuid,
+                    'edge_type': prep.item.edge_type,
+                    'edge_key': prep.item.edge_key,
+                    'content_sha256': prep.content_sha256,
+                    'projected_status': prep.projected_status,
+                }
+                for prep in sorted(
+                    edge_prepared,
+                    key=lambda p: (p.item.edge_type, p.item.edge_key),
+                )
+            ],
+            'sources': [
+                {
+                    'uuid': prep.source_uuid,
+                    'source_key': prep.item.source_key,
+                    'content_sha256': prep.content_sha256,
+                    'projected_status': prep.projected_status,
+                }
+                for prep in sorted(provenance_sources, key=lambda p: p.item.source_key)
+            ],
+            'evidence_links': sorted(
+                evidence_membership,
+                key=lambda d: str(d.get('link_key') or ''),
+            ),
+        }
+
+    def _evidence_params_from_request(
+        self,
+        *,
+        namespace: uuid.UUID,
+        group_id: str,
+        batch_id: str,
+        request_ts: datetime,
+        evidence_links: list[Any],
+        source_uuid_by_key: dict[str, str],
+        entity_uuid_by_key: dict[tuple[str, str], str],
+        edge_uuid_by_key: dict[tuple[str, str], str],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Build store evidence params + compact membership from explicit links only."""
+        coalesced = coalesce_byte_identical_evidence_links(list(evidence_links or []))
+        params_out: list[dict[str, Any]] = []
+        membership_out: list[dict[str, Any]] = []
+        seen_link_content: dict[str, str] = {}
+        for link in coalesced:
+            link_key = evidence_link_key(link)
+            content_sha = canonical_sha256(evidence_canonical_payload(link))
+            prior = seen_link_content.get(link_key)
+            if prior is not None and prior != content_sha:
+                raise self._ProvenanceInvariantRace(CatalogErrorCode.provenance_link_conflict)
+            if prior is not None:
+                continue
+            seen_link_content[link_key] = content_sha
+            source_uuid = source_uuid_by_key.get(str(link.source_key))
+            if not source_uuid:
+                raise self._ProvenanceInvariantRace(CatalogErrorCode.provenance_target_missing)
+            if link.entity_target is not None:
+                target_kind = 'entity'
+                target_uuid = entity_uuid_by_key.get(
+                    (link.entity_target.entity_type, link.entity_target.graph_key)
+                )
+            elif link.edge_target is not None:
+                target_kind = 'edge'
+                target_uuid = edge_uuid_by_key.get(
+                    (link.edge_target.edge_type, link.edge_target.edge_key)
+                )
+            else:
+                raise self._ProvenanceInvariantRace(CatalogErrorCode.validation_error)
+            if not target_uuid:
+                raise self._ProvenanceInvariantRace(CatalogErrorCode.provenance_target_missing)
+            ev_uuid = catalog_evidence_link_uuid(namespace, group_id, link_key)
+            locator = getattr(link, 'locator', None)
+            locator_json = None
+            if locator is not None:
+                dump = getattr(locator, 'model_dump', None)
+                if callable(dump):
+                    locator_json = json.dumps(
+                        dump(mode='json'),
+                        sort_keys=True,
+                        separators=(',', ':'),
+                        ensure_ascii=False,
+                    )
+            params_out.append(
+                self._store.prepare_evidence_link_params(
+                    uuid=ev_uuid,
+                    group_id=group_id,
+                    batch_id=batch_id,
+                    link_key=link_key,
+                    content_sha256=content_sha,
+                    source_uuid=source_uuid,
+                    target_kind=target_kind,
+                    target_uuid=target_uuid,
+                    evidence_kind=str(link.evidence_kind),
+                    locator_json=locator_json,
+                    excerpt=link.excerpt,
+                    extractor_name=link.extractor_name,
+                    extractor_version=link.extractor_version,
+                    rule_id=link.rule_id,
+                    confidence=link.confidence,
+                    created_at=request_ts,
+                    updated_at=request_ts,
+                )
+            )
+            membership_out.append(
+                {
+                    'uuid': ev_uuid,
+                    'link_key': link_key,
+                    'content_sha256': content_sha,
+                }
+            )
+        return params_out, membership_out
+
+    def _build_projection_from_upsert(
+        self,
+        *,
+        request: UpsertCatalogBatchRequest,
+        pre: _BatchPreflightOutcome,
+        request_ts: datetime,
+    ) -> CatalogWriteProjection:
+        """Projection for direct non-dry-run upsert after preflight+embed."""
+        assert pre.namespace is not None
+        assert pre.batch_uuid is not None
+        entity_prepared = pre.entity_prepared
+        edge_prepared = pre.edge_prepared
+        provenance_sources = pre.provenance_sources
+        source_uuid_by_key = {p.item.source_key: p.source_uuid for p in provenance_sources}
+        entity_uuid_by_key = {
+            (p.item.entity_type, p.item.graph_key): p.entity_uuid for p in entity_prepared
+        }
+        # Include request-entity map for targets not rewritten this batch.
+        entity_uuid_by_key.update(pre.request_entity_uuids)
+        edge_uuid_by_key = {(p.item.edge_type, p.item.edge_key): p.edge_uuid for p in edge_prepared}
+        evidence_links = list(getattr(request.provenance, 'evidence_links', None) or [])
+        evidence_params, evidence_membership = self._evidence_params_from_request(
+            namespace=pre.namespace,
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            request_ts=request_ts,
+            evidence_links=evidence_links,
+            source_uuid_by_key=source_uuid_by_key,
+            entity_uuid_by_key=entity_uuid_by_key,
+            edge_uuid_by_key=edge_uuid_by_key,
+        )
+        membership = self._membership_from_prepared(
+            entity_prepared=entity_prepared,
+            edge_prepared=edge_prepared,
+            provenance_sources=provenance_sources,
+            evidence_membership=evidence_membership,
+        )
+        return CatalogWriteProjection(
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            batch_uuid=pre.batch_uuid,
+            request_sha256=pre.server_hash,
+            catalog_sha256=request.catalog_sha256,
+            artifact_sha256=None,
+            identity_schema_version=request.identity_schema_version,
+            canonicalization_version=CANONICALIZATION_VERSION,
+            namespace=pre.namespace,
+            request_ts=request_ts,
+            entity_prepared=entity_prepared,
+            edge_prepared=edge_prepared,
+            provenance_sources=provenance_sources,
+            request_entity_uuids=pre.request_entity_uuids,
+            evidence_link_params=evidence_params,
+            membership=membership,
+            entity_count=len(request.entities),
+            edge_count=len(request.edges),
+            provenance_count=self._batch_provenance_item_count(request),
+            edge_offset=pre.edge_offset,
+            request_entity_count=len(request.entities),
+            plan=None,
+            request_for_edge_recheck=request,
+        )
+
+    def _build_projection_from_artifact(
+        self,
+        *,
+        artifact: dict[str, Any],
+        root: dict[str, Any],
+        token_digest: str,
+        request_ts: datetime,
+        namespace: uuid.UUID,
+    ) -> CatalogWriteProjection:
+        """Projection from frozen prepared artifact only — zero external I/O (D-06)."""
+        group_id = str(artifact.get('group_id') or root.get('group_id') or '')
+        batch_id = str(artifact.get('batch_id') or root.get('batch_id') or '')
+        request_sha = str(artifact.get('request_sha256') or root.get('request_sha256') or '')
+        catalog_sha = str(artifact.get('catalog_sha256') or root.get('catalog_sha256') or '')
+        art_sha = str(root.get('artifact_sha256') or artifact.get('artifact_sha256') or '') or None
+        plan_uuid = str(root.get('uuid') or '')
+        if not group_id or not batch_id or not request_sha or not catalog_sha or not plan_uuid:
+            raise CatalogStoreError(
+                'prepared artifact missing identity fields',
+                code='prepared_plan_conflict',
+            )
+        batch_uuid = catalog_batch_uuid(namespace, group_id, batch_id)
+        membership_raw = artifact.get('membership')
+        if not isinstance(membership_raw, dict):
+            raise CatalogStoreError(
+                'prepared artifact membership missing',
+                code='prepared_plan_conflict',
+            )
+        request_canonical = artifact.get('request_canonical')
+        if not isinstance(request_canonical, dict):
+            raise CatalogStoreError(
+                'prepared artifact request_canonical missing',
+                code='prepared_plan_conflict',
+            )
+
+        # Rebuild domain items from frozen request_canonical (no embedder).
+        entities_raw = list(request_canonical.get('entities') or [])
+        edges_raw = list(request_canonical.get('edges') or [])
+        sources_raw = list(request_canonical.get('sources') or [])
+        evidence_raw = list(request_canonical.get('evidence_links') or [])
+
+        mem_entities = {
+            str(row.get('uuid')): row for row in list(membership_raw.get('entities') or [])
+        }
+        mem_edges = {str(row.get('uuid')): row for row in list(membership_raw.get('edges') or [])}
+        mem_sources = {
+            str(row.get('uuid')): row for row in list(membership_raw.get('sources') or [])
+        }
+
+        entity_prepared: list[_PreparedEntity] = []
+        request_entity_uuids: dict[tuple[str, str], str] = {}
+        for index, raw in enumerate(entities_raw):
+            item = CatalogEntityItem.model_validate(raw)
+            entity_uuid = catalog_entity_uuid(namespace, group_id, item.entity_type, item.graph_key)
+            mem = mem_entities.get(entity_uuid) or {}
+            emb = mem.get('name_embedding')
+            # Membership rows may carry frozen embeddings under the prepare path.
+            for cand in list(membership_raw.get('entities') or []):
+                if str(cand.get('uuid')) == entity_uuid and cand.get('name_embedding') is not None:
+                    emb = cand.get('name_embedding')
+                    break
+            prep = _PreparedEntity(
+                index=index,
+                item=item,
+                entity_uuid=entity_uuid,
+                content_sha256=str(
+                    mem.get('content_sha256')
+                    or canonical_sha256(pure_entity_canonical_payload(item))
+                ),
+                name_embedding=list(emb) if isinstance(emb, list) else emb,
+                projected_status=str(mem.get('projected_status') or 'created'),
+            )
+            entity_prepared.append(prep)
+            request_entity_uuids[(item.entity_type, item.graph_key)] = entity_uuid
+
+        edge_prepared: list[_PreparedEdge] = []
+        for index, raw in enumerate(edges_raw):
+            item = CatalogEdgeItem.model_validate(raw)
+            edge_uuid = catalog_edge_uuid(namespace, group_id, item.edge_type, item.edge_key)
+            mem = mem_edges.get(edge_uuid) or {}
+            emb = None
+            for cand in list(membership_raw.get('edges') or []):
+                if str(cand.get('uuid')) == edge_uuid and cand.get('fact_embedding') is not None:
+                    emb = cand.get('fact_embedding')
+                    break
+            source_uuid = request_entity_uuids.get(
+                (item.source_entity_type, item.source_graph_key)
+            ) or catalog_entity_uuid(
+                namespace, group_id, item.source_entity_type, item.source_graph_key
+            )
+            target_uuid = request_entity_uuids.get(
+                (item.target_entity_type, item.target_graph_key)
+            ) or catalog_entity_uuid(
+                namespace, group_id, item.target_entity_type, item.target_graph_key
+            )
+            # Prefer frozen membership endpoint uuids when present.
+            for cand in list(membership_raw.get('edges') or []):
+                if str(cand.get('uuid')) == edge_uuid:
+                    if cand.get('source_uuid'):
+                        source_uuid = str(cand.get('source_uuid'))
+                    if cand.get('target_uuid'):
+                        target_uuid = str(cand.get('target_uuid'))
+                    break
+            prep = _PreparedEdge(
+                index=index,
+                item=item,
+                edge_uuid=edge_uuid,
+                content_sha256=str(
+                    mem.get('content_sha256') or canonical_sha256(pure_edge_canonical_payload(item))
+                ),
+                source_uuid=source_uuid,
+                target_uuid=target_uuid,
+                fact_embedding=list(emb) if isinstance(emb, list) else emb,
+                projected_status=str(mem.get('projected_status') or 'created'),
+                batch_result_index=len(entities_raw) + index,
+            )
+            edge_prepared.append(prep)
+
+        # Explicit evidence targets drive source link sets (non-Cartesian).
+        evidence_models: list[Any] = []
+        for raw in evidence_raw:
+            if hasattr(raw, 'source_key'):
+                evidence_models.append(raw)
+            else:
+                evidence_models.append(CatalogEvidenceLink.model_validate(raw))
+
+        source_entity_targets: dict[str, list[str]] = {}
+        source_edge_targets: dict[str, list[str]] = {}
+        for link in evidence_models:
+            if link.entity_target is not None:
+                eu = catalog_entity_uuid(
+                    namespace,
+                    group_id,
+                    link.entity_target.entity_type,
+                    link.entity_target.graph_key,
+                )
+                source_entity_targets.setdefault(link.source_key, []).append(eu)
+            elif link.edge_target is not None:
+                eu = catalog_edge_uuid(
+                    namespace,
+                    group_id,
+                    link.edge_target.edge_type,
+                    link.edge_target.edge_key,
+                )
+                source_edge_targets.setdefault(link.source_key, []).append(eu)
+
+        provenance_sources: list[_PreparedSource] = []
+        for index, raw in enumerate(sources_raw):
+            item = CatalogSourceItem.model_validate(raw)
+            source_uuid = catalog_source_uuid(namespace, group_id, item.source_key)
+            mem = mem_sources.get(source_uuid) or {}
+            entity_uuids = list(dict.fromkeys(source_entity_targets.get(item.source_key, [])))
+            edge_uuids = list(dict.fromkeys(source_edge_targets.get(item.source_key, [])))
+            content_sha = str(
+                mem.get('content_sha256') or canonical_sha256(pure_source_canonical_payload(item))
+            )
+            prep = _PreparedSource(
+                index=index,
+                item=item,
+                source_uuid=source_uuid,
+                content_sha256=content_sha,
+                content_json=json.dumps(
+                    pure_source_canonical_payload(item),
+                    sort_keys=True,
+                    separators=(',', ':'),
+                    ensure_ascii=False,
+                ),
+                valid_at=self._parse_source_valid_at(item.reference_time),
+                projected_status=str(mem.get('projected_status') or 'created'),
+                entity_uuids=entity_uuids,
+                edge_uuids=edge_uuids,
+                mentions_uuids=[
+                    catalog_mentions_uuid(namespace, group_id, source_uuid, eu)
+                    for eu in entity_uuids
+                ],
+                missing_links=bool(entity_uuids or edge_uuids),
+            )
+            provenance_sources.append(prep)
+
+        source_uuid_by_key = {p.item.source_key: p.source_uuid for p in provenance_sources}
+        entity_uuid_by_key = {
+            (p.item.entity_type, p.item.graph_key): p.entity_uuid for p in entity_prepared
+        }
+        edge_uuid_by_key = {(p.item.edge_type, p.item.edge_key): p.edge_uuid for p in edge_prepared}
+        evidence_params, evidence_membership = self._evidence_params_from_request(
+            namespace=namespace,
+            group_id=group_id,
+            batch_id=batch_id,
+            request_ts=request_ts,
+            evidence_links=evidence_models,
+            source_uuid_by_key=source_uuid_by_key,
+            entity_uuid_by_key=entity_uuid_by_key,
+            edge_uuid_by_key=edge_uuid_by_key,
+        )
+        # Manifest membership must match frozen compact rows (including unchanged).
+        membership = {
+            'entities': [
+                {
+                    'uuid': str(r.get('uuid')),
+                    'entity_type': str(r.get('entity_type')),
+                    'graph_key': str(r.get('graph_key')),
+                    'content_sha256': str(r.get('content_sha256')),
+                    'projected_status': str(r.get('projected_status') or 'created'),
+                }
+                for r in list(membership_raw.get('entities') or [])
+            ],
+            'edges': [
+                {
+                    'uuid': str(r.get('uuid')),
+                    'edge_type': str(r.get('edge_type')),
+                    'edge_key': str(r.get('edge_key')),
+                    'content_sha256': str(r.get('content_sha256')),
+                    'projected_status': str(r.get('projected_status') or 'created'),
+                }
+                for r in list(membership_raw.get('edges') or [])
+            ],
+            'sources': [
+                {
+                    'uuid': str(r.get('uuid')),
+                    'source_key': str(r.get('source_key')),
+                    'content_sha256': str(r.get('content_sha256')),
+                    'projected_status': str(r.get('projected_status') or 'created'),
+                }
+                for r in list(membership_raw.get('sources') or [])
+            ],
+            'evidence_links': evidence_membership
+            or [
+                {
+                    'uuid': str(r.get('uuid')),
+                    'link_key': str(r.get('link_key')),
+                    'content_sha256': str(r.get('content_sha256')),
+                }
+                for r in list(membership_raw.get('evidence_links') or [])
+            ],
+        }
+        edge_offset = len(entities_raw)
+        recheck_req = SimpleNamespace(
+            group_id=group_id,
+            entities=[p.item for p in entity_prepared],
+            edges=[p.item for p in edge_prepared],
+        )
+        return CatalogWriteProjection(
+            group_id=group_id,
+            batch_id=batch_id,
+            batch_uuid=batch_uuid,
+            request_sha256=request_sha,
+            catalog_sha256=catalog_sha,
+            artifact_sha256=art_sha,
+            identity_schema_version=str(
+                artifact.get('identity_schema_version') or IDENTITY_SCHEMA_VERSION
+            ),
+            canonicalization_version=str(
+                artifact.get('canonicalization_version') or CANONICALIZATION_VERSION
+            ),
+            namespace=namespace,
+            request_ts=request_ts,
+            entity_prepared=entity_prepared,
+            edge_prepared=edge_prepared,
+            provenance_sources=provenance_sources,
+            request_entity_uuids=request_entity_uuids,
+            evidence_link_params=evidence_params,
+            membership=membership,
+            entity_count=len(entities_raw),
+            edge_count=len(edges_raw),
+            provenance_count=len(sources_raw) + len(evidence_models),
+            edge_offset=edge_offset,
+            request_entity_count=len(entities_raw),
+            plan={
+                'plan_uuid': plan_uuid,
+                'token_digest': token_digest,
+            },
+            request_for_edge_recheck=recheck_req,
+        )
+
+    def _build_manifest_write_params(
+        self,
+        projection: CatalogWriteProjection,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+        """Canonical manifest root+chunks from frozen membership (MANI-02/03)."""
+        body = build_manifest_body_from_membership(
+            group_id=projection.group_id,
+            batch_id=projection.batch_id,
+            request_sha256=projection.request_sha256,
+            catalog_sha256=projection.catalog_sha256,
+            membership=projection.membership,
+            artifact_sha256=projection.artifact_sha256,
+            identity_schema_version=projection.identity_schema_version,
+            canonicalization_version=projection.canonicalization_version,
+        )
+        raw = serialize_manifest_body(body)
+        digest = pure_manifest_sha256(raw)
+        chunk_size = int(self.catalog_config.prepared_chunk_bytes)
+        chunk_records = chunk_manifest_bytes(raw, chunk_size=chunk_size)
+        manifest_uuid = catalog_manifest_uuid(
+            projection.namespace, projection.group_id, projection.batch_id
+        )
+        root = self._store.prepare_manifest_root_params(
+            uuid=manifest_uuid,
+            group_id=projection.group_id,
+            batch_id=projection.batch_id,
+            identity_schema_version=projection.identity_schema_version,
+            canonicalization_version=projection.canonicalization_version,
+            request_sha256=projection.request_sha256,
+            catalog_sha256=projection.catalog_sha256,
+            artifact_sha256=projection.artifact_sha256,
+            manifest_sha256=digest,
+            payload_bytes=len(raw),
+            chunk_count=len(chunk_records),
+            entity_count=int(body['counts']['entities']),
+            edge_count=int(body['counts']['edges']),
+            source_count=int(body['counts']['sources']),
+            evidence_link_count=int(body['counts']['evidence_links']),
+            created_at=projection.request_ts,
+            updated_at=projection.request_ts,
+        )
+        chunks: list[dict[str, Any]] = []
+        for ch in chunk_records:
+            idx = int(ch['chunk_index'])
+            chunks.append(
+                self._store.prepare_manifest_chunk_params(
+                    uuid=catalog_manifest_chunk_uuid(
+                        projection.namespace, projection.group_id, projection.batch_id, idx
+                    ),
+                    group_id=projection.group_id,
+                    manifest_uuid=manifest_uuid,
+                    batch_id=projection.batch_id,
+                    chunk_index=idx,
+                    chunk_count=len(chunk_records),
+                    byte_offset=int(ch['byte_offset']),
+                    byte_length=int(ch['byte_length']),
+                    chunk_sha256=ch['chunk_sha256'],
+                    payload_b64=ch['payload_b64'],
+                )
+            )
+        return root, chunks, digest
+
+    async def _write_catalog_batch_atomic(
+        self,
+        tx: Any,
+        projection: CatalogWriteProjection,
+    ) -> dict[str, Any]:
+        """Co-write domain+evidence+manifest+terminals in one open Neo4j tx (D-04).
+
+        Caller owns transaction open/commit/rollback. Any exception must abort the
+        entire success transaction. Optional failed status is never written here.
+        """
+        entity_results: list[CatalogItemResult] = []
+        edge_results: list[CatalogItemResult] = []
+        provenance_results: list[CatalogItemResult] = []
+        request_ts = projection.request_ts
+        group_id = projection.group_id
+        batch_id = projection.batch_id
+        batch_uuid = projection.batch_uuid
+        effective_hash = projection.request_sha256
+
+        # 1. Lock plan (prepared) + claim/recheck batch identity
+        if projection.plan is not None:
+            plan_uuid = str(projection.plan.get('plan_uuid') or '')
+            await self._store.lock_prepared_plan_for_commit(
+                tx, plan_uuid=plan_uuid, group_id=group_id
+            )
+
+        claim = await self._store.claim_batch_status(
+            tx,
+            params={
+                'uuid': batch_uuid,
+                'group_id': group_id,
+                'batch_id': batch_id,
+                'request_sha256': effective_hash,
+                'created_at': request_ts,
+                'updated_at': request_ts,
+            },
+        )
+        claimed_hash = claim.get('request_sha256')
+        claimed_status = claim.get('status')
+        if claimed_hash != effective_hash:
+            raise self._BatchStatusConflict('different_hash')
+        if claimed_status == 'committed' and projection.plan is None:
+            # Direct upsert already-committed same hash short-circuit via conflict path.
+            raise self._BatchStatusConflict('already_committed')
+
+        # Terminal agreement short-circuit (prepared recovery hook; plan 05 deep matrix).
+        if projection.plan is not None:
+            agree_projection = {
+                'group_id': group_id,
+                'batch_id': batch_id,
+                'batch_uuid': batch_uuid,
+                'plan_uuid': str(projection.plan.get('plan_uuid') or ''),
+                'request_sha256': effective_hash,
+                'catalog_sha256': projection.catalog_sha256,
+                'artifact_sha256': projection.artifact_sha256,
+                'identity_schema_version': projection.identity_schema_version,
+                'manifest_sha256': '',  # filled after build if needed
+            }
+            # Build digest for agreement compare without writing.
+            _, _, digest_preview = self._build_manifest_write_params(projection)
+            agree_projection['manifest_sha256'] = digest_preview
+            if await self._store.terminal_commit_agrees(tx, projection=agree_projection):
+                return {
+                    'short_circuit': True,
+                    'manifest_sha256': digest_preview,
+                    'entity_results': [],
+                    'edge_results': [],
+                    'provenance_results': [],
+                    'batch_uuid': batch_uuid,
+                }
+
+        # 2. Entities
+        written_request_entities: set[str] = set()
+        for prep in projection.entity_prepared:
+            status = prep.projected_status
+            existing = await self._store.get_entity_by_uuid(
+                None,
+                uuid=prep.entity_uuid,
+                group_id=group_id,
+                tx=tx,
+            )
+            if existing is None and status == 'unchanged':
+                raise self._EntityInvariantRace(CatalogErrorCode.missing_endpoint)
+            if existing is not None:
+                if self._entity_label_conflict(existing, prep.item.entity_type) is not None:
+                    raise self._EntityInvariantRace(CatalogErrorCode.entity_type_conflict)
+                if self._entity_identity_property_conflict(existing, prep.item) is not None:
+                    raise self._EntityInvariantRace(CatalogErrorCode.deterministic_uuid_conflict)
+                if status == 'unchanged' and existing.get('content_sha256') != prep.content_sha256:
+                    raise self._EntityInvariantRace(CatalogErrorCode.batch_conflict)
+            if status != 'unchanged':
+                row = await self._store.upsert_entity_item(
+                    tx,
+                    entity_type=prep.item.entity_type,
+                    params=self._store.prepare_entity_params(
+                        entity_type=prep.item.entity_type,
+                        uuid=prep.entity_uuid,
+                        group_id=group_id,
+                        batch_id=batch_id,
+                        graph_key=prep.item.graph_key,
+                        name_raw=prep.item.name_raw,
+                        name_canonical=prep.item.name_canonical,
+                        database_qualified_name=prep.item.database_qualified_name,
+                        summary=prep.item.summary,
+                        content_sha256=prep.content_sha256,
+                        created_at=request_ts,
+                        updated_at=request_ts,
+                        name_embedding=prep.name_embedding or [],
+                        attributes=prep.item.attributes,
+                        source_refs=prep.item.source_refs,
+                        confidence=prep.item.confidence,
+                    ),
+                )
+                self._raise_entity_row_error(row)
+                status = self._write_status_from_row(row, prep.projected_status)
+                written_request_entities.add(prep.entity_uuid)
+            entity_results.append(self._batch_result_for_entity(prep, status=status))
+            for index in prep.coalesced_indices:
+                duplicate = self._batch_result_for_entity(prep, status=status)
+                duplicate.index = index
+                entity_results.append(duplicate)
+
+        # 3. Edges
+        recheck_request = projection.request_for_edge_recheck
+        for prep in projection.edge_prepared:
+            status = prep.projected_status
+            if recheck_request is not None:
+                existing = await self._batch_recheck_edge_in_tx(
+                    tx,
+                    prep,
+                    recheck_request,
+                    projection.request_entity_uuids,
+                    written_request_entities,
+                )
+            else:
+                existing = await self._store.get_edge_by_uuid(
+                    None, uuid=prep.edge_uuid, group_id=group_id, tx=tx
+                )
+            if status == 'unchanged':
+                if existing is None:
+                    raise self._EdgeEndpointRace(CatalogErrorCode.missing_endpoint)
+                if existing.get('content_sha256') != prep.content_sha256:
+                    raise self._EdgeEndpointRace(CatalogErrorCode.batch_conflict)
+            else:
+                row = await self._store.upsert_edge_item(
+                    tx,
+                    params=self._store.prepare_edge_params(
+                        edge_type=prep.item.edge_type,
+                        uuid=prep.edge_uuid,
+                        group_id=group_id,
+                        batch_id=batch_id,
+                        edge_key=prep.item.edge_key,
+                        source_uuid=prep.source_uuid or '',
+                        target_uuid=prep.target_uuid or '',
+                        fact=prep.item.fact,
+                        evidence=prep.item.evidence,
+                        content_sha256=prep.content_sha256,
+                        created_at=request_ts,
+                        updated_at=request_ts,
+                        fact_embedding=prep.fact_embedding or [],
+                        attributes=prep.item.attributes,
+                        confidence=prep.item.confidence,
+                    ),
+                )
+                status = self._write_status_from_row(row, prep.projected_status)
+            result_index = (
+                prep.batch_result_index
+                if prep.batch_result_index is not None
+                else projection.edge_offset + prep.index
+            )
+            edge_results.append(
+                self._batch_result_for_edge(prep, index=result_index, status=status)
+            )
+            for local_index in prep.coalesced_indices:
+                edge_results.append(
+                    self._batch_result_for_edge(
+                        prep,
+                        index=projection.request_entity_count + local_index,
+                        status=status,
+                    )
+                )
+
+        # 4. Sources + Graphiti compatibility links
+        created_targets = {
+            *(('entity', uuid_) for uuid_ in written_request_entities),
+            *(('edge', result.uuid) for result in edge_results if result.uuid),
+        }
+        for prep in sorted(projection.provenance_sources, key=lambda source: source.source_uuid):
+            expected_exists, expected_source_key, expected_content_sha256 = (
+                self._source_expected_state(prep)
+            )
+            params = self._store.prepare_source_episode_params(
+                uuid=prep.source_uuid,
+                group_id=group_id,
+                batch_id=batch_id,
+                source_key=prep.item.source_key,
+                content_sha256=prep.content_sha256,
+                content=prep.content_json,
+                source='json',
+                source_description='catalog provenance source',
+                valid_at=prep.valid_at,
+                created_at=request_ts,
+                updated_at=request_ts,
+                expected_exists=expected_exists,
+                expected_source_key=expected_source_key,
+                expected_content_sha256=expected_content_sha256,
+                entity_edges=list(prep.edge_uuids),
+                name=prep.item.source_key,
+            )
+            row = await self._store.upsert_source_episode(tx, params=params)
+            if self._source_cas_matches_concurrent_identical(prep, row):
+                row = {**row, 'status': 'unchanged', 'error_code': None}
+            self._raise_source_cas_error(row)
+            await self._lock_and_recheck_provenance_targets(
+                tx,
+                prep,
+                group_id=group_id,
+                created_targets=created_targets,
+            )
+            source_status = str(row.get('status') or prep.projected_status)
+            if prep.missing_links and source_status == 'unchanged':
+                source_status = 'updated'
+            for entity_uuid, mentions_uuid in zip(
+                prep.entity_uuids, prep.mentions_uuids, strict=True
+            ):
+                if mentions_uuid not in prep.existing_mentions:
+                    await self._store.upsert_mentions_link(
+                        tx,
+                        episode_uuid=prep.source_uuid,
+                        entity_uuid=entity_uuid,
+                        mentions_uuid=mentions_uuid,
+                        group_id=group_id,
+                        created_at=request_ts,
+                    )
+            for edge_uuid in prep.edge_uuids:
+                if edge_uuid not in prep.existing_edge_links:
+                    await self._store.append_edge_episode(
+                        tx,
+                        edge_uuid=edge_uuid,
+                        episode_uuid=prep.source_uuid,
+                        group_id=group_id,
+                    )
+            provenance_offset = projection.request_entity_count + projection.edge_count
+            provenance_results.append(
+                self._source_result(
+                    prep,
+                    prep.index,
+                    source_status,
+                    batch=True,
+                    offset=provenance_offset,
+                )
+            )
+            for index in prep.coalesced_indices:
+                provenance_results.append(
+                    self._source_result(
+                        prep,
+                        index,
+                        source_status,
+                        batch=True,
+                        offset=provenance_offset,
+                    )
+                )
+
+        # 5. Exact evidence control records (explicit links only)
+        if projection.evidence_link_params:
+            await self._store.write_evidence_links(tx, links=projection.evidence_link_params)
+
+        # 6. Manifest root + chunks
+        root, chunks, digest = self._build_manifest_write_params(projection)
+        await self._store.write_manifest_root_and_chunks(tx, root=root, chunks=chunks)
+
+        # 7. Terminal batch committed
+        status_params = self._store.prepare_batch_status_params(
+            uuid=batch_uuid,
+            group_id=group_id,
+            batch_id=batch_id,
+            status='committed',
+            request_sha256=effective_hash,
+            catalog_sha256=projection.catalog_sha256,
+            entity_count=projection.entity_count,
+            edge_count=projection.edge_count,
+            provenance_count=projection.provenance_count,
+            created_at=request_ts,
+            updated_at=request_ts,
+            committed_at=request_ts,
+        )
+        committed_row = await self._store.upsert_batch_status(tx, params=status_params)
+        if committed_row.get('request_sha256') != effective_hash:
+            raise self._BatchStatusConflict('different_hash')
+        if committed_row.get('status') != 'committed':
+            raise self._BatchStatusConflict('commit_rejected')
+
+        # 8. Terminal plan COMMITTING→COMMITTED (prepared path only)
+        if projection.plan is not None:
+            token_digest = str(projection.plan.get('token_digest') or '')
+            await self._store.cas_plan_state(
+                tx,
+                token_digest=token_digest,
+                expected_from=PLAN_STATE_COMMITTING,
+                to_state=PLAN_STATE_COMMITTED,
+                updated_at=request_ts,
+                now=request_ts,
+            )
+
+        return {
+            'short_circuit': False,
+            'manifest_sha256': digest,
+            'entity_results': entity_results,
+            'edge_results': edge_results,
+            'provenance_results': provenance_results,
+            'batch_uuid': batch_uuid,
+        }
+
     async def upsert_catalog_batch(
         self,
         *,
@@ -4646,7 +5541,6 @@ class CatalogService:
         edge_prepared = pre.edge_prepared
         provenance_sources = pre.provenance_sources
         edge_offset = pre.edge_offset
-        request_entity_uuids = pre.request_entity_uuids
 
         if request.dry_run:
             entity_results: list[CatalogItemResult] = []
@@ -4762,6 +5656,7 @@ class CatalogService:
         provenance_results: list[CatalogItemResult] = []
 
         async def _record_failed_status(error_summary: str) -> None:
+            # D-27: optional failed status only after success-tx rollback; never with manifest.
             failed_params = self._store.prepare_batch_status_params(
                 uuid=batch_uuid,
                 group_id=request.group_id,
@@ -4787,228 +5682,16 @@ class CatalogService:
                 )
 
         try:
+            projection = self._build_projection_from_upsert(
+                request=request,
+                pre=pre,
+                request_ts=request_ts,
+            )
             async with client.driver.transaction() as tx:
-                claim = await self._store.claim_batch_status(
-                    tx,
-                    params={
-                        'uuid': batch_uuid,
-                        'group_id': request.group_id,
-                        'batch_id': request.batch_id,
-                        'request_sha256': effective_hash,
-                        'created_at': request_ts,
-                        'updated_at': request_ts,
-                    },
-                )
-                claimed_hash = claim.get('request_sha256')
-                claimed_status = claim.get('status')
-                if claimed_hash != effective_hash:
-                    raise self._BatchStatusConflict('different_hash')
-                if claimed_status == 'committed':
-                    raise self._BatchStatusConflict('already_committed')
-                written_request_entities: set[str] = set()
-                for prep in entity_prepared:
-                    status = prep.projected_status
-                    existing = await self._store.get_entity_by_uuid(
-                        None,
-                        uuid=prep.entity_uuid,
-                        group_id=request.group_id,
-                        tx=tx,
-                    )
-                    if existing is None and status == 'unchanged':
-                        raise self._EntityInvariantRace(CatalogErrorCode.missing_endpoint)
-                    if existing is not None:
-                        if self._entity_label_conflict(existing, prep.item.entity_type) is not None:
-                            raise self._EntityInvariantRace(CatalogErrorCode.entity_type_conflict)
-                        if self._entity_identity_property_conflict(existing, prep.item) is not None:
-                            raise self._EntityInvariantRace(
-                                CatalogErrorCode.deterministic_uuid_conflict
-                            )
-                        if (
-                            status == 'unchanged'
-                            and existing.get('content_sha256') != prep.content_sha256
-                        ):
-                            raise self._EntityInvariantRace(CatalogErrorCode.batch_conflict)
-                    if status != 'unchanged':
-                        row = await self._store.upsert_entity_item(
-                            tx,
-                            entity_type=prep.item.entity_type,
-                            params=self._store.prepare_entity_params(
-                                entity_type=prep.item.entity_type,
-                                uuid=prep.entity_uuid,
-                                group_id=request.group_id,
-                                batch_id=request.batch_id,
-                                graph_key=prep.item.graph_key,
-                                name_raw=prep.item.name_raw,
-                                name_canonical=prep.item.name_canonical,
-                                database_qualified_name=prep.item.database_qualified_name,
-                                summary=prep.item.summary,
-                                content_sha256=prep.content_sha256,
-                                created_at=request_ts,
-                                updated_at=request_ts,
-                                name_embedding=prep.name_embedding or [],
-                                attributes=prep.item.attributes,
-                                source_refs=prep.item.source_refs,
-                                confidence=prep.item.confidence,
-                            ),
-                        )
-                        self._raise_entity_row_error(row)
-                        status = self._write_status_from_row(row, prep.projected_status)
-                        written_request_entities.add(prep.entity_uuid)
-                    entity_results.append(self._batch_result_for_entity(prep, status=status))
-                    for index in prep.coalesced_indices:
-                        duplicate = self._batch_result_for_entity(prep, status=status)
-                        duplicate.index = index
-                        entity_results.append(duplicate)
-
-                for prep in edge_prepared:
-                    status = prep.projected_status
-                    existing = await self._batch_recheck_edge_in_tx(
-                        tx,
-                        prep,
-                        request,
-                        request_entity_uuids,
-                        written_request_entities,
-                    )
-                    if status == 'unchanged':
-                        if existing is None:
-                            raise self._EdgeEndpointRace(CatalogErrorCode.missing_endpoint)
-                        if existing.get('content_sha256') != prep.content_sha256:
-                            raise self._EdgeEndpointRace(CatalogErrorCode.batch_conflict)
-                    else:
-                        row = await self._store.upsert_edge_item(
-                            tx,
-                            params=self._store.prepare_edge_params(
-                                edge_type=prep.item.edge_type,
-                                uuid=prep.edge_uuid,
-                                group_id=request.group_id,
-                                batch_id=request.batch_id,
-                                edge_key=prep.item.edge_key,
-                                source_uuid=prep.source_uuid or '',
-                                target_uuid=prep.target_uuid or '',
-                                fact=prep.item.fact,
-                                evidence=prep.item.evidence,
-                                content_sha256=prep.content_sha256,
-                                created_at=request_ts,
-                                updated_at=request_ts,
-                                fact_embedding=prep.fact_embedding or [],
-                                attributes=prep.item.attributes,
-                                confidence=prep.item.confidence,
-                            ),
-                        )
-                        status = self._write_status_from_row(row, prep.projected_status)
-                    result_index = prep.batch_result_index
-                    assert result_index is not None
-                    edge_results.append(
-                        self._batch_result_for_edge(prep, index=result_index, status=status)
-                    )
-                    for local_index in prep.coalesced_indices:
-                        edge_results.append(
-                            self._batch_result_for_edge(
-                                prep,
-                                index=len(request.entities) + local_index,
-                                status=status,
-                            )
-                        )
-
-                created_targets = {
-                    *(('entity', uuid) for uuid in written_request_entities),
-                    *(('edge', result.uuid) for result in edge_results if result.uuid),
-                }
-                for prep in sorted(provenance_sources, key=lambda source: source.source_uuid):
-                    expected_exists, expected_source_key, expected_content_sha256 = (
-                        self._source_expected_state(prep)
-                    )
-                    params = self._store.prepare_source_episode_params(
-                        uuid=prep.source_uuid,
-                        group_id=request.group_id,
-                        batch_id=request.batch_id,
-                        source_key=prep.item.source_key,
-                        content_sha256=prep.content_sha256,
-                        content=prep.content_json,
-                        source='json',
-                        source_description='catalog provenance source',
-                        valid_at=prep.valid_at,
-                        created_at=request_ts,
-                        updated_at=request_ts,
-                        expected_exists=expected_exists,
-                        expected_source_key=expected_source_key,
-                        expected_content_sha256=expected_content_sha256,
-                        entity_edges=list(prep.edge_uuids),
-                        name=prep.item.source_key,
-                    )
-                    row = await self._store.upsert_source_episode(tx, params=params)
-                    if self._source_cas_matches_concurrent_identical(prep, row):
-                        row = {**row, 'status': 'unchanged', 'error_code': None}
-                    self._raise_source_cas_error(row)
-                    await self._lock_and_recheck_provenance_targets(
-                        tx,
-                        prep,
-                        group_id=request.group_id,
-                        created_targets=created_targets,
-                    )
-                    source_status = str(row.get('status') or prep.projected_status)
-                    if prep.missing_links and source_status == 'unchanged':
-                        source_status = 'updated'
-                    for entity_uuid, mentions_uuid in zip(
-                        prep.entity_uuids, prep.mentions_uuids, strict=True
-                    ):
-                        if mentions_uuid not in prep.existing_mentions:
-                            await self._store.upsert_mentions_link(
-                                tx,
-                                episode_uuid=prep.source_uuid,
-                                entity_uuid=entity_uuid,
-                                mentions_uuid=mentions_uuid,
-                                group_id=request.group_id,
-                                created_at=request_ts,
-                            )
-                    for edge_uuid in prep.edge_uuids:
-                        if edge_uuid not in prep.existing_edge_links:
-                            await self._store.append_edge_episode(
-                                tx,
-                                edge_uuid=edge_uuid,
-                                episode_uuid=prep.source_uuid,
-                                group_id=request.group_id,
-                            )
-                    provenance_offset = len(request.entities) + len(request.edges)
-                    provenance_results.append(
-                        self._source_result(
-                            prep,
-                            prep.index,
-                            source_status,
-                            batch=True,
-                            offset=provenance_offset,
-                        )
-                    )
-                    for index in prep.coalesced_indices:
-                        provenance_results.append(
-                            self._source_result(
-                                prep,
-                                index,
-                                source_status,
-                                batch=True,
-                                offset=provenance_offset,
-                            )
-                        )
-
-                status_params = self._store.prepare_batch_status_params(
-                    uuid=batch_uuid,
-                    group_id=request.group_id,
-                    batch_id=request.batch_id,
-                    status='committed',
-                    request_sha256=effective_hash,
-                    catalog_sha256=request.catalog_sha256,
-                    entity_count=len(request.entities),
-                    edge_count=len(request.edges),
-                    provenance_count=self._batch_provenance_item_count(request),
-                    created_at=request_ts,
-                    updated_at=request_ts,
-                    committed_at=request_ts,
-                )
-                committed_row = await self._store.upsert_batch_status(tx, params=status_params)
-                if committed_row.get('request_sha256') != effective_hash:
-                    raise self._BatchStatusConflict('different_hash')
-                if committed_row.get('status') != 'committed':
-                    raise self._BatchStatusConflict('commit_rejected')
+                write_out = await self._write_catalog_batch_atomic(tx, projection)
+            entity_results = list(write_out.get('entity_results') or [])
+            edge_results = list(write_out.get('edge_results') or [])
+            provenance_results = list(write_out.get('provenance_results') or [])
         except self._BatchStatusConflict as exc:
             if exc.reason == 'already_committed':
                 return CatalogBatchWriteResponse(
@@ -5306,9 +5989,7 @@ class CatalogService:
                 seen_link_content[link_key] = content_sha
                 membership_evidence.append(
                     {
-                        'uuid': catalog_evidence_link_uuid(
-                            namespace, request.group_id, link_key
-                        ),
+                        'uuid': catalog_evidence_link_uuid(namespace, request.group_id, link_key),
                         'link_key': link_key,
                         'content_sha256': content_sha,
                     }
@@ -5894,16 +6575,236 @@ class CatalogService:
             PLAN_STATE_COMMITTING,
             bool(claimed.get('reentry')),
         )
+
+        # Success path: frozen artifact projection + one atomic writer (D-01/D-06/D-26).
+        # Zero embedder/LLM/queue/HTTP after claim.
+        namespace = self._namespace()
+        if namespace is None:
+            return _echo_fail(
+                CatalogErrorCode.invalid_uuid_namespace,
+                'uuid_namespace missing or invalid',
+            )
+
+        try:
+            await self._ensure_schema(client)
+            await self._store.ensure_plan_schema(client.driver)
+        except Exception as exc:
+            logger.error(
+                'catalog commit_prepared_catalog_batch schema_failed plan_uuid=%s reason=%s',
+                plan_uuid,
+                type(exc).__name__,
+            )
+            return self._commit_fail(
+                CatalogErrorCode.neo4j_transaction_failed,
+                'catalog schema initialization failed',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTING,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+
+        request_ts = datetime.now(timezone.utc)
+        try:
+            projection = self._build_projection_from_artifact(
+                artifact=artifact,
+                root=root,
+                token_digest=token_digest,
+                request_ts=request_ts,
+                namespace=namespace,
+            )
+        except CatalogStoreError as exc:
+            return self._commit_fail(
+                self._map_store_error_code(exc),
+                str(exc) or 'prepared projection build failed',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTING,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog commit_prepared_catalog_batch projection_failed plan_uuid=%s reason=%s',
+                plan_uuid,
+                type(exc).__name__,
+            )
+            return self._commit_fail(
+                CatalogErrorCode.prepared_plan_conflict,
+                'prepared projection build failed',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTING,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+
+        async def _record_failed_status(error_summary: str) -> None:
+            # D-27: separate post-rollback tx only; never plan COMMITTED / manifest.
+            failed_params = self._store.prepare_batch_status_params(
+                uuid=projection.batch_uuid,
+                group_id=projection.group_id,
+                batch_id=projection.batch_id,
+                status='failed',
+                request_sha256=projection.request_sha256,
+                catalog_sha256=projection.catalog_sha256,
+                entity_count=projection.entity_count,
+                edge_count=projection.edge_count,
+                provenance_count=projection.provenance_count,
+                created_at=request_ts,
+                updated_at=datetime.now(timezone.utc),
+                error_summary=error_summary,
+            )
+            try:
+                async with client.driver.transaction() as status_tx:
+                    await self._store.upsert_batch_status(status_tx, params=failed_params)
+            except Exception as status_exc:
+                logger.error(
+                    'catalog commit_prepared_catalog_batch failed_status_write_failed '
+                    'plan_uuid=%s reason=%s',
+                    plan_uuid,
+                    type(status_exc).__name__,
+                )
+
+        try:
+            async with client.driver.transaction() as tx:
+                write_out = await self._write_catalog_batch_atomic(tx, projection)
+        except self._BatchStatusConflict as exc:
+            if exc.reason == 'already_committed':
+                # Should be rare on prepared path; treat as conflict (plan 05 recovery).
+                return self._commit_fail(
+                    CatalogErrorCode.batch_conflict,
+                    'batch already committed with conflicting terminal state',
+                    plan_uuid=plan_uuid,
+                    request_sha256=request_sha,
+                    catalog_sha256=catalog_sha,
+                    artifact_sha256=art_sha,
+                    state=PLAN_STATE_COMMITTING,
+                    entity_count=entity_count,
+                    edge_count=edge_count,
+                    source_count=source_count,
+                    evidence_link_count=evidence_link_count,
+                )
+            return self._commit_fail(
+                CatalogErrorCode.batch_conflict,
+                'batch_id has different request_sha256',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTING,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+        except CatalogStoreError as exc:
+            await _record_failed_status(getattr(exc, 'code', None) or type(exc).__name__)
+            return self._commit_fail(
+                self._map_store_error_code(exc),
+                str(exc) or 'catalog commit write failed',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTING,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+        except (
+            self._EntityInvariantRace,
+            self._EdgeEndpointRace,
+            self._ProvenanceInvariantRace,
+        ) as exc:
+            code = getattr(exc, 'code', CatalogErrorCode.neo4j_transaction_failed)
+            await _record_failed_status(getattr(code, 'value', str(code)))
+            return self._commit_fail(
+                code if isinstance(code, CatalogErrorCode) else CatalogErrorCode.batch_conflict,
+                'catalog commit invariant conflict',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTING,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog commit_prepared_catalog_batch write_failed plan_uuid=%s reason=%s',
+                plan_uuid,
+                type(exc).__name__,
+            )
+            await _record_failed_status(type(exc).__name__)
+            return self._commit_fail(
+                CatalogErrorCode.neo4j_transaction_failed,
+                'neo4j transaction failed',
+                plan_uuid=plan_uuid,
+                request_sha256=request_sha,
+                catalog_sha256=catalog_sha,
+                artifact_sha256=art_sha,
+                state=PLAN_STATE_COMMITTING,
+                entity_count=entity_count,
+                edge_count=edge_count,
+                source_count=source_count,
+                evidence_link_count=evidence_link_count,
+            )
+
+        entity_results = list(write_out.get('entity_results') or [])
+        edge_results = list(write_out.get('edge_results') or [])
+        provenance_results = list(write_out.get('provenance_results') or [])
+        all_results = entity_results + edge_results + provenance_results
+        committed_created = sum(r.status == 'created' for r in all_results)
+        committed_updated = sum(r.status == 'updated' for r in all_results)
+        committed_unchanged = sum(r.status == 'unchanged' for r in all_results)
+        if write_out.get('short_circuit'):
+            # Stable receipt counts from plan root when no rewrite.
+            committed_created = int(root.get('created_count') or 0)
+            committed_updated = int(root.get('updated_count') or 0)
+            committed_unchanged = int(root.get('unchanged_count') or 0)
+
+        logger.info(
+            'catalog commit_prepared_catalog_batch committed plan_uuid=%s batch_id=%s '
+            'entities=%s edges=%s sources=%s evidence=%s short_circuit=%s',
+            plan_uuid,
+            projection.batch_id,
+            entity_count,
+            edge_count,
+            source_count,
+            evidence_link_count,
+            bool(write_out.get('short_circuit')),
+        )
         return CommitPreparedCatalogBatchResponse(
             plan_uuid=plan_uuid,
             request_sha256=request_sha,
             catalog_sha256=catalog_sha,
             artifact_sha256=art_sha,
-            state=PLAN_STATE_COMMITTING,
+            state=PLAN_STATE_COMMITTED,
             entity_count=entity_count,
             edge_count=edge_count,
             source_count=source_count,
             evidence_link_count=evidence_link_count,
+            batch_uuid=str(write_out.get('batch_uuid') or projection.batch_uuid),
+            manifest_sha256=str(write_out.get('manifest_sha256') or '') or None,
+            committed_created=committed_created,
+            committed_updated=committed_updated,
+            committed_unchanged=committed_unchanged,
         )
 
     async def discard_prepared_catalog_batch(
