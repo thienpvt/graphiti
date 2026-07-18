@@ -1,140 +1,2093 @@
 {
-  "schema_version": "legacy-mcp-contract-baseline.v1",
-  "description": "Wave 0 scaffold: canonical pre-Phase-5 public-contract baseline for 14 legacy MCP tools (SAFE-09, D-07). GREEN fills exact metadata/defaults/schemas/response invariants in 05-04.",
-  "legacy_tool_count": 14,
   "catalog_tool_count": 14,
-  "union_tool_count": 28,
+  "legacy_tool_count": 14,
   "legacy_tools": {
     "add_memory": {
+      "defaults": {
+        "custom_extraction_instructions": null,
+        "excluded_entity_types": null,
+        "group_id": null,
+        "previous_episode_uuids": null,
+        "reference_time": null,
+        "saga": null,
+        "saga_previous_episode_uuid": null,
+        "source": "text",
+        "source_description": "",
+        "update_communities": false,
+        "uuid": null
+      },
+      "input_schema": {
+        "properties": {
+          "custom_extraction_instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "episode_body": {
+            "type": "string"
+          },
+          "excluded_entity_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "name": {
+            "type": "string"
+          },
+          "previous_episode_uuids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "reference_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "saga": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "saga_previous_episode_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "source": {
+            "default": "text",
+            "type": "string"
+          },
+          "source_description": {
+            "default": "",
+            "type": "string"
+          },
+          "update_communities": {
+            "default": false,
+            "type": "boolean"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "episode_body",
+          "name"
+        ],
+        "type": "object"
+      },
       "name": "add_memory",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
-    },
-    "search_nodes": {
-      "name": "search_nodes",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
-    },
-    "search_memory_facts": {
-      "name": "search_memory_facts",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
+      "output_schema": {
+        "$defs": {
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "SuccessResponse": {
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SuccessResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "name",
+          "required": true
+        },
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "episode_body",
+          "required": true
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "group_id",
+          "required": false
+        },
+        {
+          "annotation": "str",
+          "default": "text",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "source",
+          "required": false
+        },
+        {
+          "annotation": "str",
+          "default": "",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "source_description",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "uuid",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "reference_time",
+          "required": false
+        },
+        {
+          "annotation": "list[str] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "excluded_entity_types",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "custom_extraction_instructions",
+          "required": false
+        },
+        {
+          "annotation": "list[str] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "previous_episode_uuids",
+          "required": false
+        },
+        {
+          "annotation": "bool",
+          "default": false,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "update_communities",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "saga",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "saga_previous_episode_uuid",
+          "required": false
+        }
+      ],
+      "required": [
+        "episode_body",
+        "name"
+      ],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_catalog_service.py#test_entity_no_queue_or_llm_calls"
+      }
     },
     "add_triplet": {
+      "defaults": {
+        "group_id": null,
+        "source_node_uuid": null,
+        "target_node_uuid": null
+      },
+      "input_schema": {
+        "properties": {
+          "edge_name": {
+            "type": "string"
+          },
+          "fact": {
+            "type": "string"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "source_node_name": {
+            "type": "string"
+          },
+          "source_node_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "target_node_name": {
+            "type": "string"
+          },
+          "target_node_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "edge_name",
+          "fact",
+          "source_node_name",
+          "target_node_name"
+        ],
+        "type": "object"
+      },
       "name": "add_triplet",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
-    },
-    "get_entity_edge": {
-      "name": "get_entity_edge",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
-    },
-    "get_episodes": {
-      "name": "get_episodes",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
-    },
-    "get_episode_entities": {
-      "name": "get_episode_entities",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
-    },
-    "update_entity": {
-      "name": "update_entity",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
+      "output_schema": {
+        "$defs": {
+          "EdgeResult": {
+            "properties": {
+              "created_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "fact": {
+                "type": "string"
+              },
+              "group_id": {
+                "type": "string"
+              },
+              "invalid_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "source_node_uuid": {
+                "type": "string"
+              },
+              "target_node_uuid": {
+                "type": "string"
+              },
+              "uuid": {
+                "type": "string"
+              },
+              "valid_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "created_at",
+              "fact",
+              "group_id",
+              "invalid_at",
+              "name",
+              "source_node_uuid",
+              "target_node_uuid",
+              "uuid",
+              "valid_at"
+            ],
+            "type": "object"
+          },
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "NodeResult": {
+            "properties": {
+              "attributes": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "created_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "group_id": {
+                "type": "string"
+              },
+              "labels": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": "string"
+              },
+              "summary": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "uuid": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attributes",
+              "created_at",
+              "group_id",
+              "labels",
+              "name",
+              "summary",
+              "uuid"
+            ],
+            "type": "object"
+          },
+          "TripletResponse": {
+            "properties": {
+              "edges": {
+                "items": {
+                  "$ref": "#/$defs/EdgeResult"
+                },
+                "type": "array"
+              },
+              "message": {
+                "type": "string"
+              },
+              "nodes": {
+                "items": {
+                  "$ref": "#/$defs/NodeResult"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "edges",
+              "message",
+              "nodes"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TripletResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "source_node_name",
+          "required": true
+        },
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "edge_name",
+          "required": true
+        },
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "fact",
+          "required": true
+        },
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "target_node_name",
+          "required": true
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "group_id",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "source_node_uuid",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "target_node_uuid",
+          "required": false
+        }
+      ],
+      "required": [
+        "edge_name",
+        "fact",
+        "source_node_name",
+        "target_node_name"
+      ],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_core_parity.py#test_triplet_objects_construct"
+      }
     },
     "build_communities": {
+      "defaults": {
+        "group_ids": null
+      },
+      "input_schema": {
+        "properties": {
+          "group_ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      },
       "name": "build_communities",
-      "parameters": [],
+      "output_schema": {
+        "$defs": {
+          "BuildCommunitiesResponse": {
+            "properties": {
+              "communities": {
+                "items": {
+                  "$ref": "#/$defs/CommunityResult"
+                },
+                "type": "array"
+              },
+              "community_count": {
+                "type": "integer"
+              },
+              "edge_count": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "communities",
+              "community_count",
+              "edge_count",
+              "message"
+            ],
+            "type": "object"
+          },
+          "CommunityResult": {
+            "properties": {
+              "group_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "summary": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "uuid": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "group_id",
+              "name",
+              "summary",
+              "uuid"
+            ],
+            "type": "object"
+          },
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BuildCommunitiesResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str | list[str] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "group_ids",
+          "required": false
+        }
+      ],
       "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
-    },
-    "summarize_saga": {
-      "name": "summarize_saga",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
-    },
-    "delete_episode": {
-      "name": "delete_episode",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
-    },
-    "delete_entity_edge": {
-      "name": "delete_entity_edge",
-      "parameters": [],
-      "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_core_parity.py#test_core_exposes_parity_methods"
+      }
     },
     "clear_graph": {
+      "defaults": {
+        "group_ids": null
+      },
+      "input_schema": {
+        "properties": {
+          "group_ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      },
       "name": "clear_graph",
-      "parameters": [],
+      "output_schema": {
+        "$defs": {
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "SuccessResponse": {
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SuccessResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str | list[str] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "group_ids",
+          "required": false
+        }
+      ],
       "required": [],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_falkordb_integration.py#test_clear_graph"
+      }
+    },
+    "delete_entity_edge": {
       "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
+      "input_schema": {
+        "properties": {
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid"
+        ],
+        "type": "object"
+      },
+      "name": "delete_entity_edge",
+      "output_schema": {
+        "$defs": {
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "SuccessResponse": {
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SuccessResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "uuid",
+          "required": true
+        }
+      ],
+      "required": [
+        "uuid"
+      ],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_comprehensive_integration.py#test_delete_entity_edge"
+      }
+    },
+    "delete_episode": {
+      "defaults": {},
+      "input_schema": {
+        "properties": {
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid"
+        ],
+        "type": "object"
+      },
+      "name": "delete_episode",
+      "output_schema": {
+        "$defs": {
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "SuccessResponse": {
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SuccessResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "uuid",
+          "required": true
+        }
+      ],
+      "required": [
+        "uuid"
+      ],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_comprehensive_integration.py#test_delete_episode"
+      }
+    },
+    "get_entity_edge": {
+      "defaults": {},
+      "input_schema": {
+        "properties": {
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid"
+        ],
+        "type": "object"
+      },
+      "name": "get_entity_edge",
+      "output_schema": {
+        "$defs": {
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "uuid",
+          "required": true
+        }
+      ],
+      "required": [
+        "uuid"
+      ],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_comprehensive_integration.py#test_get_entity_edge"
+      }
+    },
+    "get_episode_entities": {
+      "defaults": {},
+      "input_schema": {
+        "properties": {
+          "episode_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "episode_uuids"
+        ],
+        "type": "object"
+      },
+      "name": "get_episode_entities",
+      "output_schema": {
+        "$defs": {
+          "EdgeResult": {
+            "properties": {
+              "created_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "fact": {
+                "type": "string"
+              },
+              "group_id": {
+                "type": "string"
+              },
+              "invalid_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "source_node_uuid": {
+                "type": "string"
+              },
+              "target_node_uuid": {
+                "type": "string"
+              },
+              "uuid": {
+                "type": "string"
+              },
+              "valid_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "created_at",
+              "fact",
+              "group_id",
+              "invalid_at",
+              "name",
+              "source_node_uuid",
+              "target_node_uuid",
+              "uuid",
+              "valid_at"
+            ],
+            "type": "object"
+          },
+          "EpisodeEntitiesResponse": {
+            "properties": {
+              "edges": {
+                "items": {
+                  "$ref": "#/$defs/EdgeResult"
+                },
+                "type": "array"
+              },
+              "message": {
+                "type": "string"
+              },
+              "nodes": {
+                "items": {
+                  "$ref": "#/$defs/NodeResult"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "edges",
+              "message",
+              "nodes"
+            ],
+            "type": "object"
+          },
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "NodeResult": {
+            "properties": {
+              "attributes": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "created_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "group_id": {
+                "type": "string"
+              },
+              "labels": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": "string"
+              },
+              "summary": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "uuid": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attributes",
+              "created_at",
+              "group_id",
+              "labels",
+              "name",
+              "summary",
+              "uuid"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EpisodeEntitiesResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "list[str]",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "episode_uuids",
+          "required": true
+        }
+      ],
+      "required": [
+        "episode_uuids"
+      ],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_core_parity.py#test_core_exposes_parity_methods"
+      }
+    },
+    "get_episodes": {
+      "defaults": {
+        "group_ids": null,
+        "max_episodes": 10
+      },
+      "input_schema": {
+        "properties": {
+          "group_ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "max_episodes": {
+            "default": 10,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "get_episodes",
+      "output_schema": {
+        "$defs": {
+          "EpisodeSearchResponse": {
+            "properties": {
+              "episodes": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "episodes",
+              "message"
+            ],
+            "type": "object"
+          },
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EpisodeSearchResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str | list[str] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "group_ids",
+          "required": false
+        },
+        {
+          "annotation": "int",
+          "default": 10,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "max_episodes",
+          "required": false
+        }
+      ],
+      "required": [],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_comprehensive_integration.py#test_get_episodes_pagination"
+      }
     },
     "get_status": {
+      "defaults": {},
+      "input_schema": {
+        "properties": {},
+        "type": "object"
+      },
       "name": "get_status",
+      "output_schema": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "status"
+        ],
+        "type": "object"
+      },
       "parameters": [],
       "required": [],
-      "defaults": {},
-      "input_schema": {},
-      "output_schema": {},
-      "response_invariants": []
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_catalog_capabilities.py#test_get_status_preserves_status_and_message_keys"
+      }
+    },
+    "search_memory_facts": {
+      "defaults": {
+        "center_node_uuid": null,
+        "edge_types": null,
+        "group_ids": null,
+        "invalid_at_after": null,
+        "invalid_at_before": null,
+        "max_facts": 10,
+        "valid_at_after": null,
+        "valid_at_before": null
+      },
+      "input_schema": {
+        "properties": {
+          "center_node_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "edge_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "group_ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "invalid_at_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "invalid_at_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "max_facts": {
+            "default": 10,
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "valid_at_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "valid_at_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "search_memory_facts",
+      "output_schema": {
+        "$defs": {
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "FactSearchResponse": {
+            "properties": {
+              "facts": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "facts",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FactSearchResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "query",
+          "required": true
+        },
+        {
+          "annotation": "str | list[str] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "group_ids",
+          "required": false
+        },
+        {
+          "annotation": "int",
+          "default": 10,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "max_facts",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "center_node_uuid",
+          "required": false
+        },
+        {
+          "annotation": "list[str] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "edge_types",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "valid_at_after",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "valid_at_before",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "invalid_at_after",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "invalid_at_before",
+          "required": false
+        }
+      ],
+      "required": [
+        "query"
+      ],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_core_parity.py#TestBuildFactSearchFilters"
+      }
+    },
+    "search_nodes": {
+      "defaults": {
+        "center_node_uuid": null,
+        "entity_types": null,
+        "group_ids": null,
+        "max_nodes": 10
+      },
+      "input_schema": {
+        "properties": {
+          "center_node_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "entity_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "group_ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "max_nodes": {
+            "default": 10,
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "search_nodes",
+      "output_schema": {
+        "$defs": {
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "NodeResult": {
+            "properties": {
+              "attributes": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "created_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "group_id": {
+                "type": "string"
+              },
+              "labels": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": "string"
+              },
+              "summary": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "uuid": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attributes",
+              "created_at",
+              "group_id",
+              "labels",
+              "name",
+              "summary",
+              "uuid"
+            ],
+            "type": "object"
+          },
+          "NodeSearchResponse": {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "nodes": {
+                "items": {
+                  "$ref": "#/$defs/NodeResult"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "message",
+              "nodes"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NodeSearchResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "query",
+          "required": true
+        },
+        {
+          "annotation": "str | list[str] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "group_ids",
+          "required": false
+        },
+        {
+          "annotation": "int",
+          "default": 10,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "max_nodes",
+          "required": false
+        },
+        {
+          "annotation": "list[str] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "entity_types",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "center_node_uuid",
+          "required": false
+        }
+      ],
+      "required": [
+        "query"
+      ],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_core_parity.py#TestCoerceGroupIds"
+      }
+    },
+    "summarize_saga": {
+      "defaults": {
+        "group_id": null
+      },
+      "input_schema": {
+        "properties": {
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "saga_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "saga_name"
+        ],
+        "type": "object"
+      },
+      "name": "summarize_saga",
+      "output_schema": {
+        "$defs": {
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "SagaSummaryResponse": {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "uuid": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message",
+              "name",
+              "summary",
+              "uuid"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SagaSummaryResponse"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "saga_name",
+          "required": true
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "group_id",
+          "required": false
+        }
+      ],
+      "required": [
+        "saga_name"
+      ],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_core_parity.py#test_core_exposes_parity_methods"
+      }
+    },
+    "update_entity": {
+      "defaults": {
+        "attributes": null,
+        "labels": null,
+        "name": null,
+        "summary": null
+      },
+      "input_schema": {
+        "properties": {
+          "attributes": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid"
+        ],
+        "type": "object"
+      },
+      "name": "update_entity",
+      "output_schema": {
+        "$defs": {
+          "ErrorResponse": {
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "type": "object"
+          },
+          "NodeResult": {
+            "properties": {
+              "attributes": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "created_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "group_id": {
+                "type": "string"
+              },
+              "labels": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": "string"
+              },
+              "summary": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "uuid": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "attributes",
+              "created_at",
+              "group_id",
+              "labels",
+              "name",
+              "summary",
+              "uuid"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NodeResult"
+              },
+              {
+                "$ref": "#/$defs/ErrorResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "parameters": [
+        {
+          "annotation": "str",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "uuid",
+          "required": true
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "name",
+          "required": false
+        },
+        {
+          "annotation": "str | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "summary",
+          "required": false
+        },
+        {
+          "annotation": "dict[str, typing.Any] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "attributes",
+          "required": false
+        },
+        {
+          "annotation": "list[str] | None",
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "labels",
+          "required": false
+        }
+      ],
+      "required": [
+        "uuid"
+      ],
+      "response_contract": {
+        "classification": "schema_and_fake_backed_test",
+        "test_ref": "mcp_server/tests/test_update_entity.py#test_update_entity_requires_initialized_service"
+      }
     }
   },
   "notes": {
-    "wave0": "Scaffold only — empty parameter/schema bodies are intentional RED placeholders for 05-04 GREEN.",
-    "d07": "Catalog tools asserted separately; never merged into legacy baseline.",
-    "secrets": "No credentials, tokens, or payload bodies in this fixture."
-  }
+    "d07": "Catalog tools are asserted separately; the original seven remain a subset, not a cap.",
+    "response_contracts": "Each legacy tool binds its exposed output schema to an existing deterministic fake-backed test; get_status also has a direct no-live response assertion.",
+    "secrets": "No credentials, tokens, payload bodies, descriptions, titles, source locations, or ordering metadata."
+  },
+  "provenance": {
+    "generation_rule": "FastMCP list_tools schemas plus inspect.signature; recursively remove only title/description metadata and sort mapping keys/scalar enum lists",
+    "source": "pre-Phase-5 FastMCP registration at Phase 5 execution base",
+    "source_head": "536de2bd8f0d7d68ecb5c8352fcacace8dcc9b62"
+  },
+  "schema_version": "legacy-mcp-contract-baseline.v1",
+  "union_tool_count": 28
 }
