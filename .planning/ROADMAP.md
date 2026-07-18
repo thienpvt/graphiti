@@ -219,7 +219,7 @@ Plans:
   4. Separate read/write feature gates keep capabilities and catalog diagnostics usable when writes are disabled; read paths never initialize/repair schema or open write transactions
   5. Explicit-key verification remains available; gate/registration tests prove read tools work while writes are off
 
-**Plans**: 2/6 plans executed
+**Plans**: 3/6 plans executed
 
 **Wave 1**
 
@@ -231,7 +231,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 04-03-PLAN.md — Durable manifest reassembly, integrity checks, and canonical paginated membership read
+- [x] 04-03-PLAN.md — Durable manifest reassembly, integrity checks, and canonical paginated membership read
 
 **Wave 4** *(blocked on Wave 3)*
 
