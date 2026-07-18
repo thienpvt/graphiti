@@ -451,22 +451,22 @@ pytest.skip(f'Neo4j unavailable: {exc}')
 
 **If empty verification needed:** Product behavior largely verified in Phases 1–4; Phase 5 owns exhaustive proof packaging.
 
-## Open Questions
+## Resolved Questions
 
-1. **Exact hardened artifact directory/version string**
-   - What we know: Historical `catalog/canary-v2-requests/` must remain readable; new artifacts supersede offline only.
-   - What's unclear: Final dirname/suffix (discretion).
-   - Recommendation: `catalog/canary-v2-requests-hardened/` + manifest field `identity_schema_version=catalog-v2` + `artifact_schema_version`.
+1. **RESOLVED — hardened artifact directory/version string**
+   - Choice: use the versioned `catalog/canary-v2-requests-hardened/` directory.
+   - Schema: every hardened manifest/fixture/receipt/checkpoint carries an explicit `artifact_schema_version` plus `identity_schema_version='catalog-v2'`; historical `catalog/canary-v2-requests/` remains read-only.
+   - Authority: D-09, D-11 and the locked recommendation to keep historical and hardened artifacts separate.
 
-2. **Whether live TEST-11 expands existing int modules or adds a thin Phase 5 suite**
-   - What we know: `test_catalog_neo4j_int.py`, `test_catalog_commit_neo4j_int.py`, `test_catalog_prepare_neo4j_int.py` already cover much of rollback/search/isolation.
-   - What's unclear: Gap list vs TEST-11 exact bullets (control labels excluded, zero writes outside group).
-   - Recommendation: Inventory existing live tests first; add only missing named proofs; keep availability skip.
+2. **RESOLVED — TEST-11 module ownership**
+   - Choice: extend the existing Neo4j modules (`test_catalog_neo4j_int.py`, `test_catalog_commit_neo4j_int.py`, `test_catalog_prepare_neo4j_int.py`) after inventorying their current coverage.
+   - Scope: add only missing named proofs, retaining availability-truthful skip behavior and the `oracle-catalog-tool-test` boundary.
+   - Authority: existing module semantics plus the locked recommendation; no thin duplicate Phase 5 integration suite.
 
-3. **Ollama E2E harness location**
-   - What we know: Ollama CLI present; retrospective mentions prior E2E; no Phase 5 harness yet.
-   - What's unclear: Minimal script vs pytest module.
-   - Recommendation: Small optional pytest or script under mcp_server/tests, test group only, skip if Ollama/Neo4j down.
+3. **RESOLVED — Ollama E2E harness location**
+   - Choice: pytest module `mcp_server/tests/test_catalog_ollama_e2e.py`.
+   - Scope: local services plus `oracle-catalog-tool-test` only; availability skip with reason; no runner execution or cleanup.
+   - Authority: D-23 and the locked pytest-based harness recommendation.
 
 ## Environment Availability
 

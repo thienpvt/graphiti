@@ -9,106 +9,113 @@ created: 2026-07-19
 
 # Phase 05 — Validation Strategy
 
-> Per-phase validation contract for pre-canary readiness. Every result is pass, fail, or
-> availability-based skip. A skip is never a pass.
-
----
+> Pre-canary validation contract. Every execution result is pass, fail, or availability-skip. Skip is never pass. Final readiness additionally requires named post-execution audits.
 
 ## Test Infrastructure
 
 | Property | Value |
 |----------|-------|
-| **Framework** | pytest + pytest-asyncio through the existing `mcp_server` uv project |
-| **Config file** | `mcp_server/pytest.ini` |
-| **Quick run command** | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_phase5_gate_runner.py -q --tb=line -x` |
-| **Full suite command** | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py run` |
-| **Estimated runtime** | Offline quick loop <15 seconds; full gate depends on available live Neo4j/Ollama checks |
+| **Framework** | Existing pytest + pytest-asyncio through `mcp_server` uv project; stdlib gate runner |
+| **Config** | `mcp_server/pytest.ini` |
+| **Quick offline** | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_catalog_store_unit.py mcp_server/tests/test_catalog_service.py mcp_server/tests/test_legacy_mcp_contract_compatibility.py mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_phase5_gate_runner.py -q --tb=line -x` |
+| **Initial package** | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py run-initial` |
+| **Post-audit closure** | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py finalize --require-audits --require-ready --expected-requirements 17 --expected-edge-probes 37` |
+| **Final proof check** | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py verify-final --require-ready --expected-requirements 17 --expected-edge-probes 37` |
+| **Offline latency** | Target <30 seconds per focused task command |
 
----
+## Sampling and Safety
 
-## Sampling Rate
-
-- **After every task commit:** Run the smallest named pytest module or structural check covering the changed artifact.
-- **After every plan wave:** Run the Phase 5 focused offline suite plus `git diff --check`.
-- **Before `/gsd-verify-work`:** Phase 5 gate runner must emit a valid ledger with every check classified pass/fail/skip, `canary_executed=false`, and no current protected-group access.
-- **Max offline feedback latency:** 30 seconds.
-- **Live checks:** Run only against `oracle-catalog-tool-test` when configured and available. Otherwise record an availability-based skip reason. Never query or mutate `oracle-catalog-v2`.
-
----
+- After every task: run its exact `<automated>` predicate.
+- After every wave: focused offline suite plus `git diff --check`.
+- Live Neo4j and local Ollama checks use only `oracle-catalog-tool-test`; unavailable infrastructure records availability-skip with non-empty reason.
+- Never query or mutate `oracle-catalog-v2`; never execute the canary runner; never call `clear_graph`.
+- Preserve historical `a67789a` separately from current safety truth; preserve historical artifact bytes/attempt count; hardened attempts stay zero.
+- 05-06 always emits `phase_5_complete=false`, `post_execution_audits_pending=true`, `ready_to_regenerate_canary=false`.
+- 05-07 alone may derive final readiness after named audits exist and pass exact predicates.
 
 ## Per-Task Verification Map
 
-| Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
-|---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 05-W0-01 | 01 | 1 | TEST-10, TEST-12, REPT-01 | T-05-GATE | Gate defaults fail closed; canary and current protected access remain false | unit | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_phase5_gate_runner.py -q --tb=line` | ❌ W0 | ⬜ pending |
-| 05-W0-02 | 01 | 1 | SAFE-03, SAFE-04, SAFE-06, SAFE-07 | T-05-SIDEFX, T-05-LOG | Prohibited tools, LLM, queue, implicit mutations, repair, and unsafe logs are rejected | unit/static/spy | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py -q --tb=line` | ❌ W0 | ⬜ pending |
-| 05-W0-03 | 01 | 1 | IDEN-13, DOCS-06 | T-05-CANARY | Offline regeneration and runner validation make no network/DB/MCP/LLM/queue/embed calls | unit | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_canary_scripts.py -q --tb=line` | ✅ extend | ⬜ pending |
-| 05-W0-04 | 01 | 1 | TEST-11, SAFE-10 | T-05-ISO | Live checks use only `oracle-catalog-tool-test`; unavailable Neo4j is an explicit skip | integration | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_neo4j_int.py mcp_server/tests/test_catalog_commit_neo4j_int.py mcp_server/tests/test_catalog_prepare_neo4j_int.py -q --tb=line` | ✅ extend | ⬜ pending |
-| 05-SEC-01 | 02 | 2 | SAFE-03, SAFE-04, SAFE-06, SAFE-07, TEST-10 | T-05-SIDEFX, T-05-LOG | Exhaustive prohibition, fail-closed conflict, and log-scrub matrix passes | unit/static/spy | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py -q --tb=line` | ❌ W0 | ⬜ pending |
-| 05-CAN-01 | 03 | 2 | IDEN-13, DOCS-06 | T-05-CANARY, T-05-MIGRATE | Hardened artifacts are regenerated offline; old goldens are historical only; runner is not executed | unit/offline | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_canary_scripts.py -q --tb=line` | ✅ extend | ⬜ pending |
-| 05-COMP-01 | 04 | 2 | SAFE-09, SAFE-10 | T-05-COMPAT, T-05-ISO | Exact registration remains 14 legacy + 14 catalog; all catalog paths remain group scoped and Neo4j-only | contract/unit | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_service.py mcp_server/tests/test_catalog_gates.py -q --tb=short` | ✅ | ⬜ pending |
-| 05-LIVE-01 | 04 | 3 | TEST-11 | T-05-ISO | Rollback, search, exact evidence/manifest, control-label exclusion, and outside-group zero-write proofs pass or skip for unavailable Neo4j | integration | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_neo4j_int.py mcp_server/tests/test_catalog_commit_neo4j_int.py mcp_server/tests/test_catalog_prepare_neo4j_int.py -q --tb=line` | ✅ extend | ⬜ pending |
-| 05-DOC-01 | 05 | 3 | DOCS-01, DOCS-02, DOCS-03, DOCS-04 | T-05-DOC | Operator reference covers the exact 28-tool, grammar, topology, hash, lifecycle, evidence, manifest, gate, error, and config contracts without secrets | structural | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py check-docs` | ❌ W0 | ⬜ pending |
-| 05-DOC-02 | 05 | 3 | DOCS-05, DOCS-06 | T-05-MIGRATE | Migration guide forbids automatic migration/old SHA reuse and documents offline prepare/commit regeneration without execution | structural/offline | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py check-migration` | ❌ W0 | ⬜ pending |
-| 05-OLL-01 | 06 | 4 | TEST-12, D-23 | T-05-ISO | Local Ollama E2E uses local services/test group only and reports pass/fail/availability-skip truthfully | e2e | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_ollama_e2e.py -q --tb=line` | ❌ W0 | ⬜ pending |
-| 05-GATE-01 | 06 | 4 | TEST-12, REPT-01 | T-05-GATE | Final ledger binds every check, preserves two-axis safety, sets `canary_executed=false`, and derives readiness fail closed | gate | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py run` | ❌ W0 | ⬜ pending |
-
-*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
-
----
+| ID | Plan/Wave | Requirement | Secure behavior | Automated predicate | RED owner |
+|----|-----------|-------------|-----------------|---------------------|-----------|
+| 05-W0-SEC | 01/1 | SAFE-03/04/06/07, TEST-10 | Collectable RED cases cover prohibited calls, fixed Cypher identifiers/property maps, missing/same-batch endpoint no-create, conflicts, log leakage | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_catalog_store_unit.py mcp_server/tests/test_catalog_service.py --collect-only -q` | 05-01 Task 1 |
+| 05-W0-COMP | 01/1 | SAFE-09 | Canonical metadata/default/schema/response-invariant baseline for all 14 legacy tools; exact 14 catalog separate; union 28 | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_legacy_mcp_contract_compatibility.py --collect-only -q` | 05-01 Task 1 |
+| 05-W0-CAN | 01/1 | IDEN-13, DOCS-06 | Strict hardened fixture/manifest/receipt/checkpoint, historical byte/attempt preservation, leakage, no external side effect | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_canary_scripts.py --collect-only -q` | 05-01 Task 1 |
+| 05-W0-LIVE | 01/1 | SAFE-10, TEST-11 | Named live gaps collect without DB; runtime uses test group only | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_neo4j_int.py mcp_server/tests/test_catalog_commit_neo4j_int.py mcp_server/tests/test_catalog_prepare_neo4j_int.py --collect-only -q` | 05-01 Task 1 |
+| 05-W0-GATE | 01/1 | TEST-12, REPT-01 | Initial/final formula, atomic ledger, audit parser, safety defaults collect RED/fail closed | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_phase5_gate_runner.py -q --tb=line` | 05-01 Task 2 |
+| 05-SEC-ID | 02/2 | SAFE-03/04, TEST-10 | Fixed registry/allowlist authority; malicious identifiers never enter Cypher or execute; endpoint semantics cause no implicit entity/community creation | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_catalog_store_unit.py mcp_server/tests/test_catalog_service.py -k "prohibited or llm_or_queue or community or embed or cypher_identifier or property_allowlist or missing_endpoint or endpoint_union or implicit_endpoint" -q --tb=line` | 05-01 Task 1 |
+| 05-SEC-LOG | 02/2 | SAFE-06/07, TEST-10 | Fail-closed conflict matrix and bounded logs | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py -q --tb=line` | 05-01 Task 1 |
+| 05-CAN-SCHEMA | 03/2 | IDEN-13, DOCS-06 | Complete artifact inventory, strict schemas, history split, attempt preservation, recursive leakage predicates, no execution | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_canary_scripts.py -k "historical_inventory or historical_bytes_unchanged or sanitized_hardened or hardened_manifest_schema or offline_receipt_schema or offline_checkpoint_schema or no_production_content or no_external_side_effect" -q --tb=line` | 05-01 Task 1 |
+| 05-CAN-RUNNER | 03/2 | DOCS-06 | Pure prepare/token-only-commit/post-read sequence; no runner shell/network/DB/MCP/LLM/queue/embed | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_canary_scripts.py -q --tb=line` | 05-01 Task 1 |
+| 05-COMP-CONTRACT | 04/3 | SAFE-09/10 | Canonical 14 legacy public contracts; separate exact 14 catalog; union 28; isolation units | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_legacy_mcp_contract_compatibility.py mcp_server/tests/test_catalog_gates.py -q --tb=short` | 05-01 Task 1 |
+| 05-LIVE | 04/3 | TEST-11 | Rollback/search/evidence/manifest/control-label/outside-group proofs pass or availability-skip | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_neo4j_int.py mcp_server/tests/test_catalog_commit_neo4j_int.py mcp_server/tests/test_catalog_prepare_neo4j_int.py -q --tb=line` | 05-01 Task 1 |
+| 05-DOC-OP | 05/4 | DOCS-01..04 | Exact tool/error sets and operator contract; no secrets | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py check-docs` | 05-01 Task 2 |
+| 05-DOC-MIG | 05/4 | DOCS-05/06 | No automatic migration/old SHA reuse; offline hardened procedure; two-axis truth | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py check-migration` | 05-01 Task 2 |
+| 05-OLL | 06/5 | TEST-12, D-23 | Local Ollama E2E test group only; pass/fail/availability-skip truthful; no cleanup | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_phase5_gate_runner.py mcp_server/tests/test_catalog_ollama_e2e.py -q --tb=line` | 05-01 Task 1/2 |
+| 05-INITIAL | 06/5 | TEST-12, REPT-01 | Initial ledger/report binds execution evidence; four audits pending; complete/ready forced false | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py run-initial` | 05-01 Task 2 |
+| 05-FINALIZE | 07/6 | TEST-12, REPT-01 | Exact audit parser; mandatory pass; optional availability-skip only; final HEAD/digests; atomic coherent set | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py finalize --require-audits --require-ready --expected-requirements 17 --expected-edge-probes 37` | 05-01 Task 2; GREEN support 05-06 |
+| 05-TRACK | 07/6 | TEST-12, REPT-01 | Tracking changes only after final proof reread; Phase 6 untouched | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py verify-final --require-ready --expected-requirements 17 --expected-edge-probes 37` | 05-01 Task 2; GREEN support 05-06 |
 
 ## Wave 0 Requirements
 
-- [ ] `mcp_server/tests/catalog_phase5_gate_runner.py` — fail-closed TEST-12/REPT-01 ledger cloned from the Phase 4 pattern.
-- [ ] `mcp_server/tests/test_catalog_phase5_gate_runner.py` — runner self-tests: readiness formula, pass/fail/skip, two-axis safety, canary false.
-- [ ] `mcp_server/tests/test_catalog_security_matrix.py` — SAFE-03/04/06/07 and TEST-10 prohibition/log/conflict matrix.
-- [ ] `mcp_server/tests/test_catalog_canary_scripts.py` — RED assertions for hardened offline prepare/commit artifacts and no external side effects.
-- [ ] Live TEST-11 gap tests — control labels excluded and zero writes outside `oracle-catalog-tool-test`, using existing integration fixtures.
-- [ ] `mcp_server/tests/test_catalog_ollama_e2e.py` — optional local E2E with explicit availability skip; no protected-group or canary path.
-- [ ] `05-GATE-RESULTS.json` initial fail-closed ledger: `ready_to_regenerate_canary=false`, `canary_executed=false`.
-- [ ] Structural operator/migration doc checks for DOCS-01..06.
-- [ ] Framework install: none — use existing uv/pytest/Ruff/Pyright stack.
+- [ ] `mcp_server/tests/catalog_phase5_gate_runner.py` and self-tests reserve `run-initial`, `finalize --require-audits`, `verify-final`, exact audit parser, readiness formula, atomic coherent output, two-axis safety.
+- [ ] Security/store/service RED cases reserve malicious entity/edge/property identifiers, zero query execution, missing endpoint, same-batch endpoint union, zero implicit endpoint/community writes.
+- [ ] `legacy_mcp_contract_baseline.json` and compatibility RED module reserve behavior-bearing FastMCP contracts for every legacy tool plus separate exact catalog set.
+- [ ] Canary RED extensions reserve full historical/hardened inventory, strict schemas, digests, attempt counts, content/secret/token/full-response leakage, and external-side-effect spies.
+- [ ] Existing three Neo4j modules reserve only missing TEST-11 cases; no duplicate integration suite.
+- [ ] `test_catalog_ollama_e2e.py` reserves pytest-based local harness and availability classification.
+- [ ] Initial `05-GATE-RESULTS.json` is fail closed: `canary_executed=false`, `phase_5_complete=false`, `ready_to_regenerate_canary=false`.
+- [ ] No framework/package install.
 
----
+## Initial Gate Ledger Contract
 
-## Gate Ledger Contract
+| Check ID | Classification | Effect |
+|----------|----------------|--------|
+| `runner_self_tests` | pass/fail | fail blocks |
+| `focused_pytest` | pass/fail | fail blocks |
+| `security_matrix` | pass/fail | fail blocks |
+| `legacy_contract_14` | pass/fail | fail blocks |
+| `catalog_registration_14` | pass/fail | fail blocks |
+| `tool_union_28` | pass/fail | fail blocks |
+| `cypher_identifier_authority` | pass/fail | fail blocks |
+| `endpoint_no_implicit_creation` | pass/fail | fail blocks |
+| `safety_no_v2_current` | pass/fail | fail blocks |
+| `historical_axis_preserved` | pass/fail | fail blocks |
+| `historical_artifacts_unchanged` | pass/fail | fail blocks |
+| `hardened_artifacts_strict` | pass/fail | fail blocks |
+| `canary_not_executed` | pass/fail | fail blocks |
+| `offline_canary_pure` | pass/fail | fail blocks |
+| `docs_operator_sections` | pass/fail | fail blocks |
+| `docs_migration_phrases` | pass/fail | fail blocks |
+| `ruff` | pass/fail/availability-skip | runnable fail blocks; skip needs availability reason |
+| `pyright` | pass/fail/availability-skip | runnable fail blocks; skip needs availability reason |
+| `live_neo4j_test11` | pass/fail/availability-skip | runnable fail blocks; skip needs availability reason |
+| `ollama_e2e` | pass/fail/availability-skip | runnable fail blocks; skip needs availability reason |
 
-| Check ID | Required Classification | Readiness Effect |
-|----------|-------------------------|------------------|
-| `runner_self_tests` | pass/fail | Failure blocks |
-| `focused_pytest` | pass/fail | Failure blocks |
-| `security_matrix` | pass/fail | Failure blocks |
-| `registration_28` | pass/fail | Failure blocks |
-| `safety_no_v2_current` | pass/fail | Failure blocks |
-| `historical_axis_preserved` | pass/fail | Failure blocks |
-| `canary_not_executed` | pass/fail | Failure blocks |
-| `offline_canary_pure` | pass/fail | Failure blocks |
-| `docs_operator_sections` | pass/fail | Failure blocks |
-| `docs_migration_phrases` | pass/fail | Failure blocks |
-| `ruff` | pass/fail/availability-skip | Runnable failure blocks; unavailable records skip reason |
-| `pyright` | pass/fail/availability-skip | Runnable failure blocks; unavailable records skip reason |
-| `live_neo4j_test11` | pass/fail/availability-skip | Runnable failure blocks; unavailable records skip reason |
-| `ollama_e2e` | pass/fail/availability-skip | Runnable failure blocks; unavailable records skip reason |
+Initial output always remains incomplete/not ready because post-execution audits are pending.
 
-`ready_to_regenerate_canary=true` requires every runnable required check to pass, every skip to have an availability reason, no unexplained internal failure, no blocking review/security/goal gap, `canary_executed=false`, current `oracle-catalog-v2` query/mutation false, and `clear_graph_called=false`.
+## Post-Execution Audit Contract
 
----
+| Artifact | Exact accepted state | Readiness effect |
+|----------|----------------------|------------------|
+| `05-REVIEW.md` | `status: clean`; blocker count 0 | otherwise block |
+| `05-VALIDATION.md` | `status: validated`; `nyquist_compliant: true`; 37/37 probes resolved | otherwise block |
+| `05-SECURITY.md` | `status: verified`; `threats_open: 0`; no high/critical accepted threat | otherwise block |
+| `05-VERIFICATION.md` | `status: passed`; `score: 5/5 must-haves verified`; `behavior_unverified: 0`; `requirements_verified: 17/17`; `gaps: []` | otherwise block |
+
+Final readiness is the fail-closed AND of complete initial classifications, exact audit states, safety invariants, final HEAD/digest binding, coherent atomic outputs, 17 requirement IDs, and 37 probe dispositions. Missing/malformed/stale/duplicate evidence blocks. No CLI override.
 
 ## Manual-Only Verifications
 
-None. Cleanup/deletion is intentionally not performed; it requires a later explicit confirmation. All Phase 5 readiness claims must have automated or artifact evidence.
-
----
+None. Cleanup/deletion is intentionally absent and needs later explicit confirmation. Phase 6 remains separate.
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies.
-- [ ] Sampling continuity: no three consecutive tasks without automated verification.
-- [ ] Wave 0 covers every missing reference above.
-- [ ] No watch-mode flags.
-- [ ] Offline feedback latency <30 seconds.
-- [ ] Live/Ollama checks report availability-based skip rather than pass when unavailable.
-- [ ] `canary_executed=false`; no current `oracle-catalog-v2` access.
+- [ ] Every task has an automated predicate.
+- [ ] RED precedes GREEN for all new behavior.
+- [ ] Exactly 37 probes retain concrete automated predicates.
+- [ ] Same-wave plan file ownership has no overlap.
+- [ ] Live/Ollama skip is availability-based, reasoned, never pass.
+- [ ] `canary_executed=false`; current protected access false; historical `a67789a` preserved.
 - [ ] `nyquist_compliant: true` set only by post-execution validation.
 
-**Approval:** pending
+**Approval:** pending independent checker

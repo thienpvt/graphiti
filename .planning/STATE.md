@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-status: ready_to_plan
-stopped_at: Phase 5 context gathered
-last_updated: "2026-07-18T20:56:20.235Z"
+status: ready_to_execute
+stopped_at: Phase 5 plans verified; execution not started
+last_updated: "2026-07-18T22:09:58.331Z"
 progress:
   total_phases: 7
   completed_phases: 6
-  total_plans: 37
+  total_plans: 44
   completed_plans: 37
   percent: 86
 current_phase: 05
 current_phase_name: Verification, Security, Compatibility, and Migration Docs
 last_activity: 2026-07-19
-last_activity_desc: Phase 4 complete 6/6; tracking reconciled; Phase 5 next/unblocked
+last_activity_desc: Phase 5 planning complete; 7 plans verified across 6 waves
 ---
 
 # Project State
@@ -28,14 +28,14 @@ See: `.planning/PROJECT.md`
 
 ## Current Position
 
-Phase 4 complete. Tracking reconciled to artifact truth. Phase 5 next/unblocked; plans not started.
+Phase 5 planned and independently verified; execution not started.
 
-- Phase 4 plans: 6/6 Complete
-- Goal verification: 5/5 truths; requirements_verified 21/21; status passed
-- Nyquist: 21/21 requirements; 42/42 edge probes
-- Security: closed 11/11; review clean
-- Gate: `manifest_verification=true`; `ready_for_phase_5=true`; `canary_executed=false`
-- Historical `a67789a` two-axis safety retained; current v2 ban unchanged
+- Phase 5 plans: 0/7 Complete across 6 waves
+- Planning coverage: 17/17 requirements; D-01..D-23; 37/37 edge probes
+- Plan checker: passed after one correction iteration
+- Phase 4 gate remains `manifest_verification=true`; `ready_for_phase_5=true`
+- `canary_executed=false`; historical `a67789a` retained; current v2 ban unchanged
+- Plan 05-07 owns post-review/Nyquist/ASVS/goal closure; Phase 6 remains separate
 
 ## Performance Metrics
 
@@ -49,7 +49,7 @@ Phase 4 complete. Tracking reconciled to artifact truth. Phase 5 next/unblocked;
 | Phase 3A | 6/6 | Complete |
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
-| Phase 5 | TBD | Next / unblocked; not started |
+| Phase 5 | 0/7 | Planned and independently verified; ready to execute |
 
 ## Accumulated Context
 
@@ -68,10 +68,11 @@ Phase 4 complete. Tracking reconciled to artifact truth. Phase 5 next/unblocked;
 
 ### Pending Todos
 
-1. Plan Phase 5 final readiness work without canary (`/gsd-plan-phase 5`).
-2. Execute Phase 5 final readiness work without canary.
-3. Run local Ollama E2E before milestone cleanup.
-4. Require explicit confirmation before cleanup/deletion.
+1. Execute Phase 5 plans 05-01..05-06 without canary.
+2. Run deep review/fix, Nyquist validation, ASVS security audit, and goal verification.
+3. Execute 05-07 final closure only after all four audits are green.
+4. Run local Ollama E2E before closure; classify unavailable infrastructure as skip with reason.
+5. Require explicit confirmation before cleanup/deletion.
 
 ### Blockers/Concerns
 
@@ -100,8 +101,8 @@ Phase 4 complete. Tracking reconciled to artifact truth. Phase 5 next/unblocked;
 
 ## Session Continuity
 
-**Last session:** 2026-07-18T20:56:20.228Z
-**Resume file:** .planning/phases/05-verification-security-compatibility-and-migration-docs/05-CONTEXT.md
+**Last session:** 2026-07-18T22:09:58.331Z
+**Resume file:** .planning/phases/05-verification-security-compatibility-and-migration-docs/05-01-PLAN.md
 
-Stopped at: Phase 5 context gathered
-Next: `/gsd-plan-phase 5`.
+Stopped at: Phase 5 plans verified; execution not started
+Next: execute Phase 5 plans 05-01..05-06, run post-execution audits, then execute 05-07 closure. Stop before Phase 6.

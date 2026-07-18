@@ -258,12 +258,38 @@ Plans:
 **Success Criteria** (what must be TRUE):
 
   1. Deterministic catalog paths never invoke prohibited Graphiti tools, LLM extraction, async queue ingestion, implicit endpoints, or communities; conflicts fail closed; logs stay free of payloads, source text, credentials, auth headers, raw tokens, and unsafe exceptions
-  2. All 14 legacy MCP tools retain names and public contracts; seven catalog tool names remain registered; every read/write stays `group_id`-isolated on Neo4j 5.26+ only
+  2. All 14 legacy MCP tools retain canonical public contracts; all 14 catalog tools remain a separately asserted exact set; the union remains exactly 28; every read/write stays `group_id`-isolated on Neo4j 5.26+ only
   3. Live Neo4j tests on `oracle-catalog-tool-test` prove atomic rollback, search interop, exact evidence/manifest behavior, control labels excluded from entity search, and zero writes outside the test group
   4. Operator and migration docs cover tool inventory, catalog-v2 grammar/map/hash/capabilities/prepare/evidence/manifest/gates/errors/config, obsolete pre-hardening identities/hashes, no automatic migration, and offline canary-artifact regeneration without running the canary
-  5. Final structured report sets `canary_executed=false` and sets `ready_to_regenerate_canary=true` only after every stated available gate reports pass/fail/skip truthfully
+  5. Final structured report sets `canary_executed=false` and sets `ready_to_regenerate_canary=true` only after truthful execution classifications plus post-execution code review, Nyquist, ASVS security, and goal verification are green with no blockers
 
-**Plans**: TBD
+**Plans**: 7 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 05-01-PLAN.md — RED scaffolds: security/Cypher/endpoint matrix, compatibility baseline, offline canary, live/Ollama, fail-closed initial/final ledgers
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 05-02-PLAN.md — Security prohibition, fixed Cypher identifiers, endpoint no-create, log-scrub, and fail-closed matrix GREEN
+- [ ] 05-03-PLAN.md — Complete hardened canary artifact inventory and offline builder/runner migration; historical bytes preserved; runner never executed
+
+**Wave 3** *(blocked on Wave 1+2 security)*
+
+- [ ] 05-04-PLAN.md — Canonical 14-legacy contracts + separate exact 14-catalog set + group isolation + live TEST-11
+
+**Wave 4** *(blocked on Wave 1+ offline canary + compatibility)*
+
+- [ ] 05-05-PLAN.md — Operator reference + migration guide (DOCS-01..06) structural gates
+
+**Wave 5** *(blocked on Waves 1–4)*
+
+- [ ] 05-06-PLAN.md — Ollama E2E + initial TEST-12 ledger/REPT-01 package; readiness remains false pending audits
+
+**Wave 6** *(post-execution closure; blocked on Wave 5 plus named audits)*
+
+- [ ] 05-07-PLAN.md — Consume review/Nyquist/ASVS/goal artifacts, atomically bind final proof, then conditionally close Phase 5 tracking
 
 ## Progress
 
@@ -280,7 +306,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3A. Immutable Prepare/Commit Control Plane | 6/6 | Complete; ready_for_phase_3b=true | 2026-07-18 |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
-| Phase 5. Verification, Security, Compatibility, and Migration Docs | 0/TBD | Not started; Phase 4 dependency satisfied | - |
+| Phase 5. Verification, Security, Compatibility, and Migration Docs | 0/7 | Planned; not started | - |
 
 ## Coverage
 
