@@ -219,7 +219,7 @@ Plans:
   4. Separate read/write feature gates keep capabilities and catalog diagnostics usable when writes are disabled; read paths never initialize/repair schema or open write transactions
   5. Explicit-key verification remains available; gate/registration tests prove read tools work while writes are off
 
-**Plans**: 5/6 plans executed
+**Plans**: 6/6 plans executed
 
 **Wave 1**
 
@@ -243,7 +243,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5)*
 
-- [ ] 04-06-PLAN.md — Additive 28-tool registration, final capability flip, and fail-closed Phase 4 gate
+- [x] 04-06-PLAN.md — Additive 28-tool registration, final capability flip, and fail-closed Phase 4 gate
 
 **Research**: complete (`04-RESEARCH.md`) — manifest reassembly, pagination, verification authority, split gates
 **Planning gate**: passed after one revision; 21/21 requirements, D-01–D-31, 42/42 edge probes, 31/31 decision coverage
