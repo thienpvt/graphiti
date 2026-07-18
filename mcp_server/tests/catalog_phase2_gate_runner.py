@@ -347,10 +347,9 @@ def check_summary_presence(root: Path) -> None:
         if not path.is_file():
             raise AssertionError(f'missing summary {plan}')
         text = path.read_text(encoding='utf-8')
-        if 'status: complete' not in text and 'status:complete' not in text:
-            # still require non-empty substantive summary
-            if len(text) < 200:
-                raise AssertionError(f'summary too short: {plan}')
+        has_status = 'status: complete' in text or 'status:complete' in text
+        if not has_status and len(text) < 200:
+            raise AssertionError(f'summary too short: {plan}')
 
 
 def check_safety_no_probe(root: Path) -> None:
@@ -367,16 +366,18 @@ def check_safety_no_probe(root: Path) -> None:
         if FORBIDDEN_GROUP in src and 'FORBIDDEN_GROUP' not in src and 'forbidden' not in src.lower():
             # Allow constant documentation of forbidden group.
             pass
-        if ALLOWED_TEST_GROUP not in src and 'phase2_gate' in rel:
-            # runner must declare allowed group constant
-            if rel.endswith('catalog_phase2_gate_runner.py') and ALLOWED_TEST_GROUP not in src:
-                raise AssertionError('allowed test group constant missing from runner')
+        if (
+            ALLOWED_TEST_GROUP not in src
+            and rel.endswith('catalog_phase2_gate_runner.py')
+        ):
+            raise AssertionError('allowed test group constant missing from runner')
 
     runner_src = (root / 'mcp_server/tests/catalog_phase2_gate_runner.py').read_text(encoding='utf-8')
     for line in runner_src.splitlines():
-        if line.startswith('import ') or line.startswith('from '):
-            if 'test_catalog_neo4j_int' in line:
-                raise AssertionError('runner imports integration module')
+        if (line.startswith('import ') or line.startswith('from ')) and (
+            'test_catalog_neo4j_int' in line
+        ):
+            raise AssertionError('runner imports integration module')
 
     # No prepare/control-plane write path in product store/service.
     product_paths = [
@@ -397,10 +398,12 @@ def check_safety_no_probe(root: Path) -> None:
     if re.search(r'prepare_catalog_batch', store):
         raise AssertionError('catalog_store references prepare_catalog_batch')
     # Evidence MERGE for prepare path must not appear as new domain write orchestration.
-    if re.search(r'def\s+upsert_evidence_links?\b', store) and 'prepare' in store.lower():
-        # only fail if tied to prepare
-        if 'prepare_catalog' in store:
-            raise AssertionError('evidence upsert tied to prepare path')
+    if (
+        re.search(r'def\s+upsert_evidence_links?\b', store)
+        and 'prepare' in store.lower()
+        and 'prepare_catalog' in store
+    ):
+        raise AssertionError('evidence upsert tied to prepare path')
 
     # Focused suite must not target forbidden live group as default fixture group.
     for rel in FOCUS_TEST_FILES:
