@@ -248,22 +248,22 @@
     }
   ],
   "catalog_neo4j_int": "skip",
-  "content_digest": "1a74c6555ae8fef158674c119d597ba031b077efeb982d9efdaf97aec9167582",
+  "content_digest": "1d067c50eb56a0575303a6fd1364d45016e6d2ac362e7cd805e8beb4798b4e00",
   "content_sha256_map": {
     ".planning/phases/01-strict-contracts-and-catalog-v2-identity/01-09-SUMMARY.md": "700bd753c0be17721ac39f5053fb3e54df0d2f60fe30afef65bddd211e09c2be",
     ".planning/phases/01-strict-contracts-and-catalog-v2-identity/01-10-SUMMARY.md": "95a79c6ac802fb1b66e6aab9caa3e93777b09ce2bc58f60a87322a56d79279a6",
     ".planning/phases/01-strict-contracts-and-catalog-v2-identity/01-EDGE-PROBE.json": "114b7a54b2fcfd686f7a389378f2837110eaa9a3a235fa16126f41895fab3f20",
-    ".planning/phases/01-strict-contracts-and-catalog-v2-identity/01-PHASE1-GATE.md": "70f98855e27f12f3517f05b2877c18ec35437c93e839d25ba70e0a4782b2f18e",
+    ".planning/phases/01-strict-contracts-and-catalog-v2-identity/01-PHASE1-GATE.md": "4955372fc4476160d3c6024ec7e5e36d645db457e49d2af756fa1ecd2cb4648d",
     ".planning/phases/01-strict-contracts-and-catalog-v2-identity/01-REVIEW-GAPS.md": "0c93e1c9ee80328bd7dd4c4b51e77a3fc42e6cda53d7495a4a7faa922a66e4e0",
     ".planning/phases/01-strict-contracts-and-catalog-v2-identity/01-SECURITY.md": "e09fd32750ce3b5a868cff9008e00acdb85b111aab8cf294e8d047a6b64911f8",
     ".planning/phases/01-strict-contracts-and-catalog-v2-identity/01-VALIDATION.md": "e4834011eb94c51bcd543b8e7892785a82a06aef0dd0fb6110443542c409a599"
   },
-  "evaluated_head": "acaea8edebcea6b54213a63abd2b3c4e5a9c69d0",
+  "evaluated_head": "455dc14dcc00a5e5e1d9c3dfff0f23b49bab534c",
   "independent_code_review": "pending",
   "independent_goal_verification": "pending",
   "independent_nyquist_audit": "pending",
   "independent_security_audit": "pending",
-  "ledger_sha256": "c132d247e663ac0395de7b082b549d0c2386595b490785932c6e667b56751a5a",
+  "ledger_sha256": "e6d3c4af7a8eaee5c1744034259229a59e7941da1c17b2ef9940fcfa94bf3f4f",
   "local_gate_pass": true,
   "notes": {
     "forbidden_group": "oracle-catalog-v2",
@@ -339,7 +339,7 @@
       "mandatory": true,
       "status": "pass",
       "stderr": "",
-      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 537 items\n\nmcp_server\\tests\\test_catalog_models.py ................................ [  5%]\n........................................................................ [ 19%]\n........................................................................ [ 32%]\n........................................................................ [ 46%]\n.....                                                                    [ 47%]\nmcp_server\\tests\\test_catalog_identity.py ............................   [ 52%]\nmcp_server\\tests\\test_catalog_service.py ............................... [ 58%]\n........................................................................ [ 71%]\n........................................................................ [ 84%]\n......                                                                   [ 86%]\nmcp_server\\tests\\test_catalog_store_unit.py ............................ [ 91%]\n..................................                                       [ 97%]\nmcp_server\\tests\\test_catalog_edge_probe.py .........                    [ 99%]\nmcp_server\\tests\\test_catalog_neo4j_fixtures.py ....                     [100%]\n\n============================= 537 passed in 2.47s =============================\n"
+      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\mcp_server\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function\ncollected 537 items\n\nmcp_server\\tests\\test_catalog_models.py ................................ [  5%]\n........................................................................ [ 19%]\n........................................................................ [ 32%]\n........................................................................ [ 46%]\n.....                                                                    [ 47%]\nmcp_server\\tests\\test_catalog_identity.py ............................   [ 52%]\nmcp_server\\tests\\test_catalog_service.py ............................... [ 58%]\n........................................................................ [ 71%]\n........................................................................ [ 84%]\n......                                                                   [ 86%]\nmcp_server\\tests\\test_catalog_store_unit.py ............................ [ 91%]\n..................................                                       [ 97%]\nmcp_server\\tests\\test_catalog_edge_probe.py .........                    [ 99%]\nmcp_server\\tests\\test_catalog_neo4j_fixtures.py ....                     [100%]\n\n============================= 537 passed in 2.45s =============================\n"
     },
     {
       "argv": [
