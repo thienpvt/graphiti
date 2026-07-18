@@ -18,6 +18,7 @@ from config.schema import CatalogConfig
 from models.catalog_batch import GetCatalogIngestStatusRequest, UpsertCatalogBatchRequest
 from models.catalog_common import (
     IDENTITY_SCHEMA_VERSION,
+    MAX_EVIDENCE_LENGTH,
     PLAN_STATE_COMMITTED,
     PLAN_STATE_COMMITTING,
     PLAN_STATE_DISCARDED,
@@ -29,7 +30,10 @@ from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest
 from models.catalog_entities import (
     CatalogEntityItem,
     GetCatalogBatchManifestRequest,
+    GetCatalogEvidenceRequest,
+    ResolveEdgeRef,
     ResolveEntityRef,
+    ResolveTypedEdgesRequest,
     ResolveTypedEntitiesRequest,
     UpsertTypedEntitiesRequest,
     VerifyCatalogBatchRequest,
@@ -48,21 +52,25 @@ from models.catalog_responses import (
     CatalogItemResult,
     CatalogWriteResponse,
     CommitPreparedCatalogBatchResponse,
+    CompactEvidenceLink,
     CompactManifestEdgeMember,
     CompactManifestEntityMember,
     CompactManifestEvidenceLinkMember,
     CompactManifestSourceMember,
     DiscardPreparedCatalogBatchResponse,
     GetCatalogBatchManifestResponse,
+    GetCatalogEvidenceResponse,
     PrepareCatalogBatchResponse,
+    ResolveEdgeResult,
     ResolveEntityResult,
+    ResolveTypedEdgesResponse,
     ResolveTypedEntitiesResponse,
     VerifyCatalogBatchResponse,
     VerifyEdgeSection,
     VerifyEntitySection,
     VerifyEvidenceSection,
 )
-from models.catalog_topology import validate_edge_endpoint_pair
+from models.catalog_topology import is_edge_endpoint_pair_allowed, validate_edge_endpoint_pair
 from services.catalog_capabilities import HARD_MAX_PAGE_SIZE
 from services.catalog_identity import (
     CANONICALIZATION_VERSION,
@@ -1397,6 +1405,399 @@ class CatalogService:
             sum(1 for r in results if r.found),
         )
         return ResolveTypedEntitiesResponse(group_id=request.group_id, results=results)
+
+    async def resolve_typed_edges(
+        self,
+        *,
+        client: Any,
+        request: ResolveTypedEdgesRequest,
+    ) -> ResolveTypedEdgesResponse:
+        """Read-only resolve of typed catalog edges (RESE-01..03).
+
+        Never opens a write transaction, calls the embedder, or repairs edges.
+        """
+        refs = list(request.edges)
+
+        gate = self._read_gate(client, group_id=request.group_id, item_count=len(refs))
+        if gate is not None:
+            code, message = gate
+            results = [
+                ResolveEdgeResult(
+                    index=i,
+                    edge_type=ref.edge_type,
+                    edge_key=ref.edge_key,
+                    status='error',
+                    found=False,
+                    error_code=code,
+                    error_message=message,
+                    anomalies=[code.value if hasattr(code, 'value') else str(code)],
+                )
+                for i, ref in enumerate(refs)
+            ]
+            logger.info(
+                'catalog resolve_typed_edges gated count=%s code=%s',
+                len(refs),
+                code,
+            )
+            return ResolveTypedEdgesResponse(group_id=request.group_id, results=results)
+
+        namespace = self._namespace()
+        assert namespace is not None
+
+        edge_keys = [ref.edge_key for ref in refs]
+        try:
+            rows = await self._store.match_edges_for_resolve(
+                client.driver,
+                group_id=request.group_id,
+                edge_keys=edge_keys,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog resolve_typed_edges read_failed count=%s reason=%s',
+                len(refs),
+                type(exc).__name__,
+            )
+            return ResolveTypedEdgesResponse(
+                group_id=request.group_id,
+                results=[
+                    ResolveEdgeResult(
+                        index=i,
+                        edge_type=ref.edge_type,
+                        edge_key=ref.edge_key,
+                        status='error',
+                        found=False,
+                        error_code=CatalogErrorCode.internal_error,
+                        error_message='resolve read failed',
+                        anomalies=['internal_error'],
+                    )
+                    for i, ref in enumerate(refs)
+                ],
+            )
+
+        by_key: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            key = row.get('edge_key')
+            if not key:
+                continue
+            by_key.setdefault(str(key), []).append(row)
+
+        results: list[ResolveEdgeResult] = []
+        for i, ref in enumerate(refs):
+            expected_uuid = catalog_edge_uuid(
+                namespace, request.group_id, ref.edge_type, ref.edge_key
+            )
+            matches = by_key.get(ref.edge_key, [])
+            results.append(
+                self._analyze_resolve_edge_item(
+                    index=i,
+                    ref=ref,
+                    expected_uuid=expected_uuid,
+                    matches=matches,
+                )
+            )
+
+        logger.info(
+            'catalog resolve_typed_edges count=%s found=%s',
+            len(refs),
+            sum(1 for r in results if r.found),
+        )
+        return ResolveTypedEdgesResponse(group_id=request.group_id, results=results)
+
+    def _endpoint_entity_type(self, labels: Any) -> str | None:
+        if isinstance(labels, str):
+            labels = [labels]
+        if not labels:
+            return None
+        custom = self._custom_labels(list(labels))
+        if not custom:
+            return None
+        return custom[0]
+
+    def _analyze_resolve_edge_item(
+        self,
+        *,
+        index: int,
+        ref: ResolveEdgeRef,
+        expected_uuid: str,
+        matches: list[dict[str, Any]],
+    ) -> ResolveEdgeResult:
+        """Anomaly taxonomy without repair (RESE-02)."""
+        if not matches:
+            return ResolveEdgeResult(
+                index=index,
+                edge_type=ref.edge_type,
+                edge_key=ref.edge_key,
+                status='missing',
+                found=False,
+                anomalies=['missing'],
+            )
+
+        anomalies: list[str] = []
+        if len(matches) > 1:
+            anomalies.append('duplicate_edge_key')
+
+        # Prefer exact expected UUID primary, else first match.
+        primary: dict[str, Any] | None = None
+        for row in matches:
+            if str(row.get('uuid') or '') == expected_uuid:
+                primary = row
+                break
+        if primary is None:
+            primary = matches[0]
+
+        duplicate_uuids: list[str] = []
+        for row in matches:
+            u = str(row.get('uuid') or '')
+            if u and u != str(primary.get('uuid') or ''):
+                duplicate_uuids.append(u)
+
+        live_type = primary.get('edge_type') or primary.get('name')
+        if not live_type or str(live_type) != ref.edge_type:
+            anomalies.append('edge_type_mismatch')
+        if any(str(row.get('uuid') or '') != expected_uuid for row in matches):
+            anomalies.append('uuid_mismatch')
+        if any(row.get('source_uuid') is None or row.get('target_uuid') is None for row in matches):
+            anomalies.append('endpoint_mismatch')
+        if any(not row.get('has_fact_embedding') for row in matches):
+            anomalies.append('missing_embedding')
+        # Null live content_sha256 is observation anomaly (Q2); report, never repair.
+        if any(row.get('content_sha256') in (None, '') for row in matches):
+            anomalies.append('missing_content_hash')
+
+        source_labels = primary.get('source_labels') or []
+        target_labels = primary.get('target_labels') or []
+        source_entity_type = self._endpoint_entity_type(source_labels)
+        target_entity_type = self._endpoint_entity_type(target_labels)
+        if (
+            source_entity_type is not None
+            and target_entity_type is not None
+            and not is_edge_endpoint_pair_allowed(
+                ref.edge_type, source_entity_type, target_entity_type
+            )
+        ):
+            anomalies.append('endpoint_pair_violation')
+
+        seen_a: set[str] = set()
+        ordered: list[str] = []
+        for a in anomalies:
+            if a not in seen_a:
+                seen_a.add(a)
+                ordered.append(a)
+
+        verified = str(live_type) if live_type else None
+        if verified == ref.edge_type and 'edge_type_mismatch' not in ordered:
+            status = 'found'
+        elif verified is not None:
+            status = 'edge_type_mismatch' if 'edge_type_mismatch' in ordered else 'found'
+        else:
+            status = 'found' if ordered else 'found'
+
+        return ResolveEdgeResult(
+            index=index,
+            edge_type=ref.edge_type,
+            edge_key=ref.edge_key,
+            status=status,
+            found=True,
+            uuid=str(primary.get('uuid') or '') or None,
+            verified_type=verified,
+            source_uuid=str(primary.get('source_uuid') or '') or None,
+            target_uuid=str(primary.get('target_uuid') or '') or None,
+            source_graph_key=(
+                str(primary.get('source_graph_key') or primary.get('source_name') or '') or None
+            ),
+            target_graph_key=(
+                str(primary.get('target_graph_key') or primary.get('target_name') or '') or None
+            ),
+            source_entity_type=source_entity_type,
+            target_entity_type=target_entity_type,
+            content_sha256=(
+                str(primary['content_sha256'])
+                if primary.get('content_sha256') is not None
+                else None
+            ),
+            has_fact_embedding=bool(primary.get('has_fact_embedding')),
+            duplicate_uuids=duplicate_uuids,
+            anomalies=ordered,
+        )
+
+    async def get_catalog_evidence(
+        self,
+        *,
+        client: Any,
+        request: GetCatalogEvidenceRequest,
+    ) -> GetCatalogEvidenceResponse:
+        """Read-only compact evidence page for one entity/edge target (EVID-12).
+
+        No embedder, schema init, write tx, or raw source dump by default.
+        """
+        group_id = request.group_id
+        configured_max = int(getattr(self.catalog_config, 'max_page_size', 100) or 100)
+        if configured_max < 1:
+            configured_max = 100
+        effective_max = min(configured_max, HARD_MAX_PAGE_SIZE)
+        limit = request.limit if request.limit is not None else effective_max
+        offset = int(request.offset)
+
+        target_kind: str
+        target_graph_key: str | None = None
+        target_edge_key: str | None = None
+        target_entity_type: str | None = None
+        target_edge_type: str | None = None
+        if request.entity_target is not None:
+            target_kind = 'entity'
+            target_graph_key = request.entity_target.graph_key
+            target_entity_type = request.entity_target.entity_type
+        else:
+            assert request.edge_target is not None
+            target_kind = 'edge'
+            target_edge_key = request.edge_target.edge_key
+            target_edge_type = request.edge_target.edge_type
+
+        def _empty(
+            *,
+            found_target: bool = False,
+            target_uuid: str | None = None,
+            error_code: CatalogErrorCode | None = None,
+            error_message: str | None = None,
+            limit_val: int = 0,
+            total: int = 0,
+        ) -> GetCatalogEvidenceResponse:
+            return GetCatalogEvidenceResponse(
+                group_id=group_id,
+                target_kind=target_kind,
+                target_uuid=target_uuid,
+                target_graph_key=target_graph_key,
+                target_edge_key=target_edge_key,
+                found_target=found_target,
+                offset=offset,
+                limit=limit_val,
+                total=total,
+                error_code=error_code,
+                error_message=error_message,
+            )
+
+        if limit > HARD_MAX_PAGE_SIZE:
+            return _empty(
+                error_code=CatalogErrorCode.validation_error,
+                error_message=f'page size exceeds hard max ({HARD_MAX_PAGE_SIZE})',
+                limit_val=limit,
+            )
+        if limit > effective_max:
+            return _empty(
+                error_code=CatalogErrorCode.validation_error,
+                error_message=f'page size exceeds configured max ({effective_max})',
+                limit_val=limit,
+            )
+        if offset < 0 or limit < 1:
+            return _empty(
+                error_code=CatalogErrorCode.validation_error,
+                error_message='invalid pagination',
+                limit_val=limit,
+            )
+
+        gate = self._read_gate(client, group_id=group_id, item_count=1)
+        if gate is not None:
+            code, message = gate
+            logger.info(
+                'catalog get_catalog_evidence gated code=%s',
+                code,
+            )
+            return _empty(error_code=code, error_message=message, limit_val=limit)
+
+        namespace = self._namespace()
+        assert namespace is not None
+
+        if target_kind == 'entity':
+            assert target_entity_type is not None and target_graph_key is not None
+            target_uuid = catalog_entity_uuid(
+                namespace, group_id, target_entity_type, target_graph_key
+            )
+        else:
+            assert target_edge_type is not None and target_edge_key is not None
+            target_uuid = catalog_edge_uuid(namespace, group_id, target_edge_type, target_edge_key)
+
+        try:
+            rows = await self._store.match_evidence_links_for_target(
+                client.driver,
+                group_id=group_id,
+                target_kind=target_kind,
+                target_uuid=target_uuid,
+            )
+        except Exception as exc:
+            logger.error(
+                'catalog get_catalog_evidence read_failed reason=%s',
+                type(exc).__name__,
+            )
+            return _empty(
+                target_uuid=target_uuid,
+                found_target=False,
+                error_code=CatalogErrorCode.internal_error,
+                error_message='evidence read failed',
+                limit_val=limit,
+            )
+
+        # Stable order by uuid already from store; page in service.
+        # Convert to dict list for page_members.
+        items = [dict(r) for r in rows]
+        try:
+            page, total = page_members(
+                items, offset=offset, limit=limit, hard_max=HARD_MAX_PAGE_SIZE
+            )
+        except ValueError as exc:
+            return _empty(
+                target_uuid=target_uuid,
+                found_target=True,
+                error_code=CatalogErrorCode.validation_error,
+                error_message=str(exc)[:512],
+                limit_val=limit,
+            )
+
+        links: list[CompactEvidenceLink] = []
+        for row in page:
+            excerpt: str | None = None
+            if request.include_excerpts:
+                raw_ex = row.get('excerpt')
+                if isinstance(raw_ex, str):
+                    excerpt = raw_ex[:MAX_EVIDENCE_LENGTH]
+            links.append(
+                CompactEvidenceLink(
+                    uuid=str(row.get('uuid') or ''),
+                    link_key=str(row.get('link_key') or ''),
+                    content_sha256=(
+                        str(row['content_sha256'])
+                        if row.get('content_sha256') is not None
+                        else None
+                    ),
+                    source_uuid=str(row.get('source_uuid') or '') or None,
+                    target_kind=str(row.get('target_kind') or '') or None,
+                    target_uuid=str(row.get('target_uuid') or '') or None,
+                    evidence_kind=str(row.get('evidence_kind') or '') or None,
+                    extractor_name=str(row.get('extractor_name') or '') or None,
+                    extractor_version=str(row.get('extractor_version') or '') or None,
+                    rule_id=str(row.get('rule_id') or '') or None,
+                    confidence=row.get('confidence'),
+                    excerpt=excerpt,
+                )
+            )
+
+        logger.info(
+            'catalog get_catalog_evidence count=%s total=%s include_excerpts=%s',
+            len(links),
+            total,
+            request.include_excerpts,
+        )
+        return GetCatalogEvidenceResponse(
+            group_id=group_id,
+            target_kind=target_kind,
+            target_uuid=target_uuid,
+            target_graph_key=target_graph_key,
+            target_edge_key=target_edge_key,
+            found_target=True,
+            offset=offset,
+            limit=limit,
+            total=total,
+            links=links,
+        )
 
     def _analyze_resolve_item(
         self,

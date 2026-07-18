@@ -665,6 +665,104 @@ def test_verify_edge_queries_return_physical_identity_and_provenance_is_group_sc
     assert 'n.group_id = $group_id' in provenance
 
 
+def test_build_match_edges_for_resolve_cypher_returns_content_sha256_and_is_read_only():
+    """RESE-01/Q2: resolve MATCH always RETURNs content_sha256; no write verbs."""
+    store = CatalogNeo4jStore()
+    cypher = store.build_match_edges_for_resolve_cypher()
+    upper = cypher.upper()
+    assert 'MATCH' in upper
+    assert 'e.group_id = $group_id' in cypher or 'e.group_id = $group_id' in cypher.replace(
+        '\n', ' '
+    )
+    assert '$group_id' in cypher
+    assert '$edge_keys' in cypher
+    assert 'e.content_sha256 AS content_sha256' in cypher
+    assert 'e.fact_embedding IS NOT NULL AS has_fact_embedding' in cypher
+    assert 'CREATE' not in upper.replace('CREATED_AT', '')
+    assert 'MERGE' not in upper
+    assert 'SET ' not in cypher
+    assert 'DELETE' not in upper
+    assert 'DETACH' not in upper
+
+
+@pytest.mark.asyncio
+async def test_match_edges_for_resolve_uses_read_many_only():
+    store = CatalogNeo4jStore()
+    calls: list[tuple[str, dict]] = []
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = kwargs
+            calls.append((cypher, dict(params or {})))
+            return ([], None, [])
+
+    rows = await store.match_edges_for_resolve(_Exec(), group_id=GROUP, edge_keys=['EDGE::K'])
+    assert rows == []
+    assert len(calls) == 1
+    cypher, params = calls[0]
+    assert params['group_id'] == GROUP
+    assert params['edge_keys'] == ['EDGE::K']
+    assert 'MERGE' not in cypher.upper()
+    assert await store.match_edges_for_resolve(_Exec(), group_id=GROUP, edge_keys=[]) == []
+
+
+def test_build_match_evidence_links_for_target_cypher_group_scoped_read_only():
+    """EVID-12: fixed CatalogEvidenceLink MATCH; ORDER BY uuid; no write verbs."""
+    store = CatalogNeo4jStore()
+    cypher = store.build_match_evidence_links_for_target_cypher()
+    upper = cypher.upper()
+    assert 'MATCH (n:CatalogEvidenceLink)' in cypher.replace('\n', ' ').replace('  ', ' ') or (
+        'CatalogEvidenceLink' in cypher and 'MATCH' in upper
+    )
+    assert '$group_id' in cypher
+    assert '$target_kind' in cypher
+    assert '$target_uuid' in cypher
+    assert 'ORDER BY' in upper
+    assert 'n.uuid' in cypher
+    assert 'CREATE' not in upper.replace('CREATED_AT', '')
+    assert 'MERGE' not in upper
+    assert 'SET ' not in cypher
+    assert 'DELETE' not in upper
+
+
+@pytest.mark.asyncio
+async def test_match_evidence_links_for_target_uses_read_many_only():
+    store = CatalogNeo4jStore()
+    calls: list[dict] = []
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = cypher, kwargs
+            calls.append(dict(params or {}))
+            return (
+                [
+                    {
+                        'uuid': 'u1',
+                        'link_key': 'L1',
+                        'content_sha256': 'a' * 64,
+                        'target_kind': 'entity',
+                        'target_uuid': 't1',
+                    }
+                ],
+                None,
+                [],
+            )
+
+    rows = await store.match_evidence_links_for_target(
+        _Exec(), group_id=GROUP, target_kind='entity', target_uuid='t1'
+    )
+    assert len(rows) == 1
+    assert calls[0]['group_id'] == GROUP
+    assert calls[0]['target_kind'] == 'entity'
+    assert calls[0]['target_uuid'] == 't1'
+    assert (
+        await store.match_evidence_links_for_target(
+            _Exec(), group_id=GROUP, target_kind='bogus', target_uuid='t1'
+        )
+        == []
+    )
+
+
 @pytest.mark.asyncio
 async def test_verify_edge_overlap_dedup_uses_element_id_and_preserves_twins():
     store = CatalogNeo4jStore()
@@ -1567,6 +1665,4 @@ async def test_load_manifest_chunks_with_payload_requires_ids():
             object(), manifest_uuid='', group_id='oracle-catalog-tool-test'
         )
     with pytest.raises(CatalogStoreError):
-        await store.load_manifest_chunks_with_payload(
-            object(), manifest_uuid='m1', group_id=''
-        )
+        await store.load_manifest_chunks_with_payload(object(), manifest_uuid='m1', group_id='')
