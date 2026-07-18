@@ -33,8 +33,8 @@ from services.catalog_identity import CANONICALIZATION_VERSION, CATALOG_SCHEMA_V
 Connectivity = Literal['ok', 'error', 'unknown']
 IndexReadiness = Literal['ready', 'unknown', 'n/a']
 
-# Real plan hard ceilings (PLAN-08 / D-29 partial). features.prepare_commit stays false
-# until 03A-06 live-proof gate; pagination remains explicitly zero.
+# Real plan hard ceilings (PLAN-08 / D-29). features.prepare_commit flips true only after
+# 03A-06 live immutable proof on final HEAD; pagination remains explicitly zero.
 HARD_MAX_PREPARED_PAYLOAD_BYTES = _COMMON_HARD_MAX_PREPARED_PAYLOAD_BYTES
 HARD_MAX_ACTIVE_PLANS = HARD_MAX_ACTIVE_PLANS_PER_GROUP
 HARD_PLAN_TTL_SECONDS = _COMMON_HARD_PLAN_TTL_SECONDS
@@ -144,8 +144,8 @@ def build_catalog_capabilities(
         embeddings=embeddings,
         neo4j_indexes=neo4j_indexes,
         features={
-            # D-29 / P22: remain false through Wave 4; 03A-06 flips after live proof.
-            'prepare_commit': False,
+            # D-29 / P22: true only after 03A-06 live immutable proof + re-test green.
+            'prepare_commit': True,
             'explicit_evidence_links': True,
             'manifests': False,
             'manifest_verification': False,

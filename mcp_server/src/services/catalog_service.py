@@ -5934,15 +5934,14 @@ class CatalogService:
             )
 
         now = datetime.now(timezone.utc)
-        expected_from = (
-            PLAN_STATE_DISCARDED if state == PLAN_STATE_DISCARDED else PLAN_STATE_PREPARED
-        )
+        # Store CAS table only allows PREPARED→DISCARDED; already-DISCARDED is
+        # handled as an idempotent success inside cas_plan_state (PLAN-19).
         try:
             async with client.driver.transaction() as tx:
                 discarded = await self._store.cas_plan_state(
                     tx,
                     token_digest=token_digest,
-                    expected_from=expected_from,
+                    expected_from=PLAN_STATE_PREPARED,
                     to_state=PLAN_STATE_DISCARDED,
                     updated_at=now,
                     now=now,
