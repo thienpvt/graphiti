@@ -88,7 +88,15 @@ The following claims from earlier false-green SUMMARY/ledger revisions are **rej
 - Completed requirements list (PLAN-13..TEST-07) as phase-accepted
 - Phase 4 readiness / green gate under `--require-neo4j`
 
-Live 11/11 results after adversarial remediation are **not accepted** as Phase 4 transition evidence because the historical isolation violation remains.
+### Live suite evidence (exact known)
+
+| Claim | Status |
+|-------|--------|
+| Coordinator pre-remediation run | **10 passed / 1 deselected** (independently known) |
+| Later agent-reported 11/11 after adversarial suite rewrite | **agent-reported only; not independently accepted** |
+| Use as Phase 4 transition evidence | **forbidden** — historical isolation violation remains |
+
+Do not restate "11/11 results" as accepted proof.
 
 ## Current remediated source safety (does not clear history)
 
@@ -119,6 +127,11 @@ Live 11/11 results after adversarial remediation are **not accepted** as Phase 4
 - `oracle_catalog_v2_queried=true` (top-level + `safety.*`)
 - `manifests=false`
 - `verify_ledger` must pass on this truthful blocked ledger.
+- CLI `run` exits **nonzero** while historical safety blocks (even if `local_gate_pass=true`).
+- Signal names:
+  - `local_gate_pass` = mandatory **non-live command checks only** (pytest/ruff/pyright/structural). Not overall success.
+  - `safety.safety_checks_pass` / top-level canary|v2|clear_graph = separate safety axis; historical v2 permanently fails safety.
+  - `ready_for_phase_4` = Phase 4 readiness (false under history).
 - No Neo4j connection during remediation.
 
 ## Task Commits (historical; plan not complete)
