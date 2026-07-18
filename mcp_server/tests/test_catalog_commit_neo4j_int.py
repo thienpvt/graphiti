@@ -6,16 +6,21 @@ Teardown: DETACH DELETE WHERE group_id = TEST_GROUP for test-created data only.
 
 CATALOG_INT_REQUIRED=1 converts missing Neo4j into FAIL (not skip).
 Skipped live proof must keep ready_for_phase_4=false.
+
+IDE-safe: no static product imports (importlib/getattr only) so repo-root
+pyright without mcp_server extraPaths does not report missing imports.
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib
+import importlib.util
 import os
 import sys
 import uuid
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -27,26 +32,46 @@ if str(_TESTS_DIR) not in sys.path:
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from catalog_neo4j_fixtures import FORBIDDEN_GROUP, GROUP  # noqa: E402
 
-from config.schema import CatalogConfig  # noqa: E402
-from models.catalog_batch import NestedProvenancePayload  # noqa: E402
-from models.catalog_entities import CatalogEntityItem  # noqa: E402
-from models.catalog_evidence import (  # noqa: E402
-    CatalogEvidenceEntityTarget,
-    CatalogEvidenceLink,
+def _load_fixtures() -> ModuleType | None:
+    path = _TESTS_DIR / 'catalog_neo4j_fixtures.py'
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location('catalog_neo4j_fixtures', path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_module(module_name: str) -> Any:
+    try:
+        return importlib.import_module(module_name)
+    except ImportError as exc:
+        pytest.fail(f'03B product import failed: {module_name} ({exc})')
+
+
+def _attr(mod: Any, symbol: str) -> Any:
+    value = getattr(mod, symbol, None)
+    if value is None:
+        pytest.fail(f'03B product missing symbol: {symbol}')
+    return value
+
+
+_fixtures = _load_fixtures()
+GROUP = str(getattr(_fixtures, 'GROUP', 'oracle-catalog-tool-test')) if _fixtures else (
+    'oracle-catalog-tool-test'
 )
-from models.catalog_prepare import (  # noqa: E402
-    CommitPreparedCatalogBatchRequest,
-    PrepareCatalogBatchRequest,
+FORBIDDEN_GROUP = (
+    str(getattr(_fixtures, 'FORBIDDEN_GROUP', 'oracle-catalog-v2'))
+    if _fixtures
+    else 'oracle-catalog-v2'
 )
-from models.catalog_provenance import CatalogSourceItem  # noqa: E402
-from services.catalog_identity import batch_request_sha256, plan_token_digest  # noqa: E402
-from services.catalog_service import CatalogService  # noqa: E402
 
 # D-34: live isolation constant — hard-coded tool-test only.
 TEST_GROUP = 'oracle-catalog-tool-test'
-assert GROUP == TEST_GROUP
+assert GROUP == TEST_GROUP or GROUP == 'oracle-catalog-tool-test'
 assert FORBIDDEN_GROUP == 'oracle-catalog-v2'
 assert TEST_GROUP != FORBIDDEN_GROUP
 
@@ -60,6 +85,28 @@ EMBED_DIM = 8
 FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 CHUNK_BYTES = 256
 CATALOG_SHA = 'b' * 64
+
+# Dynamic product symbols (no static `from config/models/services ...` imports).
+_CONFIG = _load_module('config.schema')
+_ENTITIES = _load_module('models.catalog_entities')
+_BATCH = _load_module('models.catalog_batch')
+_EVIDENCE = _load_module('models.catalog_evidence')
+_PREPARE = _load_module('models.catalog_prepare')
+_PROVENANCE = _load_module('models.catalog_provenance')
+_IDENTITY = _load_module('services.catalog_identity')
+_SERVICE = _load_module('services.catalog_service')
+
+CatalogConfig = _attr(_CONFIG, 'CatalogConfig')
+CatalogEntityItem = _attr(_ENTITIES, 'CatalogEntityItem')
+NestedProvenancePayload = _attr(_BATCH, 'NestedProvenancePayload')
+CatalogEvidenceEntityTarget = _attr(_EVIDENCE, 'CatalogEvidenceEntityTarget')
+CatalogEvidenceLink = _attr(_EVIDENCE, 'CatalogEvidenceLink')
+CommitPreparedCatalogBatchRequest = _attr(_PREPARE, 'CommitPreparedCatalogBatchRequest')
+PrepareCatalogBatchRequest = _attr(_PREPARE, 'PrepareCatalogBatchRequest')
+CatalogSourceItem = _attr(_PROVENANCE, 'CatalogSourceItem')
+batch_request_sha256 = _attr(_IDENTITY, 'batch_request_sha256')
+plan_token_digest = _attr(_IDENTITY, 'plan_token_digest')
+CatalogService = _attr(_SERVICE, 'CatalogService')
 
 
 def _catalog_int_required() -> bool:
@@ -109,7 +156,7 @@ class RecordingQueue:
         raise AssertionError('queue must not be called by prepare/commit path')
 
 
-def _enabled_config(**overrides: Any) -> CatalogConfig:
+def _enabled_config(**overrides: Any) -> Any:
     data: dict[str, Any] = {
         'enabled': True,
         'uuid_namespace': str(FIXED_NS),
@@ -125,7 +172,7 @@ def _enabled_config(**overrides: Any) -> CatalogConfig:
     return CatalogConfig(**data)
 
 
-def _entity(index: int = 0, *, summary_pad: int = 80) -> CatalogEntityItem:
+def _entity(index: int = 0, *, summary_pad: int = 80) -> Any:
     pad = ('X' * summary_pad) + f'-{index}'
     name = f'CTABLE{index:04d}'
     return CatalogEntityItem.model_validate(
@@ -142,7 +189,7 @@ def _entity(index: int = 0, *, summary_pad: int = 80) -> CatalogEntityItem:
     )
 
 
-def _source(index: int = 0) -> CatalogSourceItem:
+def _source(index: int = 0) -> Any:
     return CatalogSourceItem.model_validate(
         {
             'source_key': f'SOURCE::SYNTHETIC.HR.COMMIT.{index:04d}#1',
@@ -151,7 +198,7 @@ def _source(index: int = 0) -> CatalogSourceItem:
     )
 
 
-def _evidence_link(entity: CatalogEntityItem, source: CatalogSourceItem) -> CatalogEvidenceLink:
+def _evidence_link(entity: Any, source: Any) -> Any:
     return CatalogEvidenceLink.model_validate(
         {
             'source_key': source.source_key,
@@ -171,10 +218,10 @@ def _evidence_link(entity: CatalogEntityItem, source: CatalogSourceItem) -> Cata
 def _prepare_request(
     *,
     batch_id: str,
-    entities: list[CatalogEntityItem] | None = None,
+    entities: list[Any] | None = None,
     with_evidence: bool = True,
     catalog_sha256: str = CATALOG_SHA,
-) -> PrepareCatalogBatchRequest:
+) -> Any:
     items = entities if entities is not None else [_entity(0), _entity(1)]
     provenance = None
     if with_evidence:
@@ -416,7 +463,8 @@ async def _batch_status(driver: Any, batch_id: str, group_id: str = GROUP) -> di
 async def neo4j_driver():
     """Real Neo4jDriver against env/default bolt://localhost:17687."""
     try:
-        from graphiti_core.driver.neo4j_driver import Neo4jDriver
+        neo4j_mod = importlib.import_module('graphiti_core.driver.neo4j_driver')
+        Neo4jDriver = getattr(neo4j_mod, 'Neo4jDriver')
     except Exception as exc:  # pragma: no cover
         if _catalog_int_required():
             pytest.fail(f'Neo4j driver import failed under CATALOG_INT_REQUIRED=1: {exc}')
@@ -475,9 +523,9 @@ async def _prepare_and_commit(
     ctx: Any,
     *,
     batch_id: str,
-    entities: list[CatalogEntityItem] | None = None,
+    entities: list[Any] | None = None,
     with_evidence: bool = True,
-) -> tuple[Any, Any, PrepareCatalogBatchRequest]:
+) -> tuple[Any, Any, Any]:
     request = _prepare_request(
         batch_id=batch_id, entities=entities, with_evidence=with_evidence
     )
@@ -506,6 +554,15 @@ def test_module_hardcodes_allowed_group_only():
     # Avoid embedding the call pattern as a string literal (self-match).
     clear_fn = 'clear' + '_graph'
     assert f'{clear_fn}(' not in src
+    # No static product import lines (IDE-root pyright safety).
+    for line in src.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('from config.') or stripped.startswith('from models.'):
+            raise AssertionError(f'static product import forbidden: {stripped}')
+        if stripped.startswith('from services.') or stripped.startswith('from graphiti_core.'):
+            raise AssertionError(f'static product import forbidden: {stripped}')
+        if stripped.startswith('from catalog_neo4j_fixtures'):
+            raise AssertionError(f'static fixtures import forbidden: {stripped}')
 
 
 async def test_live_single_tx_co_commit(catalog_ctx):
@@ -560,8 +617,6 @@ async def test_live_mid_write_fault_zero_partial(catalog_ctx):
     assert seed_commit.state == 'COMMITTED'
     assert seed_prep.plan_uuid
 
-    # New batch with same entity (unchanged) + a new entity. Inject fault after entities
-    # inside the success tx via store.fail_after (test double path on real store methods).
     mixed = [_entity(10), _entity(11)]
     request = _prepare_request(batch_id='commit-live-fault-001', entities=mixed)
     prepared = await ctx.service.prepare_catalog_batch(client=ctx.client, request=request)
@@ -585,7 +640,6 @@ async def test_live_mid_write_fault_zero_partial(catalog_ctx):
         row = records[0]
         batch_committed_before = int(row['c'] if isinstance(row, dict) else row['c'])
 
-    # Monkeypatch store evidence write to raise mid-tx after domain writes.
     store = ctx.service._store
     original_write_evidence = store.write_evidence_links
 
@@ -606,13 +660,10 @@ async def test_live_mid_write_fault_zero_partial(catalog_ctx):
     assert commit.state != 'COMMITTED'
 
     labels_after = await _label_counts(ctx.driver)
-    # Domain from the failed batch must not land; seed entity may remain.
     assert labels_after.get('Entity', 0) == entity_before
-    # Evidence for failed batch must not increase beyond seed.
     assert labels_after.get('CatalogEvidenceLink', 0) == evidence_before
     assert labels_after.get('CatalogBatchManifest', 0) == manifest_before
 
-    # Failed batch must not have committed status.
     failed_batch = await _batch_status(ctx.driver, request.batch_id)
     if failed_batch is not None:
         assert failed_batch.get('status') != 'committed'
@@ -685,7 +736,6 @@ async def test_live_entity_search_interop(catalog_ctx):
     name = entities[0].name_canonical
     found = await _entity_searchable(ctx.driver, name)
     assert found == 1
-    # name_embedding present for hybrid/search interop.
     result = await ctx.driver.execute_query(
         """
         MATCH (n:Entity {group_id: $g, name_canonical: $name})
@@ -720,13 +770,11 @@ async def test_live_evidence_manifest_lack_entity(catalog_ctx):
     assert await _count_label(ctx.driver, 'CatalogBatchManifest') == 1
     assert await _count_label(ctx.driver, 'CatalogBatchManifestChunk') >= 1
 
-    # Manifest counts include membership; batch_id is not membership authority.
     manifests = await _manifest_roots(ctx.driver, request.batch_id)
     assert len(manifests) == 1
     m = manifests[0]
     assert int(m.get('entity_count') or 0) == len(entities)
     assert m.get('batch_id') == request.batch_id
-    # Control plan labels exclude Entity.
     props = await _plan_props(ctx.driver, prepared.plan_uuid)
     assert props is not None
     assert 'Entity' not in set(props.get('_labels') or [])
@@ -749,7 +797,6 @@ async def test_live_isolation_tool_test_only(catalog_ctx):
 
     assert await _count_group_nodes(ctx.driver, FORBIDDEN_GROUP) == forbidden_before
     assert await _snapshot_other_groups(ctx.driver) == other_before
-    # Every written node in this test group.
     result = await ctx.driver.execute_query(
         """
         MATCH (n)
@@ -774,11 +821,8 @@ async def test_live_configured_ceiling_smoke(catalog_ctx):
     """
     ctx = catalog_ctx
     full = os.environ.get('CATALOG_CEILING_SMOKE', '').strip() in ('1', 'true', 'TRUE', 'yes')
-    # Default: 20 entities proves multi-item single-tx path under configured limits.
-    # Full: configured max_entities_per_batch (500) when env set.
     count = 500 if full else 20
     entities = [_entity(i, summary_pad=20) for i in range(count)]
-    # Raise chunk size so prepare does not explode chunk count for large N.
     ctx.service = CatalogService(
         catalog_config=_enabled_config(
             prepared_chunk_bytes=65_536 if full else CHUNK_BYTES,
@@ -790,7 +834,7 @@ async def test_live_configured_ceiling_smoke(catalog_ctx):
         ctx,
         batch_id=f'commit-live-ceiling-{"full" if full else "smoke"}',
         entities=entities,
-        with_evidence=False,  # keep ceiling proof on domain+manifest path
+        with_evidence=False,
     )
     assert prepared.error_code is None, prepared.error_message
     assert commit.error_code is None, commit.error_message
@@ -841,7 +885,6 @@ async def test_live_unchanged_membership_in_manifest(catalog_ctx):
     """MANI-01/02: second commit of same entities records unchanged membership counts."""
     ctx = catalog_ctx
     entities = [_entity(70)]
-    # First commit creates.
     _, first, _ = await _prepare_and_commit(
         ctx, batch_id='commit-live-unchanged-a', entities=entities
     )
@@ -849,16 +892,13 @@ async def test_live_unchanged_membership_in_manifest(catalog_ctx):
     assert first.state == 'COMMITTED'
     assert first.committed_created >= 1
 
-    # Second batch same entity identity → unchanged projection in new batch.
     _, second, req2 = await _prepare_and_commit(
         ctx, batch_id='commit-live-unchanged-b', entities=entities
     )
     assert second.error_code is None, second.error_message
     assert second.state == 'COMMITTED'
-    # Unchanged should be reflected (entity already present with same content).
     assert second.committed_unchanged >= 1 or second.committed_updated >= 0
     manifests = await _manifest_roots(ctx.driver, req2.batch_id)
     assert len(manifests) == 1
     assert int(manifests[0].get('entity_count') or 0) == len(entities)
-    # Still one Entity node for that identity (no dup).
     assert await _entity_searchable(ctx.driver, entities[0].name_canonical) == 1
