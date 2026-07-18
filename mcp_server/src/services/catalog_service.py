@@ -2586,7 +2586,12 @@ class CatalogService:
                     row = await self._store.upsert_edge_item(tx, params=params)
                     if not row or not row.get('uuid'):
                         raise RuntimeError('edge upsert empty row')
+                    self._raise_edge_row_error(row)
                     status = self._write_status_from_row(row, prep.projected_status)
+                    if status == 'error':
+                        raise self._EdgeEndpointRace(
+                            self._row_error_code(row) or CatalogErrorCode.internal_error
+                        )
                     result = CatalogItemResult(
                         index=prep.index,
                         status=status,  # type: ignore[arg-type]
@@ -2698,7 +2703,12 @@ class CatalogService:
                     row = await self._store.upsert_edge_item(tx, params=params)
                     if not row or not row.get('uuid'):
                         raise RuntimeError('edge upsert empty row')
+                    self._raise_edge_row_error(row)
                     status = self._write_status_from_row(row, prep.projected_status)
+                    if status == 'error':
+                        raise self._EdgeEndpointRace(
+                            self._row_error_code(row) or CatalogErrorCode.internal_error
+                        )
                     written[prep.index] = CatalogItemResult(
                         index=prep.index,
                         status=status,  # type: ignore[arg-type]
@@ -2716,6 +2726,26 @@ class CatalogService:
                             edge_key=request.edges[ci].edge_key,
                             edge_type=request.edges[ci].edge_type,
                         )
+            except self._EdgeEndpointRace as exc:
+                written[prep.index] = CatalogItemResult(
+                    index=prep.index,
+                    status='error',
+                    uuid=prep.edge_uuid,
+                    edge_key=prep.item.edge_key,
+                    edge_type=prep.item.edge_type,
+                    error_code=exc.code,
+                    error_message=f'endpoint race in write transaction: {exc.code.value}',
+                )
+                for ci in prep.coalesced_indices:
+                    written[ci] = CatalogItemResult(
+                        index=ci,
+                        status='error',
+                        uuid=prep.edge_uuid,
+                        edge_key=request.edges[ci].edge_key,
+                        edge_type=request.edges[ci].edge_type,
+                        error_code=exc.code,
+                        error_message=f'endpoint race in write transaction: {exc.code.value}',
+                    )
             except Exception as exc:
                 logger.error(
                     'catalog neo4j_transaction_failed batch_id=%s index=%s',
