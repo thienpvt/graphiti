@@ -91,6 +91,7 @@ Phase 5 complete. Phase 6 not entered.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260719-udj | Implement truthful mutation-free Catalog-v2 runtime readiness | 2026-07-19 | uncommitted | `.planning/quick/260719-udj-implement-truthful-mutation-free-catalog/` |
 | 260718-ca6 | Document Phase 1 residual WR-R01/WR-R02 as accepted residuals | 2026-07-18 | e31bb04 | `.planning/quick/260718-ca6-document-phase-1-residual-findings/` |
 | 260718-c2u | LF-stable Phase 1 gate digests + Scope Stop bind | 2026-07-18 | 4c9fff3 | `.planning/quick/260718-c2u-remediate-phase-1-nyquist-digest-bind/` |
 | 260718-bnv | Remediate Phase 1 Nyquist non-compliance | 2026-07-18 | 63f7fe8 | `.planning/quick/260718-bnv-remediate-phase-1-nyquist-non-compliance/` |
