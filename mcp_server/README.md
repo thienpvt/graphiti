@@ -645,7 +645,7 @@ Direct tools (`upsert_typed_entities`, `upsert_typed_edges`, `upsert_provenance`
 
 - `identity_schema_version` must be exactly `catalog-v2`. Other values → `unsupported_identity_schema`.
 - `system_key` is a closed set: `FE`, `BO`, `COMMON`.
-- **FE/BO single-group guidance:** run FE catalog work in one dedicated `group_id` and BO in another. Keep each system in one group_id; do not mix FE and BO objects in the same batch/`group_id` unless the batch is intentionally `COMMON` and operator-approved. Every entity/edge endpoint `graph_key` must embed the same `system_key` as the request shell.
+- **FE/BO single-group guidance:** keep FE and BO catalog objects in one group_id. `system_key` and the embedded graph-key system segment keep otherwise-identical Oracle names distinct. Each request/batch has one `system_key`, so ingest FE and BO as separate batches within that same group. `COMMON` is explicit shared ownership, never a fallback for ambiguous ownership. Every entity/edge endpoint `graph_key` must embed the same `system_key` as the request shell.
 - Server derives all UUIDv5 identities from the configured namespace + canonical material. Caller UUIDs are never identity authority.
 - Canonicalization version: `catalog-canonical-v1`. Catalog schema version: `catalog-schema-v1`.
 
