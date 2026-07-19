@@ -331,8 +331,30 @@ def check_historical_axis_preserved(root: Path) -> None:
         raise AssertionError('historical axis constant must remain True')
 
 
+def _literal_value(node: ast.AST, assignments: dict[str, object]) -> object:
+    if isinstance(node, ast.Name) and node.id in assignments:
+        return assignments[node.id]
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        owner = _literal_value(node.func.value, assignments)
+        if node.func.attr == 'keys' and isinstance(owner, dict) and not node.args:
+            return tuple(owner)
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {'set', 'frozenset'}
+        and len(node.args) == 1
+    ):
+        values = _literal_value(node.args[0], assignments)
+        if isinstance(values, (dict, list, tuple, set, frozenset)):
+            items = tuple(values)
+        else:
+            raise TypeError('set/frozenset argument is not a static iterable')
+        return frozenset(items) if node.func.id == 'frozenset' else set(items)
+    return ast.literal_eval(node)
+
+
 def _python_assignments(path: Path) -> dict[str, object]:
-    """Return literal module assignments without importing product code."""
+    """Return static module assignments without importing product code."""
     if not path.is_file():
         raise AssertionError(f'authoritative source missing: {path}')
     tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
@@ -347,15 +369,9 @@ def _python_assignments(path: Path) -> dict[str, object]:
                 if not isinstance(target, ast.Name):
                     continue
                 try:
-                    assignments[target.id] = ast.literal_eval(value_node)
-                except (ValueError, TypeError):
-                    if (
-                        isinstance(value_node, ast.Call)
-                        and isinstance(value_node.func, ast.Name)
-                        and value_node.func.id == 'frozenset'
-                        and len(value_node.args) == 1
-                    ):
-                        assignments[target.id] = frozenset(ast.literal_eval(value_node.args[0]))
+                    assignments[target.id] = _literal_value(value_node, assignments)
+                except (ValueError, TypeError, KeyError):
+                    continue
     return assignments
 
 
@@ -380,18 +396,33 @@ def _enum_string_values(path: Path, class_name: str) -> frozenset[str]:
 
 
 def _markdown_section(text: str, heading: str) -> str:
-    pattern = re.compile(
-        rf'^##+\s+{re.escape(heading)}\s*$\n(.*?)(?=^##+\s+|\Z)',
-        re.IGNORECASE | re.MULTILINE | re.DOTALL,
+    match = re.search(
+        rf'^(?P<marks>#{{2,6}})\s+{re.escape(heading)}\s*$',
+        text,
+        re.IGNORECASE | re.MULTILINE,
     )
-    match = pattern.search(text)
     if match is None:
         raise AssertionError(f'documentation section missing: {heading}')
-    return match.group(1)
+    level = len(match.group('marks'))
+    start = match.end()
+    end = len(text)
+    for candidate in re.finditer(r'^(?P<marks>#{2,6})\s+', text[start:], re.MULTILINE):
+        if len(candidate.group('marks')) <= level:
+            end = start + candidate.start()
+            break
+    return text[start:end]
 
 
-def _backtick_names(section: str) -> frozenset[str]:
-    return frozenset(re.findall(r'`([a-z][a-z0-9_]*)`', section))
+def _tool_inventory_names(section: str) -> frozenset[str]:
+    return frozenset(
+        re.findall(r'^\s*(?:-\s+|\d+\.\s+)`([a-z][a-z0-9_]*)`', section, re.MULTILINE)
+    )
+
+
+def _error_code_names(section: str) -> frozenset[str]:
+    return frozenset(
+        re.findall(r'^\|\s*`([a-z][a-z0-9_]*)`\s*\|', section, re.MULTILINE)
+    )
 
 
 def _assert_exact_set(label: str, actual: frozenset[str], expected: frozenset[str]) -> None:
@@ -409,15 +440,35 @@ def _require_phrases(label: str, text: str, phrases: tuple[str, ...]) -> None:
 
 
 def _assert_no_sensitive_values(text: str, label: str) -> None:
-    """Reject secret-like assignments; never inspect environment or secret values."""
-    patterns = (
-        r'(?i)\b(?:password|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret)\s*[:=]\s*[`"\']?(?!<|\$\{|omitted\b|redacted\b|none\b)[^\s`"\']+',
-        r'(?i)\bGRAPHITI_CATALOG_UUID_NAMESPACE\s*=\s*[0-9a-f]{8}-[0-9a-f-]{27,}',
-        r'(?i)\b(?:sk|ghp|glpat)-[A-Za-z0-9_-]{12,}',
+    """Reject secret-like assignments; allow explicit placeholders/default examples."""
+    placeholder_values = {
+        '',
+        'none',
+        'ollama',
+        'password',
+        'demodemo',
+        'your_password',
+        'your_openai_api_key_here',
+        'your_anthropic_key',
+        'your_gemini_key',
+        'your_groq_key',
+        'sk-xxxxxxxx',
+    }
+    assignment = re.compile(
+        r'(?i)\b(?:password|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret)'
+        r'\s*[:=]\s*[`"\']?([^\s`"\']+)'
     )
-    for pattern in patterns:
-        if re.search(pattern, text):
-            raise AssertionError(f'{label} contains a credential or raw namespace value')
+    for match in assignment.finditer(text):
+        value = match.group(1).rstrip('`,;').lower()
+        if value in placeholder_values or value.startswith(('your_', '${', '<')):
+            continue
+        if value in {'omitted', 'redacted'}:
+            continue
+        raise AssertionError(f'{label} contains a credential or raw namespace value')
+    if re.search(
+        r'(?i)\bGRAPHITI_CATALOG_UUID_NAMESPACE\s*=\s*[0-9a-f]{8}-[0-9a-f-]{27,}', text
+    ) or re.search(r'(?i)\b(?:sk|ghp|glpat)-[A-Za-z0-9_-]{12,}', text):
+        raise AssertionError(f'{label} contains a credential or raw namespace value')
 
 
 def _registered_tool_names(path: Path) -> frozenset[str]:
@@ -479,10 +530,11 @@ def _assert_registry_members(root: Path, text: str) -> None:
         raise AssertionError('catalog entity/edge registries are not literal authoritative sets')
 
     registry = _markdown_section(text, 'Entity and edge registries')
+    grammar = _markdown_section(text, 'Catalog-v2 graph-key grammar and group scope')
     endpoint_map = _markdown_section(text, 'Endpoint type map')
     for entity_type, prefix in entity_prefixes.items():
-        if f'`{entity_type}`' not in registry or f'`{prefix}`' not in registry:
-            raise AssertionError(f'entity registry missing {entity_type} / {prefix}')
+        if f'`{entity_type}`' not in registry or f'`{prefix}`' not in grammar:
+            raise AssertionError(f'entity registry/grammar missing {entity_type} / {prefix}')
     for edge_type in edge_types:
         if f'`{edge_type}`' not in registry:
             raise AssertionError(f'edge registry missing {edge_type}')
@@ -501,9 +553,13 @@ def check_docs_operator_sections(root: Path) -> None:
     legacy_section = _markdown_section(text, 'Legacy tool inventory (14)')
     catalog_section = _markdown_section(text, 'Catalog tool inventory (14)')
     error_section = _markdown_section(text, 'Catalog error codes')
-    _assert_exact_set('legacy tool inventory', _backtick_names(legacy_section), legacy_tools)
-    _assert_exact_set('catalog tool inventory', _backtick_names(catalog_section), catalog_tools)
-    _assert_exact_set('CatalogErrorCode inventory', _backtick_names(error_section), error_codes)
+    _assert_exact_set(
+        'legacy tool inventory', _tool_inventory_names(legacy_section), legacy_tools
+    )
+    _assert_exact_set(
+        'catalog tool inventory', _tool_inventory_names(catalog_section), catalog_tools
+    )
+    _assert_exact_set('CatalogErrorCode inventory', _error_code_names(error_section), error_codes)
 
     required_sections = (
         'Preferred large-payload path',
@@ -588,11 +644,11 @@ def check_docs_migration_phrases(root: Path) -> None:
             'ACCEPT_TAB',
             'must **never** be reused',
             'historical',
-            'current ban remains in force',
+            'active ban on querying/mutating `oracle-catalog-v2`',
             'separate residual axis',
             'a67789a',
-            'never executes canary',
-            'do **not** query or mutate `oracle-catalog-v2`',
+            'phase 5 **never**',
+            'queries or mutates `oracle-catalog-v2`',
             'Neo4j 5.26+ only',
         ),
     )

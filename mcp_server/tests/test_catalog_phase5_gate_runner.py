@@ -341,7 +341,8 @@ def test_run_gate_wave0_ready_false(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     root = _root()
     ledger_path = tmp_path / '05-GATE-RESULTS.json'
 
-    def fake_run_argv(*_: Any, **__: Any) -> dict[str, Any]:
+    def fake_run_argv(*_: Any, **kwargs: Any) -> dict[str, Any]:
+        del kwargs
         return {
             'exit_code': 0,
             'stdout': '1 passed',
@@ -501,6 +502,27 @@ def test_doc_inventory_and_error_checks_reject_missing_and_extra():
         gate._assert_exact_set('fixture', frozenset({'alpha'}), expected)
     with pytest.raises(AssertionError, match=r"extra=\['gamma'\]"):
         gate._assert_exact_set('fixture', frozenset({'alpha', 'beta', 'gamma'}), expected)
+
+
+def test_doc_inventory_extractors_ignore_inline_contract_names():
+    tools = '- `alpha`: references `other_param`.\n2. `beta` — uses `alpha`.\n'
+    errors = '| `validation_error` | bad request |\ntext `not_a_code`\n'
+    assert gate._tool_inventory_names(tools) == {'alpha', 'beta'}
+    assert gate._error_code_names(errors) == {'validation_error'}
+
+
+def test_secret_scan_allows_placeholders_and_rejects_values():
+    gate._assert_no_sensitive_values(
+        'password: "your_password"\napi_key: "ollama"\nPassword: `demodemo`\n',
+        'fixture',
+    )
+    with pytest.raises(AssertionError, match='credential'):
+        gate._assert_no_sensitive_values('api_key: "live-secret-value-123"', 'fixture')
+    with pytest.raises(AssertionError, match='namespace'):
+        gate._assert_no_sensitive_values(
+            'GRAPHITI_CATALOG_UUID_NAMESPACE=6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+            'fixture',
+        )
 
 
 def test_doc_checks_are_static_and_side_effect_free():

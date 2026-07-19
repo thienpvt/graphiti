@@ -18,7 +18,7 @@ There is **no automatic migration**, rekey, rewrite, graph rewrite, or in-place 
 - Server-derived UUIDv5 identity under the configured namespace remains the only identity authority for catalog-v2 writes.
 - Backend scope for this path: **Neo4j 5.26+ only**. No non-Neo4j portability claim is made here.
 
-## Historical canary materials (non-authority)
+## Historical canary materials
 
 - Historical path `catalog/canary-v2-requests/` is **read-only** and **non-authority**.
 - Historical canary files must not be used as source-of-truth for live identity, acceptance hashes, or write payloads.
@@ -26,9 +26,9 @@ There is **no automatic migration**, rekey, rewrite, graph rewrite, or in-place 
 
   `catalog/canary-v2-requests-hardened/`
 
-## Offline regeneration (builder only)
+## Offline regeneration
 
-Regenerate hardened canary request payloads **offline** using the **builder only**.
+Regenerate hardened canary request payloads **offline** using the **builder only**. No network, DB, MCP, LLM, or embedder is involved.
 
 Builder script: `scripts/build_catalog_canary_requests.py`
 
@@ -65,7 +65,7 @@ Hardened offline payloads must satisfy catalog-v2 prepare-shaped contracts, incl
 - Do not rehydrate obsolete catalog-v1 keys/hashes into the regenerated payload set.
 - Do not reuse old `ACCEPT_TAB` SHA values.
 
-## Future live path (not Phase 5)
+## Future live path
 
 When a live write path is **separately approved** (after Phase 5 / canary readiness gates):
 
@@ -76,7 +76,7 @@ Direct upserts (`upsert_catalog_batch`, `upsert_typed_entities`, `upsert_typed_e
 
 No other live commit sequence is authorized by this note.
 
-## Phase 5 bans (explicit)
+## Phase 5 ban
 
 Phase 5 **never**:
 
@@ -88,9 +88,9 @@ Phase 5 **never**:
 
 Offline builder regeneration and pure tests are documentation/support only; they are not live canary execution.
 
-## Two safety axes (historical vs current)
+## Separate residual axis
 
-Keep these axes **separate**. Do not conflate them.
+Keep the historical and current safety axes **separate**. Do not conflate them.
 
 1. **Historical axis** — commit `a67789a04ca0cc2f2a56d7498c65be3460215f77` `test_policy` / `local_neo4j_no_corresponding_data` residual findings. Preserve historical truth; do not rewrite. Not resolved by this migration note.
 2. **Current axis** — catalog-v2 identity, hardened offline artifacts, and the active ban on querying/mutating `oracle-catalog-v2` plus Phase 5 canary non-execution.

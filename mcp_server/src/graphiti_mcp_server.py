@@ -1541,11 +1541,11 @@ async def upsert_catalog_batch(
 async def prepare_catalog_batch(
     request: PrepareCatalogBatchRequest,
 ) -> PrepareCatalogBatchResponse | ErrorResponse:
-    """Prepare an immutable catalog plan (control-plane only; no domain writes).
+    """Prepare an immutable catalog plan without domain writes.
 
-    Validates/hashes/projects/embeds, then freezes membership+embeddings into a
-    prepared-plan root and chunks. Returns one-time plan_token. Domain co-commit
-    is a separate commit_prepared_catalog_batch step (Phase 3B body later).
+    Validates, hashes, projects, and embeds before freezing the complete domain
+    artifact into prepared-plan root/chunk control records. Returns one-time
+    plan_token; commit_prepared_catalog_batch performs the separate domain commit.
     """
     global graphiti_service, catalog_service
 
@@ -1572,11 +1572,11 @@ async def prepare_catalog_batch(
 async def commit_prepared_catalog_batch(
     request: CommitPreparedCatalogBatchRequest,
 ) -> CommitPreparedCatalogBatchResponse | ErrorResponse:
-    """Token-only claim of a prepared plan (CAS to COMMITTING; no domain body yet).
+    """Token-only commit of a validated immutable prepared plan.
 
-    Accepts plan_token and optional expected_request_sha256 only. Loads/reassembles
-    frozen artifact, verifies binding/expiry, then claims COMMITTING. Phase 3A
-    stops before Entity/evidence/manifest writes.
+    Accepts plan_token and optional expected_request_sha256 only. Loads and verifies
+    the frozen artifact, claims COMMITTING, then atomically commits domain objects,
+    exact evidence, durable manifest, batch status, and terminal plan state.
     """
     global graphiti_service, catalog_service
 
