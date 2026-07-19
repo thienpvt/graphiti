@@ -436,6 +436,31 @@ class CatalogNeo4jStore:
         )
         return entity_ok and rel_ok and episodic_ok and mentions_ok and batch_ok
 
+    async def inspect_catalog_v2_schema_readiness(self, executor: Any) -> dict[str, bool]:
+        """Read-only Catalog-v2 uniqueness-constraint readiness (14 named constraints).
+
+        Reuses SHOW CONSTRAINTS presence checks for identity (5), prepared-plan (4),
+        and evidence/manifest (5). Never CREATE/DROP/ALTER; never sets process-local
+        ready flags (_schema_ready / _plan_schema_ready / _evidence_manifest_schema_ready).
+
+        Returns:
+            {
+                'identity': bool,            # 5 domain identity constraints
+                'plan': bool,                # 4 prepared-plan constraints
+                'evidence_manifest': bool,   # 5 evidence/manifest constraints
+                'ready': bool,               # all 14 present with exact shape
+            }
+        """
+        identity_ok = await self._identity_uniqueness_present(executor)
+        plan_ok = await self._plan_uniqueness_present(executor)
+        evidence_ok = await self._evidence_manifest_uniqueness_present(executor)
+        return {
+            'identity': identity_ok,
+            'plan': plan_ok,
+            'evidence_manifest': evidence_ok,
+            'ready': identity_ok and plan_ok and evidence_ok,
+        }
+
     def resolve_entity_label(self, entity_type: str) -> str:
         """Map allowlisted entity_type to a fixed Neo4j label (re-validate at builder)."""
         if entity_type not in CATALOG_ENTITY_TYPES or entity_type not in _ENTITY_LABELS:

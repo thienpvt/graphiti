@@ -76,7 +76,7 @@ from models.response_types import (
     SuccessResponse,
     TripletResponse,
 )
-from services.catalog_capabilities import build_catalog_capabilities
+from services.catalog_capabilities import build_catalog_capabilities_async
 from services.catalog_service import CatalogService
 from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
 from services.queue_service import QueueService
@@ -1705,7 +1705,8 @@ async def get_catalog_capabilities() -> CatalogCapabilitiesResponse | ErrorRespo
 
     Available after server init even when catalog writes are disabled or the UUID
     namespace is missing. Never mutates schema, indexes, or graph state. Never
-    returns raw namespace or secrets.
+    returns raw namespace or secrets. Uses already-initialized client only
+    (require_initialized_client); never get_client bootstrap.
     """
     global graphiti_service
 
@@ -1718,14 +1719,22 @@ async def get_catalog_capabilities() -> CatalogCapabilitiesResponse | ErrorRespo
         embedder_cfg = getattr(graphiti_service.config, 'embedder', None)
         embedder_provider = getattr(embedder_cfg, 'provider', None) if embedder_cfg else None
         embedder_model = getattr(embedder_cfg, 'model', None) if embedder_cfg else None
-        # Do not call get_client / driver / build_indices — pure config view only.
-        return build_catalog_capabilities(
+        ollama_api_url = None
+        if embedder_cfg is not None and embedder_provider == 'ollama':
+            providers = getattr(embedder_cfg, 'providers', None)
+            ollama_cfg = getattr(providers, 'ollama', None) if providers is not None else None
+            ollama_api_url = (
+                getattr(ollama_cfg, 'api_url', None) if ollama_cfg is not None else None
+            )
+        # Never get_client / initialize / build_indices / ensure_* — initialized only.
+        client = require_initialized_client(graphiti_service)
+        return await build_catalog_capabilities_async(
             config=cfg,
-            client=None,
+            client=client,
             backend=backend,
-            connectivity='unknown',
             embedder_provider=embedder_provider,
             embedder_model=embedder_model,
+            ollama_api_url=ollama_api_url,
         )
     except Exception as e:
         logger.error('get_catalog_capabilities failed reason=%s', type(e).__name__)

@@ -767,7 +767,7 @@ If the client supplies `content_sha256` / `request_sha256` / `expected_request_s
 |---|---|
 | `package_version` | MCP server package version |
 | `backend` | Graph backend name when known (`neo4j`, etc.) |
-| `connectivity` | `ok` \| `error` \| `unknown` |
+| `connectivity` | `ok` \| `error` \| `unknown` — already-initialized client only |
 | `catalog_writes_enabled` | `catalog_upsert.enabled` |
 | `catalog_reads_enabled` | `catalog_upsert.reads_enabled` |
 | `uuid_namespace_configured` | whether a parseable namespace is configured |
@@ -780,14 +780,41 @@ If the client supplies `content_sha256` / `request_sha256` / `expected_request_s
 | `endpoint_map` | sorted allowed pairs per edge type |
 | `limits.configured` | configured batch, prepared-payload, active-plan, TTL, chunk-size, and page ceilings |
 | `limits.hard` | exported hard batch, prepared-payload, active-plan, TTL, and page ceilings; chunk-size/chunk-count hard constants are not exported here |
-| `embeddings` | provider/model/ready (ready may be `unknown`) |
-| `neo4j_indexes` | `ready` \| `unknown` \| `n/a` |
+| `embeddings` | provider/model/ready (see readiness rules below) |
+| `neo4j_indexes` | legacy field name: Catalog-v2 uniqueness-constraint readiness (`ready` \| `unknown` \| `n/a`) |
 | `features.prepare_commit` | prepare/commit control plane available |
 | `features.explicit_evidence_links` | non-Cartesian evidence links available |
 | `features.manifests` | durable manifests co-committed |
 | `features.manifest_verification` | manifest-backed verify path available |
 
-Capabilities never probe with writes, never mutate schema/indexes, and never return secrets or the raw UUID namespace.
+#### Truthful readiness probes (mutation-free)
+
+`get_catalog_capabilities` reports evidence-backed readiness when a Graphiti client is already initialized. It uses `require_initialized_client` only — **never** `get_client`, `initialize`, `build_indices_and_constraints`, `ensure_*`, embed generation, LLM, or queue enqueue. Probe timeout is pinned at **2.0s**.
+
+| Signal | When | How | States |
+|---|---|---|---|
+| `connectivity` | backend `neo4j` + initialized client | raw Neo4j driver `verify_connectivity()` | `ok` on success; `error` on raise/timeout; `unknown` if service/client uninitialized |
+| `neo4j_indexes` | backend `neo4j` + initialized client | read-only `SHOW CONSTRAINTS` inspection over the **14** required Catalog-v2 uniqueness constraints (legacy field name — product has **no** Catalog-v2-specific indexes) | `ready` only when all 14 present with exact shape; missing/uninitialized/`SHOW` failure → `unknown`; non-neo4j → `n/a` |
+| `embeddings.ready` | embedder provider `ollama` + configured `api_url` | HTTP `GET {api_url}/api/tags` only (never `/api/embed`, never `embedder.create`) | tags 200 + configured model present (strip/casefold; bare name also matches `name:latest`) → `ready`; tags 200 + model absent → `error`; request fail/timeout/non-200 → `error`; non-ollama or missing api_url → `unknown` |
+
+Required uniqueness constraints (14 names; field `neo4j_indexes` means this full set):
+
+1. `catalog_entity_identity_unique`
+2. `catalog_relates_to_identity_unique`
+3. `catalog_episodic_identity_unique`
+4. `catalog_mentions_identity_unique`
+5. `catalog_batch_identity_unique`
+6. `catalog_prepared_plan_identity_unique`
+7. `catalog_prepared_plan_token_digest_unique`
+8. `catalog_prepared_plan_chunk_identity_unique`
+9. `catalog_prepared_plan_chunk_index_unique`
+10. `catalog_evidence_link_identity_unique`
+11. `catalog_evidence_link_key_unique`
+12. `catalog_batch_manifest_identity_unique`
+13. `catalog_batch_manifest_chunk_identity_unique`
+14. `catalog_batch_manifest_chunk_index_unique`
+
+Capabilities never probe with writes, never CREATE/DROP/ALTER/ensure schema, and never return secrets, the raw UUID namespace, passwords, API keys, raw Neo4j URIs (`bolt://`, `neo4j://`), or raw embedder `api_url`.
 
 ### Prepare, commit, and discard lifecycle
 

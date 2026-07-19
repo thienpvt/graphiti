@@ -65,6 +65,16 @@ Hardened offline payloads must satisfy catalog-v2 prepare-shaped contracts, incl
 - Do not rehydrate obsolete catalog-v1 keys/hashes into the regenerated payload set.
 - Do not reuse old `ACCEPT_TAB` SHA values.
 
+## Pre-canary readiness (mutation-free)
+
+Before any canary retry, call `get_catalog_capabilities` for truthful runtime readiness:
+
+- `connectivity` — already-initialized raw Neo4j driver `verify_connectivity`; never bootstraps
+- `neo4j_indexes` — all 14 Catalog-v2 uniqueness constraints present via `SHOW CONSTRAINTS` (legacy field name; no product Catalog-v2 indexes)
+- `embeddings.ready` — Ollama: `GET /api/tags` + configured model present; never embed generation
+
+Probes are mutation-free (no CREATE/DROP/ensure/write/LLM). This readiness work **stops before canary** — no Phase 6 / live canary execution is authorized here.
+
 ## Future live path
 
 When a live write path is **separately approved** (after Phase 5 / canary readiness gates):
