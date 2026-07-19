@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import inspect
 import logging
 import sys
 import uuid
@@ -31,7 +32,10 @@ from models.catalog_common import (  # noqa: E402
 )
 from models.catalog_edges import CatalogEdgeItem, UpsertTypedEdgesRequest  # noqa: E402
 from models.catalog_entities import CatalogEntityItem, UpsertTypedEntitiesRequest  # noqa: E402
-from models.catalog_prepare import CommitPreparedCatalogBatchRequest  # noqa: E402
+from models.catalog_prepare import (  # noqa: E402
+    CommitPreparedCatalogBatchRequest,
+    PrepareCatalogBatchRequest,
+)
 from services.catalog_identity import mint_plan_token, plan_token_digest  # noqa: E402
 from services.catalog_service import CatalogService  # noqa: E402
 from services.catalog_store import (  # noqa: E402
@@ -66,8 +70,8 @@ PROHIBITED_ON_CATALOG_PATH = frozenset(
     }
 )
 
-# Catalog MCP wrappers that must route only through CatalogService.
-CATALOG_MCP_WRAPPERS = frozenset(
+# Thirteen wrappers delegate exactly once to their same-named CatalogService method.
+CATALOG_SERVICE_WRAPPERS = frozenset(
     {
         'upsert_typed_entities',
         'upsert_typed_edges',
@@ -82,9 +86,48 @@ CATALOG_MCP_WRAPPERS = frozenset(
         'prepare_catalog_batch',
         'commit_prepared_catalog_batch',
         'discard_prepared_catalog_batch',
-        'get_catalog_capabilities',
     }
 )
+# Capabilities is intentionally a pure config builder: no CatalogService/client/driver call.
+CATALOG_CAPABILITIES_WRAPPER = 'get_catalog_capabilities'
+CATALOG_MCP_WRAPPERS = CATALOG_SERVICE_WRAPPERS | {CATALOG_CAPABILITIES_WRAPPER}
+
+FAIL_CLOSED_PROOF_INVENTORY = {
+    'persisted_type': {
+        'test_catalog_service.py': {'test_entity_entity_type_conflict_no_mutation'},
+    },
+    'endpoint': {
+        'test_catalog_service.py': {
+            'test_edge_missing_endpoint_before_embed_no_write',
+            'test_edge_endpoint_type_mismatch_and_generic_conflict_no_create',
+        },
+    },
+    'provenance': {
+        'test_catalog_evidence_store.py': {
+            'test_evidence_divergent_content_raises_provenance_link_conflict',
+            'test_evidence_missing_target_fails',
+        },
+    },
+    'manifest': {
+        'test_catalog_evidence_store.py': {'test_write_manifest_divergent_hash_conflicts'},
+        'test_catalog_verify_manifest.py': {'test_manifest_uuid_mismatch_fails_closed'},
+    },
+    'uniqueness': {
+        'test_catalog_prepare_service.py': {'test_prepare_uniqueness_race_exception_maps_conflict'},
+        'test_catalog_concurrency.py': {
+            'test_no_duplicate_manifest_under_race',
+            'test_no_duplicate_domain_under_race',
+        },
+    },
+    'request_hash': {
+        'test_catalog_service.py': {
+            'test_batch_rejects_caller_hash_mismatch_before_status_read_or_embed'
+        },
+        'test_catalog_hash.py': {'test_caller_request_hash_mismatch_echoes_server_hash'},
+    },
+}
+
+CONTROLLED_STORE_PARAMETERS = frozenset({'entity_type', 'edge_type', 'attributes'})
 
 # Exact UTF-8 forbidden log substrings (SAFE-07 encoding).
 FORBIDDEN_LOG_MARKERS = (
@@ -336,6 +379,102 @@ def _call_names(node: ast.AST) -> set[str]:
     return names
 
 
+def _assigned_names(target: ast.expr) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return {name for item in target.elts for name in _assigned_names(item)}
+    return set()
+
+
+def _wrapper_delegations(node: ast.AST) -> tuple[list[str], set[str], set[str]]:
+    """Track direct/aliased CatalogService calls and callable getattr callbacks."""
+    service_aliases = {'catalog_service'}
+    callable_aliases: dict[str, str] = {}
+    getattr_targets: set[str] = set()
+
+    for child in ast.walk(node):
+        if not isinstance(child, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = child.targets if isinstance(child, ast.Assign) else [child.target]
+        value = child.value
+        if value is None:
+            continue
+        assigned = {name for target in targets for name in _assigned_names(target)}
+        if isinstance(value, ast.Name) and value.id in service_aliases:
+            service_aliases.update(assigned)
+        elif (
+            isinstance(value, ast.Attribute)
+            and isinstance(value.value, ast.Name)
+            and value.value.id in service_aliases
+        ):
+            callable_aliases.update({name: value.attr for name in assigned})
+        elif isinstance(value, ast.Name) and value.id in PROHIBITED_ON_CATALOG_PATH:
+            callable_aliases.update({name: value.id for name in assigned})
+        elif (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == 'getattr'
+        ):
+            method = (
+                value.args[1].value
+                if len(value.args) > 1
+                and isinstance(value.args[1], ast.Constant)
+                and isinstance(value.args[1].value, str)
+                else '<dynamic>'
+            )
+            service_getattr = (
+                value.args
+                and isinstance(value.args[0], ast.Name)
+                and value.args[0].id in service_aliases
+            )
+            if service_getattr or method in PROHIBITED_ON_CATALOG_PATH:
+                callable_aliases.update({name: method for name in assigned})
+                getattr_targets.add(method)
+
+    delegations: list[str] = []
+    indirect_calls: set[str] = set()
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Call):
+            continue
+        if (
+            isinstance(child.func, ast.Attribute)
+            and isinstance(child.func.value, ast.Name)
+            and child.func.value.id in service_aliases
+        ):
+            delegations.append(child.func.attr)
+        elif isinstance(child.func, ast.Name) and child.func.id in callable_aliases:
+            delegations.append(callable_aliases[child.func.id])
+            indirect_calls.add(callable_aliases[child.func.id])
+        elif (
+            isinstance(child.func, ast.Call)
+            and isinstance(child.func.func, ast.Name)
+            and child.func.func.id == 'getattr'
+        ):
+            indirect_calls.add('<direct-getattr-call>')
+    return delegations, getattr_targets, indirect_calls
+
+
+def _test_names(path: Path) -> set[str]:
+    return {
+        node.name
+        for node in ast.parse(path.read_text(encoding='utf-8')).body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith('test_')
+    }
+
+
+def _controlled_store_methods() -> dict[str, set[str]]:
+    methods: dict[str, set[str]] = {}
+    for name, member in inspect.getmembers(CatalogNeo4jStore, predicate=inspect.isfunction):
+        if name.startswith('_'):
+            continue
+        controlled = set(CONTROLLED_STORE_PARAMETERS) & set(inspect.signature(member).parameters)
+        if controlled:
+            methods[name] = controlled
+    return methods
+
+
 def _literal_logger_template(expression: ast.expr) -> tuple[str, list[str]] | None:
     if isinstance(expression, ast.Constant) and isinstance(expression.value, str):
         return expression.value, []
@@ -419,7 +558,7 @@ def _base_entity_params(**overrides: Any) -> dict[str, Any]:
 
 
 def test_prohibited_tools_absent_on_catalog_paths():
-    """SAFE-03: deterministic catalog service+MCP wrappers never call prohibited tools."""
+    """SAFE-03: every wrapper has one approved delegation, including alias dataflow."""
     service_tree = ast.parse(SERVICE_PATH.read_text(encoding='utf-8'))
     service_calls = _call_names(service_tree)
     leaked = PROHIBITED_ON_CATALOG_PATH & service_calls
@@ -427,14 +566,27 @@ def test_prohibited_tools_absent_on_catalog_paths():
 
     mcp_tree = ast.parse(MCP_PATH.read_text(encoding='utf-8'))
     defs = _function_defs(mcp_tree)
-    for name in sorted(CATALOG_MCP_WRAPPERS):
-        assert name in defs, f'missing catalog MCP wrapper: {name}'
-        wrapper_calls = _call_names(defs[name])
-        leaked_w = PROHIBITED_ON_CATALOG_PATH & wrapper_calls
+    assert defs.keys() >= CATALOG_MCP_WRAPPERS
+    for name in sorted(CATALOG_SERVICE_WRAPPERS):
+        delegations, getattr_targets, indirect_calls = _wrapper_delegations(defs[name])
+        assert delegations == [name], f'{name} delegations: {delegations}'
+        assert not getattr_targets, (
+            f'{name} obtains service callbacks via getattr: {getattr_targets}'
+        )
+        assert not indirect_calls, f'{name} invokes indirect callbacks: {indirect_calls}'
+        leaked_w = PROHIBITED_ON_CATALOG_PATH & _call_names(defs[name])
         assert not leaked_w, f'{name} calls prohibited tools: {sorted(leaked_w)}'
 
-    # Service source must not contain bare call-literal patterns for banned tools
-    # as attribute calls on client/graphiti (static string scan of service only).
+    capabilities = defs[CATALOG_CAPABILITIES_WRAPPER]
+    delegations, getattr_targets, indirect_calls = _wrapper_delegations(capabilities)
+    assert delegations == []
+    assert getattr_targets == set()
+    assert indirect_calls == set()
+    capability_calls = _call_names(capabilities)
+    assert 'build_catalog_capabilities' in capability_calls
+    assert 'get_client' not in capability_calls
+    assert not (PROHIBITED_ON_CATALOG_PATH & capability_calls)
+
     service_src = SERVICE_PATH.read_text(encoding='utf-8')
     for tool in PROHIBITED_ON_CATALOG_PATH:
         assert f'.{tool}(' not in service_src, f'catalog_service contains .{tool}('
@@ -448,38 +600,56 @@ def test_prohibited_tools_absent_on_catalog_paths():
 
 @pytest.mark.asyncio
 async def test_llm_or_queue_or_community_ban_on_catalog_paths():
-    """SAFE-04: LLM/queue/community counts stay zero on prepare/commit/upsert paths."""
+    """SAFE-04: concurrent prepare/commit/edge/batch paths call no implicit services."""
     client = _make_client()
+    client.llm_client.generate = AsyncMock()
     queue = MagicMock()
     queue.add_episode = AsyncMock()
-    service = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
-    _wire_minimal_entity_store(service)
+    queue.enqueue = AsyncMock()
 
-    # Sequential
-    await service.upsert_typed_entities(client=client, request=_entity_request())
-    # Concurrent
+    prepare = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
+    batch = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
+    edge = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
+    commit = CatalogService(catalog_config=_enabled_config(), queue_service=queue)
+    _wire_batch_preflight(prepare)
+    _wire_batch_preflight(batch)
+    edge._store.resolve_endpoint_typed = AsyncMock(return_value=('missing_endpoint', None))
+    edge._store.get_edge_by_uuid = AsyncMock(return_value=None)
+    edge._store.upsert_edge_item = AsyncMock()
+    commit._store.load_prepared_plan_by_token_digest = AsyncMock(return_value=None)
+
+    bad_hash = 'b' * 64
     await asyncio.gather(
-        service.upsert_typed_entities(client=client, request=_entity_request()),
-        service.upsert_typed_entities(
+        prepare.prepare_catalog_batch(
             client=client,
-            request=_entity_request(
-                [
-                    _entity(
-                        graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
-                        name_raw='DEPARTMENTS',
-                        name_canonical='departments',
-                        database_qualified_name='ORCL.HR.DEPARTMENTS',
-                    )
-                ]
+            request=PrepareCatalogBatchRequest.model_validate(
+                {
+                    **_batch_request().model_dump(exclude={'dry_run'}),
+                    'request_sha256': bad_hash,
+                }
             ),
+        ),
+        commit.commit_prepared_catalog_batch(
+            client=client,
+            request=CommitPreparedCatalogBatchRequest(plan_token=mint_plan_token()),
+        ),
+        edge.upsert_typed_edges(client=client, request=_edge_request()),
+        batch.upsert_catalog_batch(
+            client=client,
+            request=_batch_request().model_copy(update={'request_sha256': bad_hash}),
         ),
     )
 
     queue.add_episode.assert_not_awaited()
-    queue.add_episode.assert_not_called()
+    queue.enqueue.assert_not_awaited()
     client.llm_client.generate_response.assert_not_called()
-    # CatalogService must not expose community/maintenance fan-out callables.
-    assert not callable(getattr(service, 'build_communities', None))
+    client.llm_client.generate.assert_not_awaited()
+    assert all(
+        not callable(getattr(service, 'build_communities', None))
+        for service in (prepare, commit, edge, batch)
+    )
+    client.embedder.create.assert_not_awaited()
+    client.embedder.create_batch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -609,22 +779,52 @@ def test_client_controlled_property_keys_fail_before_query():
 
 
 def test_cypher_identifier_registry_nonempty():
-    """TEST-10 empty: fixed-authority identifier registry must be nonempty."""
+    """TEST-10: introspect every public store surface accepting controlled fields."""
     assert CATALOG_ENTITY_TYPES
     assert CATALOG_EDGE_TYPES
     assert _ENTITY_LABELS
     assert set(_ENTITY_LABELS) == set(CATALOG_ENTITY_TYPES)
+    controlled = _controlled_store_methods()
+    assert controlled
+    assert {
+        'resolve_entity_label',
+        'build_entity_upsert_cypher',
+        'build_get_entity_by_group_name_type_cypher',
+        'prepare_entity_params',
+        'upsert_entity_item',
+        'get_entity_by_group_name_type',
+        'build_resolve_endpoint_typed_cypher',
+        'resolve_endpoint_typed',
+        'resolve_edge_type',
+        'prepare_edge_params',
+    } <= controlled.keys()
+    assert {'prepare_entity_params', 'prepare_edge_params'} <= {
+        name for name, parameters in controlled.items() if 'attributes' in parameters
+    }
+
+
+@pytest.mark.asyncio
+async def test_store_rejects_malicious_types_before_executor_or_transaction():
+    """TEST-10: public execution surfaces reject types before any query call."""
     store = CatalogNeo4jStore()
-    # Inventory every builder that accepts entity_type/edge_type.
-    builders = [
-        store.resolve_entity_label,
-        store.build_entity_upsert_cypher,
-        store.build_resolve_endpoint_typed_cypher,
-        store.resolve_edge_type,
-    ]
-    assert builders
-    for entity_type in sorted(CATALOG_ENTITY_TYPES):
-        assert store.resolve_entity_label(entity_type) == entity_type
+    executor = SimpleNamespace(execute_query=AsyncMock())
+    tx = SimpleNamespace(run=AsyncMock())
+    for bad in MALICIOUS_ENTITY_TYPES:
+        with pytest.raises(CatalogStoreError):
+            await store.get_entity_by_group_name_type(
+                executor, group_id=GROUP, name='n', entity_type=bad
+            )
+        with pytest.raises(CatalogStoreError):
+            await store.resolve_endpoint_typed(
+                executor, group_id=GROUP, graph_key='g', entity_type=bad
+            )
+        with pytest.raises(CatalogStoreError):
+            await store.upsert_entity_item(tx, entity_type=bad, params={})
+    for bad in MALICIOUS_EDGE_TYPES:
+        with pytest.raises(CatalogStoreError):
+            await store.upsert_edge_item(tx, params={'name': bad})
+    executor.execute_query.assert_not_awaited()
+    tx.run.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -729,9 +929,27 @@ async def test_implicit_endpoint_creation_forbidden():
 # ---------------------------------------------------------------------------
 
 
+def test_fail_closed_behavioral_proof_inventory():
+    """SAFE-06: named tests remain exact proofs for every fail-closed category."""
+    assert set(FAIL_CLOSED_PROOF_INVENTORY) == {
+        'persisted_type',
+        'endpoint',
+        'provenance',
+        'manifest',
+        'uniqueness',
+        'request_hash',
+    }
+    for category, files in FAIL_CLOSED_PROOF_INVENTORY.items():
+        assert files, f'{category}: empty proof inventory'
+        for filename, required in files.items():
+            assert required <= _test_names(Path(__file__).with_name(filename)), (
+                f'{category}: missing {filename} proofs {sorted(required)}'
+            )
+
+
 @pytest.mark.asyncio
-async def test_fail_closed_conflicts_no_silent_repair():
-    """SAFE-06: identity/type/endpoint/provenance/manifest/hash conflicts fail closed."""
+async def test_representative_fail_closed_conflicts_no_silent_repair():
+    """SAFE-06: representative duplicate, endpoint, and hash probes fail closed."""
     # Hash mismatch via explicit request_sha256 compare guard.
     service2 = CatalogService(catalog_config=_enabled_config())
     _wire_batch_preflight(service2)
@@ -809,30 +1027,58 @@ async def test_fail_closed_conflicts_no_silent_repair():
 
 
 @pytest.mark.asyncio
-async def test_log_empty_batch_omits_payload_and_credentials(caplog: pytest.LogCaptureFixture):
-    """SAFE-07 empty: empty/minimal catalog log events omit payload/source/token/creds."""
-    client = _make_client()
-    service = CatalogService(catalog_config=_enabled_config())
-    _wire_minimal_entity_store(service)
-
+async def test_rejected_empty_and_malicious_logs_omit_sensitive_material(
+    caplog: pytest.LogCaptureFixture,
+):
+    """SAFE-07: empty validation plus Unicode payload/exception secrets stay out of logs."""
+    sensitive = (
+        '秘密-raw-源',
+        'plan_token=токен-秘密',
+        'password=pässwörd-秘密',
+        'api_key=κλειδί-秘密',
+        'authorization: Bearer 秘密',
+        'source_text=原文-秘密',
+        'payload=完整目录-秘密',
+    )
+    empty = {
+        'identity_schema_version': 'catalog-v2',
+        'system_key': 'FE',
+        'group_id': GROUP,
+        'batch_id': BATCH,
+        'entities': [],
+        'edges': [],
+        'catalog_sha256': HEX64,
+    }
     with caplog.at_level(logging.INFO):
-        # Minimal dry_run path logs counts only (entities min_length=1).
-        await service.upsert_typed_entities(
-            client=client,
-            request=_entity_request(dry_run=True),
+        with pytest.raises(ValueError):
+            UpsertCatalogBatchRequest.model_validate(empty)
+        with pytest.raises(ValueError):
+            PrepareCatalogBatchRequest.model_validate(empty)
+
+        client = _make_client()
+        client.embedder.create.side_effect = RuntimeError(' '.join(sensitive))
+        service = CatalogService(catalog_config=_enabled_config())
+        _wire_minimal_entity_store(service)
+        entity = _entity(
+            summary=' '.join(sensitive),
+            attributes={'credential': sensitive[2]},
+            source_refs=[{'document_id': '秘密.pdf', 'page': 1, 'raw_text': sensitive[0]}],
         )
-        await service.upsert_typed_entities(
+        response = await service.upsert_typed_entities(
             client=client,
-            request=_entity_request(),
+            request=_entity_request([entity]),
         )
 
-    joined = ' '.join(r.getMessage() for r in caplog.records)
+    assert any(
+        result.error_code == CatalogErrorCode.embedding_failed for result in response.results
+    )
+    joined = ' '.join(record.getMessage() for record in caplog.records)
+    for secret in sensitive:
+        assert secret not in joined
+    lowered = joined.lower()
     for marker in FORBIDDEN_LOG_MARKERS:
-        assert marker not in joined
-    assert 'Employee master table' not in joined
-    assert 'CREATE TABLE' not in joined
-    assert 'password' not in joined.lower()
-    assert GROUP not in joined  # group_id scrubbed from catalog logs
+        assert marker not in lowered
+    assert GROUP not in joined
     assert FORBIDDEN_GROUP not in joined
 
 
@@ -846,13 +1092,10 @@ def test_log_encoding_forbids_plan_token_and_payload_markers():
     catalog_wrapper_calls = [c for c in wrapper_calls if c[0] in CATALOG_MCP_WRAPPERS]
     assert catalog_wrapper_calls
 
-    for function_name, _method, template, arguments in (
-        catalog_service_calls + catalog_wrapper_calls
-    ):
+    for function_name, _, template, arguments in catalog_service_calls + catalog_wrapper_calls:
         lowered = template.lower()
         for marker in FORBIDDEN_LOG_MARKERS:
-            assert marker not in template, f'{function_name}: template has {marker!r}'
-            assert marker not in lowered or marker in FORBIDDEN_LOG_MARKERS
+            assert marker not in lowered, f'{function_name}: template has {marker!r}'
         assert 'group_id' not in lowered
         assert 'plan_token' not in lowered
         assert 'password' not in lowered
@@ -888,12 +1131,8 @@ async def test_empty_spy_baseline_no_prohibited_call():
         client=client,
         request=_entity_request(dry_run=True),
     )
-    assert resp is not None
-    assert (
-        resp.dry_run is True
-        or resp.failed == 0
-        or resp.created + resp.updated + resp.unchanged >= 0
-    )
+    assert resp.dry_run is True
+    assert resp.failed == 0
     queue.add_episode.assert_not_awaited()
     client.llm_client.generate_response.assert_not_called()
     cast(AsyncMock, service._store.upsert_entity_item).assert_not_awaited()
