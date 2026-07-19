@@ -263,7 +263,7 @@ Plans:
   4. Operator and migration docs cover tool inventory, catalog-v2 grammar/map/hash/capabilities/prepare/evidence/manifest/gates/errors/config, obsolete pre-hardening identities/hashes, no automatic migration, and offline canary-artifact regeneration without running the canary
   5. Final structured report sets `canary_executed=false` and sets `ready_to_regenerate_canary=true` only after truthful execution classifications plus post-execution code review, Nyquist, ASVS security, and goal verification are green with no blockers
 
-**Plans**: 4/7 plans executed
+**Plans**: 5/7 plans executed
 
 Plans:
 **Wave 1**
@@ -281,7 +281,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 1+ offline canary + compatibility)*
 
-- [ ] 05-05-PLAN.md — Operator reference + migration guide (DOCS-01..06) structural gates
+- [x] 05-05-PLAN.md — Operator reference + migration guide (DOCS-01..06) structural gates
 
 **Wave 5** *(blocked on Waves 1–4)*
 
@@ -306,7 +306,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3A. Immutable Prepare/Commit Control Plane | 6/6 | Complete; ready_for_phase_3b=true | 2026-07-18 |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
-| Phase 5. Verification, Security, Compatibility, and Migration Docs | 4/7 | In progress; Waves 1–3 green | - |
+| Phase 5. Verification, Security, Compatibility, and Migration Docs | 5/7 | In progress; Waves 1–4 green | - |
 
 ## Coverage
 
