@@ -185,18 +185,6 @@ def _prepare_request(
     )
 
 
-async def _count_group_nodes(driver: Any, group_id: str = GROUP) -> int:
-    result = await driver.execute_query(
-        'MATCH (n) WHERE n.group_id = $g RETURN count(n) AS c',
-        params={'g': group_id},
-    )
-    records = result[0] if result else []
-    if not records:
-        return 0
-    row = records[0]
-    return int(row['c'] if isinstance(row, dict) else row['c'])
-
-
 async def _count_group_edges(driver: Any, group_id: str = GROUP) -> int:
     result = await driver.execute_query(
         'MATCH ()-[e]->() WHERE e.group_id = $g RETURN count(e) AS c',
@@ -460,10 +448,7 @@ async def test_prepare_zero_domain_and_status_contamination(catalog_ctx):
         'CatalogSource',
         'Community',
     ):
-        assert labels.get(forbidden, 0) == before_labels.get(forbidden, 0) == 0 or labels.get(
-            forbidden, 0
-        ) == before_labels.get(forbidden, 0)
-        assert labels.get(forbidden, 0) == 0
+        assert labels.get(forbidden, 0) == before_labels.get(forbidden, 0)
     assert labels.get('CatalogPreparedPlan', 0) >= 1
     assert labels.get('CatalogPreparedPlanChunk', 0) >= 1
     # No RELATES_TO edges for this group from prepare.

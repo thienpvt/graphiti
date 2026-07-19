@@ -96,8 +96,11 @@ GraphitiClients = _attr(_load_module('graphiti_core.graphiti_types'), 'GraphitiC
 LLMClient = _attr(_load_module('graphiti_core.llm_client.client'), 'LLMClient')
 search = _attr(_load_module('graphiti_core.search.search'), 'search')
 _search_recipes = _load_module('graphiti_core.search.search_config_recipes')
+_search_config = _load_module('graphiti_core.search.search_config')
 EDGE_HYBRID_SEARCH_RRF = _attr(_search_recipes, 'EDGE_HYBRID_SEARCH_RRF')
 NODE_HYBRID_SEARCH_RRF = _attr(_search_recipes, 'NODE_HYBRID_SEARCH_RRF')
+EdgeSearchMethod = _attr(_search_config, 'EdgeSearchMethod')
+NodeSearchMethod = _attr(_search_config, 'NodeSearchMethod')
 SearchFilters = _attr(_load_module('graphiti_core.search.search_filters'), 'SearchFilters')
 NoOpTracer = _attr(_load_module('graphiti_core.tracer'), 'NoOpTracer')
 build_communities = _attr(
@@ -1149,18 +1152,31 @@ async def test_search_nodes_and_memory_facts_interop(catalog_client):
             tracer=NoOpTracer(),
         )
 
+    await ctx.driver.execute_query(
+        'CALL db.index.fulltext.awaitEventuallyConsistentIndexRefresh()', params={}
+    )
+    node_search_config = NODE_HYBRID_SEARCH_RRF.model_copy(deep=True)
+    assert node_search_config.node_config is not None
+    node_search_config.node_config.search_methods = [NodeSearchMethod.bm25]
+    search_entity = next(
+        item
+        for item in request.entities
+        if item.entity_type == 'Table' and 'ACCEPT_TAB' in item.name_raw
+    )
+    # Catalog Entity.name is the deterministic graph_key; name_raw is preserved separately.
     node_results = await search(
         clients,
-        'ACCEPT_TAB',
+        search_entity.graph_key.lower(),
         [GROUP],
-        NODE_HYBRID_SEARCH_RRF,
+        node_search_config,
         SearchFilters(node_labels=['Table']),
     )
+    search_name = search_entity.name_raw
     node_names = {
         getattr(n, 'name', None) or getattr(n, 'uuid', None) for n in (node_results.nodes or [])
     }
-    assert any(n and 'ACCEPT_TAB' in str(n) for n in node_names), (
-        f'BATC-11: search_nodes path returned no ACCEPT_TAB; got {node_names!r}'
+    assert any(n and search_name in str(n) for n in node_names), (
+        f'BATC-11: search_nodes path returned no {search_name}; got {node_names!r}'
     )
 
     expected_batch_uuid = catalog_batch_uuid(FIXED_NS, GROUP, request.batch_id)
@@ -1171,11 +1187,14 @@ async def test_search_nodes_and_memory_facts_interop(catalog_client):
     )
     assert batch_labels[0][0]['labels'] == ['CatalogIngestBatch']
 
+    edge_search_config = EDGE_HYBRID_SEARCH_RRF.model_copy(deep=True)
+    assert edge_search_config.edge_config is not None
+    edge_search_config.edge_config.search_methods = [EdgeSearchMethod.bm25]
     edge_results = await search(
         clients,
         'ACCEPT_TAB contains ACCEPT_ID',
         [GROUP],
-        EDGE_HYBRID_SEARCH_RRF,
+        edge_search_config,
         SearchFilters(edge_types=None),
     )
     facts = [getattr(e, 'fact', None) for e in (edge_results.edges or [])]

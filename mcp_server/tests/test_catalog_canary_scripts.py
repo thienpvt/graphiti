@@ -9,14 +9,16 @@ Hard constraints:
 
 from __future__ import annotations
 
+import argparse
 import ast
 import hashlib
 import importlib.util
 import json
 import socket
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -134,6 +136,171 @@ def _walk_strings(value: Any) -> list[str]:
     return found
 
 
+def _commit_crash_case(tmp_path: Path) -> SimpleNamespace:
+    payload_path = tmp_path / 'accept-tab.payload.json'
+    payload_path.write_bytes((HARDENED_ARTIFACT_DIR / payload_path.name).read_bytes())
+    artifact_bytes, raw, _, artifact_sha, request_sha = runner.validate_hardened_artifact(
+        payload_path
+    )
+    request = runner.UpsertCatalogBatchRequest.model_validate(
+        {**raw, 'dry_run': False}, strict=True
+    )
+    assert request.provenance is not None
+    token = 'never-persist-crash-test-token'
+    plan_uuid = '11111111-1111-1111-1111-111111111111'
+    batch_uuid = '22222222-2222-2222-2222-222222222222'
+    prepared_artifact_sha = 'a' * 64
+    manifest_sha = 'b' * 64
+    total_items = len(request.entities) + len(request.edges) + len(request.provenance.sources)
+    prepare = runner.PrepareCatalogBatchResponse(
+        plan_token=token,
+        plan_uuid=plan_uuid,
+        request_sha256=request_sha,
+        catalog_sha256=request.catalog_sha256,
+        artifact_sha256=prepared_artifact_sha,
+        identity_schema_version=request.identity_schema_version,
+        expires_at='2099-01-01T00:00:00Z',
+        entity_count=len(request.entities),
+        edge_count=len(request.edges),
+        source_count=len(request.provenance.sources),
+        evidence_link_count=len(request.provenance.evidence_links),
+    )
+    commit = runner.CommitPreparedCatalogBatchResponse(
+        plan_uuid=plan_uuid,
+        request_sha256=request_sha,
+        catalog_sha256=request.catalog_sha256,
+        artifact_sha256=prepared_artifact_sha,
+        state='COMMITTED',
+        entity_count=len(request.entities),
+        edge_count=len(request.edges),
+        source_count=len(request.provenance.sources),
+        evidence_link_count=len(request.provenance.evidence_links),
+        batch_uuid=batch_uuid,
+        manifest_sha256=manifest_sha,
+        committed_created=total_items,
+    )
+    return SimpleNamespace(
+        payload_path=payload_path,
+        artifact_bytes=artifact_bytes,
+        artifact_sha=artifact_sha,
+        request_sha=request_sha,
+        request=request,
+        token=token,
+        prepare=prepare,
+        commit=commit,
+        remote={
+            'batch_uuid': batch_uuid,
+            'request_sha256': request_sha,
+            'catalog_sha256': request.catalog_sha256,
+            'artifact_sha256': prepared_artifact_sha,
+            'manifest_sha256': manifest_sha,
+            'counts': runner._expected_domain_counts(request),
+        },
+        post_commit={
+            'get_catalog_ingest_status': {
+                'status': 'committed',
+                'group_id': request.group_id,
+                'batch_id': request.batch_id,
+                'request_sha256': request_sha,
+                'catalog_sha256': request.catalog_sha256,
+                'counts': [
+                    len(request.entities),
+                    len(request.edges),
+                    len(request.provenance.sources) + len(request.provenance.evidence_links),
+                ],
+            },
+            'verify_catalog_batch': {
+                'manifest_sha256': manifest_sha,
+                'counts': [
+                    len(request.entities),
+                    len(request.edges),
+                    len(request.provenance.evidence_links),
+                ],
+            },
+            'resolve_typed_entities': {
+                'found': len(request.entities),
+                'uuids_sha256': 'c' * 64,
+            },
+            'get_catalog_batch_manifest': {
+                'manifest_sha256': manifest_sha,
+                'artifact_sha256': prepared_artifact_sha,
+                'counts': list(runner._expected_domain_counts(request).values()),
+                'inventory_sha256': 'd' * 64,
+            },
+            'get_catalog_evidence': {
+                'total': 1,
+                'target_uuid': '33333333-3333-3333-3333-333333333333',
+            },
+            'search_nodes': {'found': True},
+            'search_memory_facts': {
+                'found': True,
+                'uuid': '44444444-4444-4444-4444-444444444444',
+            },
+        },
+    )
+
+
+@asynccontextmanager
+async def _fake_runner_http(_url: str):
+    yield object(), object(), None
+
+
+class _FakeRunnerSession:
+    def __init__(self, *_args: Any):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args: Any) -> None:
+        return None
+
+    async def initialize(self) -> None:
+        return None
+
+
+def _runner_args(case: SimpleNamespace, checkpoint: Path) -> argparse.Namespace:
+    return argparse.Namespace(
+        mcp_url='http://127.0.0.1:8000/mcp/',
+        payload=case.payload_path,
+        mode='commit',
+        expected_artifact_sha256=case.artifact_sha,
+        expected_request_sha256=case.request_sha,
+        checkpoint=checkpoint,
+        allow_test_paths=True,
+    )
+
+
+def _install_recovery_fakes(
+    monkeypatch: pytest.MonkeyPatch, case: SimpleNamespace, calls: list[str]
+) -> None:
+    async def fake_remote(session: Any, request: Any, request_sha: str) -> dict[str, Any]:
+        assert session is not None
+        assert request == case.request
+        assert request_sha == case.request_sha
+        calls.append('remote_binding')
+        return case.remote
+
+    async def fake_gates(
+        session: Any,
+        request: Any,
+        request_sha: str,
+        *,
+        expected_manifest_sha256: str,
+        expected_artifact_sha256: str,
+    ) -> dict[str, Any]:
+        assert session is not None
+        assert request == case.request
+        assert request_sha == case.request_sha
+        assert expected_manifest_sha256 == case.commit.manifest_sha256
+        assert expected_artifact_sha256 == case.commit.artifact_sha256
+        calls.append('post_commit')
+        return case.post_commit
+
+    monkeypatch.setattr(runner, '_remote_commit_binding', fake_remote)
+    monkeypatch.setattr(runner, 'run_post_commit_gates', fake_gates)
+
+
 # ---------------------------------------------------------------------------
 # Strict JSON (shared pure helpers)
 # ---------------------------------------------------------------------------
@@ -207,11 +374,17 @@ def test_historical_inventory_and_digests_preserved() -> None:
         assert path.is_file(), rel
         assert _sha256_file(path) == digest, rel
 
-    # Historical EXPECTED_BATCHES table remains for inventory (not hardened authority)
-    assert 'canary-v2::accept-tab' in runner.EXPECTED_BATCHES
-    accept = runner.EXPECTED_BATCHES['canary-v2::accept-tab']
-    assert accept['request_sha256'] == HISTORICAL_ACCEPT_TAB_REQUEST_SHA256
-    assert accept['provenance'] == (1, 10, 16)
+    # Historical ACCEPT_TAB authority remains frozen in historical artifacts, not runner code.
+    historical_manifest = json.loads(
+        (HISTORICAL_ARTIFACT_DIR / 'manifest.json').read_text(encoding='utf-8')
+    )
+    accept = next(
+        item for item in historical_manifest['batches'] if item['batch_id'] == 'canary-v2::accept-tab'
+    )
+    assert accept['server_request_sha256'] == HISTORICAL_ACCEPT_TAB_REQUEST_SHA256
+    assert accept['counts']['provenance_sources'] == 1
+    assert accept['counts']['provenance_entity_targets'] == 10
+    assert accept['counts']['provenance_edge_targets'] == 16
 
 
 def test_historical_bytes_unchanged_and_attempt_count() -> None:
@@ -302,6 +475,14 @@ def test_hardened_manifest_schema_strict() -> None:
         assert key in inventory
 
     digests = manifest['digests']
+    assert 'manifest' not in digests
+    assert set(digests) == {
+        'payload',
+        'offline_prepare_receipt',
+        'offline_commit_receipt',
+        'offline_checkpoint',
+        'sanitized_fixture',
+    }
     assert digests['payload'] == _sha256_file(HARDENED_ARTIFACT_DIR / 'accept-tab.payload.json')
     assert digests['offline_prepare_receipt'] == _sha256_file(
         HARDENED_ARTIFACT_DIR / 'offline-prepare.receipt.json'
@@ -425,6 +606,34 @@ def test_builder_rejects_cartesian_provenance_for_current_models() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_builder_and_runner_default_to_hardened_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, 'argv', ['build_catalog_canary_requests.py'])
+    assert builder.parse_args().mode == 'hardened'
+    args = runner.parse_args(
+        [
+            '--mcp-url',
+            'http://127.0.0.1:8000/mcp/',
+            '--payload',
+            str(HARDENED_ARTIFACT_DIR / 'accept-tab.payload.json'),
+        ]
+    )
+    assert args.mode == 'commit'
+    assert args.checkpoint == HARDENED_ARTIFACT_DIR / 'live-checkpoint.json'
+    with pytest.raises(SystemExit):
+        runner.parse_args(
+            [
+                '--mcp-url',
+                'http://127.0.0.1:8000/mcp/',
+                '--payload',
+                str(HISTORICAL_ARTIFACT_DIR / 'accept-tab.payload.json'),
+                '--mode',
+                'dry-run',
+            ]
+        )
+
+
 def test_prepare_catalog_batch_commit_prepared_sequence_preferred() -> None:
     assert runner.COMMIT_TOOL_SEQUENCE == PREFERRED_HARDENED_SEQUENCE
     assert 'prepare_catalog_batch' in runner.COMMIT_TOOL_SEQUENCE
@@ -467,6 +676,766 @@ def test_prepare_catalog_batch_commit_prepared_sequence_preferred() -> None:
         assert plan_token not in (HARDENED_ARTIFACT_DIR / name).read_text(encoding='utf-8')
 
 
+@pytest.mark.asyncio
+async def test_hardened_execute_uses_prepare_token_commit_without_persisting_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload_path = tmp_path / 'accept-tab.payload.json'
+    payload_path.write_bytes((HARDENED_ARTIFACT_DIR / payload_path.name).read_bytes())
+    artifact_bytes, raw, _, artifact_sha, request_sha = runner.validate_hardened_artifact(
+        payload_path
+    )
+    request = runner.UpsertCatalogBatchRequest.model_validate(
+        {**raw, 'dry_run': False}, strict=True
+    )
+    assert request.provenance is not None
+    token = 'in-memory-secret-plan-token'
+    plan_uuid = '11111111-1111-1111-1111-111111111111'
+    batch_uuid = '22222222-2222-2222-2222-222222222222'
+    entity_uuids = [
+        f'11111111-1111-1111-1111-{index + 1:012d}' for index in range(len(request.entities))
+    ]
+    edge_uuids = [
+        f'22222222-2222-2222-2222-{index + 1:012d}' for index in range(len(request.edges))
+    ]
+    source_uuids = [
+        f'33333333-3333-3333-3333-{index + 1:012d}'
+        for index in range(len(request.provenance.sources))
+    ]
+    evidence_uuids = [
+        f'44444444-4444-4444-4444-{index + 1:012d}'
+        for index in range(len(request.provenance.evidence_links))
+    ]
+    evidence_keys = [
+        runner.evidence_link_key(item) for item in request.provenance.evidence_links
+    ]
+    evidence_hashes = [
+        runner.canonical_sha256(runner.evidence_canonical_payload(item))
+        for item in request.provenance.evidence_links
+    ]
+    prepared_artifact_sha = 'a' * 64
+    manifest_sha = 'b' * 64
+    total_items = len(request.entities) + len(request.edges) + len(request.provenance.sources)
+
+    responses = {
+        'prepare_catalog_batch': runner.PrepareCatalogBatchResponse(
+            plan_token=token,
+            plan_uuid=plan_uuid,
+            request_sha256=request_sha,
+            catalog_sha256=request.catalog_sha256,
+            artifact_sha256=prepared_artifact_sha,
+            identity_schema_version=request.identity_schema_version,
+            expires_at='2099-01-01T00:00:00Z',
+            entity_count=len(request.entities),
+            edge_count=len(request.edges),
+            source_count=len(request.provenance.sources),
+            evidence_link_count=len(request.provenance.evidence_links),
+            projected_created=total_items,
+        ).model_dump(mode='python'),
+        'commit_prepared_catalog_batch': runner.CommitPreparedCatalogBatchResponse(
+            plan_uuid=plan_uuid,
+            request_sha256=request_sha,
+            catalog_sha256=request.catalog_sha256,
+            artifact_sha256=prepared_artifact_sha,
+            state='COMMITTED',
+            entity_count=len(request.entities),
+            edge_count=len(request.edges),
+            source_count=len(request.provenance.sources),
+            evidence_link_count=len(request.provenance.evidence_links),
+            batch_uuid=batch_uuid,
+            manifest_sha256=manifest_sha,
+            committed_created=total_items,
+        ).model_dump(mode='python'),
+        'get_catalog_ingest_status': runner.CatalogIngestStatusResponse(
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            batch_uuid=batch_uuid,
+            status='committed',
+            request_sha256=request_sha,
+            catalog_sha256=request.catalog_sha256,
+            entity_count=len(request.entities),
+            edge_count=len(request.edges),
+            provenance_count=(
+                len(request.provenance.sources) + len(request.provenance.evidence_links)
+            ),
+        ).model_dump(mode='python'),
+        'verify_catalog_batch': runner.VerifyCatalogBatchResponse(
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            entities={'expected': len(request.entities), 'found': len(request.entities)},
+            edges={'expected': len(request.edges), 'found': len(request.edges)},
+            evidence={
+                'expected': len(request.provenance.evidence_links),
+                'found': len(request.provenance.evidence_links),
+            },
+            require_provenance=True,
+            manifest_sha256=manifest_sha,
+        ).model_dump(mode='python'),
+        'resolve_typed_entities': runner.ResolveTypedEntitiesResponse(
+            group_id=request.group_id,
+            results=[
+                {
+                    'index': index,
+                    'entity_type': item.entity_type,
+                    'graph_key': item.graph_key,
+                    'status': 'found',
+                    'found': True,
+                    'uuid': entity_uuids[index],
+                    'labels': ['Entity', item.entity_type],
+                    'verified_type': item.entity_type,
+                    'has_name_embedding': True,
+                    'content_sha256': item.content_sha256,
+                }
+                for index, item in enumerate(request.entities)
+            ],
+        ).model_dump(mode='python'),
+        'get_catalog_batch_manifest': runner.GetCatalogBatchManifestResponse(
+            group_id=request.group_id,
+            batch_id=request.batch_id,
+            found=True,
+            request_sha256=request_sha,
+            catalog_sha256=request.catalog_sha256,
+            artifact_sha256=prepared_artifact_sha,
+            manifest_sha256=manifest_sha,
+            identity_schema_version=request.identity_schema_version,
+            entity_count=len(request.entities),
+            edge_count=len(request.edges),
+            source_count=len(request.provenance.sources),
+            evidence_link_count=len(request.provenance.evidence_links),
+            limit=max(
+                len(request.entities),
+                len(request.edges),
+                len(request.provenance.sources),
+                len(request.provenance.evidence_links),
+            ),
+            entities=[
+                {
+                    'uuid': entity_uuids[index],
+                    'entity_type': item.entity_type,
+                    'graph_key': item.graph_key,
+                    'content_sha256': item.content_sha256,
+                }
+                for index, item in enumerate(request.entities)
+            ],
+            edges=[
+                {
+                    'uuid': edge_uuids[index],
+                    'edge_type': item.edge_type,
+                    'edge_key': item.edge_key,
+                    'content_sha256': item.content_sha256,
+                }
+                for index, item in enumerate(request.edges)
+            ],
+            sources=[
+                {
+                    'uuid': source_uuids[index],
+                    'source_key': item.source_key,
+                    'content_sha256': item.content_sha256,
+                }
+                for index, item in enumerate(request.provenance.sources)
+            ],
+            evidence_links=[
+                {
+                    'uuid': evidence_uuids[index],
+                    'link_key': evidence_keys[index],
+                    'content_sha256': evidence_hashes[index],
+                }
+                for index in range(len(request.provenance.evidence_links))
+            ],
+        ).model_dump(mode='python'),
+        'get_catalog_evidence': runner.GetCatalogEvidenceResponse(
+            group_id=request.group_id,
+            target_kind='entity',
+            target_uuid=entity_uuids[0],
+            target_graph_key=request.entities[0].graph_key,
+            found_target=True,
+            limit=100,
+            total=1,
+            links=[
+                {
+                    'uuid': evidence_uuids[0],
+                    'link_key': evidence_keys[0],
+                    'content_sha256': evidence_hashes[0],
+                    'target_kind': 'entity',
+                    'target_uuid': entity_uuids[0],
+                }
+            ],
+        ).model_dump(mode='python'),
+        'search_nodes': {
+            'nodes': [
+                {
+                    'uuid': entity_uuids[0],
+                    'name': request.entities[0].graph_key,
+                    'group_id': request.group_id,
+                    'labels': ['Entity', request.entities[0].entity_type],
+                }
+            ]
+        },
+        'search_memory_facts': {
+            'facts': [
+                {
+                    'uuid': edge_uuids[0],
+                    'edge_key': request.edges[0].edge_key,
+                    'name': request.edges[0].edge_type,
+                    'fact': request.edges[0].fact,
+                    'group_id': request.group_id,
+                }
+            ]
+        },
+    }
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    @asynccontextmanager
+    async def fake_http(_url: str):
+        yield object(), object(), None
+
+    class FakeSession:
+        def __init__(self, *_args: Any):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> SimpleNamespace:
+            calls.append((name, arguments))
+            return SimpleNamespace(
+                content=[],
+                structuredContent={'result': responses[name]},
+                isError=False,
+            )
+
+    monkeypatch.setattr(runner, 'streamable_http_client', fake_http)
+    monkeypatch.setattr(runner, 'ClientSession', FakeSession)
+    checkpoint = tmp_path / 'live-checkpoint.json'
+    result = await runner.execute(
+        argparse.Namespace(
+            mcp_url='http://127.0.0.1:8000/mcp/',
+            payload=payload_path,
+            mode='commit',
+            expected_artifact_sha256=artifact_sha,
+            expected_request_sha256=request_sha,
+            checkpoint=checkpoint,
+            allow_test_paths=True,
+        )
+    )
+
+    assert [name for name, _ in calls] == PREFERRED_HARDENED_SEQUENCE
+    assert all(name != 'upsert_catalog_batch' for name, _ in calls)
+    prepare_body = calls[0][1]['request']
+    assert 'plan_token' not in prepare_body
+    assert 'dry_run' not in prepare_body
+    commit_body = calls[1][1]['request']
+    assert commit_body == {
+        'plan_token': token,
+        'expected_request_sha256': request_sha,
+    }
+    assert result['status'] == 'commit_verified'
+    assert result['artifact_sha256'] == runner.sha256_bytes(artifact_bytes)
+    response_path = payload_path.with_name('accept-tab.commit.response.json')
+    persisted = response_path.read_text(encoding='utf-8') + checkpoint.read_text(encoding='utf-8')
+    assert token not in persisted
+    assert request.entities[0].graph_key not in persisted
+    assert 'protocol_response' not in persisted
+
+    calls.clear()
+    replay = await runner.execute(
+        argparse.Namespace(
+            mcp_url='http://127.0.0.1:8000/mcp/',
+            payload=payload_path,
+            mode='commit',
+            expected_artifact_sha256=artifact_sha,
+            expected_request_sha256=request_sha,
+            checkpoint=checkpoint,
+            allow_test_paths=True,
+        )
+    )
+    assert [name for name, _ in calls] == PREFERRED_HARDENED_SEQUENCE[2:]
+    assert replay['status'] == 'commit_verified'
+    assert replay['replayed_from_checkpoint'] is True
+
+
+@pytest.mark.asyncio
+async def test_hardened_execute_recovers_committed_receipt_without_prepare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload_path = tmp_path / 'accept-tab.payload.json'
+    payload_path.write_bytes((HARDENED_ARTIFACT_DIR / payload_path.name).read_bytes())
+    artifact_bytes, raw, _, artifact_sha, request_sha = runner.validate_hardened_artifact(
+        payload_path
+    )
+    request = runner.UpsertCatalogBatchRequest.model_validate(
+        {**raw, 'dry_run': False}, strict=True
+    )
+    assert request.provenance is not None
+    plan_uuid = '11111111-1111-1111-1111-111111111111'
+    batch_uuid = '22222222-2222-2222-2222-222222222222'
+    prepared_artifact_sha = 'a' * 64
+    manifest_sha = 'b' * 64
+    total_items = len(request.entities) + len(request.edges) + len(request.provenance.sources)
+    prepare = runner.PrepareCatalogBatchResponse(
+        plan_token='never-persist-this-token',
+        plan_uuid=plan_uuid,
+        request_sha256=request_sha,
+        catalog_sha256=request.catalog_sha256,
+        artifact_sha256=prepared_artifact_sha,
+        identity_schema_version=request.identity_schema_version,
+        expires_at='2099-01-01T00:00:00Z',
+        entity_count=len(request.entities),
+        edge_count=len(request.edges),
+        source_count=len(request.provenance.sources),
+        evidence_link_count=len(request.provenance.evidence_links),
+    )
+    commit = runner.CommitPreparedCatalogBatchResponse(
+        plan_uuid=plan_uuid,
+        request_sha256=request_sha,
+        catalog_sha256=request.catalog_sha256,
+        artifact_sha256=prepared_artifact_sha,
+        state='COMMITTED',
+        entity_count=len(request.entities),
+        edge_count=len(request.edges),
+        source_count=len(request.provenance.sources),
+        evidence_link_count=len(request.provenance.evidence_links),
+        batch_uuid=batch_uuid,
+        manifest_sha256=manifest_sha,
+        committed_created=total_items,
+    )
+    checkpoint = tmp_path / 'live-checkpoint.json'
+    failed = runner._base_attempt(
+        payload_path=payload_path,
+        mode='commit',
+        artifact_sha256=artifact_sha,
+        artifact_size=len(artifact_bytes),
+        server_request_sha256=request_sha,
+        batch_id=request.batch_id,
+        started_at=runner.utc_now(),
+    )
+    failed.update(
+        {
+            'status': 'committed_verification_failed',
+            'prepare': runner._prepare_receipt(prepare),
+            'commit': runner._durable_commit_receipt(commit),
+            'counts': runner._prepared_response_counts(commit),
+            'completed_at': runner.utc_now(),
+        }
+    )
+    runner.append_checkpoint_attempt(checkpoint, failed)
+    calls: list[str] = []
+
+    @asynccontextmanager
+    async def fake_http(url: str):
+        _ = url
+        yield object(), object(), None
+
+    class FakeSession:
+        def __init__(self, *args: Any):
+            _ = args
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            _ = args
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+    remote = {
+        'batch_uuid': batch_uuid,
+        'request_sha256': request_sha,
+        'catalog_sha256': request.catalog_sha256,
+        'artifact_sha256': prepared_artifact_sha,
+        'manifest_sha256': manifest_sha,
+        'counts': runner._expected_domain_counts(request),
+    }
+    post_commit = {
+        name: {'verified': name}
+        for name in runner.COMMIT_TOOL_SEQUENCE[2:]
+    }
+
+    async def fake_remote(session: Any, remote_request: Any, sha: str) -> dict[str, Any]:
+        assert session is not None
+        assert remote_request == request
+        assert sha == request_sha
+        calls.append('remote_binding')
+        return remote
+
+    async def fake_gates(
+        session: Any,
+        gate_request: Any,
+        sha: str,
+        *,
+        expected_manifest_sha256: str,
+        expected_artifact_sha256: str,
+    ) -> dict[str, Any]:
+        assert session is not None
+        assert gate_request == request
+        assert sha == request_sha
+        assert expected_manifest_sha256 == manifest_sha
+        assert expected_artifact_sha256 == prepared_artifact_sha
+        calls.append('post_commit')
+        return post_commit
+
+    monkeypatch.setattr(runner, 'streamable_http_client', fake_http)
+    monkeypatch.setattr(runner, 'ClientSession', FakeSession)
+    monkeypatch.setattr(runner, '_remote_commit_binding', fake_remote)
+    monkeypatch.setattr(runner, 'run_post_commit_gates', fake_gates)
+
+    result = await runner.execute(
+        argparse.Namespace(
+            mcp_url='http://127.0.0.1:8000/mcp/',
+            payload=payload_path,
+            mode='commit',
+            expected_artifact_sha256=artifact_sha,
+            expected_request_sha256=request_sha,
+            checkpoint=checkpoint,
+            allow_test_paths=True,
+        )
+    )
+
+    assert calls == ['remote_binding', 'post_commit']
+    assert result['status'] == 'commit_verified'
+    assert result['recovered_from_committed_receipt'] is True
+    persisted = checkpoint.read_text(encoding='utf-8') + runner.response_path_for(
+        payload_path, 'commit'
+    ).read_text(encoding='utf-8')
+    assert prepare.plan_token not in persisted
+
+
+@pytest.mark.asyncio
+async def test_hardened_execute_crash_after_commit_response_reconciles_without_prepare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = _commit_crash_case(tmp_path)
+    checkpoint = tmp_path / 'live-checkpoint.json'
+    calls: list[str] = []
+    commit_calls = 0
+
+    async def crashing_tool(
+        _session: Any, tool_name: str, _arguments: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        nonlocal commit_calls
+        calls.append(tool_name)
+        if tool_name == 'prepare_catalog_batch':
+            return {}, case.prepare.model_dump(mode='python')
+        if tool_name == 'commit_prepared_catalog_batch':
+            commit_calls += 1
+            if commit_calls == 1:
+                raise ConnectionError('connection lost after server commit')
+        raise AssertionError(f'unexpected write call: {tool_name}')
+
+    monkeypatch.setattr(runner, 'streamable_http_client', _fake_runner_http)
+    monkeypatch.setattr(runner, 'ClientSession', _FakeRunnerSession)
+    monkeypatch.setattr(runner, 'call_mcp_tool', crashing_tool)
+    with pytest.raises(runner.RunnerError) as error:
+        await runner.execute(_runner_args(case, checkpoint))
+    assert error.value.code == 'transport_outcome_uncertain'
+    attempt = runner.strict_json_load(checkpoint)['attempts'][-1]
+    assert attempt['status'] == 'uncertain'
+    assert case.token not in checkpoint.read_text(encoding='utf-8')
+
+    calls.clear()
+    _install_recovery_fakes(monkeypatch, case, calls)
+    result = await runner.execute(_runner_args(case, checkpoint))
+    assert calls == ['remote_binding', 'post_commit']
+    assert result['reconciled_from_remote_state'] is True
+
+
+@pytest.mark.asyncio
+async def test_hardened_execute_crash_after_receipt_write_recovers_without_prepare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = _commit_crash_case(tmp_path)
+    checkpoint = tmp_path / 'live-checkpoint.json'
+    calls: list[str] = []
+    real_append = runner.append_checkpoint_attempt
+
+    async def write_tools(
+        _session: Any, tool_name: str, _arguments: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        calls.append(tool_name)
+        if tool_name == 'prepare_catalog_batch':
+            return {}, case.prepare.model_dump(mode='python')
+        if tool_name == 'commit_prepared_catalog_batch':
+            return {}, case.commit.model_dump(mode='python')
+        raise AssertionError(f'unexpected write call: {tool_name}')
+
+    def interrupt_after_receipt(path: Path, attempt: dict[str, Any]) -> None:
+        real_append(path, attempt)
+        if attempt.get('status') == 'commit_received':
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(runner, 'streamable_http_client', _fake_runner_http)
+    monkeypatch.setattr(runner, 'ClientSession', _FakeRunnerSession)
+    monkeypatch.setattr(runner, 'call_mcp_tool', write_tools)
+    monkeypatch.setattr(runner, 'append_checkpoint_attempt', interrupt_after_receipt)
+    with pytest.raises(KeyboardInterrupt):
+        await runner.execute(_runner_args(case, checkpoint))
+    attempts = runner.strict_json_load(checkpoint)['attempts']
+    assert [attempt['status'] for attempt in attempts] == [
+        'started',
+        'commit_received',
+        'committed_verification_failed',
+    ]
+    assert attempts[-1]['error_type'] == 'KeyboardInterrupt'
+    assert case.token not in checkpoint.read_text(encoding='utf-8')
+
+    calls.clear()
+    monkeypatch.setattr(runner, 'append_checkpoint_attempt', real_append)
+    _install_recovery_fakes(monkeypatch, case, calls)
+    result = await runner.execute(_runner_args(case, checkpoint))
+    assert calls == ['remote_binding', 'post_commit']
+    assert result['recovered_from_committed_receipt'] is True
+
+
+@pytest.mark.asyncio
+async def test_hardened_execute_checkpoint_write_failure_reconciles_without_prepare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = _commit_crash_case(tmp_path)
+    checkpoint = tmp_path / 'live-checkpoint.json'
+    calls: list[str] = []
+    real_append = runner.append_checkpoint_attempt
+
+    async def write_tools(
+        _session: Any, tool_name: str, _arguments: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        calls.append(tool_name)
+        if tool_name == 'prepare_catalog_batch':
+            return {}, case.prepare.model_dump(mode='python')
+        if tool_name == 'commit_prepared_catalog_batch':
+            return {}, case.commit.model_dump(mode='python')
+        raise AssertionError(f'unexpected write call: {tool_name}')
+
+    def fail_receipt_write(path: Path, attempt: dict[str, Any]) -> None:
+        if attempt.get('status') == 'commit_received':
+            raise OSError('synthetic checkpoint write failure')
+        real_append(path, attempt)
+
+    monkeypatch.setattr(runner, 'streamable_http_client', _fake_runner_http)
+    monkeypatch.setattr(runner, 'ClientSession', _FakeRunnerSession)
+    monkeypatch.setattr(runner, 'call_mcp_tool', write_tools)
+    monkeypatch.setattr(runner, 'append_checkpoint_attempt', fail_receipt_write)
+    with pytest.raises(runner.RunnerError) as error:
+        await runner.execute(_runner_args(case, checkpoint))
+    assert error.value.code == 'post_commit_verification_failed'
+    attempts = runner.strict_json_load(checkpoint)['attempts']
+    assert [attempt['status'] for attempt in attempts] == [
+        'started',
+        'committed_verification_failed',
+    ]
+    assert attempts[-1]['error_type'] == 'OSError'
+    assert case.token not in checkpoint.read_text(encoding='utf-8')
+
+    calls.clear()
+    monkeypatch.setattr(runner, 'append_checkpoint_attempt', real_append)
+    _install_recovery_fakes(monkeypatch, case, calls)
+    result = await runner.execute(_runner_args(case, checkpoint))
+    assert calls == ['remote_binding', 'post_commit']
+    assert result['recovered_from_committed_receipt'] is True
+
+
+@pytest.mark.asyncio
+async def test_hardened_execute_post_commit_failure_keeps_durable_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = _commit_crash_case(tmp_path)
+    checkpoint = tmp_path / 'live-checkpoint.json'
+    calls: list[str] = []
+
+    async def write_tools(
+        _session: Any, tool_name: str, _arguments: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        calls.append(tool_name)
+        if tool_name == 'prepare_catalog_batch':
+            return {}, case.prepare.model_dump(mode='python')
+        if tool_name == 'commit_prepared_catalog_batch':
+            return {}, case.commit.model_dump(mode='python')
+        raise AssertionError(f'unexpected write call: {tool_name}')
+
+    async def fail_post_commit(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        calls.append('post_commit_failed')
+        raise runner.RunnerError('verify_failed', 'synthetic post-commit failure')
+
+    monkeypatch.setattr(runner, 'streamable_http_client', _fake_runner_http)
+    monkeypatch.setattr(runner, 'ClientSession', _FakeRunnerSession)
+    monkeypatch.setattr(runner, 'call_mcp_tool', write_tools)
+    monkeypatch.setattr(runner, 'run_post_commit_gates', fail_post_commit)
+    with pytest.raises(runner.RunnerError) as error:
+        await runner.execute(_runner_args(case, checkpoint))
+    assert error.value.code == 'verify_failed'
+    attempts = runner.strict_json_load(checkpoint)['attempts']
+    assert [attempt['status'] for attempt in attempts] == [
+        'started',
+        'commit_received',
+        'committed_verification_failed',
+    ]
+    assert attempts[-1]['error_code'] == 'verify_failed'
+    assert case.token not in checkpoint.read_text(encoding='utf-8')
+
+    calls.clear()
+    _install_recovery_fakes(monkeypatch, case, calls)
+    result = await runner.execute(_runner_args(case, checkpoint))
+    assert calls == ['remote_binding', 'post_commit']
+    assert result['recovered_from_committed_receipt'] is True
+
+
+def test_runner_rejects_cross_bound_receipts_and_verification_anomalies() -> None:
+    _, raw, _, _, request_sha = runner.validate_hardened_artifact(
+        HARDENED_ARTIFACT_DIR / 'accept-tab.payload.json'
+    )
+    request = runner.UpsertCatalogBatchRequest.model_validate(
+        {**raw, 'dry_run': False}, strict=True
+    )
+    assert request.provenance is not None
+    prepare = runner.PrepareCatalogBatchResponse(
+        plan_token='token',
+        plan_uuid='11111111-1111-1111-1111-111111111111',
+        request_sha256=request_sha,
+        catalog_sha256=request.catalog_sha256,
+        artifact_sha256='a' * 64,
+        identity_schema_version=request.identity_schema_version,
+        expires_at='2099-01-01T00:00:00Z',
+        entity_count=len(request.entities),
+        edge_count=len(request.edges),
+        source_count=len(request.provenance.sources),
+        evidence_link_count=len(request.provenance.evidence_links),
+    )
+    commit = runner.CommitPreparedCatalogBatchResponse(
+        plan_uuid='22222222-2222-2222-2222-222222222222',
+        request_sha256=request_sha,
+        catalog_sha256=request.catalog_sha256,
+        artifact_sha256='b' * 64,
+        state='COMMITTED',
+        entity_count=len(request.entities),
+        edge_count=len(request.edges),
+        source_count=len(request.provenance.sources),
+        evidence_link_count=len(request.provenance.evidence_links),
+        batch_uuid='33333333-3333-3333-3333-333333333333',
+        manifest_sha256='c' * 64,
+        committed_created=(
+            len(request.entities) + len(request.edges) + len(request.provenance.sources)
+        ),
+    ).model_dump(mode='python')
+    with pytest.raises(runner.RunnerError, match='binding'):
+        runner._validate_commit_response(
+            commit,
+            request,
+            request_sha,
+            expected_plan_uuid=prepare.plan_uuid,
+            expected_artifact_sha256=prepare.artifact_sha256,
+        )
+
+    verify = runner.VerifyCatalogBatchResponse(
+        group_id=request.group_id,
+        batch_id=request.batch_id,
+        entities={
+            'expected': len(request.entities),
+            'found': len(request.entities),
+            'content_hash_mismatch': ['bad-entity'],
+        },
+        edges={'expected': len(request.edges), 'found': len(request.edges)},
+        evidence={
+            'expected': len(request.provenance.evidence_links),
+            'found': len(request.provenance.evidence_links),
+        },
+        require_provenance=True,
+    ).model_dump(mode='python')
+    with pytest.raises(runner.RunnerError, match='anomalies'):
+        runner._validate_verify_response(verify, request)
+
+
+def test_runner_search_validators_reject_wrong_or_missing_group() -> None:
+    _, raw, _, _, _ = runner.validate_hardened_artifact(
+        HARDENED_ARTIFACT_DIR / 'accept-tab.payload.json'
+    )
+    request = runner.UpsertCatalogBatchRequest.model_validate(
+        {**raw, 'dry_run': False}, strict=True
+    )
+    entity = request.entities[0]
+    edge = request.edges[0]
+    with pytest.raises(runner.RunnerError, match='fact retrieval'):
+        runner._validate_fact_search(
+            {
+                'facts': [
+                    {
+                        'uuid': 'wrong-uuid',
+                        'edge_key': edge.edge_key,
+                        'name': edge.edge_type,
+                        'fact': edge.fact,
+                        'group_id': request.group_id,
+                    }
+                ]
+            },
+            edge,
+            group_id=request.group_id,
+            expected_uuid='22222222-2222-2222-2222-000000000001',
+        )
+    with pytest.raises(runner.RunnerError, match='node retrieval'):
+        runner._validate_node_search(
+            {
+                'nodes': [
+                    {
+                        'uuid': '11111111-1111-1111-1111-111111111111',
+                        'name': entity.graph_key,
+                        'group_id': 'oracle-catalog-v2',
+                        'labels': ['Entity', entity.entity_type],
+                    }
+                ]
+            },
+            graph_key=entity.graph_key,
+            group_id=request.group_id,
+            entity_type=entity.entity_type,
+            expected_uuid='11111111-1111-1111-1111-111111111111',
+        )
+    with pytest.raises(runner.RunnerError, match='fact retrieval'):
+        runner._validate_fact_search(
+            {
+                'facts': [
+                    {
+                        'edge_key': edge.edge_key,
+                        'name': edge.edge_type,
+                        'fact': edge.fact,
+                    }
+                ]
+            },
+            edge,
+            group_id=request.group_id,
+            expected_uuid='22222222-2222-2222-2222-000000000001',
+        )
+
+
+def test_builder_atomic_replace_set_rolls_back_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = tmp_path / 'first.json'
+    second = tmp_path / 'second.json'
+    first.write_bytes(b'old-first')
+    second.write_bytes(b'old-second')
+    before = {first: first.read_bytes(), second: second.read_bytes()}
+    real_replace = builder.os.replace
+    calls = 0
+
+    def fail_second_replace(source: Any, target: Any) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError('synthetic coherent-write failure')
+        real_replace(source, target)
+
+    monkeypatch.setattr(builder.os, 'replace', fail_second_replace)
+    with pytest.raises(OSError, match='synthetic coherent-write failure'):
+        builder._atomic_replace_set({first: b'new-first', second: b'new-second'})
+    assert {path: path.read_bytes() for path in before} == before
+    assert not list(tmp_path.glob('.*.tmp'))
+
+
 def test_runner_rejects_historical_payload_as_hardened() -> None:
     with pytest.raises(runner.RunnerError) as error:
         runner.validate_hardened_artifact(HISTORICAL_ARTIFACT_DIR / 'accept-tab.payload.json')
@@ -474,13 +1443,21 @@ def test_runner_rejects_historical_payload_as_hardened() -> None:
 
 
 def test_runner_source_has_no_prohibited_write_tool_call_literals_in_sequence() -> None:
-    """Hardened COMMIT_TOOL_SEQUENCE must not include prohibited write tools."""
+    """Hardened execution contains no direct-upsert or legacy tool call."""
     for tool in runner.PROHIBITED_LEGACY_TOOLS:
-        if tool == 'upsert_catalog_batch':
-            # still present as historical execute() string; must not be in sequence constant
-            assert tool not in runner.COMMIT_TOOL_SEQUENCE
-            continue
         assert tool not in runner.COMMIT_TOOL_SEQUENCE
+    tree = ast.parse(RUNNER_PATH.read_text(encoding='utf-8'))
+    called_tools = {
+        argument.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == 'call_tool'
+        and node.args
+        and isinstance((argument := node.args[0]), ast.Constant)
+        and isinstance(argument.value, str)
+    }
+    assert called_tools.isdisjoint(runner.PROHIBITED_LEGACY_TOOLS)
 
 
 def test_offline_canary_no_external_side_effect(
@@ -489,14 +1466,16 @@ def test_offline_canary_no_external_side_effect(
     """Socket / MCP client / Neo4j / embed spies stay unused during pure validation."""
     hits: list[str] = []
 
-    def _block_socket(*_a: Any, **_k: Any) -> None:
+    def _block_socket(*args: Any, **kwargs: Any) -> None:
+        _ = args, kwargs
         hits.append('socket')
         raise AssertionError('socket must not be used offline')
 
     monkeypatch.setattr(socket, 'socket', _block_socket)
     monkeypatch.setattr(socket, 'create_connection', _block_socket)
 
-    def _block_client(*_a: Any, **_k: Any) -> None:
+    def _block_client(*args: Any, **kwargs: Any) -> None:
+        _ = args, kwargs
         hits.append('mcp_client')
         raise AssertionError('MCP client must not be used offline')
 

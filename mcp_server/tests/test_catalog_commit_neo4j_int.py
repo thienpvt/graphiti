@@ -909,7 +909,7 @@ async def test_live_entity_search_interop(catalog_ctx):
     assert commit.state == 'COMMITTED'
 
     search_mod = importlib.import_module('graphiti_core.search.search')
-    recipes = importlib.import_module('graphiti_core.search.search_config_recipes')
+    search_config_mod = importlib.import_module('graphiti_core.search.search_config')
     filters_mod = importlib.import_module('graphiti_core.search.search_filters')
     types_mod = importlib.import_module('graphiti_core.graphiti_types')
     tracer_mod = importlib.import_module('graphiti_core.tracer')
@@ -918,7 +918,10 @@ async def test_live_entity_search_interop(catalog_ctx):
     llm_mod = importlib.import_module('graphiti_core.llm_client.client')
 
     search = _attr(search_mod, 'search')
-    NODE_HYBRID_SEARCH_RRF = _attr(recipes, 'NODE_HYBRID_SEARCH_RRF')
+    NodeSearchConfig = _attr(search_config_mod, 'NodeSearchConfig')
+    NodeSearchMethod = _attr(search_config_mod, 'NodeSearchMethod')
+    NodeReranker = _attr(search_config_mod, 'NodeReranker')
+    SearchConfig = _attr(search_config_mod, 'SearchConfig')
     SearchFilters = _attr(filters_mod, 'SearchFilters')
     GraphitiClients = _attr(types_mod, 'GraphitiClients')
     NoOpTracer = _attr(tracer_mod, 'NoOpTracer')
@@ -970,12 +973,21 @@ async def test_live_entity_search_interop(catalog_ctx):
         tracer=NoOpTracer(),
     )
 
+    await ctx.driver.execute_query(
+        'CALL db.index.fulltext.awaitEventuallyConsistentIndexRefresh()', params={}
+    )
     name = entities[0].name_raw
+    # Catalog Entity.name is the deterministic graph_key; name_raw is preserved separately.
     node_results = await search(
         clients,
-        name,
+        entities[0].graph_key.lower(),
         [GROUP],
-        NODE_HYBRID_SEARCH_RRF,
+        SearchConfig(
+            node_config=NodeSearchConfig(
+                search_methods=[NodeSearchMethod.bm25],
+                reranker=NodeReranker.rrf,
+            )
+        ),
         SearchFilters(node_labels=['Table']),
     )
     node_names = {

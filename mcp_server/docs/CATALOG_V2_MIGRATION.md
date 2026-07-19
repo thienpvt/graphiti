@@ -46,7 +46,7 @@ uv run python scripts/build_catalog_canary_requests.py \
 - **Builder only** — no MCP server, no Neo4j/DB, no network, no LLM/embedder calls.
 - Offline pure model validation + file write under the output directory.
 - After write, builder **reopens** emitted JSON and runs `validate_hardened_request`.
-- Default `--mode` is `historical`. Historical mode emits pre-hardening artifacts under `catalog/canary-v2-requests/` and is **not** hardened authority. Prefer explicit `--mode hardened` for catalog-v2 offline regen.
+- Default `--mode` is `hardened`. Historical mode remains available only for explicit archival regeneration under `catalog/canary-v2-requests/` and is **not** hardened authority.
 - Syntax check only when needed: `uv run python scripts/build_catalog_canary_requests.py --help` or the offline unit tests. Do not treat help as a regeneration run requirement for Phase 5.
 
 ### Required hardened payload fields

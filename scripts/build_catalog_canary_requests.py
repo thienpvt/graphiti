@@ -945,6 +945,54 @@ def _atomic_write_missing(path: Path, raw: bytes) -> None:
         raise
 
 
+def _atomic_replace_set(destinations: dict[Path, bytes]) -> None:
+    """Stage and verify every file before replacing; restore on handled failures.
+
+    ponytail: process-crash atomicity is directory-level only; use a generation directory
+    plus pointer swap if readers ever consume files concurrently with regeneration.
+    """
+    staged: dict[Path, Path] = {}
+    backups = {path: path.read_bytes() if path.exists() else None for path in destinations}
+    replaced: list[Path] = []
+    try:
+        for path, raw in destinations.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, temp_name = tempfile.mkstemp(
+                prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent
+            )
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary = Path(temp_name)
+            if temporary.read_bytes() != raw:
+                raise OSError(f'staged bytes mismatch: {path.name}')
+            staged[path] = temporary
+        for path, temporary in staged.items():
+            os.replace(temporary, path)
+            replaced.append(path)
+    except BaseException:
+        for path in reversed(replaced):
+            prior = backups[path]
+            if prior is None:
+                with contextlib.suppress(FileNotFoundError):
+                    path.unlink()
+            else:
+                fd, temp_name = tempfile.mkstemp(
+                    prefix=f'.{path.name}.restore.', suffix='.tmp', dir=path.parent
+                )
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(prior)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temp_name, path)
+        raise
+    finally:
+        for temporary in staged.values():
+            with contextlib.suppress(FileNotFoundError):
+                temporary.unlink()
+
+
 def build(catalog_path: Path, output_dir: Path) -> dict[str, Any]:
     catalog_raw = catalog_path.read_bytes()
     catalog_sha256 = sha256_bytes(catalog_raw)
@@ -1433,12 +1481,6 @@ def build_hardened(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
             'note': 'Historical ACCEPT_TAB SHA/receipt/plan remain history only (D-05, D-11)',
         },
     }
-    digests['manifest'] = sha256_bytes(canonical_bytes(manifest))
-    # recompute with final digests map
-    manifest['digests'] = digests
-    manifest_bytes = canonical_bytes(manifest)
-    digests['manifest'] = sha256_bytes(manifest_bytes)
-    manifest['digests'] = digests
     manifest_bytes = canonical_bytes(manifest)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1449,11 +1491,11 @@ def build_hardened(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
         output_dir / 'offline-checkpoint.json': checkpoint_bytes,
         output_dir / 'manifest.json': manifest_bytes,
     }
+    if any(not dest.exists() or dest.read_bytes() != raw for dest, raw in destinations.items()):
+        _atomic_replace_set(destinations)
     for dest, raw in destinations.items():
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists() and dest.read_bytes() == raw:
-            continue
-        dest.write_bytes(raw)
+        if dest.read_bytes() != raw:
+            raise ValueError(f'{dest}: bytes changed after coherent write')
     reopened = strict_json_bytes((output_dir / file_name).read_bytes(), file_name)
     validate_hardened_request(reopened)
     return manifest
@@ -1464,8 +1506,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--mode',
         choices=('historical', 'hardened'),
-        default='historical',
-        help='historical catalog.json builder or offline sanitized hardened builder',
+        default='hardened',
+        help='offline sanitized hardened builder (default) or explicit historical builder',
     )
     parser.add_argument(
         '--catalog',
