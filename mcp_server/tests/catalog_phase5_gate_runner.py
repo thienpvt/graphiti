@@ -11,6 +11,7 @@ Historical a67789a is immutable audit pointer only. Never shells canary runner.
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import hashlib
 import json
@@ -330,20 +331,281 @@ def check_historical_axis_preserved(root: Path) -> None:
         raise AssertionError('historical axis constant must remain True')
 
 
+def _python_assignments(path: Path) -> dict[str, object]:
+    """Return literal module assignments without importing product code."""
+    if not path.is_file():
+        raise AssertionError(f'authoritative source missing: {path}')
+    tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+    assignments: dict[str, object] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            value_node = node.value
+            if value_node is None:
+                continue
+            for target in targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                try:
+                    assignments[target.id] = ast.literal_eval(value_node)
+                except (ValueError, TypeError):
+                    if (
+                        isinstance(value_node, ast.Call)
+                        and isinstance(value_node.func, ast.Name)
+                        and value_node.func.id == 'frozenset'
+                        and len(value_node.args) == 1
+                    ):
+                        assignments[target.id] = frozenset(ast.literal_eval(value_node.args[0]))
+    return assignments
+
+
+def _enum_string_values(path: Path, class_name: str) -> frozenset[str]:
+    tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or node.name != class_name:
+            continue
+        values: set[str] = set()
+        for statement in node.body:
+            if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                continue
+            if not isinstance(statement.targets[0], ast.Name):
+                continue
+            value = ast.literal_eval(statement.value)
+            if isinstance(value, str):
+                values.add(value)
+        if not values:
+            raise AssertionError(f'{class_name} has no string members')
+        return frozenset(values)
+    raise AssertionError(f'{class_name} missing from {path}')
+
+
+def _markdown_section(text: str, heading: str) -> str:
+    pattern = re.compile(
+        rf'^##+\s+{re.escape(heading)}\s*$\n(.*?)(?=^##+\s+|\Z)',
+        re.IGNORECASE | re.MULTILINE | re.DOTALL,
+    )
+    match = pattern.search(text)
+    if match is None:
+        raise AssertionError(f'documentation section missing: {heading}')
+    return match.group(1)
+
+
+def _backtick_names(section: str) -> frozenset[str]:
+    return frozenset(re.findall(r'`([a-z][a-z0-9_]*)`', section))
+
+
+def _assert_exact_set(label: str, actual: frozenset[str], expected: frozenset[str]) -> None:
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing or extra:
+        raise AssertionError(f'{label} mismatch: missing={missing}, extra={extra}')
+
+
+def _require_phrases(label: str, text: str, phrases: tuple[str, ...]) -> None:
+    lowered = text.lower()
+    missing = [phrase for phrase in phrases if phrase.lower() not in lowered]
+    if missing:
+        raise AssertionError(f'{label} missing required statements: {missing}')
+
+
+def _assert_no_sensitive_values(text: str, label: str) -> None:
+    """Reject secret-like assignments; never inspect environment or secret values."""
+    patterns = (
+        r'(?i)\b(?:password|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret)\s*[:=]\s*[`"\']?(?!<|\$\{|omitted\b|redacted\b|none\b)[^\s`"\']+',
+        r'(?i)\bGRAPHITI_CATALOG_UUID_NAMESPACE\s*=\s*[0-9a-f]{8}-[0-9a-f-]{27,}',
+        r'(?i)\b(?:sk|ghp|glpat)-[A-Za-z0-9_-]{12,}',
+    )
+    for pattern in patterns:
+        if re.search(pattern, text):
+            raise AssertionError(f'{label} contains a credential or raw namespace value')
+
+
+def _registered_tool_names(path: Path) -> frozenset[str]:
+    tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+    names: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if (
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and decorator.func.attr == 'tool'
+                and isinstance(decorator.func.value, ast.Name)
+                and decorator.func.value.id == 'mcp'
+            ):
+                names.add(node.name)
+    return frozenset(names)
+
+
+def _authoritative_doc_sets(root: Path) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    server = root / 'mcp_server/src/graphiti_mcp_server.py'
+    assignments = _python_assignments(server)
+    catalog_value = assignments.get('CATALOG_TOOL_NAMES')
+    if not isinstance(catalog_value, (set, frozenset)):
+        raise AssertionError('CATALOG_TOOL_NAMES must be a literal set/frozenset')
+    catalog_tools = frozenset(str(name) for name in catalog_value)
+    registered_tools = _registered_tool_names(server)
+    legacy_tools = registered_tools - catalog_tools
+
+    baseline_path = root / 'mcp_server/tests/fixtures/legacy_mcp_contract_baseline.json'
+    if not baseline_path.is_file():
+        raise AssertionError('legacy MCP baseline missing')
+    baseline = json.loads(baseline_path.read_text(encoding='utf-8'))
+    legacy_map = baseline.get('legacy_tools')
+    if not isinstance(legacy_map, dict):
+        raise AssertionError('legacy MCP baseline has no legacy_tools object')
+    baseline_legacy = frozenset(str(name) for name in legacy_map)
+    _assert_exact_set('registered legacy tools vs baseline', legacy_tools, baseline_legacy)
+
+    error_codes = _enum_string_values(
+        root / 'mcp_server/src/models/catalog_common.py', 'CatalogErrorCode'
+    )
+    if (
+        len(legacy_tools) != 14
+        or len(catalog_tools) != 14
+        or len(registered_tools) != 28
+        or legacy_tools & catalog_tools
+    ):
+        raise AssertionError('authoritative tool sets must be disjoint 14 legacy + 14 catalog')
+    return legacy_tools, catalog_tools, error_codes
+
+
+def _assert_registry_members(root: Path, text: str) -> None:
+    common_assignments = _python_assignments(root / 'mcp_server/src/models/catalog_common.py')
+    entity_prefixes = common_assignments.get('ENTITY_TYPE_PREFIXES')
+    edge_types = common_assignments.get('CATALOG_EDGE_TYPES')
+    if not isinstance(entity_prefixes, dict) or not isinstance(edge_types, (set, frozenset)):
+        raise AssertionError('catalog entity/edge registries are not literal authoritative sets')
+
+    registry = _markdown_section(text, 'Entity and edge registries')
+    endpoint_map = _markdown_section(text, 'Endpoint type map')
+    for entity_type, prefix in entity_prefixes.items():
+        if f'`{entity_type}`' not in registry or f'`{prefix}`' not in registry:
+            raise AssertionError(f'entity registry missing {entity_type} / {prefix}')
+    for edge_type in edge_types:
+        if f'`{edge_type}`' not in registry:
+            raise AssertionError(f'edge registry missing {edge_type}')
+        if f'`{edge_type}`' not in endpoint_map:
+            raise AssertionError(f'endpoint type map missing {edge_type}')
+
+
 def check_docs_operator_sections(root: Path) -> None:
-    """Wave 0: README exists (full phrase checks GREEN in 05-05)."""
+    """Fail closed on the complete operator-reference contract (DOCS-01..04)."""
     readme = root / 'mcp_server' / 'README.md'
     if not readme.is_file():
         raise AssertionError('mcp_server/README.md missing')
+    text = readme.read_text(encoding='utf-8')
+    legacy_tools, catalog_tools, error_codes = _authoritative_doc_sets(root)
+
+    legacy_section = _markdown_section(text, 'Legacy tool inventory (14)')
+    catalog_section = _markdown_section(text, 'Catalog tool inventory (14)')
+    error_section = _markdown_section(text, 'Catalog error codes')
+    _assert_exact_set('legacy tool inventory', _backtick_names(legacy_section), legacy_tools)
+    _assert_exact_set('catalog tool inventory', _backtick_names(catalog_section), catalog_tools)
+    _assert_exact_set('CatalogErrorCode inventory', _backtick_names(error_section), error_codes)
+
+    required_sections = (
+        'Preferred large-payload path',
+        'Catalog-v2 graph-key grammar and group scope',
+        'Entity and edge registries',
+        'Endpoint type map',
+        'Hash contracts',
+        'Capabilities contract',
+        'Prepare, commit, and discard lifecycle',
+        'Limits and overload handling',
+        'Explicit evidence links',
+        'Manifest semantics',
+        'Read and write gates',
+        'Rollout configuration',
+        'Catalog safety and backend scope',
+    )
+    for heading in required_sections:
+        _markdown_section(text, heading)
+    _assert_registry_members(root, text)
+
+    _require_phrases(
+        'operator reference',
+        text,
+        (
+            '28 total',
+            'preferred large-payload path',
+            'prepare_catalog_batch',
+            'commit_prepared_catalog_batch',
+            'compatibility',
+            'catalog-v2',
+            'system_key',
+            'FE',
+            'BO',
+            'one group_id',
+            'single server-owned endpoint map',
+            'request_sha256',
+            'catalog_sha256',
+            'artifact_sha256',
+            'manifest_sha256',
+            'expires_at',
+            'payload_b64',
+            'content_sha256',
+            'link_key',
+            'catalog_reads_enabled',
+            'catalog_writes_enabled',
+            'GRAPHITI_CATALOG_UUID_NAMESPACE',
+            'Neo4j 5.26+',
+            'no non-Neo4j portability claim',
+            'never executes canary',
+            'do not query or mutate',
+        ),
+    )
+    _assert_no_sensitive_values(text, 'operator reference')
 
 
 def check_docs_migration_phrases(root: Path) -> None:
-    """Wave 0: migration guide path reserved (content GREEN in 05-05)."""
+    """Fail closed on catalog-v2 offline migration guidance (DOCS-05/06)."""
     mig = root / 'mcp_server' / 'docs' / 'CATALOG_V2_MIGRATION.md'
-    if mig.is_file():
-        text = mig.read_text(encoding='utf-8').lower()
-        if 'automatic migration' in text and 'no automatic' not in text and 'never' not in text:
-            raise AssertionError('migration guide must not claim automatic migration')
+    if not mig.is_file():
+        raise AssertionError('mcp_server/docs/CATALOG_V2_MIGRATION.md missing')
+    text = mig.read_text(encoding='utf-8')
+    for heading in (
+        'Status',
+        'Identity rules',
+        'Historical canary materials',
+        'Offline regeneration',
+        'Future live path',
+        'Phase 5 ban',
+        'Separate residual axis',
+    ):
+        _markdown_section(text, heading)
+    _require_phrases(
+        'migration guide',
+        text,
+        (
+            'catalog-v1 identity keys and content hashes are **obsolete**',
+            'no automatic migration',
+            'catalog/canary-v2-requests-hardened/',
+            'offline',
+            'prepare_catalog_batch',
+            'commit_prepared_catalog_batch',
+            'ACCEPT_TAB',
+            'must **never** be reused',
+            'historical',
+            'current ban remains in force',
+            'separate residual axis',
+            'a67789a',
+            'never executes canary',
+            'do **not** query or mutate `oracle-catalog-v2`',
+            'Neo4j 5.26+ only',
+        ),
+    )
+    lowered = text.lower()
+    if re.search(r'(?<!no )(?<!never )automatic (?:identity )?migration', lowered):
+        raise AssertionError('migration guide contains a positive automatic-migration claim')
+    for line in text.splitlines():
+        lowered_line = line.lower()
+        if 'reuse' not in lowered_line or 'accept_tab' not in lowered_line or 'sha' not in lowered_line:
+            continue
+        if not any(negation in lowered_line for negation in ('no ', 'not ', 'never', "mustn't")):
+            raise AssertionError('migration guide contains ACCEPT_TAB SHA reuse guidance')
+    _assert_no_sensitive_values(text, 'migration guide')
 
 
 def check_registration_contract(root: Path) -> None:
@@ -867,9 +1129,7 @@ def derive_ready_to_regenerate_canary(
         return False
     if safety.get('oracle_catalog_v2_queried') is not False:
         return False
-    if safety.get('safety_checks_pass') is not True:
-        return False
-    return True
+    return safety.get('safety_checks_pass') is True
 
 
 def derive_cli_exit_code(ledger: dict[str, Any]) -> int:

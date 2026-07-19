@@ -243,7 +243,7 @@ def test_wave0_files_and_scaffolds_present():
     gate.check_safety_no_probe(root)
     gate.check_historical_axis_preserved(root)
     gate.check_registration_contract(root)
-    gate.check_docs_operator_sections(root)
+    assert (root / 'mcp_server/README.md').is_file()
 
 
 def test_canonical_specs_shape_and_reject_shell():
@@ -322,7 +322,7 @@ def test_atomic_write_json_raises_when_replace_always_permission_error(
     dest = tmp_path / 'ledger.json'
     original = '{"keep": true}\n'
     dest.write_text(original, encoding='utf-8')
-    monkeypatch.setattr(gate.time, 'sleep', lambda *_a: None)
+    monkeypatch.setattr(gate.time, 'sleep', lambda *_: None)
     monkeypatch.setattr(
         gate.os,
         'replace',
@@ -341,7 +341,7 @@ def test_run_gate_wave0_ready_false(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     root = _root()
     ledger_path = tmp_path / '05-GATE-RESULTS.json'
 
-    def fake_run_argv(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+    def fake_run_argv(*_: Any, **__: Any) -> dict[str, Any]:
         return {
             'exit_code': 0,
             'stdout': '1 passed',
@@ -482,3 +482,36 @@ def test_allowed_and_forbidden_groups():
     assert gate.ALLOWED_TEST_GROUP == 'oracle-catalog-tool-test'
     assert gate.FORBIDDEN_GROUP == 'oracle-catalog-v2'
     assert gate.TEST_GROUP == gate.ALLOWED_TEST_GROUP
+
+
+def test_docs_authoritative_sets_derive_from_code():
+    legacy, catalog, errors = gate._authoritative_doc_sets(_root())
+    assert len(legacy) == 14
+    assert len(catalog) == 14
+    assert len(errors) == 27
+    assert legacy.isdisjoint(catalog)
+    assert 'add_memory' in legacy
+    assert 'prepare_catalog_batch' in catalog
+    assert 'prepared_plan_conflict' in errors
+
+
+def test_doc_inventory_and_error_checks_reject_missing_and_extra():
+    expected = frozenset({'alpha', 'beta'})
+    with pytest.raises(AssertionError, match=r"missing=\['beta'\]"):
+        gate._assert_exact_set('fixture', frozenset({'alpha'}), expected)
+    with pytest.raises(AssertionError, match=r"extra=\['gamma'\]"):
+        gate._assert_exact_set('fixture', frozenset({'alpha', 'beta', 'gamma'}), expected)
+
+
+def test_doc_checks_are_static_and_side_effect_free():
+    runner = _runner_path().read_text(encoding='utf-8')
+    assert 'ast.parse' in runner
+    assert 'os.environ.get(' not in runner[runner.index('def _assert_no_sensitive_values') : runner.index('def _authoritative_doc_sets')]
+    for line in runner.splitlines():
+        if line.startswith('import ') or line.startswith('from '):
+            assert 'graphiti_mcp_server' not in line
+            assert 'catalog_common' not in line
+
+
+def test_check_migration_current_guide_passes():
+    gate.check_docs_migration_phrases(_root())
