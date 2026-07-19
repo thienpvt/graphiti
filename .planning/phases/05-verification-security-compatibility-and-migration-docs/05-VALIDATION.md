@@ -1,10 +1,15 @@
 ---
 phase: 05
 slug: verification-security-compatibility-and-migration-docs
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-07-19
+evaluated_head: 27c4e2e4e5000d84d18cde24a99b010831771fe7
+execution_input_digest: 43d85a2b3dc74a65c9b49b5154917f4bec7dc1179cbd3bcebc5c10a7003d3e68
+reviewed_worktree_digest: e1cf97bcc69650c6680598363f9fd222c2dcf0bc09be1ee16aaa6f492bc7a27b
+initial_ledger_sha256: 403c575443a93738901610bc015e0bcb9b268207825f11b9b9f8b49165287ca3
+audited_at: '2026-07-19T13:05:54.897366Z'
 ---
 
 # Phase 05 — Validation Strategy
@@ -17,7 +22,7 @@ created: 2026-07-19
 |----------|-------|
 | **Framework** | Existing pytest + pytest-asyncio through `mcp_server` uv project; stdlib gate runner |
 | **Config** | `mcp_server/pytest.ini` |
-| **Quick offline** | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_catalog_store_unit.py mcp_server/tests/test_catalog_service.py mcp_server/tests/test_legacy_mcp_contract_compatibility.py mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_phase5_gate_runner.py -q --tb=line -x` |
+| **Quick offline** | `uv run --project mcp_server python -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_canary_review_regressions.py mcp_server/tests/test_catalog_service.py mcp_server/tests/test_catalog_capabilities.py mcp_server/tests/test_catalog_gates.py mcp_server/tests/test_catalog_commit_recovery.py mcp_server/tests/test_catalog_concurrency.py mcp_server/tests/test_catalog_store_unit.py mcp_server/tests/test_legacy_mcp_contract_compatibility.py -q --tb=line` |
 | **Initial package** | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py run-initial` |
 | **Post-audit closure** | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py finalize --require-audits --require-ready --expected-requirements 17 --expected-edge-probes 37` |
 | **Final proof check** | `uv run --project mcp_server python mcp_server/tests/catalog_phase5_gate_runner.py verify-final --require-ready --expected-requirements 17 --expected-edge-probes 37` |
@@ -57,14 +62,14 @@ created: 2026-07-19
 
 ## Wave 0 Requirements
 
-- [ ] `mcp_server/tests/catalog_phase5_gate_runner.py` and self-tests reserve `run-initial`, `finalize --require-audits`, `verify-final`, exact audit parser, readiness formula, atomic coherent output, two-axis safety.
-- [ ] Security/store/service RED cases reserve malicious entity/edge/property identifiers, zero query execution, missing endpoint, same-batch endpoint union, zero implicit endpoint/community writes.
-- [ ] `legacy_mcp_contract_baseline.json` and compatibility RED module reserve behavior-bearing FastMCP contracts for every legacy tool plus separate exact catalog set.
-- [ ] Canary RED extensions reserve full historical/hardened inventory, strict schemas, digests, attempt counts, content/secret/token/full-response leakage, and external-side-effect spies.
-- [ ] Existing three Neo4j modules reserve only missing TEST-11 cases; no duplicate integration suite.
-- [ ] `test_catalog_ollama_e2e.py` reserves pytest-based local harness and availability classification.
-- [ ] Initial `05-GATE-RESULTS.json` is fail closed: `canary_executed=false`, `phase_5_complete=false`, `ready_to_regenerate_canary=false`.
-- [ ] No framework/package install.
+- [x] `mcp_server/tests/catalog_phase5_gate_runner.py` and self-tests reserve `run-initial`, `finalize --require-audits`, `verify-final`, exact audit parser, readiness formula, atomic coherent output, two-axis safety.
+- [x] Security/store/service RED cases reserve malicious entity/edge/property identifiers, zero query execution, missing endpoint, same-batch endpoint union, zero implicit endpoint/community writes.
+- [x] `legacy_mcp_contract_baseline.json` and compatibility RED module reserve behavior-bearing FastMCP contracts for every legacy tool plus separate exact catalog set.
+- [x] Canary RED extensions reserve full historical/hardened inventory, strict schemas, digests, attempt counts, content/secret/token/full-response leakage, and external-side-effect spies.
+- [x] Existing three Neo4j modules reserve only missing TEST-11 cases; no duplicate integration suite.
+- [x] `test_catalog_ollama_e2e.py` reserves pytest-based local harness and availability classification.
+- [x] Initial `05-GATE-RESULTS.json` is fail closed: `canary_executed=false`, `phase_5_complete=false`, `ready_to_regenerate_canary=false`.
+- [x] No framework/package install.
 
 ## Initial Gate Ledger Contract
 
@@ -110,12 +115,14 @@ None. Cleanup/deletion is intentionally absent and needs later explicit confirma
 
 ## Validation Sign-Off
 
-- [ ] Every task has an automated predicate.
-- [ ] RED precedes GREEN for all new behavior.
-- [ ] Exactly 37 probes retain concrete automated predicates.
-- [ ] Same-wave plan file ownership has no overlap.
-- [ ] Live/Ollama skip is availability-based, reasoned, never pass.
-- [ ] `canary_executed=false`; current protected access false; historical `a67789a` preserved.
-- [ ] `nyquist_compliant: true` set only by post-execution validation.
+- [x] Every task has an automated predicate.
+- [x] RED precedes GREEN for all new behavior.
+- [x] Exactly 37 probes retain concrete automated predicates.
+- [x] Same-wave plan file ownership has no overlap.
+- [x] Live/Ollama skip is availability-based, reasoned, never pass.
+- [x] `canary_executed=false`; current protected access false; historical `a67789a` preserved.
+- [x] `nyquist_compliant: true` set only by post-execution validation.
 
-**Approval:** pending independent checker
+**Post-execution result:** 37/37 probes resolved by runnable or structural predicates. TEST-12 and REPT-01 final dispositions remain conditional on Plan 05-07 consuming all four exact-green audits; this validation artifact is one required input, not a closure claim.
+
+**Approval:** validated after independent predicate audit and current exact initial gate pass.

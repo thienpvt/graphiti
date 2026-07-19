@@ -32,7 +32,7 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 - [x] **Phase 3A: Immutable Prepare/Commit Control Plane** - Prepare/discard/token, immutable payload, zero domain write on prepare; local gate ready_for_phase_3b=true
 - [x] **Phase 3B: Atomic Catalog, Exact Evidence, Durable Manifest Writes** - Domain+evidence+manifest co-commit, rollback, search interop
 - [x] **Phase 4: Manifest-Backed Verification and Read-Only Diagnostics** - Manifest reads, verify, edge resolve, split gates (completed 2026-07-18)
-- [ ] **Phase 5: Verification, Security, Compatibility, and Migration Docs** - Exhaustive tests, isolation, docs, final report without canary
+- [x] **Phase 5: Verification, Security, Compatibility, and Migration Docs** - Exhaustive tests, isolation, docs, final report without canary (completed 2026-07-19)
 - Phase 6 canary: separate approval only — not in this milestone requirement set
 
 ## Hard Gates
@@ -263,7 +263,7 @@ Plans:
   4. Operator and migration docs cover tool inventory, catalog-v2 grammar/map/hash/capabilities/prepare/evidence/manifest/gates/errors/config, obsolete pre-hardening identities/hashes, no automatic migration, and offline canary-artifact regeneration without running the canary
   5. Final structured report sets `canary_executed=false` and sets `ready_to_regenerate_canary=true` only after truthful execution classifications plus post-execution code review, Nyquist, ASVS security, and goal verification are green with no blockers
 
-**Plans**: 5/7 plans executed
+**Plans**: 7/7 plans executed
 
 Plans:
 **Wave 1**
@@ -285,11 +285,13 @@ Plans:
 
 **Wave 5** *(blocked on Waves 1–4)*
 
-- [ ] 05-06-PLAN.md — Ollama E2E + initial TEST-12 ledger/REPT-01 package; readiness remains false pending audits
+- [x] 05-06-PLAN.md — Ollama E2E + initial TEST-12 ledger/REPT-01 package; readiness remains false pending audits
 
 **Wave 6** *(post-execution closure; blocked on Wave 5 plus named audits)*
 
-- [ ] 05-07-PLAN.md — Consume review/Nyquist/ASVS/goal artifacts, atomically bind final proof, then conditionally close Phase 5 tracking
+- [x] 05-07-PLAN.md — Consume review/Nyquist/ASVS/goal artifacts, atomically bind final proof, then conditionally close Phase 5 tracking
+
+**Gate**: Passed — final marker-bound proof verified; 20/20 canonical checks pass; goal 5/5 and requirements 17/17; Nyquist 37/37 probes; security `threats_open=0`; review clean; `ready_to_regenerate_canary=true`; `phase_5_complete=true`; `canary_executed=false`; current protected-group access false; historical `a67789a` preserved. Phase 6 not entered.
 
 ## Progress
 
@@ -306,7 +308,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3A. Immutable Prepare/Commit Control Plane | 6/6 | Complete; ready_for_phase_3b=true | 2026-07-18 |
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
-| Phase 5. Verification, Security, Compatibility, and Migration Docs | 5/7 | In progress; Waves 1–4 green | - |
+| Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
 
 ## Coverage
 

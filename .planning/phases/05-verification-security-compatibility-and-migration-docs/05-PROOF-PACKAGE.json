@@ -1,0 +1,20 @@
+{
+  "files": {
+    "05-GATE-RESULTS.json": {
+      "sha256": "e07fe7df2ee3078ba4daf3eea1ae10354c23858094123341f897f1e432a190f8",
+      "size": 135087
+    },
+    "05-IMPLEMENTATION-REPORT.json": {
+      "sha256": "bec86a857f7b539b1a6bb2c499314bb3c6fde9a46ba73c7a4e77550ece5e93eb",
+      "size": 18140
+    },
+    "05-IMPLEMENTATION-REPORT.md": {
+      "sha256": "b88033ab67107a2aa37f90ac2306fc22d7f96da7e33cbf970bef38a8cf08c05c",
+      "size": 1684
+    }
+  },
+  "ledger_sha256": "012a5a2129719755babed6cc0850b1ede25f54125f6c6e560c555db79b1041d5",
+  "marker_sha256": "ead31643f5ac571e17b02ad5960ab8b4b240b5dfc1ca17f75a5300b4119e1677",
+  "package_stage": "final",
+  "schema_version": "phase5-proof-package.v1"
+}
