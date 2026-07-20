@@ -63,9 +63,9 @@ data:
 
       providers:
         openai:
-          api_key: ${OPENAI_API_KEY}
+          api_key: ${OPENAI_EMBEDDER_API_KEY}
           api_url: ${OPENAI_EMBEDDER_API_URL:http://router9.shb-smartcard.svc.cluster.local:20128/v1}
-          organization_id: ${OPENAI_ORGANIZATION_ID:}
+          organization_id: ${OPENAI_ORGANIZATION_ID}
 
         azure_openai:
           api_key: ${AZURE_OPENAI_API_KEY}
@@ -85,7 +85,7 @@ data:
           model: "voyage-3"
 
         ollama:
-          api_url: ${OLLAMA_EMBEDDER_API_URL:http://ollama:11434}
+          api_url: ${OLLAMA_EMBEDDER_API_URL:https://ollama.com}
           api_key: ${OLLAMA_API_KEY:}
           truncate: ${OLLAMA_EMBEDDER_TRUNCATE:true}
           keep_alive: ${OLLAMA_EMBEDDER_KEEP_ALIVE:}
@@ -420,7 +420,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: graphiti-mcp
-          image: ghcr.io/thienpvt/graphiti-mcp:sha-19b8bb14cdac147566daeab94c4bfb370f564d5b
+          image: ghcr.io/thienpvt/graphiti-mcp:sha-5a51fa8528bdcaef79167b3a283ba361161cd592
           imagePullPolicy: Always
           ports:
             - name: http
@@ -458,6 +458,11 @@ spec:
                 secretKeyRef:
                   name: graphiti-secrets
                   key: OPENAI_EMBEDDER_API_KEY
+            - name: OLLAMA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: graphiti-secrets
+                  key: OLLAMA_API_KEY
           resources:
             requests:
               cpu: 500m

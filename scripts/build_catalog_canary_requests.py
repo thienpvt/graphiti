@@ -9,6 +9,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 from collections import Counter
@@ -122,6 +123,14 @@ HARDENED_PAYLOAD_FIELDS = frozenset(
 )
 HARDENED_EXTRACTOR_NAME = 'sanitized-fixture'
 HARDENED_EXTRACTOR_VERSION = '1.0.0'
+LIVE_ARTIFACT_SCHEMA_VERSION = 'phase6-canary-run-v1'
+LIVE_PAYLOAD_NAME = 'accept-tab.payload.json'
+LIVE_MANIFEST_NAME = 'run-manifest.json'
+MAX_LIVE_ID_LENGTH = 512
+LIVE_ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+PROTECTED_GROUP_IDS = frozenset(
+    {'oracle-core', 'oracle-catalog-v2', 'oracle-catalog-tool-test', 'main'}
+)
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1205,7 +1214,27 @@ def _evidence_links_from_cartesian(
     return links
 
 
-def build_hardened_payload_from_fixture(fixture: dict[str, Any]) -> dict[str, Any]:
+def _validate_live_id(name: str, value: str) -> str:
+    if name in {'group_id', 'control_group_id'} and isinstance(value, str):
+        _reject_protected_group(name, value)
+    if not isinstance(value, str) or not value or len(value) > MAX_LIVE_ID_LENGTH:
+        raise ValueError(f'{name} must be 1..{MAX_LIVE_ID_LENGTH} characters')
+    if LIVE_ID_RE.fullmatch(value) is None:
+        raise ValueError(f'{name} must use ASCII alphanumeric, dash, or underscore only')
+    return value
+
+
+def _reject_protected_group(name: str, value: str) -> None:
+    if value.strip().casefold() in {item.casefold() for item in PROTECTED_GROUP_IDS}:
+        raise ValueError(f'{name} is a protected group')
+
+
+def build_hardened_payload_from_fixture(
+    fixture: dict[str, Any],
+    *,
+    group_id: str = HARDENED_GROUP_ID,
+    batch_id: str | None = None,
+) -> dict[str, Any]:
     """Build one model-valid catalog-v2 prepare-shaped payload from synthetic fixture only."""
     if fixture.get('identity_schema_version') != HARDENED_IDENTITY_SCHEMA_VERSION:
         raise ValueError('fixture identity_schema_version must be catalog-v2')
@@ -1223,17 +1252,18 @@ def build_hardened_payload_from_fixture(fixture: dict[str, Any]) -> dict[str, An
             list(provenance.get('entity_targets') or []),
             list(provenance.get('edge_targets') or []),
         )
-    entities, edges, sources = _with_content_hashes(entities, edges, sources)
     fixture_digest = sha256_bytes(
         json.dumps(fixture, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode(
             'utf-8'
         )
     )
+    effective_batch_id = batch_id or fixture['batch_id']
+    entities, edges, sources = _with_content_hashes(entities, edges, sources)
     payload = {
         'identity_schema_version': HARDENED_IDENTITY_SCHEMA_VERSION,
         'system_key': HARDENED_SYSTEM_KEY,
-        'group_id': HARDENED_GROUP_ID,
-        'batch_id': fixture['batch_id'],
+        'group_id': group_id,
+        'batch_id': effective_batch_id,
         'catalog_sha256': fixture_digest,
         'atomic': True,
         'entities': entities,
@@ -1501,43 +1531,165 @@ def build_hardened(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
     return manifest
 
 
-def parse_args() -> argparse.Namespace:
+def build_golden(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
+    """Regenerate Phase 5 bytes, retaining its immutable manifest timestamp."""
+    source_manifest = REPO_ROOT / HARDENED_OUTPUT_REL / 'manifest.json'
+    if not (output_dir / 'manifest.json').exists() and source_manifest.is_file():
+        manifest = strict_load(source_manifest)
+        if not isinstance(manifest, dict):
+            raise ValueError('golden manifest root must be an object')
+        output_dir.mkdir(parents=True, exist_ok=True)
+        _atomic_write_missing(
+            output_dir / 'manifest.json',
+            canonical_bytes({'generated_at': manifest['generated_at']}),
+        )
+    return build_hardened(fixture_path, output_dir)
+
+
+def build_live_canary(
+    fixture_path: Path,
+    output_dir: Path,
+    *,
+    run_id: str,
+    group_id: str,
+    control_group_id: str,
+    batch_id: str,
+) -> dict[str, Any]:
+    """Build one deterministic live-canary request without transport or secret material."""
+    identities = {
+        name: _validate_live_id(name, value)
+        for name, value in {
+            'run_id': run_id,
+            'group_id': group_id,
+            'control_group_id': control_group_id,
+            'batch_id': batch_id,
+        }.items()
+    }
+    _reject_protected_group('group_id', identities['group_id'])
+    _reject_protected_group('control_group_id', identities['control_group_id'])
+    if identities['control_group_id'] == identities['group_id']:
+        raise ValueError('control_group_id must differ from group_id')
+    expected_group = f'oracle-catalog-v2-canary-{identities["run_id"]}'
+    expected_batch = f'accept-tab-catalog-v2-canary-{identities["run_id"]}'
+    if identities['group_id'] != expected_group:
+        raise ValueError('group_id must equal oracle-catalog-v2-canary-<run_id>')
+    if identities['control_group_id'] != f'{expected_group}-empty-control':
+        raise ValueError('control_group_id must equal group_id + -empty-control')
+    if identities['batch_id'] != expected_batch:
+        raise ValueError('batch_id must equal accept-tab-catalog-v2-canary-<run_id>')
+
+    resolved_output = output_dir.resolve()
+    hardened = (REPO_ROOT / HARDENED_OUTPUT_REL).resolve()
+    historical = (REPO_ROOT / 'catalog' / 'canary-v2-requests').resolve()
+    if any(resolved_output == root or root in resolved_output.parents for root in (hardened, historical)):
+        raise ValueError('live output directory must not be a tracked golden or historical directory')
+
+    fixture_raw = fixture_path.read_bytes()
+    approved_fixture_raw = (REPO_ROOT / SANITIZED_FIXTURE_REL).read_bytes()
+    if fixture_raw != approved_fixture_raw:
+        raise ValueError('live fixture must be byte-identical to approved sanitized fixture')
+    fixture = strict_json_bytes(fixture_raw, str(fixture_path))
+    if not isinstance(fixture, dict):
+        raise ValueError('sanitized fixture root must be an object')
+    payload = build_hardened_payload_from_fixture(
+        fixture,
+        group_id=identities['group_id'],
+        batch_id=identities['batch_id'],
+    )
+    model = UpsertCatalogBatchRequest.model_validate({**payload, 'dry_run': True}, strict=True)
+    request_sha256 = CatalogService.batch_request_sha256(model)
+    payload_bytes = canonical_bytes(payload)
+    artifact_sha256 = sha256_bytes(payload_bytes)
+    builder_sha256 = sha256_bytes(Path(__file__).read_bytes())
+    assert model.provenance is not None
+    manifest = {
+        'artifact_schema_version': LIVE_ARTIFACT_SCHEMA_VERSION,
+        'profile': 'live-canary',
+        'run_id': identities['run_id'],
+        'group_id': identities['group_id'],
+        'control_group_id': identities['control_group_id'],
+        'batch_id': identities['batch_id'],
+        'identity_schema_version': model.identity_schema_version,
+        'system_key': model.system_key,
+        'fixture': SANITIZED_FIXTURE_REL.as_posix(),
+        'fixture_sha256': sha256_bytes(fixture_raw),
+        'catalog_sha256': model.catalog_sha256,
+        'request_sha256': request_sha256,
+        'artifact_sha256': artifact_sha256,
+        'payload': LIVE_PAYLOAD_NAME,
+        'counts': {
+            'entities': len(model.entities),
+            'edges': len(model.edges),
+            'sources': len(model.provenance.sources),
+            'evidence_links': len(model.provenance.evidence_links),
+        },
+        'builder': 'scripts/build_catalog_canary_requests.py',
+        'builder_sha256': builder_sha256,
+        'canary_executed': False,
+    }
+    destinations = {
+        resolved_output / LIVE_PAYLOAD_NAME: payload_bytes,
+        resolved_output / LIVE_MANIFEST_NAME: canonical_bytes(manifest),
+    }
+    if resolved_output.exists():
+        existing = {path.name for path in resolved_output.iterdir()}
+        if existing - {LIVE_PAYLOAD_NAME, LIVE_MANIFEST_NAME}:
+            raise FileExistsError('refusing live output directory containing unexpected files')
+    resolved_output.mkdir(parents=True, exist_ok=True)
+    differing = [path for path, raw in destinations.items() if path.exists() and path.read_bytes() != raw]
+    if differing:
+        raise FileExistsError(
+            'refusing to overwrite differing files: ' + ', '.join(str(path) for path in differing)
+        )
+    for path, raw in destinations.items():
+        _atomic_write_missing(path, raw)
+    return manifest
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        '--mode',
-        choices=('historical', 'hardened'),
-        default='hardened',
-        help='offline sanitized hardened builder (default) or explicit historical builder',
-    )
-    parser.add_argument(
-        '--catalog',
-        type=Path,
-        default=REPO_ROOT / 'catalog' / 'catalog.json',
-        help='source catalog.json path (historical mode only)',
-    )
-    parser.add_argument(
-        '--fixture',
-        type=Path,
-        default=REPO_ROOT / SANITIZED_FIXTURE_REL,
-        help='sanitized synthetic fixture (hardened mode only)',
-    )
-    parser.add_argument(
-        '--output-dir',
-        type=Path,
-        default=None,
-        help='artifact output directory',
-    )
-    return parser.parse_args()
+    parser.add_argument('--profile', choices=('golden', 'live-canary'))
+    parser.add_argument('--mode', choices=('historical', 'hardened'))
+    parser.add_argument('--catalog', type=Path, default=REPO_ROOT / 'catalog' / 'catalog.json')
+    parser.add_argument('--fixture', type=Path, default=REPO_ROOT / SANITIZED_FIXTURE_REL)
+    parser.add_argument('--output-dir', type=Path)
+    parser.add_argument('--run-id')
+    parser.add_argument('--group-id')
+    parser.add_argument('--control-group-id')
+    parser.add_argument('--batch-id')
+    args = parser.parse_args(argv)
+    if args.profile is not None and args.mode is not None:
+        parser.error('--profile and --mode are mutually exclusive')
+    args.mode = args.mode or 'hardened'
+    args.profile = args.profile or ('golden' if args.mode == 'hardened' else 'historical')
+    if args.profile == 'live-canary':
+        missing = [
+            name
+            for name in ('run_id', 'group_id', 'control_group_id', 'batch_id', 'output_dir')
+            if getattr(args, name) is None
+        ]
+        if missing:
+            parser.error('live-canary requires: ' + ', '.join('--' + name.replace('_', '-') for name in missing))
+    return args
 
 
 def main() -> int:
     args = parse_args()
-    if args.mode == 'hardened':
+    if args.profile == 'golden':
         output = args.output_dir or (REPO_ROOT / HARDENED_OUTPUT_REL)
-        manifest = build_hardened(args.fixture.resolve(), output.resolve())
-    else:
+        manifest = build_golden(args.fixture.resolve(), output.resolve())
+    elif args.profile == 'historical':
         output = args.output_dir or (REPO_ROOT / 'catalog' / 'canary-v2-requests')
         manifest = build(args.catalog.resolve(), output.resolve())
+    else:
+        manifest = build_live_canary(
+            args.fixture.resolve(),
+            args.output_dir.resolve(),
+            run_id=args.run_id,
+            group_id=args.group_id,
+            control_group_id=args.control_group_id,
+            batch_id=args.batch_id,
+        )
     print(json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False))
     return 0
 
