@@ -131,6 +131,59 @@ LIVE_ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 PROTECTED_GROUP_IDS = frozenset(
     {'oracle-core', 'oracle-catalog-v2', 'oracle-catalog-tool-test', 'main'}
 )
+APPROVED_FIXTURE_RAW_SHA256 = 'db498f2997803cb09fff15283a523f66aabaf57d54139804484cffa9033de53c'
+APPROVED_FIXTURE_LF_SHA256 = '145f38edb7245c448badc7598e2e0733b4c72c16f470909284c6e7d955bae922'
+GOLDEN_SHA256 = {
+    'accept-tab.payload.json': '9df952774c2ec7f33e110ef8956d7611851ea3e92d68ed108dae5eeedc21359f',
+    'manifest.json': 'ba7d5c6c893f59a89ac3533749bfa0e70a4726abcaa7a09c339d754d62706eb9',
+    'offline-checkpoint.json': 'f984a4f306f7e39e900f70dc322270c61456b0185d9120f8b50149121377e333',
+    'offline-commit.receipt.json': '6fce1543fd5042768f879b978dbd682b460fa05c01cff5bc03bc059fa6397832',
+    'offline-prepare.receipt.json': '0452ebd9fe9ee220900061e7af9e7fdc7520bb894e48c81e1406406ec5713111',
+}
+HISTORICAL_SHA256 = {
+    'accept-tab.commit.response.json': (
+        '83ac93da85957c5576c745a4db2e64d6e6ee8e99a2ac6c517e17b3f3e1ccc4f4'
+    ),
+    'accept-tab.dry-run.response.json': (
+        '4767473f3ace434ae23bb69687261da8041f430e5ba1908f0ca62cd496fab139'
+    ),
+    'accept-tab.payload.json': '629decce0f7927d4de542b0cf2b11b12f45872c1d5e4771fd00c900091f3ba48',
+    'documented-foreign-keys.payload.json': (
+        '2da07e6a9f9a89d5cc6d5352007a3de3401e492ec66175cf480a501fc9741035'
+    ),
+    'form-cfg.payload.json': '25ca477a8f4180baa00d0b4e60b772b1663552ea3d92decac3d276cdcc2ea11b',
+    'manifest.json': '039063d7adfe774564b8a8009af0868f96bb570fc1d74b4236e891d89506763d',
+    'pre-auth-txn-type.payload.json': (
+        '96150b1e1f10d5b5183f36aecb846f357af6aecd066e7d2d29f84c9872d1bb0b'
+    ),
+    'trans-type-class.payload.json': (
+        '4337527970d5f010ae842a06b47dd3fc2ef46d8594e3336eb9b17a02b34a3e25'
+    ),
+    'trans-type.payload.json': '97d1b81d4a11434020da0b9bb0c6dd3cb5a099c93ac9ce925c92c5f59e704024',
+}
+LIVE_MANIFEST_FIELDS = frozenset(
+    {
+        'artifact_schema_version',
+        'profile',
+        'run_id',
+        'group_id',
+        'control_group_id',
+        'batch_id',
+        'identity_schema_version',
+        'system_key',
+        'fixture',
+        'fixture_sha256',
+        'fixture_lf_sha256',
+        'catalog_sha256',
+        'request_sha256',
+        'artifact_sha256',
+        'payload',
+        'counts',
+        'builder',
+        'builder_sha256',
+        'canary_executed',
+    }
+)
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -179,6 +232,24 @@ def canonical_bytes(value: Any) -> bytes:
 
 def sha256_bytes(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def lf_normalized_bytes(raw: bytes) -> bytes:
+    return raw.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+
+
+def lf_sha256(raw: bytes) -> str:
+    return sha256_bytes(lf_normalized_bytes(raw))
+
+
+def _validate_fixture_authority(fixture_path: Path, *, exact_path: bool) -> bytes:
+    approved = (REPO_ROOT / SANITIZED_FIXTURE_REL).resolve()
+    if exact_path and fixture_path.resolve() != approved:
+        raise ValueError('live fixture path must be the exact approved sanitized fixture path')
+    raw = fixture_path.read_bytes()
+    if lf_sha256(raw) != APPROVED_FIXTURE_LF_SHA256:
+        raise ValueError('sanitized fixture LF-normalized SHA-256 mismatch')
+    return raw
 
 
 def _canonical_key(value: Any) -> str:
@@ -1002,6 +1073,31 @@ def _atomic_replace_set(destinations: dict[Path, bytes]) -> None:
                 temporary.unlink()
 
 
+def verify_historical(output_dir: Path) -> dict[str, Any]:
+    """Verify frozen historical bytes without generating or overwriting them."""
+    resolved = output_dir.resolve()
+    authority = (REPO_ROOT / 'catalog' / 'canary-v2-requests').resolve()
+    if resolved != authority:
+        raise ValueError('historical mode verifies only the tracked historical directory')
+    actual = {
+        item.name: sha256_bytes(item.read_bytes()) for item in resolved.iterdir() if item.is_file()
+    }
+    if actual != HISTORICAL_SHA256:
+        raise ValueError('historical artifact inventory or SHA-256 differs from frozen authority')
+    manifest = strict_load(resolved / 'manifest.json')
+    if not isinstance(manifest, dict):
+        raise ValueError('historical manifest root must be an object')
+    for batch in manifest.get('batches', []):
+        if not isinstance(batch, dict):
+            raise ValueError('historical manifest batch is invalid')
+        path = (REPO_ROOT / str(batch.get('path'))).resolve()
+        if path.parent != authority or not path.is_file():
+            raise ValueError('historical manifest path escapes frozen authority')
+        if lf_sha256(path.read_bytes()) != batch.get('artifact_sha256'):
+            raise ValueError('historical manifest LF-normalized artifact SHA-256 differs')
+    return manifest
+
+
 def build(catalog_path: Path, output_dir: Path) -> dict[str, Any]:
     catalog_raw = catalog_path.read_bytes()
     catalog_sha256 = sha256_bytes(catalog_raw)
@@ -1409,7 +1505,7 @@ def _offline_checkpoint() -> dict[str, Any]:
 
 def build_hardened(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
     """Emit versioned hardened payload/manifest/receipts/checkpoint offline only."""
-    fixture_raw = fixture_path.read_bytes()
+    fixture_raw = _validate_fixture_authority(fixture_path, exact_path=False)
     fixture = strict_json_bytes(fixture_raw, str(fixture_path))
     if not isinstance(fixture, dict):
         raise ValueError('sanitized fixture root must be an object')
@@ -1461,7 +1557,7 @@ def build_hardened(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
         'offline_prepare_receipt': sha256_bytes(prepare_bytes),
         'offline_commit_receipt': sha256_bytes(commit_bytes),
         'offline_checkpoint': sha256_bytes(checkpoint_bytes),
-        'sanitized_fixture': sha256_bytes(fixture_raw),
+        'sanitized_fixture': APPROVED_FIXTURE_RAW_SHA256,
     }
     manifest = {
         'artifact_schema_version': HARDENED_ARTIFACT_SCHEMA_VERSION,
@@ -1531,19 +1627,48 @@ def build_hardened(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
     return manifest
 
 
+def _golden_map(directory: Path) -> dict[str, str]:
+    names = {item.name for item in directory.iterdir() if item.is_file()}
+    if names != set(GOLDEN_SHA256):
+        raise ValueError(f'golden file set mismatch: {sorted(names)}')
+    return {name: sha256_bytes((directory / name).read_bytes()) for name in sorted(names)}
+
+
 def build_golden(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
-    """Regenerate Phase 5 bytes, retaining its immutable manifest timestamp."""
-    source_manifest = REPO_ROOT / HARDENED_OUTPUT_REL / 'manifest.json'
-    if not (output_dir / 'manifest.json').exists() and source_manifest.is_file():
-        manifest = strict_load(source_manifest)
-        if not isinstance(manifest, dict):
-            raise ValueError('golden manifest root must be an object')
-        output_dir.mkdir(parents=True, exist_ok=True)
+    """Generate in quarantine, verify five pins, then publish only identical bytes."""
+    _validate_fixture_authority(fixture_path, exact_path=False)
+    tracked = (REPO_ROOT / HARDENED_OUTPUT_REL).resolve()
+    tracked_before = _golden_map(tracked)
+    if tracked_before != GOLDEN_SHA256:
+        raise ValueError('tracked Phase 5 golden authority differs from reviewed pins')
+    tracked_manifest = strict_load(tracked / 'manifest.json')
+    if not isinstance(tracked_manifest, dict):
+        raise ValueError('golden manifest root must be an object')
+    with tempfile.TemporaryDirectory(prefix='graphiti-canary-golden-') as temporary:
+        generated = Path(temporary)
         _atomic_write_missing(
-            output_dir / 'manifest.json',
-            canonical_bytes({'generated_at': manifest['generated_at']}),
+            generated / 'manifest.json',
+            canonical_bytes({'generated_at': tracked_manifest['generated_at']}),
         )
-    return build_hardened(fixture_path, output_dir)
+        manifest = build_hardened(fixture_path, generated)
+        generated_map = _golden_map(generated)
+        if generated_map != GOLDEN_SHA256:
+            raise ValueError('generated Phase 5 golden bytes differ from reviewed pins')
+        generated_bytes = {name: (generated / name).read_bytes() for name in GOLDEN_SHA256}
+    if _golden_map(tracked) != tracked_before:
+        raise ValueError('tracked Phase 5 golden authority changed during generation')
+    destination = output_dir.resolve()
+    if destination == tracked:
+        return manifest
+    destination.mkdir(parents=True, exist_ok=True)
+    existing = {item.name for item in destination.iterdir() if item.is_file()}
+    if existing - set(GOLDEN_SHA256):
+        raise FileExistsError('refusing golden output directory containing unexpected files')
+    for name, raw in generated_bytes.items():
+        _atomic_write_missing(destination / name, raw)
+    if _golden_map(destination) != GOLDEN_SHA256:
+        raise ValueError('published golden output differs from reviewed pins')
+    return manifest
 
 
 def build_live_canary(
@@ -1581,13 +1706,15 @@ def build_live_canary(
     resolved_output = output_dir.resolve()
     hardened = (REPO_ROOT / HARDENED_OUTPUT_REL).resolve()
     historical = (REPO_ROOT / 'catalog' / 'canary-v2-requests').resolve()
-    if any(resolved_output == root or root in resolved_output.parents for root in (hardened, historical)):
-        raise ValueError('live output directory must not be a tracked golden or historical directory')
+    if any(
+        resolved_output == root or root in resolved_output.parents
+        for root in (hardened, historical)
+    ):
+        raise ValueError(
+            'live output directory must not be a tracked golden or historical directory'
+        )
 
-    fixture_raw = fixture_path.read_bytes()
-    approved_fixture_raw = (REPO_ROOT / SANITIZED_FIXTURE_REL).read_bytes()
-    if fixture_raw != approved_fixture_raw:
-        raise ValueError('live fixture must be byte-identical to approved sanitized fixture')
+    fixture_raw = _validate_fixture_authority(fixture_path, exact_path=True)
     fixture = strict_json_bytes(fixture_raw, str(fixture_path))
     if not isinstance(fixture, dict):
         raise ValueError('sanitized fixture root must be an object')
@@ -1600,7 +1727,8 @@ def build_live_canary(
     request_sha256 = CatalogService.batch_request_sha256(model)
     payload_bytes = canonical_bytes(payload)
     artifact_sha256 = sha256_bytes(payload_bytes)
-    builder_sha256 = sha256_bytes(Path(__file__).read_bytes())
+    builder_source = Path(__file__).read_bytes()
+    builder_sha256 = lf_sha256(builder_source)
     assert model.provenance is not None
     manifest = {
         'artifact_schema_version': LIVE_ARTIFACT_SCHEMA_VERSION,
@@ -1612,7 +1740,8 @@ def build_live_canary(
         'identity_schema_version': model.identity_schema_version,
         'system_key': model.system_key,
         'fixture': SANITIZED_FIXTURE_REL.as_posix(),
-        'fixture_sha256': sha256_bytes(fixture_raw),
+        'fixture_sha256': APPROVED_FIXTURE_RAW_SHA256,
+        'fixture_lf_sha256': APPROVED_FIXTURE_LF_SHA256,
         'catalog_sha256': model.catalog_sha256,
         'request_sha256': request_sha256,
         'artifact_sha256': artifact_sha256,
@@ -1627,6 +1756,8 @@ def build_live_canary(
         'builder_sha256': builder_sha256,
         'canary_executed': False,
     }
+    if set(manifest) != LIVE_MANIFEST_FIELDS:
+        raise ValueError('live manifest field set mismatch')
     destinations = {
         resolved_output / LIVE_PAYLOAD_NAME: payload_bytes,
         resolved_output / LIVE_MANIFEST_NAME: canonical_bytes(manifest),
@@ -1636,13 +1767,19 @@ def build_live_canary(
         if existing - {LIVE_PAYLOAD_NAME, LIVE_MANIFEST_NAME}:
             raise FileExistsError('refusing live output directory containing unexpected files')
     resolved_output.mkdir(parents=True, exist_ok=True)
-    differing = [path for path, raw in destinations.items() if path.exists() and path.read_bytes() != raw]
+    differing = [
+        path for path, raw in destinations.items() if path.exists() and path.read_bytes() != raw
+    ]
     if differing:
         raise FileExistsError(
             'refusing to overwrite differing files: ' + ', '.join(str(path) for path in differing)
         )
+    if Path(__file__).read_bytes() != builder_source:
+        raise ValueError('builder source changed during artifact construction')
     for path, raw in destinations.items():
         _atomic_write_missing(path, raw)
+    if Path(__file__).read_bytes() != builder_source:
+        raise ValueError('builder source changed during artifact publication')
     return manifest
 
 
@@ -1669,7 +1806,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             if getattr(args, name) is None
         ]
         if missing:
-            parser.error('live-canary requires: ' + ', '.join('--' + name.replace('_', '-') for name in missing))
+            parser.error(
+                'live-canary requires: '
+                + ', '.join('--' + name.replace('_', '-') for name in missing)
+            )
     return args
 
 
@@ -1680,7 +1820,7 @@ def main() -> int:
         manifest = build_golden(args.fixture.resolve(), output.resolve())
     elif args.profile == 'historical':
         output = args.output_dir or (REPO_ROOT / 'catalog' / 'canary-v2-requests')
-        manifest = build(args.catalog.resolve(), output.resolve())
+        manifest = verify_historical(output.resolve())
     else:
         manifest = build_live_canary(
             args.fixture.resolve(),

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -157,3 +159,89 @@ def test_live_cli_requires_every_identity_and_output() -> None:
         ]
     )
     assert args.output_dir == Path('out')
+
+
+def test_fixture_authority_is_lf_normalized_and_pinned(tmp_path: Path) -> None:
+    raw = FIXTURE.read_bytes()
+    assert builder.lf_sha256(raw) == builder.APPROVED_FIXTURE_LF_SHA256
+    crlf = tmp_path / 'fixture.json'
+    crlf.write_bytes(builder.lf_normalized_bytes(raw).replace(b'\n', b'\r\n'))
+    assert builder.lf_sha256(crlf.read_bytes()) == builder.APPROVED_FIXTURE_LF_SHA256
+    mutated = tmp_path / 'mutated.json'
+    mutated.write_bytes(raw + b' ')
+    with pytest.raises(ValueError, match='LF-normalized'):
+        builder.build_golden(mutated, tmp_path / 'golden')
+
+
+def test_five_golden_pins_and_default_never_overwrites(tmp_path: Path) -> None:
+    before = _files(GOLDEN)
+    assert {
+        name: builder.sha256_bytes(raw) for name, raw in before.items()
+    } == builder.GOLDEN_SHA256
+    builder.build_golden(FIXTURE, GOLDEN)
+    assert _files(GOLDEN) == before
+    destination = tmp_path / 'golden'
+    builder.build_golden(FIXTURE, destination)
+    (destination / 'manifest.json').write_text('{}\n', encoding='utf-8')
+    with pytest.raises(FileExistsError, match='overwrite'):
+        builder.build_golden(FIXTURE, destination)
+
+
+@pytest.mark.parametrize('protected', sorted(builder.PROTECTED_GROUP_IDS))
+@pytest.mark.parametrize('variant', ['exact', 'upper', 'trim'])
+def test_protected_matrix_for_canary_and_control(
+    tmp_path: Path, protected: str, variant: str
+) -> None:
+    value = (
+        protected
+        if variant == 'exact'
+        else protected.upper()
+        if variant == 'upper'
+        else f' {protected} '
+    )
+    for field in ('group_id', 'control_group_id'):
+        kwargs = {
+            'run_id': '20260720T010203Z-a',
+            'group_id': 'oracle-catalog-v2-canary-20260720T010203Z-a',
+            'control_group_id': 'oracle-catalog-v2-canary-20260720T010203Z-a-empty-control',
+            'batch_id': 'accept-tab-catalog-v2-canary-20260720T010203Z-a',
+        }
+        kwargs[field] = value
+        with pytest.raises(ValueError, match='protected'):
+            builder.build_live_canary(
+                FIXTURE, tmp_path / f'{field}-{variant}-{protected}', **kwargs
+            )
+
+
+def test_historical_mode_is_read_only_verifier(tmp_path: Path) -> None:
+    historical = ROOT / 'catalog' / 'canary-v2-requests'
+    before = _files(historical)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), '--mode', 'historical'],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['unique_totals'] == {'entities': 38, 'edges': 85}
+    assert _files(historical) == before
+    with pytest.raises(ValueError, match='tracked historical'):
+        builder.verify_historical(tmp_path)
+
+
+def test_live_requires_exact_fixture_path_and_manifest_schema(tmp_path: Path) -> None:
+    copied = tmp_path / 'copy.json'
+    copied.write_bytes(FIXTURE.read_bytes())
+    with pytest.raises(ValueError, match='exact approved'):
+        builder.build_live_canary(
+            copied,
+            tmp_path / 'live',
+            run_id='20260720T010203Z-a',
+            group_id='oracle-catalog-v2-canary-20260720T010203Z-a',
+            control_group_id='oracle-catalog-v2-canary-20260720T010203Z-a-empty-control',
+            batch_id='accept-tab-catalog-v2-canary-20260720T010203Z-a',
+        )
+    manifest = _live(tmp_path / 'valid')
+    assert set(manifest) == builder.LIVE_MANIFEST_FIELDS
+    assert manifest['fixture_lf_sha256'] == builder.APPROVED_FIXTURE_LF_SHA256

@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -28,7 +29,14 @@ from mcp import ClientSession  # noqa: E402
 from mcp.client.streamable_http import streamable_http_client  # noqa: E402
 from models.catalog_batch import NestedProvenancePayload, UpsertCatalogBatchRequest  # noqa: E402
 from models.catalog_edges import CatalogEdgeItem  # noqa: E402
-from models.catalog_entities import CatalogEntityItem  # noqa: E402
+from models.catalog_entities import (  # noqa: E402
+    CatalogEntityItem,
+    GetCatalogBatchManifestRequest,
+    GetCatalogEvidenceRequest,
+    ResolveTypedEdgesRequest,
+    ResolveTypedEntitiesRequest,
+    VerifyCatalogBatchRequest,
+)
 from models.catalog_evidence import CatalogEvidenceLink  # noqa: E402
 from models.catalog_prepare import (  # noqa: E402
     CommitPreparedCatalogBatchRequest,
@@ -37,6 +45,7 @@ from models.catalog_prepare import (  # noqa: E402
 from models.catalog_provenance import CatalogSourceItem  # noqa: E402
 from models.catalog_responses import (  # noqa: E402
     CatalogBatchWriteResponse,
+    CatalogCapabilitiesResponse,
     CatalogIngestStatusResponse,
     CommitPreparedCatalogBatchResponse,
     GetCatalogBatchManifestResponse,
@@ -47,7 +56,10 @@ from models.catalog_responses import (  # noqa: E402
     VerifyCatalogBatchResponse,
 )
 from pydantic import ValidationError  # noqa: E402
+from services import catalog_manifest  # noqa: E402
 from services.catalog_identity import (  # noqa: E402
+    CANONICALIZATION_VERSION,
+    CATALOG_SCHEMA_VERSION,
     canonical_sha256,
     evidence_canonical_payload,
     evidence_link_key,
@@ -101,14 +113,33 @@ PROHIBITED_LEGACY_TOOLS = {
 LIVE_ARTIFACT_SCHEMA_VERSION = 'phase6-canary-run-v1'
 EXPECTED_MCP_TOOLS = frozenset(
     {
-        'add_memory', 'search_nodes', 'search_memory_facts', 'update_entity',
-        'delete_entity_edge', 'delete_episode', 'get_entity_edge', 'get_episodes',
-        'summarize_saga', 'build_communities', 'add_triplet', 'get_episode_entities',
-        'clear_graph', 'get_status', 'upsert_typed_entities', 'resolve_typed_entities',
-        'verify_catalog_batch', 'upsert_typed_edges', 'upsert_provenance',
-        'get_catalog_ingest_status', 'upsert_catalog_batch', 'prepare_catalog_batch',
-        'commit_prepared_catalog_batch', 'discard_prepared_catalog_batch',
-        'get_catalog_batch_manifest', 'resolve_typed_edges', 'get_catalog_evidence',
+        'add_memory',
+        'search_nodes',
+        'search_memory_facts',
+        'update_entity',
+        'delete_entity_edge',
+        'delete_episode',
+        'get_entity_edge',
+        'get_episodes',
+        'summarize_saga',
+        'build_communities',
+        'add_triplet',
+        'get_episode_entities',
+        'clear_graph',
+        'get_status',
+        'upsert_typed_entities',
+        'resolve_typed_entities',
+        'verify_catalog_batch',
+        'upsert_typed_edges',
+        'upsert_provenance',
+        'get_catalog_ingest_status',
+        'upsert_catalog_batch',
+        'prepare_catalog_batch',
+        'commit_prepared_catalog_batch',
+        'discard_prepared_catalog_batch',
+        'get_catalog_batch_manifest',
+        'resolve_typed_edges',
+        'get_catalog_evidence',
         'get_catalog_capabilities',
     }
 )
@@ -117,36 +148,42 @@ LIVE_MANIFEST_NAME = 'run-manifest.json'
 PROTECTED_GROUP_IDS = frozenset(
     {'oracle-core', 'oracle-catalog-v2', 'oracle-catalog-tool-test', 'main'}
 )
-LIVE_CANARY_TOOL_SEQUENCE = [
-    'list_tools',
-    'get_status',
-    'get_catalog_capabilities',
-    'get_catalog_ingest_status',
-    'get_catalog_batch_manifest',
-    'get_catalog_ingest_status',
-    'get_catalog_batch_manifest',
-    'search_nodes',
-    'search_memory_facts',
-    'search_nodes',
-    'search_memory_facts',
-    'upsert_catalog_batch',
-    'get_catalog_ingest_status',
-    'get_catalog_batch_manifest',
-    'prepare_catalog_batch',
-    'get_catalog_ingest_status',
-    'get_catalog_batch_manifest',
-    'commit_prepared_catalog_batch',
-    'get_catalog_ingest_status',
-    'get_catalog_batch_manifest',
-    'verify_catalog_batch',
-    'resolve_typed_entities',
-    'get_catalog_evidence',
-    'search_nodes',
-    'search_memory_facts',
-    'resolve_typed_edges',
-    'search_nodes',
-    'search_memory_facts',
-]
+BLOCKED_RUN_ID = '20260719T200946Z-1c7f70b1'
+SAFE_NAMESPACE_FINGERPRINT_RE = re.compile(r'^[0-9a-f]{16}$')
+SOURCE_HEAD_RE = re.compile(r'^[0-9a-f]{40}$')
+REPORT_SCHEMA_VERSION = 'phase6-canary-report-v1'
+SOURCE_AUTHORITY_PATHS = (
+    'scripts/run_catalog_canary_batch.py',
+    'scripts/build_catalog_canary_requests.py',
+    'graphiti_mcp_phase6_canary_agent_prompt_en.md',
+    'mcp_server/tests/fixtures/accept_tab_sanitized.json',
+    '.planning/phases/05-verification-security-compatibility-and-migration-docs/05-PROOF-PACKAGE.json',
+)
+LIVE_MANIFEST_FIELDS = frozenset(
+    {
+        'artifact_schema_version',
+        'profile',
+        'run_id',
+        'group_id',
+        'control_group_id',
+        'batch_id',
+        'identity_schema_version',
+        'system_key',
+        'fixture',
+        'fixture_sha256',
+        'fixture_lf_sha256',
+        'catalog_sha256',
+        'request_sha256',
+        'artifact_sha256',
+        'payload',
+        'counts',
+        'builder',
+        'builder_sha256',
+        'canary_executed',
+    }
+)
+APPROVED_FIXTURE_RAW_SHA256 = 'db498f2997803cb09fff15283a523f66aabaf57d54139804484cffa9033de53c'
+APPROVED_FIXTURE_LF_SHA256 = '145f38edb7245c448badc7598e2e0733b4c72c16f470909284c6e7d955bae922'
 
 
 class LiveStage(IntEnum):
@@ -196,8 +233,15 @@ class SessionLiveTransport:
             return {'count': len(tools), 'names': sorted(str(tool.name) for tool in tools)}
         if name == 'upsert_catalog_batch':
             self.upsert_calls += 1
-            if self.upsert_calls != 1 or request.get('dry_run') is not True or type(request['dry_run']) is not bool:
-                raise RunnerError('dry_run_transport_guard', 'live upsert is allowed exactly once with boolean true')
+            if (
+                self.upsert_calls != 1
+                or request.get('dry_run') is not True
+                or type(request['dry_run']) is not bool
+            ):
+                raise RunnerError(
+                    'dry_run_transport_guard',
+                    'live upsert is allowed exactly once with boolean true',
+                )
         arguments = (
             request
             if name in {'get_status', 'get_catalog_capabilities'}
@@ -478,6 +522,65 @@ def build_commit_transport_request(
     return body
 
 
+def build_resolve_entities_request(request: UpsertCatalogBatchRequest) -> dict[str, Any]:
+    body = {
+        'identity_schema_version': request.identity_schema_version,
+        'system_key': request.system_key,
+        'group_id': request.group_id,
+        'entities': [
+            {'entity_type': item.entity_type, 'graph_key': item.graph_key}
+            for item in request.entities
+        ],
+    }
+    ResolveTypedEntitiesRequest.model_validate(body, strict=True)
+    return body
+
+
+def build_resolve_edges_request(request: UpsertCatalogBatchRequest) -> dict[str, Any]:
+    body = {
+        'identity_schema_version': request.identity_schema_version,
+        'system_key': request.system_key,
+        'group_id': request.group_id,
+        'edges': [
+            {'edge_type': item.edge_type, 'edge_key': item.edge_key} for item in request.edges
+        ],
+    }
+    ResolveTypedEdgesRequest.model_validate(body, strict=True)
+    return body
+
+
+def build_verify_request(
+    request: UpsertCatalogBatchRequest,
+    entity_uuids: dict[tuple[str, str], str],
+) -> dict[str, Any]:
+    body = {
+        'identity_schema_version': request.identity_schema_version,
+        'system_key': request.system_key,
+        'group_id': request.group_id,
+        'batch_id': request.batch_id,
+        'entities': [
+            {'entity_type': item.entity_type, 'graph_key': item.graph_key}
+            for item in request.entities
+        ],
+        'edges': [
+            {
+                'edge_type': item.edge_type,
+                'edge_key': item.edge_key,
+                'expected_source_uuid': entity_uuids[
+                    (item.source_entity_type, item.source_graph_key)
+                ],
+                'expected_target_uuid': entity_uuids[
+                    (item.target_entity_type, item.target_graph_key)
+                ],
+            }
+            for item in request.edges
+        ],
+        'require_provenance': True,
+    }
+    VerifyCatalogBatchRequest.model_validate(body, strict=True)
+    return body
+
+
 def simulate_prepare_commit_sequence(
     raw: dict[str, Any],
     *,
@@ -496,8 +599,15 @@ def simulate_prepare_commit_sequence(
             'representative_search_required',
             'hardened canary artifact requires at least one entity and one edge',
         )
+    request = UpsertCatalogBatchRequest.model_validate({**raw, 'dry_run': False}, strict=True)
     representative_entity = entities[0]
     representative_edge = edges[0]
+    placeholder_entities = {
+        (item.entity_type, item.graph_key): str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f'{item.entity_type}|{item.graph_key}')
+        )
+        for item in request.entities
+    }
     return [
         ('prepare_catalog_batch', {'request': prepare_body}),
         ('commit_prepared_catalog_batch', {'request': commit_body}),
@@ -509,24 +619,7 @@ def simulate_prepare_commit_sequence(
             'verify_catalog_batch',
             {
                 'request': {
-                    'group_id': group_id,
-                    'batch_id': batch_id,
-                    'entities': [
-                        {'entity_type': item['entity_type'], 'graph_key': item['graph_key']}
-                        for item in entities
-                    ],
-                    'edges': [
-                        {
-                            'edge_type': item['edge_type'],
-                            'edge_key': item['edge_key'],
-                            'expected_source_graph_key': item['source_graph_key'],
-                            'expected_target_graph_key': item['target_graph_key'],
-                            'expected_source_uuid': None,
-                            'expected_target_uuid': None,
-                        }
-                        for item in edges
-                    ],
-                    'require_provenance': True,
+                    **build_verify_request(request, placeholder_entities),
                 }
             },
         ),
@@ -534,12 +627,7 @@ def simulate_prepare_commit_sequence(
             'resolve_typed_entities',
             {
                 'request': {
-                    'group_id': group_id,
-                    'entities': [
-                        {'entity_type': item['entity_type'], 'graph_key': item['graph_key']}
-                        for item in entities
-                    ],
-                    'graph_keys': None,
+                    **build_resolve_entities_request(request),
                 }
             },
         ),
@@ -733,7 +821,9 @@ def _validate_prepare_response(
     try:
         uuid.UUID(response.plan_uuid)
     except ValueError as exc:
-        raise RunnerError('prepare_binding_mismatch', 'prepare response plan UUID is invalid') from exc
+        raise RunnerError(
+            'prepare_binding_mismatch', 'prepare response plan UUID is invalid'
+        ) from exc
     if (
         response.request_sha256 != server_request_sha256
         or response.catalog_sha256 != request.catalog_sha256
@@ -809,11 +899,13 @@ def _validate_commit_response(
     committed_total = (
         response.committed_created + response.committed_updated + response.committed_unchanged
     )
-    expected_committed_total = len(request.entities) + len(request.edges) + len(
-        request.provenance.sources
+    expected_committed_total = (
+        len(request.entities) + len(request.edges) + len(request.provenance.sources)
     )
     if committed_total != expected_committed_total:
-        raise RunnerError('commit_count_mismatch', 'committed outcome count does not match artifact')
+        raise RunnerError(
+            'commit_count_mismatch', 'committed outcome count does not match artifact'
+        )
     return response
 
 
@@ -885,7 +977,9 @@ def _validate_verify_response(
         response.evidence.expected != expected_evidence
         or response.evidence.found != expected_evidence
     ):
-        raise RunnerError('verify_evidence_count_mismatch', 'verify evidence counts do not match artifact')
+        raise RunnerError(
+            'verify_evidence_count_mismatch', 'verify evidence counts do not match artifact'
+        )
     anomaly_lists = (
         response.missing,
         response.extras,
@@ -991,9 +1085,9 @@ def _validate_fact_search(
             continue
         attributes_raw = fact.get('attributes')
         attributes: dict[str, Any] = attributes_raw if isinstance(attributes_raw, dict) else {}
-        exact_edge_key = fact.get('edge_key') == edge.edge_key or attributes.get(
-            'edge_key'
-        ) == edge.edge_key
+        exact_edge_key = (
+            fact.get('edge_key') == edge.edge_key or attributes.get('edge_key') == edge.edge_key
+        )
         if (
             fact.get('uuid') == expected_uuid
             and exact_edge_key
@@ -1009,13 +1103,8 @@ def _validate_manifest_inventory(
     request: UpsertCatalogBatchRequest,
 ) -> tuple[dict[tuple[str, str], str], dict[tuple[str, str], str], dict[str, str]]:
     assert request.provenance is not None
-    if manifest.offset != 0 or manifest.limit < max(
-        len(request.entities),
-        len(request.edges),
-        len(request.provenance.sources),
-        len(request.provenance.evidence_links),
-    ):
-        raise RunnerError('manifest_failed', 'manifest response is not a complete first page')
+    if manifest.offset != 0:
+        raise RunnerError('manifest_failed', 'manifest aggregate must start at offset zero')
 
     entity_expected = {
         (item.entity_type, item.graph_key): item.content_sha256 for item in request.entities
@@ -1026,9 +1115,7 @@ def _validate_manifest_inventory(
         evidence_link_key(item): canonical_sha256(evidence_canonical_payload(item))
         for item in request.provenance.evidence_links
     }
-    entity_found = {
-        (item.entity_type, item.graph_key): item for item in manifest.entities
-    }
+    entity_found = {(item.entity_type, item.graph_key): item for item in manifest.entities}
     edge_found = {(item.edge_type, item.edge_key): item for item in manifest.edges}
     source_found = {item.source_key: item for item in manifest.sources}
     evidence_found = {item.link_key: item for item in manifest.evidence_links}
@@ -1053,7 +1140,9 @@ def _validate_manifest_inventory(
         raise RunnerError('manifest_failed', 'manifest member content hashes do not match artifact')
     if any(source_found[key].content_sha256 != digest for key, digest in source_expected.items()):
         raise RunnerError('manifest_failed', 'manifest source hashes do not match artifact')
-    if any(evidence_found[key].content_sha256 != digest for key, digest in evidence_expected.items()):
+    if any(
+        evidence_found[key].content_sha256 != digest for key, digest in evidence_expected.items()
+    ):
         raise RunnerError('manifest_failed', 'manifest evidence hashes do not match artifact')
     all_members = [
         *manifest.entities,
@@ -1153,26 +1242,16 @@ async def run_post_commit_gates(
         'counts': [status.entity_count, status.edge_count, status.provenance_count],
     }
 
-    verify_request = {
-        'group_id': request.group_id,
-        'batch_id': request.batch_id,
-        'entities': [
-            {'entity_type': item.entity_type, 'graph_key': item.graph_key}
-            for item in request.entities
-        ],
-        'edges': [
-            {
-                'edge_type': item.edge_type,
-                'edge_key': item.edge_key,
-                'expected_source_graph_key': item.source_graph_key,
-                'expected_target_graph_key': item.target_graph_key,
-                'expected_source_uuid': None,
-                'expected_target_uuid': None,
-            }
-            for item in request.edges
-        ],
-        'require_provenance': True,
+    # Legacy batch-scoped verification ignores endpoint refs, but strict request models
+    # still require valid UUID syntax. Preserve the frozen Phase 5 call order with stable
+    # non-authoritative UUIDv5 placeholders; the live path resolves exact endpoints first.
+    placeholder_entities = {
+        (item.entity_type, item.graph_key): str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f'{item.entity_type}|{item.graph_key}')
+        )
+        for item in request.entities
     }
+    verify_request = build_verify_request(request, placeholder_entities)
     _, structured = await call_mcp_tool(
         session, 'verify_catalog_batch', {'request': verify_request}
     )
@@ -1182,21 +1261,10 @@ async def run_post_commit_gates(
         raise RunnerError('verify_failed', 'verify manifest hash does not match commit')
     summaries['verify_catalog_batch'] = {
         'manifest_sha256': verify.manifest_sha256,
-        'counts': [
-            verify.entities.expected,
-            verify.edges.expected,
-            verify.evidence.expected,
-        ],
+        'counts': [verify.entities.expected, verify.edges.expected, verify.evidence.expected],
     }
 
-    resolve_request = {
-        'group_id': request.group_id,
-        'entities': [
-            {'entity_type': item.entity_type, 'graph_key': item.graph_key}
-            for item in request.entities
-        ],
-        'graph_keys': None,
-    }
+    resolve_request = build_resolve_entities_request(request)
     _, structured = await call_mcp_tool(
         session, 'resolve_typed_entities', {'request': resolve_request}
     )
@@ -1207,9 +1275,7 @@ async def run_post_commit_gates(
             {
                 'entities': [
                     [entity_type, graph_key, entity_uuid]
-                    for (entity_type, graph_key), entity_uuid in sorted(
-                        resolved_entities.items()
-                    )
+                    for (entity_type, graph_key), entity_uuid in sorted(resolved_entities.items())
                 ]
             }
         ),
@@ -1551,7 +1617,10 @@ def _commit_binding_from_receipt(
         or SHA256_RE.fullmatch(receipt['manifest_sha256']) is None
     ):
         raise RunnerError('invalid_checkpoint', 'commit receipt binding mismatch')
-    if expected_artifact_sha256 is not None and receipt['artifact_sha256'] != expected_artifact_sha256:
+    if (
+        expected_artifact_sha256 is not None
+        and receipt['artifact_sha256'] != expected_artifact_sha256
+    ):
         raise RunnerError('invalid_checkpoint', 'commit receipt artifact mismatch')
     try:
         if receipt.get('receipt_source') == 'commit_response':
@@ -1567,7 +1636,9 @@ def _commit_binding_from_receipt(
     if any(type(value) is not int or value < 0 for value in raw_outcome_counts):
         raise RunnerError('invalid_checkpoint', 'commit receipt outcome counts mismatch')
     outcome_counts = tuple(
-        value for value in raw_outcome_counts if isinstance(value, int) and not isinstance(value, bool)
+        value
+        for value in raw_outcome_counts
+        if isinstance(value, int) and not isinstance(value, bool)
     )
     if sum(outcome_counts) != (
         expected_counts['entities'] + expected_counts['edges'] + expected_counts['sources']
@@ -1600,7 +1671,11 @@ def _validate_post_commit_summaries(
             'batch_id': request.batch_id,
             'request_sha256': server_request_sha256,
             'catalog_sha256': request.catalog_sha256,
-            'counts': [expected_counts['entities'], expected_counts['edges'], expected_provenance_count],
+            'counts': [
+                expected_counts['entities'],
+                expected_counts['edges'],
+                expected_provenance_count,
+            ],
         },
         'verify_catalog_batch': {
             'manifest_sha256': manifest_sha256,
@@ -1764,7 +1839,9 @@ async def _remote_commit_binding(
     try:
         status = CatalogIngestStatusResponse.model_validate(structured, strict=True)
     except ValidationError as exc:
-        raise RunnerError('invalid_status_response', 'status response has invalid structure') from exc
+        raise RunnerError(
+            'invalid_status_response', 'status response has invalid structure'
+        ) from exc
     if status.group_id != request.group_id or status.batch_id != request.batch_id:
         raise RunnerError('status_identity_mismatch', 'status group or batch mismatch')
     if not status.found:
@@ -1794,7 +1871,9 @@ async def _remote_commit_binding(
     try:
         manifest = GetCatalogBatchManifestResponse.model_validate(structured, strict=True)
     except ValidationError as exc:
-        raise RunnerError('invalid_manifest_response', 'manifest response has invalid structure') from exc
+        raise RunnerError(
+            'invalid_manifest_response', 'manifest response has invalid structure'
+        ) from exc
     expected_counts = _expected_domain_counts(request)
     if (
         not manifest.found
@@ -1858,12 +1937,7 @@ def _verified_commit_result(
     attempt = matches[-1]
     rel = attempt.get('response_path')
     expected_response_sha = attempt.get('response_sha256')
-    if (
-        not isinstance(rel, str)
-        or not rel
-        or Path(rel).is_absolute()
-        or '..' in Path(rel).parts
-    ):
+    if not isinstance(rel, str) or not rel or Path(rel).is_absolute() or '..' in Path(rel).parts:
         raise RunnerError('invalid_checkpoint', 'verified response path is invalid')
     root_candidate = (ROOT / rel).resolve()
     checkpoint_candidate = (checkpoint_path.parent / rel).resolve()
@@ -1883,7 +1957,10 @@ def _verified_commit_result(
         response_bytes = response_path.read_bytes()
     except OSError as exc:
         raise RunnerError('invalid_checkpoint', 'verified response is unreadable') from exc
-    if not isinstance(expected_response_sha, str) or sha256_bytes(response_bytes) != expected_response_sha:
+    if (
+        not isinstance(expected_response_sha, str)
+        or sha256_bytes(response_bytes) != expected_response_sha
+    ):
         raise RunnerError('invalid_checkpoint', 'verified response digest mismatch')
     wrapper = strict_json_loads(response_bytes)
     if not isinstance(wrapper, dict):
@@ -2005,7 +2082,6 @@ def _verified_commit_result(
     }
 
 
-
 # ponytail: single-process operator assumption; add file locking for concurrent runners.
 def append_checkpoint_attempt(checkpoint_path: Path, attempt: dict[str, Any]) -> None:
     """Append one attempt while preserving every prior checkpoint field and record."""
@@ -2076,12 +2152,10 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                 'path_outside_hardened_dir',
                 'payload and checkpoint paths must be inside the hardened artifact directory',
             ) from exc
-    artifact_bytes, raw, _, artifact_sha256, server_request_sha256 = (
-        validate_hardened_artifact(
-            payload_path,
-            expected_artifact_sha256=args.expected_artifact_sha256,
-            expected_request_sha256=args.expected_request_sha256,
-        )
+    artifact_bytes, raw, _, artifact_sha256, server_request_sha256 = validate_hardened_artifact(
+        payload_path,
+        expected_artifact_sha256=args.expected_artifact_sha256,
+        expected_request_sha256=args.expected_request_sha256,
     )
     validated = UpsertCatalogBatchRequest.model_validate({**raw, 'dry_run': False}, strict=True)
     prior = _verified_commit_result(
@@ -2098,9 +2172,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             raise RunnerError('invalid_checkpoint', 'verified commit evidence is invalid')
         manifest_sha256 = commit.get('manifest_sha256')
         prepared_artifact_sha256 = commit.get('artifact_sha256')
-        if not isinstance(manifest_sha256, str) or not isinstance(
-            prepared_artifact_sha256, str
-        ):
+        if not isinstance(manifest_sha256, str) or not isinstance(prepared_artifact_sha256, str):
             raise RunnerError('invalid_checkpoint', 'verified commit binding is incomplete')
         async with (
             streamable_http_client(args.mcp_url) as (read_stream, write_stream, _),
@@ -2426,71 +2498,240 @@ def _reject_live_group(group_id: str) -> None:
         raise RunnerError('protected_group', 'protected group is forbidden')
 
 
+def _lf_bytes(raw: bytes) -> bytes:
+    return raw.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+
+
+def _lf_sha256(path: Path) -> str:
+    return sha256_bytes(_lf_bytes(path.read_bytes()))
+
+
+def source_authority_map() -> dict[str, str]:
+    result: dict[str, str] = {}
+    for relative in SOURCE_AUTHORITY_PATHS:
+        path = ROOT / relative
+        if not path.is_file():
+            raise RunnerError('source_attestation_missing', 'source authority file is missing')
+        result[relative] = _lf_sha256(path)
+    return result
+
+
+def attest_local_source(
+    *, expected_head: str, expected_source_map_sha256: str, expected_runner_sha256: str
+) -> dict[str, Any]:
+    if SOURCE_HEAD_RE.fullmatch(expected_head) is None:
+        raise RunnerError('source_attestation_invalid', 'expected HEAD must be lowercase Git SHA-1')
+    for value in (expected_source_map_sha256, expected_runner_sha256):
+        if SHA256_RE.fullmatch(value) is None:
+            raise RunnerError(
+                'source_attestation_invalid', 'source digest must be lowercase SHA-256'
+            )
+    try:
+        head = subprocess.run(
+            ['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ['git', '-C', str(ROOT), 'status', '--porcelain=v1', '--', *SOURCE_AUTHORITY_PATHS],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RunnerError('source_attestation_failed', 'read-only Git attestation failed') from exc
+    source_map = source_authority_map()
+    source_map_sha256 = canonical_sha256({'files': source_map})
+    runner_sha256 = source_map['scripts/run_catalog_canary_batch.py']
+    if dirty:
+        raise RunnerError('source_attestation_dirty', 'harness authority paths are dirty')
+    if (
+        head != expected_head
+        or source_map_sha256 != expected_source_map_sha256
+        or runner_sha256 != expected_runner_sha256
+    ):
+        raise RunnerError(
+            'source_attestation_mismatch', 'reviewed source attestation does not match'
+        )
+    return {
+        'source_head': head,
+        'source_map_sha256': source_map_sha256,
+        'runner_sha256': runner_sha256,
+        'source_files': len(source_map),
+    }
+
+
+class ToolLedger:
+    def __init__(self) -> None:
+        self.entries: list[dict[str, Any]] = []
+
+    def record(
+        self, *, tool: str, stage: str, success: bool, error_code: str | None = None
+    ) -> None:
+        self.entries.append(
+            {
+                'ordinal': len(self.entries) + 1,
+                'tool': tool,
+                'stage': stage,
+                'success': success,
+                'error_code': error_code,
+            }
+        )
+
+
+async def _ledger_call(
+    transport: Any,
+    ledger: ToolLedger,
+    stage: str,
+    name: str,
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        result = await transport.call(name, request)
+        if not isinstance(result, dict):
+            raise RunnerError('invalid_transport_result', f'{name} returned invalid result')
+    except BaseException as exc:
+        code = exc.code if isinstance(exc, RunnerError) else type(exc).__name__
+        ledger.record(tool=name, stage=stage, success=False, error_code=code)
+        raise
+    ledger.record(tool=name, stage=stage, success=True)
+    return result
+
+
 def validate_live_operator_confirmation(
     manifest: dict[str, Any], *, group_id: str, control_group_id: str, batch_id: str
 ) -> None:
     supplied = (group_id, control_group_id, batch_id)
-    expected = (manifest.get('group_id'), manifest.get('control_group_id'), manifest.get('batch_id'))
+    expected = (
+        manifest.get('group_id'),
+        manifest.get('control_group_id'),
+        manifest.get('batch_id'),
+    )
     if supplied != expected:
-        raise RunnerError('operator_confirmation_mismatch', 'operator confirmation does not match manifest')
+        raise RunnerError(
+            'operator_confirmation_mismatch', 'operator confirmation does not match manifest'
+        )
+    run_id = manifest.get('run_id')
+    expected_group = f'oracle-catalog-v2-canary-{run_id}'
+    if (
+        group_id != expected_group
+        or control_group_id != f'{expected_group}-empty-control'
+        or batch_id != f'accept-tab-catalog-v2-canary-{run_id}'
+    ):
+        raise RunnerError('live_identity_mismatch', 'live identity naming relationship is invalid')
+    if BLOCKED_RUN_ID in '|'.join(str(value) for value in (*supplied, run_id)):
+        raise RunnerError('blocked_run_immutable', 'blocked run identity must never be reused')
     _reject_live_group(group_id)
     _reject_live_group(control_group_id)
     if group_id == control_group_id:
         raise RunnerError('control_group_mismatch', 'control group must differ from canary group')
 
 
+def _protected_roots(payload_path: Path, manifest_path: Path) -> tuple[Path, ...]:
+    roots = [
+        HARDENED_ARTIFACT_DIR.resolve(),
+        (ROOT / 'catalog' / 'canary-v2-requests').resolve(),
+        payload_path.resolve().parent,
+        manifest_path.resolve().parent,
+    ]
+    quick = ROOT / '.planning' / 'quick'
+    if quick.exists():
+        roots.extend(
+            path.resolve()
+            for path in quick.rglob('*')
+            if path.is_dir() and path.name in {BLOCKED_RUN_ID, '20260719T211404Z-0df5d06d'}
+        )
+    return tuple(dict.fromkeys(roots))
+
+
+def validate_result_directory(path: Path, payload_path: Path, manifest_path: Path) -> Path:
+    resolved = path.resolve()
+    for root in _protected_roots(payload_path, manifest_path):
+        if resolved == root or root in resolved.parents:
+            raise RunnerError('protected_result_directory', 'result directory is protected')
+    if path.exists() and path.is_symlink():
+        raise RunnerError('protected_result_directory', 'result directory symlink is forbidden')
+    return resolved
+
+
 def validate_live_artifact(
     payload_path: Path, manifest_path: Path
 ) -> tuple[bytes, dict[str, Any], dict[str, Any], UpsertCatalogBatchRequest, str, str]:
-    for path in (payload_path.resolve(), manifest_path.resolve()):
-        if HARDENED_ARTIFACT_DIR.resolve() in path.parents or (
-            ROOT / 'catalog' / 'canary-v2-requests'
-        ).resolve() in path.parents:
-            raise RunnerError('golden_not_live', 'golden or historical artifact is not live authority')
+    payload_resolved = payload_path.resolve()
+    manifest_resolved = manifest_path.resolve()
+    if payload_resolved.parent != manifest_resolved.parent:
+        raise RunnerError(
+            'live_directory_mismatch', 'payload and manifest must share one directory'
+        )
+    for path in (payload_resolved, manifest_resolved):
+        if BLOCKED_RUN_ID in path.parts:
+            raise RunnerError('blocked_run_immutable', 'blocked run artifact is immutable')
+        for root in (
+            HARDENED_ARTIFACT_DIR.resolve(),
+            (ROOT / 'catalog' / 'canary-v2-requests').resolve(),
+        ):
+            if path == root or root in path.parents:
+                raise RunnerError(
+                    'golden_not_live', 'golden or historical artifact is not live authority'
+                )
     if payload_path.name != LIVE_PAYLOAD_NAME or manifest_path.name != LIVE_MANIFEST_NAME:
         raise RunnerError('live_filename_mismatch', 'live artifact filenames are invalid')
-    payload_bytes = payload_path.read_bytes()
-    manifest_bytes = manifest_path.read_bytes()
+    directory_files = {item.name for item in payload_resolved.parent.iterdir() if item.is_file()}
+    if directory_files != {LIVE_PAYLOAD_NAME, LIVE_MANIFEST_NAME}:
+        raise RunnerError('live_file_set_mismatch', 'live artifact directory has unexpected files')
+    payload_bytes = payload_resolved.read_bytes()
+    manifest_bytes = manifest_resolved.read_bytes()
     payload = strict_json_loads(payload_bytes)
     manifest = strict_json_loads(manifest_bytes)
     if not isinstance(payload, dict) or not isinstance(manifest, dict):
         raise RunnerError('invalid_live_artifact', 'live artifact roots must be objects')
-    if canonical_artifact_bytes(payload) != payload_bytes or canonical_artifact_bytes(manifest) != manifest_bytes:
-        raise RunnerError('non_canonical_artifact', 'live artifact bytes must be canonical')
-    fixture_path = ROOT / str(manifest.get('fixture') or '')
+    if set(manifest) != LIVE_MANIFEST_FIELDS:
+        raise RunnerError('live_manifest_mismatch', 'live manifest field set is invalid')
     if (
-        manifest.get('profile') != 'live-canary'
-        or manifest.get('artifact_schema_version') != LIVE_ARTIFACT_SCHEMA_VERSION
-        or manifest.get('payload') != LIVE_PAYLOAD_NAME
-        or manifest.get('artifact_sha256') != sha256_bytes(payload_bytes)
-        or manifest.get('builder_sha256') != sha256_bytes(
-            (ROOT / 'scripts' / 'build_catalog_canary_requests.py').read_bytes()
-        )
-        or not fixture_path.is_file()
-        or manifest.get('fixture_sha256') != sha256_bytes(fixture_path.read_bytes())
+        canonical_artifact_bytes(payload) != payload_bytes
+        or canonical_artifact_bytes(manifest) != manifest_bytes
     ):
-        raise RunnerError('live_manifest_mismatch', 'live manifest binding is invalid')
+        raise RunnerError('non_canonical_artifact', 'live artifact bytes must be canonical')
+    fixture_path = (ROOT / str(manifest['fixture'])).resolve()
+    approved_fixture = (ROOT / 'mcp_server/tests/fixtures/accept_tab_sanitized.json').resolve()
+    builder_path = (ROOT / 'scripts/build_catalog_canary_requests.py').resolve()
+    fixture_raw = approved_fixture.read_bytes()
+    if (
+        fixture_path != approved_fixture
+        or manifest['profile'] != 'live-canary'
+        or manifest['artifact_schema_version'] != LIVE_ARTIFACT_SCHEMA_VERSION
+        or manifest['payload'] != LIVE_PAYLOAD_NAME
+        or manifest['artifact_sha256'] != sha256_bytes(payload_bytes)
+        or manifest['builder'] != 'scripts/build_catalog_canary_requests.py'
+        or manifest['builder_sha256'] != _lf_sha256(builder_path)
+        or manifest['fixture_sha256'] != APPROVED_FIXTURE_RAW_SHA256
+        or manifest['fixture_lf_sha256'] != APPROVED_FIXTURE_LF_SHA256
+        or sha256_bytes(fixture_raw) != APPROVED_FIXTURE_RAW_SHA256
+        or sha256_bytes(_lf_bytes(fixture_raw)) != APPROVED_FIXTURE_LF_SHA256
+        or manifest['canary_executed'] is not False
+    ):
+        raise RunnerError('live_manifest_mismatch', 'live manifest authority binding is invalid')
     _validate_hardened_raw_field_sets(payload)
     try:
-        request = UpsertCatalogBatchRequest.model_validate({**payload, 'dry_run': True}, strict=True)
+        request = UpsertCatalogBatchRequest.model_validate(
+            {**payload, 'dry_run': True}, strict=True
+        )
     except ValidationError as exc:
         raise RunnerError('request_validation_failed', 'live payload fails validation') from exc
     _validate_content_hashes(request)
     request_sha = CatalogService.batch_request_sha256(request)
     provenance = request.provenance
     assert provenance is not None
-    counts = {
-        'entities': len(request.entities),
-        'edges': len(request.edges),
-        'sources': len(provenance.sources),
-        'evidence_links': len(provenance.evidence_links),
-    }
+    counts = _expected_domain_counts(request)
     if (
-        manifest.get('group_id') != request.group_id
-        or manifest.get('batch_id') != request.batch_id
-        or manifest.get('catalog_sha256') != request.catalog_sha256
-        or manifest.get('request_sha256') != request_sha
-        or manifest.get('counts') != counts
+        manifest['group_id'] != request.group_id
+        or manifest['batch_id'] != request.batch_id
+        or manifest['identity_schema_version'] != request.identity_schema_version
+        or manifest['system_key'] != request.system_key
+        or manifest['catalog_sha256'] != request.catalog_sha256
+        or manifest['request_sha256'] != request_sha
+        or manifest['counts'] != counts
     ):
         raise RunnerError('live_manifest_mismatch', 'live payload and manifest differ')
     _reject_live_group(request.group_id)
@@ -2532,18 +2773,23 @@ def _assert_absent(
         if (
             response.get('error_code') != 'manifest_mismatch'
             or response.get('error_message') != 'manifest root not found'
-            or response.get('offset', 0) != 0
-            or response.get('limit', expected_limit) != expected_limit
+            or response.get('offset') != 0
+            or response.get('limit') != expected_limit
             or any(response.get(key) for key in ('entities', 'edges', 'sources', 'evidence_links'))
             or any(
-                response.get(key, 0) != 0
+                response.get(key) != 0
                 for key in ('entity_count', 'edge_count', 'source_count', 'evidence_link_count')
             )
             or any(
                 response.get(key) is not None
                 for key in (
-                    'request_sha256', 'catalog_sha256', 'artifact_sha256', 'manifest_sha256',
-                    'identity_schema_version', 'canonicalization_version', 'catalog_schema_version',
+                    'request_sha256',
+                    'catalog_sha256',
+                    'artifact_sha256',
+                    'manifest_sha256',
+                    'identity_schema_version',
+                    'canonicalization_version',
+                    'catalog_schema_version',
                 )
             )
         ):
@@ -2559,11 +2805,15 @@ def _assert_absent(
         or response.get('error_code') is not None
         or response.get('status') != 'failed'
         or response.get('error_summary') != 'batch status not found'
-        or any(response.get(key, 0) != 0 for key in ('entity_count', 'edge_count', 'provenance_count'))
+        or any(response.get(key) != 0 for key in ('entity_count', 'edge_count', 'provenance_count'))
         or any(
             response.get(key) is not None
             for key in (
-                'request_sha256', 'catalog_sha256', 'created_at', 'updated_at', 'committed_at'
+                'request_sha256',
+                'catalog_sha256',
+                'created_at',
+                'updated_at',
+                'committed_at',
             )
         )
     ):
@@ -2572,80 +2822,309 @@ def _assert_absent(
 
 
 def _validate_live_dry_run_response(
-    raw: dict[str, Any], request: UpsertCatalogBatchRequest, request_sha: str
+    raw: dict[str, Any],
+    request: UpsertCatalogBatchRequest,
+    request_sha: str,
+    *,
+    expected_batch_uuid: str,
 ) -> dict[str, Any]:
     try:
         response = CatalogBatchWriteResponse.model_validate(raw, strict=True)
     except ValidationError as exc:
         raise RunnerError('invalid_dry_run_response', 'dry-run response is invalid') from exc
-    try:
-        uuid.UUID(response.batch_uuid or '')
-    except ValueError as exc:
-        raise RunnerError('dry_run_binding_mismatch', 'dry-run batch UUID is invalid') from exc
     provenance = request.provenance
     assert provenance is not None
+    expected_results: list[tuple[int, str, str, str]] = []
+    for index, item in enumerate(request.entities):
+        expected_results.append(
+            (index, item.entity_type, item.graph_key, item.content_sha256 or '')
+        )
+    edge_offset = len(request.entities)
+    for index, item in enumerate(request.edges):
+        expected_results.append(
+            (edge_offset + index, item.edge_type, item.edge_key, item.content_sha256 or '')
+        )
+    source_offset = edge_offset + len(request.edges)
+    for index, item in enumerate(provenance.sources):
+        expected_results.append(
+            (source_offset + index, '', item.source_key, item.content_sha256 or '')
+        )
+    if len(response.results) != len(expected_results):
+        raise RunnerError('dry_run_binding_mismatch', 'dry-run per-item result count is invalid')
+    seen: set[str] = set()
+    for result, (index, item_type, key, digest) in zip(
+        response.results, expected_results, strict=True
+    ):
+        identity_key = result.graph_key or result.edge_key or ''
+        if (
+            result.index != index
+            or result.status != 'created'
+            or result.uuid is None
+            or result.content_sha256 != digest
+            or identity_key != key
+            or (result.entity_type or result.edge_type or '') != item_type
+            or result.error_code is not None
+            or result.error_message is not None
+        ):
+            raise RunnerError('dry_run_binding_mismatch', 'dry-run per-item binding is invalid')
+        try:
+            uuid.UUID(result.uuid)
+        except ValueError as exc:
+            raise RunnerError('dry_run_binding_mismatch', 'dry-run item UUID is invalid') from exc
+        if result.uuid in seen:
+            raise RunnerError('dry_run_binding_mismatch', 'dry-run item UUID is reused')
+        seen.add(result.uuid)
+    outcome = {
+        'created': response.entity_created + response.edge_created + response.provenance_created,
+        'updated': response.entity_updated + response.edge_updated + response.provenance_updated,
+        'unchanged': response.entity_unchanged
+        + response.edge_unchanged
+        + response.provenance_unchanged,
+    }
+    expected_created = len(request.entities) + len(request.edges) + len(provenance.sources)
     if (
         response.group_id != request.group_id
         or response.batch_id != request.batch_id
+        or response.batch_uuid != expected_batch_uuid
         or response.dry_run is not True
         or response.atomic is not True
         or response.status != 'validating'
         or response.identity_schema_version != request.identity_schema_version
+        or response.canonicalization_version != CANONICALIZATION_VERSION
         or response.request_sha256 != request_sha
         or response.catalog_sha256 != request.catalog_sha256
         or response.error_code is not None
         or response.error_message is not None
         or response.failed != 0
         or response.rolled_back != 0
-        or response.entity_created + response.entity_updated + response.entity_unchanged
-        != len(request.entities)
-        or response.edge_created + response.edge_updated + response.edge_unchanged
-        != len(request.edges)
-        or response.provenance_created + response.provenance_updated + response.provenance_unchanged
-        != len(provenance.sources)
+        or outcome != {'created': expected_created, 'updated': 0, 'unchanged': 0}
     ):
         raise RunnerError('dry_run_binding_mismatch', 'dry-run receipt binding is invalid')
     return {
-        'group_id': response.group_id,
-        'batch_id': response.batch_id,
         'batch_uuid': response.batch_uuid,
-        'identity_schema_version': response.identity_schema_version,
-        'request_sha256': response.request_sha256,
-        'catalog_sha256': response.catalog_sha256,
+        'outcome': outcome,
         'counts': _expected_domain_counts(request),
     }
 
 
 def _validate_live_prepare_overlap(
-    raw: dict[str, Any], request: UpsertCatalogBatchRequest, request_sha: str, dry_run: dict[str, Any]
+    raw: dict[str, Any],
+    request: UpsertCatalogBatchRequest,
+    request_sha: str,
+    dry_run: dict[str, Any],
 ) -> tuple[PrepareCatalogBatchResponse, str]:
     prepared, token = _validate_prepare_response(raw, request, request_sha)
-    overlap = {
-        'identity_schema_version': prepared.identity_schema_version,
-        'request_sha256': prepared.request_sha256,
-        'catalog_sha256': prepared.catalog_sha256,
-        'counts': {
-            'entities': prepared.entity_count,
-            'edges': prepared.edge_count,
-            'sources': prepared.source_count,
-            'evidence_links': prepared.evidence_link_count,
-        },
+    outcome = {
+        'created': prepared.projected_created,
+        'updated': prepared.projected_updated,
+        'unchanged': prepared.projected_unchanged,
     }
-    expected = {key: dry_run[key] for key in overlap}
-    if overlap != expected:
-        raise RunnerError('prepare_binding_mismatch', 'prepare differs from dry-run overlap')
+    if outcome != dry_run['outcome']:
+        raise RunnerError('prepare_binding_mismatch', 'prepare C/U/U differs from dry-run')
     return prepared, token
 
 
-def _validate_live_edges(
+def _validate_committed_status(
+    raw: dict[str, Any],
+    request: UpsertCatalogBatchRequest,
+    request_sha: str,
+    *,
+    expected_batch_uuid: str,
+) -> CatalogIngestStatusResponse:
+    _validate_status_response(raw, request, request_sha)
+    response = CatalogIngestStatusResponse.model_validate(raw, strict=True)
+    if response.batch_uuid != expected_batch_uuid:
+        raise RunnerError('batch_uuid_mismatch', 'committed status batch UUID differs')
+    return response
+
+
+def _manifest_page_size(capabilities: CatalogCapabilitiesResponse) -> int:
+    configured = (
+        capabilities.limits.get('configured') if isinstance(capabilities.limits, dict) else None
+    )
+    hard = capabilities.limits.get('hard') if isinstance(capabilities.limits, dict) else None
+    values = [500]
+    for item in (configured, hard):
+        if isinstance(item, dict) and type(item.get('max_page_size')) is int:
+            values.append(item['max_page_size'])
+    size = min(values)
+    if size < 1:
+        raise RunnerError('capability_preflight_failed', 'advertised page size is invalid')
+    return size
+
+
+async def _fetch_full_manifest(
+    call: Any,
+    request: UpsertCatalogBatchRequest,
+    request_sha: str,
+    *,
+    page_size: int,
+    expected_artifact_sha256: str,
+    expected_manifest_sha256: str,
+) -> tuple[
+    GetCatalogBatchManifestResponse,
+    dict[tuple[str, str], str],
+    dict[tuple[str, str], str],
+    dict[str, str],
+    dict[str, str],
+]:
+    provenance = request.provenance
+    assert provenance is not None
+    expected_counts = _expected_domain_counts(request)
+    aggregate: dict[str, list[Any]] = {
+        key: [] for key in ('entities', 'edges', 'sources', 'evidence_links')
+    }
+    stable: dict[str, Any] | None = None
+    maximum = max(expected_counts.values())
+    for offset in range(0, maximum, page_size):
+        body = {
+            'group_id': request.group_id,
+            'batch_id': request.batch_id,
+            'offset': offset,
+            'limit': page_size,
+        }
+        GetCatalogBatchManifestRequest.model_validate(body, strict=True)
+        raw = await call('get_catalog_batch_manifest', body)
+        try:
+            page = GetCatalogBatchManifestResponse.model_validate(raw, strict=True)
+        except ValidationError as exc:
+            raise RunnerError('invalid_manifest_response', 'manifest page is invalid') from exc
+        page_stable = {
+            key: getattr(page, key)
+            for key in (
+                'group_id',
+                'batch_id',
+                'found',
+                'request_sha256',
+                'catalog_sha256',
+                'artifact_sha256',
+                'manifest_sha256',
+                'identity_schema_version',
+                'canonicalization_version',
+                'catalog_schema_version',
+                'entity_count',
+                'edge_count',
+                'source_count',
+                'evidence_link_count',
+                'error_code',
+                'error_message',
+            )
+        }
+        if stable is None:
+            stable = page_stable
+        if page_stable != stable or page.offset != offset or page.limit != page_size:
+            raise RunnerError('manifest_failed', 'manifest pagination binding changed')
+        for category, count_key in (
+            ('entities', 'entities'),
+            ('edges', 'edges'),
+            ('sources', 'sources'),
+            ('evidence_links', 'evidence_links'),
+        ):
+            items = getattr(page, category)
+            expected_len = min(page_size, max(expected_counts[count_key] - offset, 0))
+            if len(items) != expected_len:
+                raise RunnerError('manifest_failed', 'manifest page is premature or overfull')
+            aggregate[category].extend(items)
+    if stable is None:
+        raise RunnerError('manifest_failed', 'manifest has no page')
+    if (
+        stable['found'] is not True
+        or stable['error_code'] is not None
+        or stable['error_message'] is not None
+        or stable['group_id'] != request.group_id
+        or stable['batch_id'] != request.batch_id
+        or stable['request_sha256'] != request_sha
+        or stable['catalog_sha256'] != request.catalog_sha256
+        or stable['artifact_sha256'] != expected_artifact_sha256
+        or stable['manifest_sha256'] != expected_manifest_sha256
+        or stable['identity_schema_version'] != request.identity_schema_version
+        or stable['canonicalization_version'] != CANONICALIZATION_VERSION
+        or stable['catalog_schema_version'] != CATALOG_SCHEMA_VERSION
+        or [
+            stable['entity_count'],
+            stable['edge_count'],
+            stable['source_count'],
+            stable['evidence_link_count'],
+        ]
+        != list(expected_counts.values())
+    ):
+        raise RunnerError('manifest_failed', 'manifest stable binding is invalid')
+    first = GetCatalogBatchManifestResponse(
+        **stable,
+        offset=0,
+        limit=page_size,
+        entities=aggregate['entities'],
+        edges=aggregate['edges'],
+        sources=aggregate['sources'],
+        evidence_links=aggregate['evidence_links'],
+    )
+    entity_map, edge_map, evidence_map = _validate_manifest_inventory(first, request)
+    source_map = {item.source_key: item.uuid for item in first.sources}
+    all_uuid = [item.uuid for category in aggregate.values() for item in category]
+    if len(all_uuid) != len(set(all_uuid)):
+        raise RunnerError('manifest_failed', 'manifest UUID is reused across categories')
+    for item in [*first.entities, *first.edges, *first.sources]:
+        if item.projected_status != 'created':
+            raise RunnerError('manifest_failed', 'fresh manifest member is not projected created')
+    membership = {
+        key: [item.model_dump(mode='json') for item in value] for key, value in aggregate.items()
+    }
+    body = catalog_manifest.build_manifest_body_from_membership(
+        group_id=request.group_id,
+        batch_id=request.batch_id,
+        request_sha256=request_sha,
+        catalog_sha256=request.catalog_sha256,
+        membership=membership,
+        artifact_sha256=expected_artifact_sha256,
+        identity_schema_version=request.identity_schema_version,
+        canonicalization_version=CANONICALIZATION_VERSION,
+        catalog_schema_version=CATALOG_SCHEMA_VERSION,
+    )
+    calculated = catalog_manifest.manifest_sha256(catalog_manifest.serialize_manifest_body(body))
+    if calculated != expected_manifest_sha256:
+        raise RunnerError('manifest_failed', 'reconstructed manifest SHA-256 differs')
+    return first, entity_map, edge_map, source_map, evidence_map
+
+
+def _validate_resolved_entities(
+    raw: dict[str, Any],
+    request: UpsertCatalogBatchRequest,
+    manifest_entities: dict[tuple[str, str], str],
+) -> dict[tuple[str, str], str]:
+    resolved = _validate_resolve_response(raw, request)
+    response = ResolveTypedEntitiesResponse.model_validate(raw, strict=True)
+    if resolved != manifest_entities or [item.index for item in response.results] != list(
+        range(len(request.entities))
+    ):
+        raise RunnerError('resolve_failed', 'typed entity order or manifest UUID differs')
+    labels_seen: set[str] = set()
+    uuids: list[str] = []
+    for result, item in zip(response.results, request.entities, strict=True):
+        if (
+            result.labels is None
+            or result.labels.count(item.entity_type) != 1
+            or 'Entity' not in result.labels
+        ):
+            raise RunnerError('resolve_failed', 'typed entity labels are invalid')
+        uuids.append(result.uuid or '')
+        labels_seen.add(item.entity_type)
+    if len(uuids) != len(set(uuids)):
+        raise RunnerError('resolve_failed', 'typed entity UUID is duplicated')
+    return resolved
+
+
+def _validate_resolved_edges(
     raw: dict[str, Any],
     request: UpsertCatalogBatchRequest,
     entity_uuids: dict[tuple[str, str], str],
+    manifest_edges: dict[tuple[str, str], str],
 ) -> None:
     try:
         response = ResolveTypedEdgesResponse.model_validate(raw, strict=True)
     except ValidationError as exc:
-        raise RunnerError('invalid_resolve_edges_response', 'typed edge response is invalid') from exc
+        raise RunnerError(
+            'invalid_resolve_edges_response', 'typed edge response is invalid'
+        ) from exc
     if response.group_id != request.group_id or len(response.results) != len(request.edges):
         raise RunnerError('resolve_edges_failed', 'typed edge response count or group mismatch')
     for result, edge in zip(response.results, request.edges, strict=True):
@@ -2661,10 +3140,8 @@ def _validate_live_edges(
             or result.status != 'found'
             or result.found is not True
             or result.verified_type != edge.edge_type
-            or result.source_uuid
-            != entity_uuids[(edge.source_entity_type, edge.source_graph_key)]
-            or result.target_uuid
-            != entity_uuids[(edge.target_entity_type, edge.target_graph_key)]
+            or result.source_uuid != entity_uuids[(edge.source_entity_type, edge.source_graph_key)]
+            or result.target_uuid != entity_uuids[(edge.target_entity_type, edge.target_graph_key)]
             or result.source_graph_key != edge.source_graph_key
             or result.target_graph_key != edge.target_graph_key
             or result.source_entity_type != edge.source_entity_type
@@ -2677,36 +3154,239 @@ def _validate_live_edges(
             or result.error_message is not None
         ):
             raise RunnerError('resolve_edges_failed', 'typed edge response binding failed')
+    if [item.index for item in response.results] != list(range(len(request.edges))):
+        raise RunnerError('resolve_edges_failed', 'typed edge order is invalid')
+    uuids = []
+    for result, edge in zip(response.results, request.edges, strict=True):
+        if result.uuid != manifest_edges[(edge.edge_type, edge.edge_key)]:
+            raise RunnerError('resolve_edges_failed', 'typed edge UUID differs from manifest')
+        uuids.append(result.uuid or '')
+    if len(uuids) != len(set(uuids)):
+        raise RunnerError('resolve_edges_failed', 'typed edge UUID is duplicated')
 
 
-def write_live_checkpoint(path: Path, stage: LiveStage, binding: dict[str, Any]) -> None:
-    if stage > LiveStage.DRY_RUN_PASSED:
-        raise RunnerError(
-            'dry_run_checkpoint_required',
-            'resume cannot persist or skip post-dry-run token-bound stages',
+async def _verify_all_evidence(
+    call: Any,
+    request: UpsertCatalogBatchRequest,
+    *,
+    page_size: int,
+    entity_uuids: dict[tuple[str, str], str],
+    edge_uuids: dict[tuple[str, str], str],
+    source_uuids: dict[str, str],
+    manifest_evidence: dict[str, str],
+) -> int:
+    provenance = request.provenance
+    assert provenance is not None
+    found_all: set[str] = set()
+    targets = [
+        (
+            'entity',
+            item.entity_type,
+            item.graph_key,
+            entity_uuids[(item.entity_type, item.graph_key)],
         )
-    safe = {'schema_version': 1, 'stage': stage.name, 'binding': copy.deepcopy(binding)}
-    text = json.dumps(safe, sort_keys=True)
-    if 'plan_token' in text or 'token_digest' in text:
-        raise RunnerError('token_persistence', 'checkpoint contains forbidden token material')
-    atomic_write_json(path, safe)
+        for item in request.entities
+    ] + [
+        ('edge', item.edge_type, item.edge_key, edge_uuids[(item.edge_type, item.edge_key)])
+        for item in request.edges
+    ]
+    expected_by_link = {evidence_link_key(item): item for item in provenance.evidence_links}
+    for kind, item_type, key, target_uuid in targets:
+        expected_keys = {
+            evidence_link_key(item)
+            for item in provenance.evidence_links
+            if (
+                kind == 'entity'
+                and item.entity_target is not None
+                and item.entity_target.entity_type == item_type
+                and item.entity_target.graph_key == key
+            )
+            or (
+                kind == 'edge'
+                and item.edge_target is not None
+                and item.edge_target.edge_type == item_type
+                and item.edge_target.edge_key == key
+            )
+        }
+        target_found: set[str] = set()
+        total: int | None = None
+        offset = 0
+        while total is None or offset < total:
+            body = {
+                'group_id': request.group_id,
+                'identity_schema_version': request.identity_schema_version,
+                'system_key': request.system_key,
+                'entity_target': {'entity_type': item_type, 'graph_key': key}
+                if kind == 'entity'
+                else None,
+                'edge_target': {'edge_type': item_type, 'edge_key': key}
+                if kind == 'edge'
+                else None,
+                'offset': offset,
+                'limit': page_size,
+                'include_excerpts': False,
+            }
+            GetCatalogEvidenceRequest.model_validate(body, strict=True)
+            raw = await call('get_catalog_evidence', body)
+            response = GetCatalogEvidenceResponse.model_validate(raw, strict=True)
+            if total is None:
+                total = response.total
+            assert total is not None
+            if (
+                response.group_id != request.group_id
+                or response.target_kind != kind
+                or response.target_uuid != target_uuid
+                or response.found_target is not True
+                or response.offset != offset
+                or response.limit != page_size
+                or response.total != total
+                or response.error_code is not None
+                or response.error_message is not None
+                or len(response.links) != min(page_size, max(total - offset, 0))
+            ):
+                raise RunnerError('evidence_failed', 'evidence page binding is invalid')
+            for link in response.links:
+                expected = expected_by_link.get(link.link_key)
+                if (
+                    expected is None
+                    or link.uuid != manifest_evidence.get(link.link_key)
+                    or link.content_sha256 != canonical_sha256(evidence_canonical_payload(expected))
+                    or link.source_uuid != source_uuids.get(expected.source_key)
+                    or link.target_kind != kind
+                    or link.target_uuid != target_uuid
+                    or link.evidence_kind != expected.evidence_kind
+                    or link.extractor_name != expected.extractor_name
+                    or link.extractor_version != expected.extractor_version
+                    or link.rule_id != expected.rule_id
+                    or link.confidence != expected.confidence
+                    or link.excerpt is not None
+                    or link.link_key in target_found
+                ):
+                    raise RunnerError('evidence_failed', 'evidence link binding is invalid')
+                target_found.add(link.link_key)
+            offset += page_size
+        if target_found != expected_keys:
+            raise RunnerError('evidence_failed', 'evidence target membership is incomplete')
+        if found_all & target_found:
+            raise RunnerError('evidence_failed', 'evidence link appears for multiple targets')
+        found_all |= target_found
+    if found_all != set(manifest_evidence):
+        raise RunnerError('evidence_failed', 'full evidence inventory differs from manifest')
+    return len(found_all)
 
 
-def require_live_resume(path: Path, binding: dict[str, Any]) -> None:
-    checkpoint = strict_json_load(path)
-    if (
-        not isinstance(checkpoint, dict)
-        or checkpoint.get('stage') != LiveStage.DRY_RUN_PASSED.name
-        or checkpoint.get('binding') != binding
+def _validate_node_search_strict(
+    raw: dict[str, Any],
+    *,
+    group_id: str,
+    expected_uuid: str,
+    entity_type: str,
+    graph_key: str,
+) -> None:
+    nodes = raw.get('nodes')
+    if not isinstance(nodes, list) or any(
+        not isinstance(row, dict) or row.get('group_id') != group_id for row in nodes
     ):
-        raise RunnerError('resume_binding_mismatch', 'resume lacks exact dry-run binding')
+        raise RunnerError('node_search_failed', 'node search returned foreign or invalid row')
+    uuids = [row.get('uuid') for row in nodes]
+    if len(uuids) != len(set(uuids)) or uuids.count(expected_uuid) != 1:
+        raise RunnerError('node_search_failed', 'node search identity is absent or duplicated')
+    typed_identity = [
+        row
+        for row in nodes
+        if row.get('name') == graph_key and entity_type in (row.get('labels') or [])
+    ]
+    if len(typed_identity) != 1 or typed_identity[0].get('uuid') != expected_uuid:
+        raise RunnerError('node_search_failed', 'node search returned a typed identity alias')
 
 
-async def _call_live(transport: Any, name: str, request: dict[str, Any]) -> dict[str, Any]:
-    result = await transport.call(name, request)
-    if not isinstance(result, dict):
-        raise RunnerError('invalid_transport_result', f'{name} returned invalid result')
-    return result
+def _validate_fact_search_strict(
+    raw: dict[str, Any],
+    *,
+    group_id: str,
+    expected_uuid: str,
+    edge_type: str,
+    edge_key: str,
+) -> None:
+    facts = raw.get('facts')
+    if isinstance(facts, list) and facts and all(isinstance(row, str) for row in facts):
+        raise RunnerError('fact_search_failed', 'fact search lacks structured identity rows')
+    if not isinstance(facts, list) or any(
+        not isinstance(row, dict) or row.get('group_id') != group_id for row in facts
+    ):
+        raise RunnerError('fact_search_failed', 'fact search returned foreign or invalid row')
+    uuids = [row.get('uuid') for row in facts]
+    if len(uuids) != len(set(uuids)) or uuids.count(expected_uuid) != 1:
+        raise RunnerError('fact_search_failed', 'fact search identity is absent or duplicated')
+    typed_identity = [
+        row for row in facts if row.get('edge_key') == edge_key and row.get('name') == edge_type
+    ]
+    if len(typed_identity) != 1 or typed_identity[0].get('uuid') != expected_uuid:
+        raise RunnerError('fact_search_failed', 'fact search returned a typed identity alias')
+
+
+def _terminal_report(
+    *,
+    manifest: dict[str, Any],
+    classification: str,
+    machine: LiveStageMachine,
+    gates: dict[str, str],
+    attestation: dict[str, Any] | None,
+    capability_sha256: str | None,
+    artifact_sha256: str | None,
+    request_sha256: str | None,
+    manifest_sha256: str | None,
+    batch_uuid: str | None,
+    replay: str,
+    error_code: str | None,
+    error_type: str | None,
+    flags: dict[str, Any],
+    plan_token: str | None,
+) -> dict[str, Any]:
+    report = {
+        'schema_version': REPORT_SCHEMA_VERSION,
+        'classification': classification,
+        'run_id': manifest.get('run_id'),
+        'group_id': manifest.get('group_id'),
+        'control_group_id': manifest.get('control_group_id'),
+        'batch_id': manifest.get('batch_id'),
+        'source_head': (attestation or {}).get('source_head'),
+        'source_map_sha256': (attestation or {}).get('source_map_sha256'),
+        'runner_sha256': (attestation or {}).get('runner_sha256'),
+        'runtime_capability_sha256': capability_sha256,
+        'namespace_fingerprint': flags.get('namespace_fingerprint'),
+        'artifact_sha256': artifact_sha256,
+        'catalog_sha256': manifest.get('catalog_sha256'),
+        'request_sha256': request_sha256,
+        'manifest_sha256': manifest_sha256,
+        'batch_uuid': batch_uuid,
+        'tool_count': 28,
+        'stage': machine.stage.name,
+        'stage_ledger': machine.ledger,
+        'gates': gates,
+        'dry_run_zero_write_proven': flags.get('dry_run_zero_write_proven', False),
+        'commit_confirmed': flags.get('commit_confirmed', False),
+        'manifest_verified': flags.get('manifest_verified', False),
+        'entity_resolution_verified': flags.get('entity_resolution_verified', False),
+        'edge_resolution_verified': flags.get('edge_resolution_verified', False),
+        'evidence_verified': flags.get('evidence_verified', False),
+        'search_verified': flags.get('search_verified', False),
+        'control_isolation_verified': flags.get('control_isolation_verified', False),
+        'replay': replay,
+        'protected_groups_queried': [],
+        'prohibited_tools_called': [],
+        'clear_graph_called': False,
+        'cleanup_performed': False,
+        'secrets_persisted': False,
+        'error_code': error_code,
+        'error_type': error_type,
+        'notes': 'sanitized durable report; prepared-plan process-loss resume is unsupported',
+        'canary_executed': flags.get('commit_started', False),
+    }
+    text = json.dumps(report, sort_keys=True)
+    if (plan_token and plan_token in text) or 'token_digest' in text:
+        raise RunnerError('token_persistence', 'secret token material reached report')
+    return report
 
 
 async def run_live_canary(
@@ -2718,320 +3398,467 @@ async def run_live_canary(
     confirm_group_id: str,
     confirm_control_group_id: str,
     confirm_batch_id: str,
-    source_fingerprint: str,
-    tree_fingerprint: str,
+    source_head: str,
+    source_map_sha256: str,
+    runner_sha256: str,
     image_fingerprint: str | None = None,
     config_fingerprint: str | None = None,
+    output_dir: Path | None = None,
+    source_attestor: Any | None = None,
     checkpoint_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Run monotonic live stages through an injected transport; tests use fakes only."""
+    """Execute one non-resumable attempt; every transport body is strict-model-valid."""
+    del checkpoint_path
     machine = LiveStageMachine()
-    manifest_hint = strict_json_load(manifest_path)
-    if not isinstance(manifest_hint, dict):
-        raise RunnerError('invalid_live_manifest', 'live manifest must be an object')
-    if confirm_run_id != manifest_hint.get('run_id'):
-        raise RunnerError('operator_confirmation_mismatch', 'run_id confirmation does not match manifest')
-    validate_live_operator_confirmation(
-        manifest_hint,
-        group_id=confirm_group_id,
-        control_group_id=confirm_control_group_id,
-        batch_id=confirm_batch_id,
+    ledger = ToolLedger()
+    gates = {str(index): 'blocked' for index in range(11)}
+    flags: dict[str, Any] = {}
+    attestation = None
+    capability_sha = artifact_sha = request_sha = manifest_sha = batch_uuid = None
+    replay = 'skipped'
+    plan_token: str | None = None
+    commit_started = False
+    manifest_hint: dict[str, Any] = {}
+    result_dir = (
+        validate_result_directory(output_dir, payload_path, manifest_path) if output_dir else None
     )
-    tools = await _call_live(transport, 'list_tools', {})
-    names = tools.get('names')
-    if (
-        tools.get('count') != 28
-        or not isinstance(names, list)
-        or set(names) != EXPECTED_MCP_TOOLS
-    ):
-        raise RunnerError('tool_registry_mismatch', 'MCP registry must match exact 28 tools')
-    status = await _call_live(transport, 'get_status', {})
-    capabilities = await _call_live(transport, 'get_catalog_capabilities', {})
-    features = capabilities.get('features') or {}
-    embeddings = capabilities.get('embeddings') or {}
-    if (
-        status.get('status') != 'ok'
-        or capabilities.get('backend') not in {'neo4j', 'Neo4j'}
-        or capabilities.get('identity_schema_version') != HARDENED_IDENTITY_SCHEMA_VERSION
-        or capabilities.get('connectivity') != 'ok'
-        or capabilities.get('catalog_writes_enabled') is not True
-        or capabilities.get('catalog_reads_enabled') is not True
-        or capabilities.get('uuid_namespace_configured') is not True
-        or capabilities.get('neo4j_indexes') != 'ready'
-        or embeddings.get('ready') != 'ready'
-        or any(features.get(key) is not True for key in ('prepare_commit', 'manifests', 'manifest_verification'))
-    ):
-        raise RunnerError('capability_preflight_failed', 'runtime catalog capabilities are incomplete')
-    capability_fingerprint = canonical_sha256(
-        {key: value for key, value in capabilities.items() if key != 'namespace_fingerprint'}
-    )
-    machine.advance(LiveStage.START, LiveStage.PREFLIGHT_PASSED)
+    if result_dir is not None:
+        if result_dir.exists():
+            raise RunnerError('result_directory_used', 'result directory must not exist')
+        result_dir.mkdir(parents=True, exist_ok=False)
 
-    async def absence(group_id: str, batch_id: str) -> None:
-        status_result = await _call_live(
-            transport, 'get_catalog_ingest_status', {'group_id': group_id, 'batch_id': batch_id}
+    async def call(stage: str, name: str, body: dict[str, Any]) -> dict[str, Any]:
+        return await _ledger_call(transport, ledger, stage, name, body)
+
+    async def absence(
+        group_id: str,
+        batch_id: str,
+        *,
+        page_size: int,
+        expected_uuid: str | None = None,
+    ) -> str:
+        status_raw = await call(
+            'ISOLATION', 'get_catalog_ingest_status', {'group_id': group_id, 'batch_id': batch_id}
         )
-        manifest_result = await _call_live(
-            transport,
+        manifest_raw = await call(
+            'ISOLATION',
             'get_catalog_batch_manifest',
-            {'group_id': group_id, 'batch_id': batch_id, 'offset': 0, 'limit': 100},
+            {'group_id': group_id, 'batch_id': batch_id, 'offset': 0, 'limit': page_size},
         )
-        _assert_absent(status_result, group_id=group_id, batch_id=batch_id)
-        _assert_absent(manifest_result, group_id=group_id, batch_id=batch_id, manifest=True)
-
-    await absence(confirm_group_id, confirm_batch_id)
-    await absence(confirm_control_group_id, confirm_batch_id)
-    for group in (confirm_group_id, confirm_control_group_id):
-        nodes = await _call_live(transport, 'search_nodes', {'group_ids': [group], 'query': 'phase6-isolation'})
-        facts = await _call_live(transport, 'search_memory_facts', {'group_ids': [group], 'query': 'phase6-isolation'})
-        if nodes.get('nodes') or facts.get('facts'):
-            raise RunnerError('isolation_failed', 'fresh group is not empty')
-    machine.advance(LiveStage.PREFLIGHT_PASSED, LiveStage.ISOLATION_PASSED)
-
-    _, payload, manifest, request, artifact_sha, request_sha = validate_live_artifact(
-        payload_path, manifest_path
-    )
-    machine.advance(LiveStage.ISOLATION_PASSED, LiveStage.ARTIFACT_VALIDATED)
-    dry_body = build_live_dry_run_request(payload)
-    dry_raw = await _call_live(transport, 'upsert_catalog_batch', dry_body)
-    dry_receipt = _validate_live_dry_run_response(dry_raw, request, request_sha)
-    await absence(request.group_id, request.batch_id)
-    binding = {
-        'artifact_sha256': artifact_sha,
-        'catalog_sha256': request.catalog_sha256,
-        'request_sha256': request_sha,
-        'group_id': request.group_id,
-        'batch_id': request.batch_id,
-        'runtime_capability_sha256': capability_fingerprint,
-        'source_fingerprint': source_fingerprint,
-        'tree_fingerprint': tree_fingerprint,
-        'image_fingerprint': image_fingerprint,
-        'config_fingerprint': config_fingerprint,
-    }
-    machine.advance(LiveStage.ARTIFACT_VALIDATED, LiveStage.DRY_RUN_PASSED)
-    if checkpoint_path is not None:
-        write_live_checkpoint(checkpoint_path, LiveStage.DRY_RUN_PASSED, binding)
-
-    machine.require(LiveStage.DRY_RUN_PASSED)
-    prepare_body = build_prepare_transport_request(payload)
-    prepared_raw = await _call_live(transport, 'prepare_catalog_batch', prepare_body)
-    prepared, plan_token = _validate_live_prepare_overlap(prepared_raw, request, request_sha, dry_receipt)
-    await absence(request.group_id, request.batch_id)
-    machine.advance(LiveStage.DRY_RUN_PASSED, LiveStage.PREPARE_PASSED)
-    machine.require(LiveStage.PREPARE_PASSED)
-    commit_body = build_commit_transport_request(plan_token, expected_request_sha256=request_sha)
-    try:
-        commit_raw = await _call_live(transport, 'commit_prepared_catalog_batch', commit_body)
-    except Exception as exc:
-        raise RunnerError(
-            'ambiguous_commit_requires_reconciliation',
-            'commit transport outcome requires same group/batch read reconciliation',
-        ) from exc
-    committed = _validate_commit_response(
-        commit_raw,
-        request,
-        request_sha,
-        expected_plan_uuid=prepared.plan_uuid,
-        expected_artifact_sha256=prepared.artifact_sha256,
-    )
-    machine.advance(LiveStage.PREPARE_PASSED, LiveStage.COMMIT_CONFIRMED)
-    manifest_sha = committed.manifest_sha256
-    assert manifest_sha is not None
-    status_raw = await _call_live(
-        transport,
-        'get_catalog_ingest_status',
-        {'group_id': request.group_id, 'batch_id': request.batch_id},
-    )
-    _validate_status_response(status_raw, request, request_sha)
-    assert request.provenance is not None
-    manifest_limit = max(
-        len(request.entities),
-        len(request.edges),
-        len(request.provenance.sources),
-        len(request.provenance.evidence_links),
-    )
-    manifest_raw = await _call_live(
-        transport,
-        'get_catalog_batch_manifest',
-        {
-            'group_id': request.group_id,
-            'batch_id': request.batch_id,
-            'offset': 0,
-            'limit': manifest_limit,
-        },
-    )
-    try:
-        durable_manifest = GetCatalogBatchManifestResponse.model_validate(
-            manifest_raw, strict=True
+        value = _assert_absent(
+            status_raw, group_id=group_id, batch_id=batch_id, expected_batch_uuid=expected_uuid
         )
-    except ValidationError as exc:
-        raise RunnerError('invalid_manifest_response', 'manifest response is invalid') from exc
-    if (
-        not durable_manifest.found
-        or durable_manifest.request_sha256 != request_sha
-        or durable_manifest.catalog_sha256 != request.catalog_sha256
-        or durable_manifest.artifact_sha256 != prepared.artifact_sha256
-        or durable_manifest.manifest_sha256 != manifest_sha
-        or durable_manifest.identity_schema_version != request.identity_schema_version
-    ):
-        raise RunnerError('manifest_failed', 'manifest response binding failed')
-    manifest_entities, manifest_edges, manifest_evidence = _validate_manifest_inventory(
-        durable_manifest, request
-    )
-    verify_request = {
-        'group_id': request.group_id,
-        'batch_id': request.batch_id,
-        'entities': [
-            {'entity_type': item.entity_type, 'graph_key': item.graph_key}
-            for item in request.entities
-        ],
-        'edges': [
-            {
-                'edge_type': item.edge_type,
-                'edge_key': item.edge_key,
-                'expected_source_graph_key': item.source_graph_key,
-                'expected_target_graph_key': item.target_graph_key,
-                'expected_source_uuid': None,
-                'expected_target_uuid': None,
+        _assert_absent(
+            manifest_raw,
+            group_id=group_id,
+            batch_id=batch_id,
+            manifest=True,
+            expected_limit=page_size,
+        )
+        assert value is not None
+        return value
+
+    try:
+        manifest_hint = strict_json_load(manifest_path)
+        if not isinstance(manifest_hint, dict):
+            raise RunnerError('invalid_live_manifest', 'live manifest must be an object')
+        if confirm_run_id != manifest_hint.get('run_id'):
+            raise RunnerError(
+                'operator_confirmation_mismatch', 'run_id confirmation does not match manifest'
+            )
+        validate_live_operator_confirmation(
+            manifest_hint,
+            group_id=confirm_group_id,
+            control_group_id=confirm_control_group_id,
+            batch_id=confirm_batch_id,
+        )
+        for value in (image_fingerprint, config_fingerprint):
+            if value is not None and SHA256_RE.fullmatch(value) is None:
+                raise RunnerError('source_attestation_invalid', 'optional fingerprint is invalid')
+        attestor = source_attestor or attest_local_source
+        attestation = attestor(
+            expected_head=source_head,
+            expected_source_map_sha256=source_map_sha256,
+            expected_runner_sha256=runner_sha256,
+        )
+        if not isinstance(attestation, dict):
+            raise RunnerError(
+                'source_attestation_failed', 'source attestor returned invalid result'
+            )
+        gates['0'] = 'pass'
+
+        tools = await call('PREFLIGHT', 'list_tools', {})
+        names = tools.get('names')
+        if (
+            tools.get('count') != 28
+            or not isinstance(names, list)
+            or set(names) != EXPECTED_MCP_TOOLS
+        ):
+            raise RunnerError('tool_registry_mismatch', 'MCP registry must match exact 28 tools')
+        status = await call('PREFLIGHT', 'get_status', {})
+        capabilities_raw = await call('PREFLIGHT', 'get_catalog_capabilities', {})
+        try:
+            capabilities = CatalogCapabilitiesResponse.model_validate(capabilities_raw, strict=True)
+        except ValidationError as exc:
+            raise RunnerError(
+                'capability_preflight_failed', 'capability response is invalid'
+            ) from exc
+        if (
+            status.get('status') != 'ok'
+            or capabilities.backend not in {'neo4j', 'Neo4j'}
+            or capabilities.identity_schema_version != HARDENED_IDENTITY_SCHEMA_VERSION
+            or capabilities.canonicalization_version != CANONICALIZATION_VERSION
+            or capabilities.catalog_schema_version != CATALOG_SCHEMA_VERSION
+            or capabilities.connectivity != 'ok'
+            or capabilities.catalog_writes_enabled is not True
+            or capabilities.catalog_reads_enabled is not True
+            or capabilities.uuid_namespace_configured is not True
+            or SAFE_NAMESPACE_FINGERPRINT_RE.fullmatch(capabilities.namespace_fingerprint or '')
+            is None
+            or capabilities.neo4j_indexes != 'ready'
+            or capabilities.embeddings.get('ready') != 'ready'
+            or any(
+                capabilities.features.get(key) is not True
+                for key in ('prepare_commit', 'manifests', 'manifest_verification')
+            )
+        ):
+            raise RunnerError(
+                'capability_preflight_failed', 'runtime catalog capabilities are incomplete'
+            )
+        if capabilities.features.get('same_token_replay') is True:
+            raise RunnerError(
+                'unsupported_replay_contract', 'advertised replay contract is not harness-validated'
+            )
+        page_size = _manifest_page_size(capabilities)
+        capability_projection = capabilities.model_dump(mode='json')
+        capability_sha = canonical_sha256(capability_projection)
+        flags['namespace_fingerprint'] = capabilities.namespace_fingerprint
+        machine.advance(LiveStage.START, LiveStage.PREFLIGHT_PASSED)
+        gates['1'] = 'pass'
+
+        batch_uuid = await absence(confirm_group_id, confirm_batch_id, page_size=page_size)
+        control_uuid = await absence(
+            confirm_control_group_id, confirm_batch_id, page_size=page_size
+        )
+        for group in (confirm_group_id, confirm_control_group_id):
+            nodes = await call(
+                'ISOLATION', 'search_nodes', {'group_ids': [group], 'query': 'phase6-isolation'}
+            )
+            facts = await call(
+                'ISOLATION',
+                'search_memory_facts',
+                {'group_ids': [group], 'query': 'phase6-isolation'},
+            )
+            if nodes.get('nodes') or facts.get('facts'):
+                raise RunnerError('isolation_failed', 'fresh group is not empty')
+        machine.advance(LiveStage.PREFLIGHT_PASSED, LiveStage.ISOLATION_PASSED)
+        gates['2'] = 'pass'
+
+        _, payload, manifest, request, artifact_sha, request_sha = validate_live_artifact(
+            payload_path, manifest_path
+        )
+        validate_live_operator_confirmation(
+            manifest,
+            group_id=confirm_group_id,
+            control_group_id=confirm_control_group_id,
+            batch_id=confirm_batch_id,
+        )
+        machine.advance(LiveStage.ISOLATION_PASSED, LiveStage.ARTIFACT_VALIDATED)
+        gates['3'] = 'pass'
+
+        dry_raw = await call('DRY_RUN', 'upsert_catalog_batch', build_live_dry_run_request(payload))
+        dry = _validate_live_dry_run_response(
+            dry_raw, request, request_sha, expected_batch_uuid=batch_uuid
+        )
+        after_dry_uuid = await absence(
+            request.group_id,
+            request.batch_id,
+            page_size=page_size,
+            expected_uuid=batch_uuid,
+        )
+        if after_dry_uuid != batch_uuid:
+            raise RunnerError('batch_uuid_mismatch', 'post-dry-run batch UUID differs')
+        flags['dry_run_zero_write_proven'] = True
+        machine.advance(LiveStage.ARTIFACT_VALIDATED, LiveStage.DRY_RUN_PASSED)
+        gates['4'] = 'pass'
+
+        prepared_raw = await call(
+            'PREPARE', 'prepare_catalog_batch', build_prepare_transport_request(payload)
+        )
+        prepared, plan_token = _validate_live_prepare_overlap(
+            prepared_raw, request, request_sha, dry
+        )
+        after_prepare_uuid = await absence(
+            request.group_id,
+            request.batch_id,
+            page_size=page_size,
+            expected_uuid=batch_uuid,
+        )
+        if after_prepare_uuid != batch_uuid:
+            raise RunnerError('batch_uuid_mismatch', 'post-prepare batch UUID differs')
+        machine.advance(LiveStage.DRY_RUN_PASSED, LiveStage.PREPARE_PASSED)
+        gates['5'] = 'pass'
+
+        if result_dir is not None:
+            atomic_write_json(
+                result_dir / 'commit-started.json',
+                {
+                    'schema_version': 1,
+                    'stage': machine.stage.name,
+                    'plan_uuid': prepared.plan_uuid,
+                    'artifact_sha256': prepared.artifact_sha256,
+                    'expires_at': prepared.expires_at,
+                    'counts': _expected_domain_counts(request),
+                    'request_sha256': request_sha,
+                    'catalog_sha256': request.catalog_sha256,
+                    'batch_uuid': batch_uuid,
+                },
+            )
+        commit_started = True
+        flags['commit_started'] = True
+        commit_body = build_commit_transport_request(
+            plan_token, expected_request_sha256=request_sha
+        )
+        ambiguity: BaseException | None = None
+        try:
+            commit_raw = await call('COMMIT', 'commit_prepared_catalog_batch', commit_body)
+            committed_response = _validate_commit_response(
+                commit_raw,
+                request,
+                request_sha,
+                expected_plan_uuid=prepared.plan_uuid,
+                expected_artifact_sha256=prepared.artifact_sha256,
+            )
+            outcome = {
+                'created': committed_response.committed_created,
+                'updated': committed_response.committed_updated,
+                'unchanged': committed_response.committed_unchanged,
             }
-            for item in request.edges
-        ],
-        'require_provenance': True,
-    }
-    verify_raw = await _call_live(transport, 'verify_catalog_batch', verify_request)
-    _validate_verify_response(verify_raw, request)
-    resolved_raw = await _call_live(
-        transport,
-        'resolve_typed_entities',
-        {
-            'group_id': request.group_id,
-            'entities': [
-                {'entity_type': item.entity_type, 'graph_key': item.graph_key}
-                for item in request.entities
-            ],
-            'graph_keys': None,
-        },
-    )
-    resolved_entities = _validate_resolve_response(resolved_raw, request)
-    if resolved_entities != manifest_entities:
-        raise RunnerError('manifest_failed', 'typed entity UUIDs differ from manifest')
-    representative = request.entities[0]
-    evidence_raw = await _call_live(
-        transport,
-        'get_catalog_evidence',
-        {
-            'group_id': request.group_id,
-            'identity_schema_version': request.identity_schema_version,
-            'system_key': request.system_key,
-            'entity_target': {
-                'entity_type': representative.entity_type,
-                'graph_key': representative.graph_key,
-            },
-            'edge_target': None,
-            'offset': 0,
-            'limit': 100,
-            'include_excerpts': False,
-        },
-    )
-    evidence_response = GetCatalogEvidenceResponse.model_validate(evidence_raw, strict=True)
-    _validate_evidence_response(
-        evidence_response,
-        request,
-        target_kind='entity',
-        target_key=representative.graph_key,
-        target_uuid=manifest_entities[(representative.entity_type, representative.graph_key)],
-        expected_links=manifest_evidence,
-    )
-    node_raw = await _call_live(
-        transport,
-        'search_nodes',
-        {
-            'query': representative.graph_key,
-            'group_ids': [request.group_id],
-            'max_nodes': 10,
-            'entity_types': [representative.entity_type],
-            'center_node_uuid': None,
-        },
-    )
-    _validate_node_search(
-        node_raw,
-        graph_key=representative.graph_key,
-        group_id=request.group_id,
-        entity_type=representative.entity_type,
-        expected_uuid=manifest_entities[(representative.entity_type, representative.graph_key)],
-    )
-    representative_edge = request.edges[0]
-    fact_raw = await _call_live(
-        transport,
-        'search_memory_facts',
-        {
-            'query': representative_edge.fact,
-            'group_ids': [request.group_id],
-            'max_facts': 10,
-            'center_node_uuid': None,
-            'edge_types': [representative_edge.edge_type],
-            'valid_at_after': None,
-            'valid_at_before': None,
-            'invalid_at_after': None,
-            'invalid_at_before': None,
-        },
-    )
-    _validate_fact_search(
-        fact_raw,
-        representative_edge,
-        group_id=request.group_id,
-        expected_uuid=manifest_edges[(representative_edge.edge_type, representative_edge.edge_key)],
-    )
-    post_commit = {
-        'status_verified': True,
-        'manifest_verified': True,
-        'entities_verified': len(request.entities),
-        'edges_verified': len(request.edges),
-        'evidence_verified': evidence_response.total,
-        'search_verified': True,
-    }
-    machine.advance(LiveStage.COMMIT_CONFIRMED, LiveStage.MANIFEST_VERIFIED)
-    edges_request = {
-        'group_id': request.group_id,
-        'edges': [{'edge_type': edge.edge_type, 'edge_key': edge.edge_key} for edge in request.edges],
-    }
-    edges_raw = await _call_live(transport, 'resolve_typed_edges', edges_request)
-    _validate_live_edges(edges_raw, request, manifest_entities)
-    for group in (manifest['control_group_id'],):
-        nodes = await _call_live(transport, 'search_nodes', {'group_ids': [group], 'query': request.entities[0].graph_key})
-        facts = await _call_live(transport, 'search_memory_facts', {'group_ids': [group], 'query': request.edges[0].fact})
+            if outcome != dry['outcome'] or committed_response.batch_uuid != batch_uuid:
+                raise RunnerError('commit_binding_mismatch', 'commit C/U/U or batch UUID differs')
+            manifest_sha = committed_response.manifest_sha256
+        except BaseException as exc:
+            ambiguity = exc
+
+        status_raw = await call(
+            'RECONCILE' if ambiguity else 'POST_COMMIT',
+            'get_catalog_ingest_status',
+            {'group_id': request.group_id, 'batch_id': request.batch_id},
+        )
+        status_response = _validate_committed_status(
+            status_raw, request, request_sha, expected_batch_uuid=batch_uuid
+        )
+        if status_response.batch_uuid != batch_uuid:
+            raise RunnerError('batch_uuid_mismatch', 'reconciled status batch UUID differs')
+
+        async def manifest_call(name: str, body: dict[str, Any]) -> dict[str, Any]:
+            return await call('RECONCILE' if ambiguity else 'MANIFEST', name, body)
+
+        if manifest_sha is None:
+            first_manifest = await manifest_call(
+                'get_catalog_batch_manifest',
+                {
+                    'group_id': request.group_id,
+                    'batch_id': request.batch_id,
+                    'offset': 0,
+                    'limit': page_size,
+                },
+            )
+            candidate = GetCatalogBatchManifestResponse.model_validate(first_manifest, strict=True)
+            if candidate.manifest_sha256 is None:
+                raise RunnerError(
+                    'ambiguous_commit_unresolved', 'committed manifest hash is absent'
+                )
+            manifest_sha = candidate.manifest_sha256
+            # The bounded pass already consumed page zero; use a cache exactly once.
+            cached = first_manifest
+            original = manifest_call
+
+            async def manifest_call(name: str, body: dict[str, Any]) -> dict[str, Any]:
+                nonlocal cached
+                if body.get('offset') == 0 and cached is not None:
+                    value, cached = cached, None
+                    return value
+                return await original(name, body)
+
+        (
+            durable_manifest,
+            manifest_entities,
+            manifest_edges,
+            manifest_sources,
+            manifest_evidence,
+        ) = await _fetch_full_manifest(
+            manifest_call,
+            request,
+            request_sha,
+            page_size=page_size,
+            expected_artifact_sha256=prepared.artifact_sha256,
+            expected_manifest_sha256=manifest_sha,
+        )
+        flags['commit_confirmed'] = True
+        machine.advance(LiveStage.PREPARE_PASSED, LiveStage.COMMIT_CONFIRMED)
+        gates['6'] = 'pass'
+        flags['manifest_verified'] = True
+        machine.advance(LiveStage.COMMIT_CONFIRMED, LiveStage.MANIFEST_VERIFIED)
+        gates['7'] = 'pass'
+
+        resolved_raw = await call(
+            'RESOLVE', 'resolve_typed_entities', build_resolve_entities_request(request)
+        )
+        resolved_entities = _validate_resolved_entities(resolved_raw, request, manifest_entities)
+        flags['entity_resolution_verified'] = True
+        edge_raw = await call(
+            'RESOLVE', 'resolve_typed_edges', build_resolve_edges_request(request)
+        )
+        _validate_resolved_edges(edge_raw, request, resolved_entities, manifest_edges)
+        flags['edge_resolution_verified'] = True
+        verify_raw = await call(
+            'VERIFY', 'verify_catalog_batch', build_verify_request(request, resolved_entities)
+        )
+        _validate_verify_response(verify_raw, request)
+        verify = VerifyCatalogBatchResponse.model_validate(verify_raw, strict=True)
+        if verify.manifest_sha256 != manifest_sha:
+            raise RunnerError('verify_failed', 'verify manifest hash differs')
+        evidence_count = await _verify_all_evidence(
+            lambda name, body: call('EVIDENCE', name, body),
+            request,
+            page_size=page_size,
+            entity_uuids=manifest_entities,
+            edge_uuids=manifest_edges,
+            source_uuids=manifest_sources,
+            manifest_evidence=manifest_evidence,
+        )
+        if evidence_count != len(manifest_evidence):
+            raise RunnerError('evidence_failed', 'evidence total differs')
+        flags['evidence_verified'] = True
+        gates['8'] = 'pass'
+
+        for item in request.entities:
+            raw = await call(
+                'SEARCH',
+                'search_nodes',
+                {
+                    'query': item.graph_key,
+                    'group_ids': [request.group_id],
+                    'max_nodes': 10,
+                    'entity_types': [item.entity_type],
+                    'center_node_uuid': None,
+                },
+            )
+            _validate_node_search_strict(
+                raw,
+                group_id=request.group_id,
+                expected_uuid=manifest_entities[(item.entity_type, item.graph_key)],
+                entity_type=item.entity_type,
+                graph_key=item.graph_key,
+            )
+        for item in request.edges:
+            raw = await call(
+                'SEARCH',
+                'search_memory_facts',
+                {
+                    'query': item.fact,
+                    'group_ids': [request.group_id],
+                    'max_facts': 10,
+                    'center_node_uuid': None,
+                    'edge_types': [item.edge_type],
+                    'valid_at_after': None,
+                    'valid_at_before': None,
+                    'invalid_at_after': None,
+                    'invalid_at_before': None,
+                },
+            )
+            _validate_fact_search_strict(
+                raw,
+                group_id=request.group_id,
+                expected_uuid=manifest_edges[(item.edge_type, item.edge_key)],
+                edge_type=item.edge_type,
+                edge_key=item.edge_key,
+            )
+        final_control_uuid = await absence(
+            manifest['control_group_id'],
+            request.batch_id,
+            page_size=page_size,
+            expected_uuid=control_uuid,
+        )
+        if final_control_uuid != control_uuid:
+            raise RunnerError('control_isolation_failed', 'final control batch UUID differs')
+        nodes = await call(
+            'CONTROL',
+            'search_nodes',
+            {'group_ids': [manifest['control_group_id']], 'query': request.entities[0].graph_key},
+        )
+        facts = await call(
+            'CONTROL',
+            'search_memory_facts',
+            {'group_ids': [manifest['control_group_id']], 'query': request.edges[0].fact},
+        )
         if nodes.get('nodes') or facts.get('facts'):
             raise RunnerError('control_isolation_failed', 'control group is not empty')
-    machine.advance(LiveStage.MANIFEST_VERIFIED, LiveStage.SEARCH_ISOLATION_VERIFIED)
-    replay_advertised = features.get('same_token_replay') is True
-    if replay_advertised:
-        raise RunnerError(
-            'unsupported_replay_contract',
-            'runtime advertises replay without a harness-validated response contract',
+        flags['search_verified'] = True
+        flags['control_isolation_verified'] = True
+        machine.advance(LiveStage.MANIFEST_VERIFIED, LiveStage.SEARCH_ISOLATION_VERIFIED)
+        gates['9'] = 'pass'
+        gates['10'] = 'pass'
+        machine.advance(LiveStage.SEARCH_ISOLATION_VERIFIED, LiveStage.REPLAY_VERIFIED_OR_SKIPPED)
+        machine.advance(LiveStage.REPLAY_VERIFIED_OR_SKIPPED, LiveStage.FINALIZED)
+        report = _terminal_report(
+            manifest=manifest,
+            classification='PASSED',
+            machine=machine,
+            gates=gates,
+            attestation=attestation,
+            capability_sha256=capability_sha,
+            artifact_sha256=artifact_sha,
+            request_sha256=request_sha,
+            manifest_sha256=manifest_sha,
+            batch_uuid=batch_uuid,
+            replay=replay,
+            error_code=None,
+            error_type=None,
+            flags=flags,
+            plan_token=plan_token,
         )
-    machine.advance(
-        LiveStage.SEARCH_ISOLATION_VERIFIED,
-        LiveStage.REPLAY_VERIFIED_OR_SKIPPED,
-    )
-    machine.advance(LiveStage.REPLAY_VERIFIED_OR_SKIPPED, LiveStage.FINALIZED)
-    report = {
-        'classification': 'PASSED',
-        'stage': machine.stage.name,
-        'stage_ledger': machine.ledger,
-        'run_id': manifest['run_id'],
-        'group_id': request.group_id,
-        'control_group_id': manifest['control_group_id'],
-        'batch_id': request.batch_id,
-        'binding': binding,
-        'batch_uuid': committed.batch_uuid,
-        'manifest_sha256': manifest_sha,
-        'post_commit': post_commit,
-        'replay': 'verified' if replay_advertised else 'skipped',
-        'canary_executed': True,
-    }
-    if plan_token in json.dumps(report, sort_keys=True):
-        raise RunnerError('token_persistence', 'raw plan token reached final report')
-    return report
+        if result_dir is not None:
+            atomic_write_json(result_dir / 'final-report.json', report)
+            atomic_write_json(
+                result_dir / 'tool-ledger.json', {'schema_version': 1, 'entries': ledger.entries}
+            )
+        return report
+    except BaseException as exc:
+        if commit_started:
+            classification = 'FAILED_AFTER_COMMIT'
+        elif machine.stage < LiveStage.ARTIFACT_VALIDATED:
+            classification = 'BLOCKED'
+        else:
+            classification = 'FAILED_BEFORE_COMMIT'
+        current_gate = str(min(machine.stage.value, 10))
+        if gates.get(current_gate) != 'pass':
+            gates[current_gate] = 'fail' if classification != 'BLOCKED' else 'blocked'
+        error_code = exc.code if isinstance(exc, RunnerError) else 'internal_runner_error'
+        report = _terminal_report(
+            manifest=manifest_hint,
+            classification=classification,
+            machine=machine,
+            gates=gates,
+            attestation=attestation,
+            capability_sha256=capability_sha,
+            artifact_sha256=artifact_sha,
+            request_sha256=request_sha,
+            manifest_sha256=manifest_sha,
+            batch_uuid=batch_uuid,
+            replay='failed' if commit_started else replay,
+            error_code=error_code,
+            error_type=type(exc).__name__,
+            flags=flags,
+            plan_token=plan_token,
+        )
+        if result_dir is not None:
+            atomic_write_json(result_dir / 'final-report.json', report)
+            atomic_write_json(
+                result_dir / 'tool-ledger.json', {'schema_version': 1, 'entries': ledger.entries}
+            )
+        raise
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -3044,8 +3871,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument('--control-group-id')
     parser.add_argument('--batch-id')
     parser.add_argument('--output-dir', type=Path)
-    parser.add_argument('--source-fingerprint')
-    parser.add_argument('--tree-fingerprint')
+    parser.add_argument('--source-head')
+    parser.add_argument('--source-map-sha256')
+    parser.add_argument('--runner-sha256')
     parser.add_argument('--image-fingerprint')
     parser.add_argument('--config-fingerprint')
     parser.add_argument('--mode', default='commit', choices=('commit', 'live-canary'))
@@ -3057,57 +3885,72 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         missing = [
             name
             for name in (
-                'manifest', 'run_id', 'group_id', 'control_group_id', 'batch_id',
-                'output_dir', 'source_fingerprint', 'tree_fingerprint',
+                'manifest',
+                'run_id',
+                'group_id',
+                'control_group_id',
+                'batch_id',
+                'output_dir',
+                'source_head',
+                'source_map_sha256',
+                'runner_sha256',
             )
             if getattr(args, name) is None
         ]
         if missing:
-            parser.error('live-canary requires: ' + ', '.join('--' + name.replace('_', '-') for name in missing))
+            parser.error(
+                'live-canary requires: '
+                + ', '.join('--' + name.replace('_', '-') for name in missing)
+            )
         if args.output_dir.exists():
             parser.error('live-canary receipt directory must not already exist')
         for name in (
-            'source_fingerprint', 'tree_fingerprint', 'image_fingerprint', 'config_fingerprint'
+            'source_map_sha256',
+            'runner_sha256',
+            'image_fingerprint',
+            'config_fingerprint',
         ):
             value = getattr(args, name)
             if value is not None and SHA256_RE.fullmatch(value) is None:
                 parser.error('--' + name.replace('_', '-') + ' must be lowercase SHA-256')
+        if SOURCE_HEAD_RE.fullmatch(args.source_head or '') is None:
+            parser.error('--source-head must be lowercase Git SHA-1')
     return args
 
 
 async def execute_cli(args: argparse.Namespace) -> dict[str, Any]:
     if args.mode != 'live-canary':
         return await execute(args)
-    args.output_dir.mkdir(parents=False, exist_ok=False)
-    try:
-        async with (
-            streamable_http_client(args.mcp_url) as (read_stream, write_stream, _),
-            ClientSession(read_stream, write_stream) as session,
-        ):
-            await session.initialize()
-            result = await run_live_canary(
-                SessionLiveTransport(session),
-                args.payload.resolve(),
-                args.manifest.resolve(),
-                confirm_run_id=args.run_id,
-                confirm_group_id=args.group_id,
-                confirm_control_group_id=args.control_group_id,
-                confirm_batch_id=args.batch_id,
-                source_fingerprint=args.source_fingerprint,
-                tree_fingerprint=args.tree_fingerprint,
-                image_fingerprint=args.image_fingerprint,
-                config_fingerprint=args.config_fingerprint,
-                checkpoint_path=args.output_dir / 'checkpoint.json',
-            )
-        atomic_write_json(args.output_dir / 'final-report.json', result)
-        atomic_write_json(
-            args.output_dir / 'tool-ledger.json',
-            {'schema_version': 1, 'stages': result['stage_ledger']},
+    attestation = attest_local_source(
+        expected_head=args.source_head,
+        expected_source_map_sha256=args.source_map_sha256,
+        expected_runner_sha256=args.runner_sha256,
+    )
+
+    def preverified_attestor(**_kwargs: Any) -> dict[str, Any]:
+        return attestation
+
+    async with (
+        streamable_http_client(args.mcp_url) as (read_stream, write_stream, _),
+        ClientSession(read_stream, write_stream) as session,
+    ):
+        await session.initialize()
+        return await run_live_canary(
+            SessionLiveTransport(session),
+            args.payload.resolve(),
+            args.manifest.resolve(),
+            confirm_run_id=args.run_id,
+            confirm_group_id=args.group_id,
+            confirm_control_group_id=args.control_group_id,
+            confirm_batch_id=args.batch_id,
+            source_head=args.source_head,
+            source_map_sha256=args.source_map_sha256,
+            runner_sha256=args.runner_sha256,
+            image_fingerprint=args.image_fingerprint,
+            config_fingerprint=args.config_fingerprint,
+            output_dir=args.output_dir,
+            source_attestor=preverified_attestor,
         )
-        return result
-    except BaseException:
-        # The directory itself is durable proof that a run was attempted; never reuse it.
-        raise
 
 
 def main(argv: list[str] | None = None) -> int:
