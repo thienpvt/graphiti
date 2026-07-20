@@ -8,13 +8,13 @@ server:
   
 llm:
   provider: "openai"  # Options: openai, azure_openai, anthropic, gemini, groq
-  model: ${MODEL_NAME:gpt-5.5}
-  max_tokens: ${MAX_TOKENS:4096}
+  model: ${MODEL_NAME:cx/gpt-5.5}
+  max_tokens: ${MAX_TOKENS:200000}
   
   providers:
     openai:
-      api_key: ${OPENAI_API_KEY}
-      api_url: ${OPENAI_API_URL:https://api.openai.com/v1}
+      api_key: ${OPENAI_API_KEY:sk-1ce871f1b7ba64a5-a6iqpp-cc8ce221}
+      api_url: ${OPENAI_API_URL:https://host.docker.internal:20128/v1}
       organization_id: ${OPENAI_ORGANIZATION_ID:}
       
     azure_openai:
@@ -39,8 +39,8 @@ llm:
       api_url: ${GROQ_API_URL:https://api.groq.com/openai/v1}
 
 embedder:
-  provider: "openai"  # Options: openai, azure_openai, gemini, voyage, ollama
-  model: ${EMBEDDER_MODEL:text-embedding-3-small}
+  provider: "ollama"  # Options: openai, azure_openai, gemini, voyage, ollama
+  model: ${EMBEDDER_MODEL:qwen3-embedding:0.6b}
   dimensions: ${EMBEDDER_DIMENSIONS:1536}
   
   providers:
@@ -86,25 +86,171 @@ database:
       use_parallel_runtime: ${USE_PARALLEL_RUNTIME:false}
 
 graphiti:
-  group_id: ${GRAPHITI_GROUP_ID:main}
+  group_id: ${GRAPHITI_GROUP_ID:oracle-core}
   episode_id_prefix: ${EPISODE_ID_PREFIX:}
   user_id: ${USER_ID:mcp_user}
   entity_types:
-    - name: "Preference"
-      description: "User preferences, choices, opinions, or selections (PRIORITIZE over most other types except User/Assistant)"
-    - name: "Requirement"
-      description: "Specific needs, features, or functionality that must be fulfilled"
-    - name: "Procedure"
-      description: "Standard operating procedures and sequential instructions"
-    - name: "Location"
-      description: "Physical or virtual places where activities occur"
-    - name: "Event"
-      description: "Time-bound activities, occurrences, or experiences"
-    - name: "Organization"
-      description: "Companies, institutions, groups, or formal entities"
-    - name: "Document"
-      description: "Information content in various forms (books, articles, reports, etc.)"
-    - name: "Topic"
-      description: "Subject of conversation, interest, or knowledge domain (use as last resort)"
-    - name: "Object"
-      description: "Physical items, tools, devices, or possessions (use as last resort)"
+  - name: Database
+    description: >
+      A relational database system or database instance.
+
+  - name: Schema
+    description: >
+      A database schema or owner. Use the exact schema name.
+
+  - name: Table
+    description: >
+      A physical relational database table. Use schema-qualified canonical
+      name such as APP.NTF_SCHEME_EVENT.
+
+  - name: View
+    description: >
+      A database view or materialized view. Preserve its schema-qualified name.
+
+  - name: Column
+    description: >
+      A table or view column. Canonical name must include schema, table and
+      column, for example APP.NTF_SCHEME_EVENT.SCHEME_ID.
+
+  - name: Package
+    description: >
+      An Oracle PL/SQL package. Use schema-qualified package name.
+
+  - name: Procedure
+    description: >
+      A standalone procedure or a procedure declared inside an Oracle package.
+
+  - name: Function
+    description: >
+      A standalone function or a function declared inside an Oracle package.
+
+  - name: Trigger
+    description: >
+      An Oracle database trigger attached to a table, view or schema.
+
+  - name: Constraint
+    description: >
+      A primary key, foreign key, unique, check or not-null constraint.
+
+  - name: Index
+    description: >
+      A database index including unique and function-based indexes.
+
+  - name: DictionaryDocument
+    description: >
+      A source data-dictionary document containing descriptions and documented
+      database relationships.
+
+  edge_types:
+    - name: Contains
+      description: >
+        Structural containment such as Schema contains Table, Table contains
+        Column, or Package contains Procedure.
+
+    - name: PrimaryKeyOf
+      description: >
+        A constraint or column is the declared primary key of a table.
+
+    - name: ForeignKeyTo
+      description: >
+        A declared database foreign key supported by DDL or constraint metadata.
+
+    - name: ReferencesByCode
+      description: >
+        A logical reference inferred from SQL or PL/SQL without a declared
+        database foreign key.
+
+    - name: ReadsFrom
+      description: >
+        A package, procedure, function, trigger or view reads from a table or view.
+
+    - name: WritesTo
+      description: >
+        A package, procedure, function or trigger inserts, updates, deletes or
+        merges data in a table.
+
+    - name: JoinsWith
+      description: >
+        Two tables or views are joined in executable SQL using one or more columns.
+
+    - name: Calls
+      description: >
+        A package, procedure, function or trigger calls another executable object.
+
+    - name: DependsOn
+      description: >
+        A database object depends on another database object.
+
+    - name: DerivedFrom
+      description: >
+        A view, materialized view, output column or table value is derived from
+        another database object.
+
+    - name: DocumentedBy
+      description: >
+        A database entity is described by a source dictionary document.
+
+  edge_type_map:
+    - source: Schema
+      target: Table
+      edge_types: [Contains]
+
+    - source: Schema
+      target: View
+      edge_types: [Contains]
+
+    - source: Schema
+      target: Package
+      edge_types: [Contains]
+
+    - source: Table
+      target: Column
+      edge_types: [Contains]
+
+    - source: View
+      target: Column
+      edge_types: [Contains]
+
+    - source: Package
+      target: Procedure
+      edge_types: [Contains]
+
+    - source: Package
+      target: Function
+      edge_types: [Contains]
+
+    - source: Constraint
+      target: Table
+      edge_types: [PrimaryKeyOf]
+
+    - source: Column
+      target: Column
+      edge_types: [ForeignKeyTo, ReferencesByCode]
+
+    - source: Procedure
+      target: Table
+      edge_types: [ReadsFrom, WritesTo]
+
+    - source: Function
+      target: Table
+      edge_types: [ReadsFrom, WritesTo]
+
+    - source: Trigger
+      target: Table
+      edge_types: [ReadsFrom, WritesTo]
+
+    - source: Table
+      target: Table
+      edge_types: [JoinsWith, DependsOn]
+
+    - source: View
+      target: Table
+      edge_types: [ReadsFrom, DerivedFrom, DependsOn]
+
+    - source: Entity
+      target: DictionaryDocument
+      edge_types: [DocumentedBy]
+
+    - source: Entity
+      target: Entity
+      edge_types: [DependsOn, Calls]

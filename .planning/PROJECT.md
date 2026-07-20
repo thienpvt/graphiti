@@ -10,10 +10,28 @@ The v1.0 implementation preserves existing Graphiti and MCP behavior. It deliver
 
 A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
 
+## Current Milestone: v1.1 Catalog-v2 Pre-Canary Hardening
+
+**Goal:** Harden deterministic catalog identity, validation, provenance, prepare/commit, manifest, and verification contracts before any regenerated canary is executed.
+
+**Target features:**
+- Strict recursive catalog request contracts and fail-closed catalog-v2 FE/BO identity grammar
+- Server-owned edge endpoint maps plus authoritative batch hashing and capabilities discovery
+- Restart-safe immutable prepare/commit/discard protocol with exact evidence links
+- Durable batch manifests, manifest-backed verification, typed edge resolution, and split read/write gates
+- Exhaustive unit, service, store, MCP, concurrency, live Neo4j, security, compatibility, and documentation coverage
+
 ## Requirements
 
 ### Validated
 
+- ✓ Phase 0 recorded the live 14 legacy + 7 catalog MCP tool baseline and offline historical canary evidence — Phase 0
+- ✓ Phase 0 froze the catalog-v1 compatibility boundary and test-group/canary/dirty-tree/remote isolation policy — Phase 0
+- ✓ Catalog requests reject unknown fields recursively, enforce immutable execution flags, and require collision-safe catalog-v2 FE/BO/COMMON identity — Phase 1
+- ✓ Every catalog edge type enforces one finite server-owned endpoint map before side effects — Phase 2
+- ✓ Combined batch hashes cover the complete canonical domain and echo authoritative server hashes — Phase 2
+- ✓ Explicit catalog evidence links replace Cartesian batch provenance while preserving standalone legacy compatibility — Phase 2
+- ✓ Read-only capabilities expose versions, registries, topology, limits, and safe namespace fingerprint without mutation — Phase 2
 - ✓ Standard Graphiti MCP tools already expose semantic ingestion, search, triplet, maintenance, and deletion operations — existing
 - ✓ The MCP server already supports YAML configuration with environment expansion and Pydantic validation — existing
 - ✓ Neo4j is supported through an asynchronous driver with real transactions — existing
@@ -23,7 +41,11 @@ A catalog item can be retried safely and commits as exactly one deterministic, c
 
 ### Active
 
-None for v1.0.
+- [ ] Agents can prepare, commit, replay, and discard bounded restart-safe immutable batch plans
+- [ ] Every committed batch has a durable exact manifest and manifest-backed verification
+- [ ] Read-only catalog diagnostics remain usable while catalog mutation is disabled
+- [ ] Existing legacy MCP contracts, deterministic guarantees, search interoperability, and graph isolation remain intact
+- [ ] Catalog-v2 migration and regenerated-canary guidance are complete without executing a canary
 
 ### Delivered in v1.0
 
@@ -40,6 +62,7 @@ None for v1.0.
 ### Out of Scope
 
 - Kubernetes deployment — configuration may be documented, but this task must not deploy
+- `LikelyReferencesTo`, `MapsTo`, and `SynchronizesTo` — edge vocabulary additions require later inference/schema approval
 - Full catalog ingestion — only fixtures and a future canary procedure are prepared
 - Existing live graph groups — tests use only `oracle-catalog-tool-test`; `oracle-catalog-v2` is not mutated during implementation
 - Graph deletion or cleanup operations — never call `clear_graph` or delete existing graph data
@@ -49,10 +72,17 @@ None for v1.0.
 - Arbitrary Cypher, arbitrary labels, or arbitrary Neo4j property-name exposure — fixed server-owned schemas only
 - Automatic UUID namespace generation — deployments must provide one fixed UUID explicitly
 - Automatic community creation during upsert — only compatibility execution is tested
+- Oracle dictionary, SQL, or PL/SQL parsing — follows only after substrate hardening and canary validation
+- Relationship scoring or inference and agent context/path/impact tools — later retrieval milestone
+- Catalog delta, retirement, business transaction entities, or FE/BO runtime correlation — later domain work
+- Automatic catalog-v1 to catalog-v2 identity migration — identities must never be silently reinterpreted
+- Production migration, production writes, or canary execution — requires separate approval after v1.1 verification
 
 ## Context
 
 The intended catalog contains approximately 14,106 deterministic entities and more than 30,000 deterministic relationships. Existing ingestion paths are unsafe for this baseline: `add_memory` is asynchronous and invokes extraction; fresh caller episode UUIDs fail with the installed Graphiti behavior; semantic episodes can infer unwanted relationships; `excluded_entity_types` depends on the live registry; and `add_triplet` can create generic endpoints when named entities do not exist.
+
+A cherry-picked pre-hardening canary workflow now exists in `scripts/`, `catalog/canary-v2-requests/`, and `mcp_server/tests/test_catalog_canary_scripts.py`. Repository artifacts record an ACCEPT_TAB dry-run and commit against `oracle-catalog-v2` using the old identity/provenance/hash contract. v1.1 inventories that evidence offline only: it must not query, mutate, retry, or mechanically reuse the live group, old golden hash, 10/16/1 receipt, or 38/85 plan.
 
 Entity identity is UUIDv5 over `group_id|entity_type|graph_key`. Edge identity is UUIDv5 over `group_id|edge_type|edge_key`. Source identity is UUIDv5 over `group_id|Source|source_key`. Batch identity is UUIDv5 over `group_id|Batch|batch_id`. Every mutable domain payload is canonicalized and audited with exactly 64 lowercase hexadecimal SHA-256 characters; MD5 is forbidden.
 
@@ -116,6 +146,12 @@ Existing unrelated working-tree changes in `mcp_server/k8s/graphiti-neo4j.yaml`,
 | Gate Phase 2 on Phase 1 integration quality | Provenance and orchestration depend on trusted typed primitives | ✓ Gate passed before Phase 2 |
 | Keep normal upserts community-neutral | Community construction is maintenance behavior, not ingestion behavior | ✓ Delivered |
 | Use source CAS and ordered retained target locks | Close provenance validation/mutation TOCTOU under concurrent writes | ✓ Delivered |
+| Treat pre-hardening ACCEPT_TAB artifacts as offline historical evidence only | Catalog-v1 hashes and receipts cannot authorize hardened catalog-v2 behavior | ✓ Phase 0 |
+| Gate Phase 1 on recorded artifacts, safety invariants, and truthful pass/fail/skip results | Baseline failures must remain distinguishable from v1.1 regressions | ✓ Phase 0 |
+| Use one immutable server-owned endpoint registry for all 16 approved edge types | Client-supplied or divergent topology would create invalid searchable truth | ✓ Phase 2 |
+| Replace catalog-v2 Cartesian provenance with explicit one-source/one-target evidence links | Prevent implicit or inflated provenance while preserving standalone legacy behavior until Phase 3B | ✓ Phase 2 |
+| Hash the complete canonical batch domain under one versioned recipe | Omitted fields would create false idempotence and unsafe prepare/commit replay | ✓ Phase 2 |
+| Keep capability discovery mutation-free and available while writes are disabled | Agents need safe contract discovery before attempting writes | ✓ Phase 2 |
 
 ## Evolution
 
@@ -135,4 +171,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-17 after v1.0 verification*
+*Last updated: 2026-07-18 after Phase 2*

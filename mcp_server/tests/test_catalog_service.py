@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import asyncio
 import importlib
 import logging
 import sys
@@ -9,10 +11,11 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any, Literal, cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
@@ -44,14 +47,25 @@ from services.catalog_service import CatalogService  # noqa: E402
 FIXED_NS = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 GROUP = 'oracle-catalog-tool-test'
 BATCH = 'batch-entity-001'
-CATALOG_TOOL_NAMES = {
+# Request-bound catalog tools (SAFE-08 / CONT-07 typed request models).
+CATALOG_REQUEST_TOOL_NAMES = {
     'upsert_typed_entities',
     'upsert_typed_edges',
     'resolve_typed_entities',
+    'resolve_typed_edges',
     'verify_catalog_batch',
     'upsert_provenance',
     'get_catalog_ingest_status',
+    'get_catalog_batch_manifest',
+    'get_catalog_evidence',
     'upsert_catalog_batch',
+    'prepare_catalog_batch',
+    'commit_prepared_catalog_batch',
+    'discard_prepared_catalog_batch',
+}
+# Full catalog tool surface: request-bound + get_catalog_capabilities (04-06: +3 read tools → 14).
+CATALOG_TOOL_NAMES = CATALOG_REQUEST_TOOL_NAMES | {
+    'get_catalog_capabilities',
 }
 LEGACY_TOOL_NAMES = {
     'add_memory',
@@ -71,6 +85,98 @@ LEGACY_TOOL_NAMES = {
 }
 
 
+def _literal_logger_template(expression: ast.expr) -> tuple[str, list[str]] | None:
+    if isinstance(expression, ast.Constant) and isinstance(expression.value, str):
+        return expression.value, []
+    if not isinstance(expression, ast.JoinedStr):
+        return None
+
+    parts: list[str] = []
+    arguments: list[str] = []
+    for value in expression.values:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            parts.append(value.value)
+        elif isinstance(value, ast.FormattedValue):
+            parts.append('{}')
+            arguments.append(ast.unparse(value.value))
+        else:
+            return None
+    return ''.join(parts), arguments
+
+
+def _logger_calls(path: Path) -> list[tuple[str | None, str, str, list[str]]]:
+    """Return function, logger method, literal template, and argument expressions."""
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    calls: list[tuple[str | None, str, str, list[str]]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if not isinstance(node.func.value, ast.Name) or node.func.value.id != 'logger':
+            continue
+        if not node.args:
+            continue
+        parsed = _literal_logger_template(node.args[0])
+        if parsed is None:
+            continue
+        template, formatted_arguments = parsed
+        owner = parents.get(node)
+        while owner is not None and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            owner = parents.get(owner)
+        function_name = (
+            owner.name if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)) else None
+        )
+        calls.append(
+            (
+                function_name,
+                node.func.attr,
+                template,
+                formatted_arguments + [ast.unparse(argument) for argument in node.args[1:]],
+            )
+        )
+    return calls
+
+
+def test_catalog_logger_templates_omit_group_id():
+    src = Path(__file__).parent.parent / 'src'
+    wrapper_calls = _logger_calls(src / 'graphiti_mcp_server.py')
+    service_calls = _logger_calls(src / 'services' / 'catalog_service.py')
+
+    catalog_wrapper_calls = [call for call in wrapper_calls if call[0] in CATALOG_TOOL_NAMES]
+    catalog_service_calls = [call for call in service_calls if call[2].startswith('catalog ')]
+    catalog_calls = catalog_wrapper_calls + catalog_service_calls
+
+    assert catalog_wrapper_calls
+    assert catalog_service_calls
+    assert any('Using group_id' in call[2] for call in wrapper_calls)
+    assert any('Group ID' in call[2] for call in wrapper_calls)
+    assert all('group_id' not in template.lower() for _, _, template, _ in catalog_calls)
+    assert all(
+        all('group_id' not in argument for argument in arguments)
+        for _, _, _, arguments in catalog_calls
+    )
+
+
+def _catalog_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.getMessage().startswith('catalog ')]
+
+
+def _assert_group_id_absent(records: list[logging.LogRecord], group_id: str = GROUP) -> None:
+    assert records
+    assert all(group_id not in record.getMessage() for record in records)
+    assert all(group_id not in record.msg for record in records)
+    assert all(
+        group_id not in argument
+        for record in records
+        for argument in (record.args if isinstance(record.args, tuple) else ())
+        if isinstance(argument, str)
+    )
+
+
 def _mcp_server():
     """Lazy import MCP server module (avoids static missing-import diagnostics)."""
     return importlib.import_module('graphiti_mcp_server')
@@ -79,13 +185,13 @@ def _mcp_server():
 def _entity(**overrides) -> CatalogEntityItem:
     data = {
         'entity_type': 'Table',
-        'graph_key': 'TABLE::HR.EMPLOYEES',
+        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
         'name_raw': 'EMPLOYEES',
         'name_canonical': 'employees',
-        'database_qualified_name': 'HR.EMPLOYEES',
+        'database_qualified_name': 'ORCL.HR.EMPLOYEES',
         'summary': 'Employee master table',
         'attributes': {'owner': 'HR'},
-        'source_refs': [{'doc': 'ddl.sql', 'line': 12}],
+        'source_refs': [{'document_id': 'ddl.sql', 'page': 12, 'raw_text': 'CREATE TABLE'}],
         'confidence': 0.95,
     }
     data.update(overrides)
@@ -96,10 +202,12 @@ def _request(
     entities: list[CatalogEntityItem] | None = None,
     *,
     dry_run: bool = False,
-    atomic: bool = True,
+    atomic: Literal[True] = True,
     batch_id: str = BATCH,
 ) -> UpsertTypedEntitiesRequest:
     return UpsertTypedEntitiesRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
         group_id=GROUP,
         batch_id=batch_id,
         entities=entities or [_entity()],
@@ -157,6 +265,41 @@ def _schema_execute_query(cypher: str, params=None, **kwargs):
                     'entityType': 'NODE',
                     'labelsOrTypes': ['CatalogIngestBatch'],
                     'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_evidence_link_identity_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogEvidenceLink'],
+                    'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_evidence_link_key_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogEvidenceLink'],
+                    'properties': ['group_id', 'link_key'],
+                },
+                {
+                    'name': 'catalog_batch_manifest_identity_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogBatchManifest'],
+                    'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_batch_manifest_chunk_identity_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogBatchManifestChunk'],
+                    'properties': ['uuid', 'group_id'],
+                },
+                {
+                    'name': 'catalog_batch_manifest_chunk_index_unique',
+                    'type': 'NODE_PROPERTY_UNIQUENESS',
+                    'entityType': 'NODE',
+                    'labelsOrTypes': ['CatalogBatchManifestChunk'],
+                    'properties': ['manifest_uuid', 'group_id', 'chunk_index'],
                 },
             ],
             None,
@@ -281,7 +424,7 @@ async def test_entity_service_enforces_configured_limit_below_hard_max():
         max_entities_per_batch=1,
     )
     service = CatalogService(catalog_config=cfg)
-    request = _request([_entity(), _entity(graph_key='TABLE::HR.DEPARTMENTS')])
+    request = _request([_entity(), _entity(graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS')])
     resp = await service.upsert_typed_entities(client=client, request=request)
     assert all(r.error_code == CatalogErrorCode.batch_limit_exceeded for r in resp.results)
     assert 'embed' not in client.call_order
@@ -433,8 +576,12 @@ async def test_entity_changed_update_passes_request_batch_id():
 
 @pytest.mark.asyncio
 async def test_entity_atomic_rollback_on_store_failure():
-    e1 = _entity(graph_key='TABLE::A.T1', database_qualified_name='A.T1', name_raw='T1')
-    e2 = _entity(graph_key='TABLE::A.T2', database_qualified_name='A.T2', name_raw='T2')
+    e1 = _entity(
+        graph_key='TABLE::FE::ORCL.A.T1', database_qualified_name='ORCL.A.T1', name_raw='T1'
+    )
+    e2 = _entity(
+        graph_key='TABLE::FE::ORCL.A.T2', database_qualified_name='ORCL.A.T2', name_raw='T2'
+    )
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
@@ -442,7 +589,7 @@ async def test_entity_atomic_rollback_on_store_failure():
     async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
         _ = (tx, entity_type, kwargs)
         assert params is not None
-        if params['graph_key'] == 'TABLE::A.T2':
+        if params['graph_key'] == 'TABLE::FE::ORCL.A.T2':
             raise RuntimeError('neo4j boom')
         return {
             'uuid': params['uuid'],
@@ -547,8 +694,12 @@ async def test_entity_logs_batch_id_and_counts_only(caplog):
 
 @pytest.mark.asyncio
 async def test_entity_preserves_input_order_and_deterministic_uuid():
-    e1 = _entity(graph_key='TABLE::A.T1', database_qualified_name='A.T1', name_raw='T1')
-    e2 = _entity(graph_key='TABLE::A.T2', database_qualified_name='A.T2', name_raw='T2')
+    e1 = _entity(
+        graph_key='TABLE::FE::ORCL.A.T1', database_qualified_name='ORCL.A.T1', name_raw='T1'
+    )
+    e2 = _entity(
+        graph_key='TABLE::FE::ORCL.A.T2', database_qualified_name='ORCL.A.T2', name_raw='T2'
+    )
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.get_entity_by_uuid = AsyncMock(return_value=None)
@@ -566,11 +717,46 @@ async def test_entity_preserves_input_order_and_deterministic_uuid():
     service._store.upsert_entity_item = AsyncMock(side_effect=_upsert)
     resp = await service.upsert_typed_entities(client=client, request=_request([e1, e2]))
     assert [r.index for r in resp.results] == [0, 1]
-    assert resp.results[0].graph_key == 'TABLE::A.T1'
-    assert resp.results[1].graph_key == 'TABLE::A.T2'
-    assert resp.results[0].uuid == catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::A.T1')
+    assert resp.results[0].graph_key == 'TABLE::FE::ORCL.A.T1'
+    assert resp.results[1].graph_key == 'TABLE::FE::ORCL.A.T2'
+    # IDEN-08: write result echoes complete system-scoped keys (exact equality)
+    assert resp.results[0].graph_key == e1.graph_key
+    assert resp.results[1].graph_key == e2.graph_key
+    assert resp.results[0].uuid == catalog_entity_uuid(
+        FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.A.T1'
+    )
     assert resp.results[0].content_sha256 is not None
     assert len(resp.results[0].content_sha256) == 64
+
+
+@pytest.mark.asyncio
+async def test_entity_result_graph_key_echo_exact_full_system_scoped_key_iden08():
+    """IDEN-08: upsert result graph_key equals full submitted system-scoped key (exact ==)."""
+    full_key = 'TABLE::FE::ORCL.HR.EMPLOYEES_LONG_NAME'
+    entity = _entity(
+        graph_key=full_key,
+        database_qualified_name='ORCL.HR.EMPLOYEES_LONG_NAME',
+        name_raw='EMPLOYEES_LONG_NAME',
+    )
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(return_value=None)
+
+    async def _upsert(tx, *, entity_type=None, params=None, **kwargs):
+        _ = (tx, entity_type, kwargs)
+        assert params is not None
+        return {
+            'uuid': params['uuid'],
+            'content_sha256': params['content_sha256'],
+            'batch_id': params['batch_id'],
+            'status': 'created',
+        }
+
+    service._store.upsert_entity_item = AsyncMock(side_effect=_upsert)
+    resp = await service.upsert_typed_entities(client=client, request=_request([entity]))
+    assert resp.results[0].graph_key == full_key
+    assert resp.results[0].graph_key == entity.graph_key
+    assert resp.results[0].uuid == catalog_entity_uuid(FIXED_NS, GROUP, 'Table', full_key)
 
 
 @pytest.mark.asyncio
@@ -652,15 +838,48 @@ async def test_mcp_tool_upsert_typed_entities_registered():
 def _resolve_request(entities=None, **kwargs):
     if entities is None:
         entities = [
-            ResolveEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
+            ResolveEntityRef(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'),
         ]
-    return ResolveTypedEntitiesRequest(group_id=GROUP, entities=entities, **kwargs)
+    return ResolveTypedEntitiesRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        entities=entities,
+        **kwargs,
+    )
+
+
+def test_empty_resolve_rejected_before_service_no_side_effects():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service.resolve_typed_entities = AsyncMock()  # type: ignore[method-assign]
+
+    for entities in ([], None):
+        payload: dict[str, Any] = {
+            'identity_schema_version': 'catalog-v2',
+            'system_key': 'FE',
+            'group_id': GROUP,
+        }
+        if entities is not None:
+            payload['entities'] = entities
+        with pytest.raises(ValidationError):
+            ResolveTypedEntitiesRequest.model_validate(payload)
+
+    service.resolve_typed_entities.assert_not_called()
+    client.embedder.create.assert_not_called()
+    client.embedder.create_batch.assert_not_called()
+    assert 'transaction' not in client.call_order
 
 
 @pytest.mark.asyncio
 async def test_resolve_feature_disabled_no_write_no_embed():
+    # GATE-03: reads gated by reads_enabled (not write enabled).
     client = _make_client()
-    service = CatalogService(catalog_config=_disabled_config())
+    service = CatalogService(
+        catalog_config=CatalogConfig(
+            enabled=False, reads_enabled=False, uuid_namespace=str(FIXED_NS)
+        )
+    )
     service._store.match_entities_for_resolve = AsyncMock()
     resp = await service.resolve_typed_entities(client=client, request=_resolve_request())
     assert any(
@@ -687,6 +906,18 @@ async def test_resolve_non_neo4j_backend_unavailable():
 
 
 @pytest.mark.asyncio
+async def test_catalog_resolve_logs_omit_group_id_runtime(caplog: pytest.LogCaptureFixture):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(return_value=[])
+
+    with caplog.at_level(logging.INFO):
+        await service.resolve_typed_entities(client=client, request=_resolve_request())
+
+    _assert_group_id_absent(_catalog_records(caplog))
+
+
+@pytest.mark.asyncio
 async def test_resolve_missing_entity_reports_not_found():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -696,7 +927,7 @@ async def test_resolve_missing_entity_reports_not_found():
     assert r0.found is False
     assert 'missing' in r0.anomalies or r0.status == 'missing'
     assert r0.uuid is None or r0.uuid == catalog_entity_uuid(
-        FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES'
+        FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'
     )
     client.embedder.create.assert_not_awaited()
     assert 'transaction' not in client.call_order
@@ -704,7 +935,7 @@ async def test_resolve_missing_entity_reports_not_found():
 
 @pytest.mark.asyncio
 async def test_resolve_found_entity_reports_fields_and_no_side_effects():
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     resolve_call: dict = {}
@@ -716,8 +947,8 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
         return [
             {
                 'uuid': ent_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'a' * 64,
@@ -737,18 +968,52 @@ async def test_resolve_found_entity_reports_fields_and_no_side_effects():
     assert r0.has_name_embedding is True
     assert r0.generic_duplicates == []
     assert r0.typed_duplicates == []
+    # IDEN-08: exact complete system-scoped graph_key echo (no truncation/reformat)
+    assert r0.graph_key == 'TABLE::FE::ORCL.HR.EMPLOYEES'
     client.embedder.create.assert_not_awaited()
     client.embedder.create_batch.assert_not_awaited()
     assert 'transaction' not in client.call_order
     # MATCH scoped to group_id + requested keys only (captured via side_effect, not optional mock)
     service._store.match_entities_for_resolve.assert_awaited()
     assert resolve_call.get('group_id') == GROUP
-    assert 'TABLE::HR.EMPLOYEES' in (resolve_call.get('graph_keys') or [])
+    assert 'TABLE::FE::ORCL.HR.EMPLOYEES' in (resolve_call.get('graph_keys') or [])
+
+
+@pytest.mark.asyncio
+async def test_resolve_graph_key_echo_exact_full_system_scoped_key_iden08():
+    """IDEN-08: resolve result graph_key equals full submitted system-scoped key (exact ==)."""
+    full_key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', full_key)
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_resolve = AsyncMock(
+        return_value=[
+            {
+                'uuid': ent_uuid,
+                'graph_key': full_key,
+                'name': full_key,
+                'labels': ['Entity', 'Table'],
+                'neo4j_labels': ['Entity', 'Table'],
+                'content_sha256': 'a' * 64,
+                'has_name_embedding': True,
+                'batch_id': BATCH,
+            }
+        ]
+    )
+    req = _resolve_request(entities=[ResolveEntityRef(entity_type='Table', graph_key=full_key)])
+    resp = await service.resolve_typed_entities(client=client, request=req)
+    assert len(resp.results) == 1
+    assert resp.results[0].graph_key == full_key
+    assert resp.results[0].graph_key is full_key or resp.results[0].graph_key == str(full_key)
+    # not truncated to body-only or FE-less form
+    assert resp.results[0].graph_key != 'TABLE::ORCL.HR.EMPLOYEES'
+    assert resp.results[0].graph_key != 'HR.EMPLOYEES'
+    assert resp.results[0].uuid == ent_uuid
 
 
 @pytest.mark.asyncio
 async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch():
-    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_resolve = AsyncMock(
@@ -756,8 +1021,8 @@ async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch()
             # bare generic Entity with name=graph_key, no Table label
             {
                 'uuid': 'generic-uuid-1',
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity'],
                 'neo4j_labels': ['Entity'],
                 'content_sha256': 'b' * 64,
@@ -767,8 +1032,8 @@ async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch()
             # typed node with wrong uuid
             {
                 'uuid': 'wrong-uuid',
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'c' * 64,
@@ -778,8 +1043,8 @@ async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch()
             # second typed duplicate
             {
                 'uuid': expected_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'd' * 64,
@@ -812,15 +1077,15 @@ async def test_resolve_generic_duplicate_and_typed_duplicate_and_uuid_mismatch()
 
 @pytest.mark.asyncio
 async def test_resolve_wrong_custom_label_and_absent_embedding():
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_resolve = AsyncMock(
         return_value=[
             {
                 'uuid': ent_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'View'],
                 'neo4j_labels': ['Entity', 'View'],
                 'content_sha256': 'e' * 64,
@@ -840,15 +1105,15 @@ async def test_resolve_wrong_custom_label_and_absent_embedding():
 @pytest.mark.asyncio
 async def test_resolve_expected_plus_extra_label_is_wrong_type():
     """Entity+Table+View is not typed Table — exact custom label contract."""
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_resolve = AsyncMock(
         return_value=[
             {
                 'uuid': ent_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table', 'View'],
                 'neo4j_labels': ['Entity', 'Table', 'View'],
                 'content_sha256': 'f' * 64,
@@ -870,7 +1135,20 @@ async def test_resolve_expected_plus_extra_label_is_wrong_type():
 async def test_verify_expected_plus_extra_label_is_wrong_type():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
-    key = 'TABLE::HR.EMPLOYEES'
+    key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
+    _stub_batch_manifest_for_verify(
+        service,
+        entities=[
+            {
+                'uuid': catalog_entity_uuid(FIXED_NS, GROUP, 'Table', key),
+                'entity_type': 'Table',
+                'graph_key': key,
+                'content_sha256': 'a' * 64,
+                'projected_status': 'created',
+            }
+        ],
+        edges=[],
+    )
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
             {
@@ -897,15 +1175,15 @@ async def test_verify_expected_plus_extra_label_is_wrong_type():
 @pytest.mark.asyncio
 async def test_resolve_mixed_twin_aggregates_all_row_anomalies():
     """Typed expected + rogue typed + wrong-type sibling: report every anomaly."""
-    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_resolve = AsyncMock(
         return_value=[
             {
                 'uuid': expected_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'a' * 64,
@@ -914,8 +1192,8 @@ async def test_resolve_mixed_twin_aggregates_all_row_anomalies():
             },
             {
                 'uuid': 'rogue-typed-uuid',
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'b' * 64,
@@ -924,8 +1202,8 @@ async def test_resolve_mixed_twin_aggregates_all_row_anomalies():
             },
             {
                 'uuid': 'wrong-type-uuid',
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'View'],
                 'neo4j_labels': ['Entity', 'View'],
                 'content_sha256': 'c' * 64,
@@ -976,10 +1254,12 @@ async def test_mcp_tool_resolve_typed_entities_registered():
 
 def _verify_request(**kwargs):
     data = {
+        'identity_schema_version': 'catalog-v2',
+        'system_key': 'FE',
         'group_id': GROUP,
         'batch_id': BATCH,
         'entities': [
-            VerifyEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
+            VerifyEntityRef(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'),
         ],
         'edges': [
             VerifyEdgeRef(edge_type='Contains', edge_key='CONTAINS::HR.SCHEMA->HR.EMPLOYEES'),
@@ -990,10 +1270,111 @@ def _verify_request(**kwargs):
     return VerifyCatalogBatchRequest.model_validate(data)
 
 
+def _stub_batch_manifest_for_verify(
+    service: CatalogService,
+    *,
+    entities: list[dict[str, Any]] | None = None,
+    edges: list[dict[str, Any]] | None = None,
+    evidence_links: list[dict[str, Any]] | None = None,
+) -> None:
+    """Stub status + durable manifest so batch_id verify uses request-shaped membership.
+
+    Existing unit tests that pass request keys under batch_id need a committed
+    status row and a valid manifest body; otherwise verify fail-closes on
+    missing status/manifest (04-04 VERI-01/05).
+    """
+    import base64
+    import hashlib
+
+    from services.catalog_manifest import (
+        build_manifest_body_from_membership,
+        serialize_manifest_body,
+    )
+    from services.catalog_manifest import (
+        manifest_sha256 as pure_manifest_sha256,
+    )
+
+    if entities is None:
+        entities = [
+            {
+                'uuid': catalog_entity_uuid(
+                    FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'
+                ),
+                'entity_type': 'Table',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'content_sha256': 'a' * 64,
+                'projected_status': 'created',
+            }
+        ]
+    if edges is None:
+        edges = [
+            {
+                'uuid': catalog_edge_uuid(
+                    FIXED_NS, GROUP, 'Contains', 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+                ),
+                'edge_type': 'Contains',
+                'edge_key': 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES',
+                'content_sha256': 'd' * 64,
+                'projected_status': 'created',
+            }
+        ]
+    if evidence_links is None:
+        evidence_links = []
+    body = build_manifest_body_from_membership(
+        group_id=GROUP,
+        batch_id=BATCH,
+        request_sha256='r' * 64,
+        catalog_sha256='c' * 64,
+        membership={
+            'entities': entities,
+            'edges': edges,
+            'sources': [],
+            'evidence_links': evidence_links,
+        },
+    )
+    raw = serialize_manifest_body(body)
+    digest = pure_manifest_sha256(raw)
+    root = {
+        'uuid': 'manifest-uuid-stub',
+        'group_id': GROUP,
+        'batch_id': BATCH,
+        'manifest_sha256': digest,
+        'chunk_count': 1,
+        'payload_bytes': len(raw),
+    }
+    chunks = [
+        {
+            'uuid': 'chunk-0',
+            'chunk_index': 0,
+            'chunk_count': 1,
+            'byte_offset': 0,
+            'byte_length': len(raw),
+            'chunk_sha256': hashlib.sha256(raw).hexdigest(),
+            'payload_b64': base64.b64encode(raw).decode('ascii'),
+        }
+    ]
+    service._store.get_batch_status = AsyncMock(
+        return_value={
+            'uuid': 'batch-uuid-stub',
+            'group_id': GROUP,
+            'batch_id': BATCH,
+            'status': 'committed',
+        }
+    )
+    service._store.read_manifest_root_for_recovery = AsyncMock(return_value=root)
+    service._store.load_manifest_chunks_with_payload = AsyncMock(return_value=chunks)
+    service._store.match_evidence_links_exact = AsyncMock(return_value=[])
+
+
 @pytest.mark.asyncio
 async def test_verify_feature_disabled_no_write_no_embed():
+    # GATE-03: reads gated by reads_enabled (not write enabled).
     client = _make_client()
-    service = CatalogService(catalog_config=_disabled_config())
+    service = CatalogService(
+        catalog_config=CatalogConfig(
+            enabled=False, reads_enabled=False, uuid_namespace=str(FIXED_NS)
+        )
+    )
     service._store.match_entities_for_verify = AsyncMock()
     service._store.match_edges_for_verify = AsyncMock()
     resp = await service.verify_catalog_batch(client=client, request=_verify_request())
@@ -1018,6 +1399,7 @@ async def test_verify_non_neo4j_backend_unavailable():
 async def test_verify_batch_scoped_match_uses_group_and_batch_id():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _stub_batch_manifest_for_verify(service)
     ent_call: dict = {}
     edge_call: dict = {}
 
@@ -1048,15 +1430,16 @@ async def test_verify_batch_scoped_match_uses_group_and_batch_id():
 
 @pytest.mark.asyncio
 async def test_verify_entity_counts_and_anomaly_lists():
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    # Keys-only: request keys remain expected authority (VERI-06).
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
             {
                 'uuid': ent_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'a' * 64,
@@ -1065,8 +1448,8 @@ async def test_verify_entity_counts_and_anomaly_lists():
             },
             {
                 'uuid': 'generic-1',
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity'],
                 'neo4j_labels': ['Entity'],
                 'content_sha256': 'b' * 64,
@@ -1077,18 +1460,49 @@ async def test_verify_entity_counts_and_anomaly_lists():
     )
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
     req = _verify_request(
+        batch_id=None,
         entities=[
-            VerifyEntityRef(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES'),
-            VerifyEntityRef(entity_type='View', graph_key='VIEW::HR.V1'),
+            VerifyEntityRef(entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'),
+            VerifyEntityRef(entity_type='View', graph_key='VIEW::FE::ORCL.HR.V1'),
         ],
         edges=[],
     )
     resp = await service.verify_catalog_batch(client=client, request=req)
     assert resp.entities.expected == 2
     assert resp.entities.found == 1
-    assert 'VIEW::HR.V1' in resp.entities.missing
-    assert 'TABLE::HR.EMPLOYEES' in resp.entities.generic_duplicate
-    assert 'TABLE::HR.EMPLOYEES' in resp.entities.missing_embedding
+    assert 'VIEW::FE::ORCL.HR.V1' in resp.entities.missing
+    assert 'TABLE::FE::ORCL.HR.EMPLOYEES' in resp.entities.generic_duplicate
+    assert 'TABLE::FE::ORCL.HR.EMPLOYEES' in resp.entities.missing_embedding
+    # IDEN-08: verify anomaly lists carry complete system-scoped keys (exact membership)
+    assert any(k == 'TABLE::FE::ORCL.HR.EMPLOYEES' for k in resp.entities.generic_duplicate)
+    assert any(k == 'VIEW::FE::ORCL.HR.V1' for k in resp.entities.missing)
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_verify_graph_key_echo_exact_full_system_scoped_key_iden08():
+    """IDEN-08: verify missing/anomaly lists echo full submitted system-scoped keys (exact ==)."""
+    full_key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
+    missing_key = 'VIEW::FE::ORCL.HR.V_LONG_NAME'
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    service._store.match_edges_for_verify = AsyncMock(return_value=[])
+    req = _verify_request(
+        batch_id=None,
+        entities=[
+            VerifyEntityRef(entity_type='Table', graph_key=full_key),
+            VerifyEntityRef(entity_type='View', graph_key=missing_key),
+        ],
+        edges=[],
+    )
+    resp = await service.verify_catalog_batch(client=client, request=req)
+    assert full_key in resp.entities.missing
+    assert missing_key in resp.entities.missing
+    # not truncated / reformatted
+    assert 'TABLE::ORCL.HR.EMPLOYEES' not in resp.entities.missing
+    assert 'HR.EMPLOYEES' not in resp.entities.missing
     client.embedder.create.assert_not_awaited()
     assert 'transaction' not in client.call_order
 
@@ -1097,7 +1511,7 @@ async def test_verify_entity_counts_and_anomaly_lists():
 async def test_verify_entity_aggregates_anomalies_across_typed_twins():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
-    key = 'TABLE::HR.EMPLOYEES'
+    key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
     expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', key)
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
@@ -1137,7 +1551,7 @@ async def test_verify_entity_wrong_type_with_typed_present_is_reported():
     """Wrong-type sibling must surface even when exact typed rows exist."""
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
-    key = 'TABLE::HR.EMPLOYEES'
+    key = 'TABLE::FE::ORCL.HR.EMPLOYEES'
     expected_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', key)
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
@@ -1195,6 +1609,7 @@ async def test_verify_edge_counts_and_anomaly_lists():
         ]
     )
     req = _verify_request(
+        batch_id=None,
         entities=[],
         edges=[
             VerifyEdgeRef(edge_type='Contains', edge_key='CONTAINS::HR.SCHEMA->HR.EMPLOYEES'),
@@ -1211,11 +1626,53 @@ async def test_verify_edge_counts_and_anomaly_lists():
 
 
 @pytest.mark.asyncio
+async def test_verify_edge_uuid_only_expectations_no_graph_key_attribute_access():
+    """VerifyEdgeRef UUID expectations work; removed raw graph-key attrs absent."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.match_entities_for_verify = AsyncMock(return_value=[])
+    edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    source_uuid = str(uuid.uuid4())
+    target_uuid = str(uuid.uuid4())
+    service._store.match_edges_for_verify = AsyncMock(
+        return_value=[
+            {
+                'uuid': catalog_edge_uuid(FIXED_NS, GROUP, 'Contains', edge_key),
+                'edge_key': edge_key,
+                'edge_type': 'Contains',
+                'source_uuid': source_uuid,
+                'target_uuid': target_uuid,
+                'source_graph_key': 'SCHEMA::FE::ORCL.HR',
+                'target_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'has_fact_embedding': True,
+            }
+        ]
+    )
+    edge_ref = VerifyEdgeRef(
+        edge_type='Contains',
+        edge_key=edge_key,
+        expected_source_uuid=source_uuid,
+        expected_target_uuid=target_uuid,
+    )
+    assert not hasattr(edge_ref, 'expected_source_graph_key')
+    assert not hasattr(edge_ref, 'expected_target_graph_key')
+    resp = await service.verify_catalog_batch(
+        client=client,
+        request=_verify_request(batch_id=None, entities=[], edges=[edge_ref]),
+    )
+    assert resp.edges.endpoint_mismatch == []
+    assert resp.edges.found == 1
+    assert 'transaction' not in client.call_order
+    client.embedder.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_verify_edge_true_endpoint_mismatch_is_distinct_from_type():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
+    expected_source_uuid = str(uuid.uuid4())
     service._store.match_edges_for_verify = AsyncMock(
         return_value=[
             {
@@ -1225,7 +1682,7 @@ async def test_verify_edge_true_endpoint_mismatch_is_distinct_from_type():
                 'source_uuid': str(uuid.uuid4()),
                 'target_uuid': str(uuid.uuid4()),
                 'source_graph_key': 'SCHEMA::WRONG',
-                'target_graph_key': 'TABLE::HR.EMPLOYEES',
+                'target_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'has_fact_embedding': True,
             }
         ]
@@ -1237,7 +1694,7 @@ async def test_verify_edge_true_endpoint_mismatch_is_distinct_from_type():
             VerifyEdgeRef(
                 edge_type='Contains',
                 edge_key=edge_key,
-                expected_source_graph_key='SCHEMA::HR',
+                expected_source_uuid=expected_source_uuid,
             )
         ],
     )
@@ -1259,8 +1716,8 @@ async def test_verify_edge_type_mismatch_never_becomes_endpoint_mismatch():
                 'uuid': 'stored-type-uuid',
                 'edge_key': edge_key,
                 'edge_type': 'DependsOn',
-                'source_graph_key': 'SCHEMA::HR',
-                'target_graph_key': 'TABLE::HR.EMPLOYEES',
+                'source_graph_key': 'SCHEMA::FE::ORCL.HR',
+                'target_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'has_fact_embedding': True,
             }
         ]
@@ -1283,19 +1740,22 @@ async def test_verify_edge_aggregates_anomalies_across_all_duplicate_rows_once()
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     edge_key = 'CONTAINS::HR.SCHEMA->HR.EMPLOYEES'
     expected_uuid = catalog_edge_uuid(FIXED_NS, GROUP, 'Contains', edge_key)
+    expected_source_uuid = str(uuid.uuid4())
     service._store.match_edges_for_verify = AsyncMock(
         return_value=[
             {
                 'uuid': expected_uuid,
                 'edge_key': edge_key,
                 'edge_type': 'Contains',
-                'source_graph_key': 'SCHEMA::HR',
+                'source_uuid': expected_source_uuid,
+                'source_graph_key': 'SCHEMA::FE::ORCL.HR',
                 'has_fact_embedding': True,
             },
             {
                 'uuid': 'rogue',
                 'edge_key': edge_key,
                 'edge_type': '',
+                'source_uuid': str(uuid.uuid4()),
                 'source_graph_key': 'SCHEMA::WRONG',
                 'has_fact_embedding': False,
             },
@@ -1310,7 +1770,7 @@ async def test_verify_edge_aggregates_anomalies_across_all_duplicate_rows_once()
                 VerifyEdgeRef(
                     edge_type='Contains',
                     edge_key=edge_key,
-                    expected_source_graph_key='SCHEMA::HR',
+                    expected_source_uuid=expected_source_uuid,
                 )
             ],
         ),
@@ -1326,6 +1786,7 @@ async def test_verify_edge_aggregates_anomalies_across_all_duplicate_rows_once()
 async def test_verify_provenance_read_failure_is_internal_error_not_missing():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _stub_batch_manifest_for_verify(service, entities=[], edges=[])
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
     service._store.match_provenance_presence = AsyncMock(side_effect=RuntimeError('db down'))
@@ -1340,15 +1801,16 @@ async def test_verify_provenance_read_failure_is_internal_error_not_missing():
 
 @pytest.mark.asyncio
 async def test_verify_require_provenance_report_only_no_write():
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    # Keys-only path: request keys are expected authority.
     service._store.match_entities_for_verify = AsyncMock(
         return_value=[
             {
                 'uuid': ent_uuid,
-                'graph_key': 'TABLE::HR.EMPLOYEES',
-                'name': 'TABLE::HR.EMPLOYEES',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                'name': 'TABLE::FE::ORCL.HR.EMPLOYEES',
                 'labels': ['Entity', 'Table'],
                 'neo4j_labels': ['Entity', 'Table'],
                 'content_sha256': 'a' * 64,
@@ -1363,7 +1825,8 @@ async def test_verify_require_provenance_report_only_no_write():
     )
     service._store.upsert_entity_item = AsyncMock()
     resp = await service.verify_catalog_batch(
-        client=client, request=_verify_request(require_provenance=True, edges=[])
+        client=client,
+        request=_verify_request(batch_id=None, require_provenance=True, edges=[]),
     )
     assert resp.require_provenance is True
     assert ent_uuid in resp.missing_provenance
@@ -1377,6 +1840,7 @@ async def test_verify_require_provenance_report_only_no_write():
 async def test_verify_never_embeds_or_writes():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
+    _stub_batch_manifest_for_verify(service)
     service._store.match_entities_for_verify = AsyncMock(return_value=[])
     service._store.match_edges_for_verify = AsyncMock(return_value=[])
     service._store.upsert_entity_item = AsyncMock()
@@ -1408,9 +1872,9 @@ def _edge(**overrides) -> CatalogEdgeItem:
     data = {
         'edge_type': 'ForeignKeyTo',
         'edge_key': 'FK::HR.EMPLOYEES->HR.DEPARTMENTS',
-        'source_graph_key': 'TABLE::HR.EMPLOYEES',
+        'source_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
         'source_entity_type': 'Table',
-        'target_graph_key': 'TABLE::HR.DEPARTMENTS',
+        'target_graph_key': 'TABLE::FE::ORCL.HR.DEPARTMENTS',
         'target_entity_type': 'Table',
         'fact': 'employees.dept_id references departments.dept_id',
         'evidence': None,
@@ -1425,11 +1889,13 @@ def _edge_request(
     edges: list[CatalogEdgeItem] | None = None,
     *,
     dry_run: bool = False,
-    atomic: bool = True,
+    atomic: Literal[True] = True,
     batch_id: str = EDGE_BATCH,
-    strict_endpoints: bool = True,
+    strict_endpoints: Literal[True] = True,
 ) -> UpsertTypedEdgesRequest:
     return UpsertTypedEdgesRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
         group_id=GROUP,
         batch_id=batch_id,
         edges=edges or [_edge()],
@@ -1459,8 +1925,8 @@ def _wire_ok_endpoints(
     src_uuid: str | None = None,
     tgt_uuid: str | None = None,
 ):
-    src_uuid = src_uuid or _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES')
-    tgt_uuid = tgt_uuid or _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS')
+    src_uuid = src_uuid or _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
+    tgt_uuid = tgt_uuid or _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.DEPARTMENTS')
 
     async def _resolve(
         executor,
@@ -1473,9 +1939,9 @@ def _wire_ok_endpoints(
         **kwargs,
     ):
         _ = (executor, group_id, entity_type, tx, expected_uuid, kwargs)
-        if graph_key == 'TABLE::HR.EMPLOYEES':
+        if graph_key == 'TABLE::FE::ORCL.HR.EMPLOYEES':
             return None, _typed_endpoint(src_uuid, graph_key)
-        if graph_key == 'TABLE::HR.DEPARTMENTS':
+        if graph_key == 'TABLE::FE::ORCL.HR.DEPARTMENTS':
             return None, _typed_endpoint(tgt_uuid, graph_key)
         return 'missing_endpoint', None
 
@@ -1560,7 +2026,7 @@ async def test_edge_target_endpoint_read_failure_is_internal_error_not_missing()
     ):
         _ = (executor, group_id, entity_type, tx, expected_uuid, kwargs)
         assert graph_key is not None
-        if graph_key == 'TABLE::HR.EMPLOYEES':
+        if graph_key == 'TABLE::FE::ORCL.HR.EMPLOYEES':
             return None, _typed_endpoint(_expected_entity_uuid('Table', graph_key), graph_key)
         raise RuntimeError('db down')
 
@@ -1604,7 +2070,7 @@ async def test_edge_endpoint_type_mismatch_and_generic_conflict_no_create():
     ):
         _ = (executor, group_id, entity_type, tx, kwargs)
         assert graph_key is not None
-        if graph_key == 'TABLE::HR.EMPLOYEES':
+        if graph_key == 'TABLE::FE::ORCL.HR.EMPLOYEES':
             return 'endpoint_type_mismatch', {
                 'uuid': 'wrong',
                 'neo4j_labels': ['Entity', 'View'],
@@ -1696,8 +2162,8 @@ async def test_edge_identical_hash_unchanged_leaves_batch_id():
     payload = CatalogService.edge_canonical_payload(edge)
     digest = canonical_sha256(payload)
     src, tgt = (
-        _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
-        _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.DEPARTMENTS'),
     )
     existing = {
         'uuid': edge_uuid,
@@ -1727,8 +2193,8 @@ async def test_edge_changed_update_passes_request_batch_id():
     edge = _edge(fact='changed fact text about fk')
     edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
     src, tgt = (
-        _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
-        _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.DEPARTMENTS'),
     )
     existing = {
         'uuid': edge_uuid,
@@ -1773,8 +2239,8 @@ async def test_edge_identity_conflict_no_mutation():
         'batch_id': 'old',
         'name': 'Contains',  # wrong type for same uuid
         'edge_key': edge.edge_key,
-        'source_uuid': _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
-        'target_uuid': _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+        'source_uuid': _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'),
+        'target_uuid': _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.DEPARTMENTS'),
         'group_id': GROUP,
     }
     client = _make_client()
@@ -1979,8 +2445,8 @@ async def test_edge_prefers_db_status_when_present():
     edge = _edge(fact='changed fact text about fk')
     edge_uuid = catalog_edge_uuid(FIXED_NS, GROUP, edge.edge_type, edge.edge_key)
     src, tgt = (
-        _expected_entity_uuid('Table', 'TABLE::HR.EMPLOYEES'),
-        _expected_entity_uuid('Table', 'TABLE::HR.DEPARTMENTS'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.EMPLOYEES'),
+        _expected_entity_uuid('Table', 'TABLE::FE::ORCL.HR.DEPARTMENTS'),
     )
     existing = {
         'uuid': edge_uuid,
@@ -2048,6 +2514,163 @@ async def test_edge_in_tx_endpoint_race_rolls_back():
     assert resp.results[0].error_code == CatalogErrorCode.missing_endpoint
     service._store.upsert_edge_item.assert_not_awaited()
     assert call_n['n'] >= 3  # 2 pre-tx + at least 1 in-tx
+
+
+@pytest.mark.asyncio
+async def test_edge_topology_disallowed_pair_skips_resolve_embed_write():
+    """EDGE-08/09: illegal topology fails before resolve/embed/write."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock()
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock()
+    service._ensure_schema = AsyncMock()
+
+    # Bypass CatalogEdgeItem model topology so service preflight is the gate under test.
+    bad = CatalogEdgeItem.model_construct(
+        edge_type='ForeignKeyTo',
+        edge_key='FK::COL->TABLE',
+        source_graph_key='COLUMN::FE::ORCL.HR.EMPLOYEES.DEPT_ID',
+        source_entity_type='Column',
+        target_graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
+        target_entity_type='Table',
+        fact='illegal column-table foreign key topology',
+        evidence=None,
+        attributes=None,
+        content_sha256=None,
+        confidence=None,
+    )
+    request = UpsertTypedEdgesRequest.model_construct(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id=EDGE_BATCH,
+        edges=[bad],
+        dry_run=False,
+        atomic=True,
+        strict_endpoints=True,
+    )
+
+    resp = await service.upsert_typed_edges(client=client, request=request)
+
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
+    service._store.resolve_endpoint_typed.assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    service._store.upsert_edge_item.assert_not_awaited()
+    service._ensure_schema.assert_not_awaited()
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_edge_topology_dry_run_invalid_pair_no_side_effects():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock()
+    service._store.upsert_edge_item = AsyncMock()
+    service._ensure_schema = AsyncMock()
+
+    bad = CatalogEdgeItem.model_construct(
+        edge_type='Calls',
+        edge_key='CALLS::TABLE->PROC',
+        source_graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+        source_entity_type='Table',
+        target_graph_key='PROCEDURE::FE::ORCL.HR.EMP_PKG.HIRE#1',
+        target_entity_type='Procedure',
+        fact='table cannot call procedure',
+        evidence=None,
+        attributes=None,
+        content_sha256=None,
+        confidence=None,
+    )
+    request = UpsertTypedEdgesRequest.model_construct(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id=EDGE_BATCH,
+        edges=[bad],
+        dry_run=True,
+        atomic=True,
+        strict_endpoints=True,
+    )
+
+    resp = await service.upsert_typed_edges(client=client, request=request)
+
+    assert resp.results[0].error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
+    service._store.resolve_endpoint_typed.assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    service._store.upsert_edge_item.assert_not_awaited()
+    service._ensure_schema.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_batch_topology_disallowed_edge_skips_resolve_embed_write():
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    service._ensure_schema = AsyncMock()
+
+    bad = CatalogEdgeItem.model_construct(
+        edge_type='ForeignKeyTo',
+        edge_key='FK::COL->TABLE',
+        source_graph_key='COLUMN::FE::ORCL.HR.EMPLOYEES.DEPT_ID',
+        source_entity_type='Column',
+        target_graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
+        target_entity_type='Table',
+        fact='illegal topology in batch',
+        evidence=None,
+        attributes=None,
+        content_sha256=None,
+        confidence=None,
+    )
+    # model_construct shell so nested edge skips CatalogEdgeItem model_validate
+    request = UpsertCatalogBatchRequest.model_construct(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id=BATCH_ATOMIC,
+        entities=[],
+        edges=[bad],
+        provenance=None,
+        dry_run=False,
+        request_sha256=None,
+        catalog_sha256='a' * 64,
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.status == 'failed'
+    assert (
+        any(
+            r.error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
+            for r in (resp.results or [])
+        )
+        or resp.error_code == CatalogErrorCode.edge_endpoint_pair_not_allowed
+    )
+    cast(AsyncMock, service._store.resolve_endpoint_typed).assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+    client.embedder.create_batch.assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_edge_item).assert_not_awaited()
+    service._ensure_schema.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_edge_valid_table_table_foreign_key_still_reaches_resolve():
+    """Fixture compatibility: Table-Table ForeignKeyTo remains accepted."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock(return_value=('missing_endpoint', None))
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+
+    assert any(r.error_code == CatalogErrorCode.missing_endpoint for r in resp.results)
+    service._store.resolve_endpoint_typed.assert_awaited()
+    service._store.upsert_edge_item.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2255,6 +2878,7 @@ async def test_verify_edge_uuid_mismatch_reported():
         ]
     )
     req = _verify_request(
+        batch_id=None,
         entities=[],
         edges=[VerifyEdgeRef(edge_type='Contains', edge_key=edge_key)],
     )
@@ -2274,6 +2898,7 @@ async def test_mcp_tool_upsert_typed_edges_registered():
 # Provenance service (Phase 2 PROV-01, PROV-03..06)
 # ---------------------------------------------------------------------------
 
+from models.catalog_evidence import CatalogEvidenceLink  # noqa: E402
 from models.catalog_provenance import (  # noqa: E402
     CatalogProvenanceEdgeTarget,
     CatalogProvenanceEntityTarget,
@@ -2281,6 +2906,22 @@ from models.catalog_provenance import (  # noqa: E402
     UpsertProvenanceRequest,
 )
 from services.catalog_identity import catalog_mentions_uuid, catalog_source_uuid  # noqa: E402
+
+
+def _evidence_link(**overrides) -> CatalogEvidenceLink:
+    data = {
+        'source_key': 'SRC::ddl.sql#employees',
+        'entity_target': {
+            'entity_type': 'Table',
+            'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+        },
+        'evidence_kind': 'ddl',
+        'extractor_name': 'oracle-ddl-extractor',
+        'extractor_version': '1.0.0',
+        'excerpt': 'CREATE TABLE employees',
+    }
+    data.update(overrides)
+    return CatalogEvidenceLink.model_validate(data)
 
 
 def _source(**overrides) -> CatalogSourceItem:
@@ -2300,15 +2941,21 @@ def _prov_request(
     entity_targets: list[CatalogProvenanceEntityTarget] | None = None,
     edge_targets: list[CatalogProvenanceEdgeTarget] | None = None,
     dry_run: bool = False,
-    atomic: bool = True,
+    atomic: Literal[True] = True,
     batch_id: str = 'batch-prov-001',
 ) -> UpsertProvenanceRequest:
     return UpsertProvenanceRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
         group_id=GROUP,
         batch_id=batch_id,
         sources=sources or [_source()],
         entity_targets=entity_targets
-        or [CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES')],
+        or [
+            CatalogProvenanceEntityTarget(
+                entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'
+            )
+        ],
         edge_targets=edge_targets or [],
         dry_run=dry_run,
         atomic=atomic,
@@ -2316,7 +2963,7 @@ def _prov_request(
 
 
 def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = False):
-    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::HR.EMPLOYEES')
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, 'Table', 'TABLE::FE::ORCL.HR.EMPLOYEES')
     src_uuid = catalog_source_uuid(FIXED_NS, GROUP, 'SRC::ddl.sql#employees')
 
     async def _resolve(executor, *, group_id, graph_key, entity_type, expected_uuid=None, tx=None):
@@ -2344,6 +2991,7 @@ def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = Fa
         side_effect=_lock_targets
     )
     service._store.ensure_uuid_uniqueness_constraints = AsyncMock(return_value=None)
+    service._store.ensure_evidence_manifest_schema = AsyncMock(return_value=None)
 
     async def _source_upsert(tx, *, params):
         _ = tx
@@ -2365,6 +3013,20 @@ def _wire_provenance_store(service: CatalogService, *, missing_entity: bool = Fa
         return_value={'uuid': 'e1', 'episodes': [src_uuid]}
     )
     service._store.prepare_source_episode_params = CatalogNeo4jStore().prepare_source_episode_params
+    # Evidence/manifest co-write path (03B-04): default no-op success stubs.
+    service._store.write_evidence_links = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    service._store.write_manifest_root_and_chunks = AsyncMock(  # type: ignore[method-assign]
+        return_value={'uuid': 'manifest-1', 'manifest_sha256': 'a' * 64, 'chunk_count': 1}
+    )
+    service._store.prepare_evidence_link_params = (  # type: ignore[method-assign]
+        CatalogNeo4jStore().prepare_evidence_link_params
+    )
+    service._store.prepare_manifest_root_params = (  # type: ignore[method-assign]
+        CatalogNeo4jStore().prepare_manifest_root_params
+    )
+    service._store.prepare_manifest_chunk_params = (  # type: ignore[method-assign]
+        CatalogNeo4jStore().prepare_manifest_chunk_params
+    )
     return src_uuid, ent_uuid
 
 
@@ -2570,7 +3232,9 @@ async def test_provenance_unchanged_source_new_link_reports_updated(target_kind)
             return_value={'uuid': edge_uuid, 'name': edge.edge_type, 'episodes': []}
         )
         entity_targets = [
-            CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::HR.EMPLOYEES')
+            CatalogProvenanceEntityTarget(
+                entity_type='Table', graph_key='TABLE::FE::ORCL.HR.EMPLOYEES'
+            )
         ]
         service._store.get_mentions_link = AsyncMock(
             return_value={'uuid': catalog_mentions_uuid(FIXED_NS, GROUP, src_uuid, ent_uuid)}
@@ -2654,29 +3318,30 @@ async def test_provenance_atomic_cas_or_locked_link_drift_aborts_before_link_mut
     cast(AsyncMock, service._store.upsert_mentions_link).assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_provenance_non_atomic_transaction_failure_marks_prior_result_rolled_back():
-    client = _make_client()
-    service = CatalogService(catalog_config=_enabled_config())
+def test_provenance_request_rejects_non_atomic_false():
+    """catalog-v2 locks atomic=True; non-atomic path is not a valid request."""
+    from pydantic import ValidationError
+
     first = _source()
     second = _source(source_key='SRC::ddl.sql#departments')
-    _wire_provenance_store(service)
-    service._store.upsert_source_episode = AsyncMock(  # type: ignore[method-assign]
-        side_effect=[
-            {'uuid': 'first', 'status': 'created'},
-            RuntimeError('second source failed'),
-        ]
-    )
-
-    resp = await service.upsert_provenance(
-        client=client,
-        request=_prov_request(sources=[first, second], atomic=False),
-    )
-
-    assert resp.created == 0
-    assert resp.rolled_back == 1
-    assert resp.failed == 1
-    assert [result.status for result in resp.results] == ['rolled_back', 'error']
+    with pytest.raises(ValidationError) as exc:
+        UpsertProvenanceRequest.model_validate(
+            {
+                'identity_schema_version': 'catalog-v2',
+                'system_key': 'FE',
+                'group_id': GROUP,
+                'batch_id': 'batch-prov-001',
+                'sources': [first.model_dump(), second.model_dump()],
+                'entity_targets': [
+                    {
+                        'entity_type': 'Table',
+                        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                    }
+                ],
+                'atomic': False,
+            }
+        )
+    assert any('atomic' in str(err.get('loc')) for err in exc.value.errors())
 
 
 @pytest.mark.asyncio
@@ -2760,25 +3425,27 @@ async def test_status_missing_returns_structured_not_found_no_write():
     assert resp.group_id == GROUP
     assert resp.batch_id == BATCH
     assert resp.batch_uuid == catalog_batch_uuid(FIXED_NS, GROUP, BATCH)
-    assert resp.error_code is not None
-    assert resp.error_code in (
-        CatalogErrorCode.validation_error,
-        CatalogErrorCode.internal_error,
-        CatalogErrorCode.provenance_target_missing,
-    ) or resp.error_code.value in (
-        'validation_error',
-        'internal_error',
-        'not_found',
-        'batch_not_found',
-        'provenance_target_missing',
-    )
-    # Prefer explicit not-found semantics when available (error_summary, no error_message field)
+    # GATE-05: pure absence is found=False with error_code=None (not validation_error).
+    assert resp.found is False
+    assert resp.error_code is None
     assert resp.error_summary
     assert 'not' in resp.error_summary.lower() or 'missing' in resp.error_summary.lower()
     assert 'transaction' not in client.call_order
     assert 'embed' not in client.call_order
     # get_batch_status still called (read)
     service._store.get_batch_status.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_catalog_status_logs_omit_group_id_runtime(caplog: pytest.LogCaptureFixture):
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_batch_status = AsyncMock(return_value=None)
+
+    with caplog.at_level(logging.INFO):
+        await service.get_catalog_ingest_status(client=client, request=_status_request())
+
+    _assert_group_id_absent(_catalog_records(caplog))
 
 
 @pytest.mark.asyncio
@@ -2822,11 +3489,17 @@ async def test_status_reinit_new_service_reads_from_store():
 
 @pytest.mark.asyncio
 async def test_status_feature_disabled_no_store_read():
+    # GATE-03: reads gated by reads_enabled (not write enabled).
     client = _make_client()
-    service = CatalogService(catalog_config=_disabled_config())
+    service = CatalogService(
+        catalog_config=CatalogConfig(
+            enabled=False, reads_enabled=False, uuid_namespace=str(FIXED_NS)
+        )
+    )
     service._store.get_batch_status = AsyncMock(return_value={'status': 'committed'})
     resp = await service.get_catalog_ingest_status(client=client, request=_status_request())
     assert resp.error_code == CatalogErrorCode.feature_disabled
+    assert resp.found is False
     service._store.get_batch_status.assert_not_awaited()
     assert 'transaction' not in client.call_order
 
@@ -2876,8 +3549,11 @@ def _batch_request(
     provenance: NestedProvenancePayload | None = None,
     dry_run: bool = False,
     request_sha256: str | None = None,
+    catalog_sha256: str = 'a' * 64,
 ) -> UpsertCatalogBatchRequest:
     return UpsertCatalogBatchRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
         group_id=GROUP,
         batch_id=BATCH_ATOMIC,
         entities=entities if entities is not None else [_entity()],
@@ -2885,6 +3561,7 @@ def _batch_request(
         provenance=provenance,
         dry_run=dry_run,
         request_sha256=request_sha256,
+        catalog_sha256=catalog_sha256,
     )
 
 
@@ -2907,17 +3584,83 @@ def _wire_batch_preflight(service: CatalogService) -> None:
     service._store.ensure_uuid_uniqueness_constraints = AsyncMock(  # type: ignore[method-assign]
         return_value=None
     )
-    service._store.claim_batch_status = AsyncMock(  # type: ignore[method-assign]
-        return_value={'uuid': 'claim', 'status': 'writing'}
+    service._store.ensure_evidence_manifest_schema = AsyncMock(  # type: ignore[method-assign]
+        return_value=None
     )
-    service._store.upsert_batch_status = AsyncMock()  # type: ignore[method-assign]
-    service._store.upsert_entity_item = AsyncMock()  # type: ignore[method-assign]
-    service._store.upsert_edge_item = AsyncMock()  # type: ignore[method-assign]
-    service._store.upsert_source_episode = AsyncMock()  # type: ignore[method-assign]
+
+    async def _claim(tx, *, params):
+        _ = tx
+        return {
+            'uuid': params.get('uuid') or 'claim',
+            'status': 'writing',
+            'request_sha256': params.get('request_sha256'),
+            'group_id': params.get('group_id'),
+            'batch_id': params.get('batch_id'),
+        }
+
+    async def _upsert_status(tx, *, params):
+        _ = tx
+        return {
+            'uuid': params.get('uuid') or 'claim',
+            'status': params.get('status') or 'committed',
+            'request_sha256': params.get('request_sha256'),
+        }
+
+    service._store.claim_batch_status = AsyncMock(side_effect=_claim)  # type: ignore[method-assign]
+    service._store.upsert_batch_status = AsyncMock(  # type: ignore[method-assign]
+        side_effect=_upsert_status
+    )
+    service._store.upsert_entity_item = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 'e1',
+            'status': 'created',
+            'content_sha256': 'a' * 64,
+            'error_code': None,
+        }
+    )
+    service._store.upsert_edge_item = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 'r1',
+            'status': 'created',
+            'content_sha256': 'a' * 64,
+            'error_code': None,
+        }
+    )
+    service._store.upsert_source_episode = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 's1',
+            'status': 'created',
+            'source_key': 'SRC',
+            'content_sha256': 'a' * 64,
+            'error_code': None,
+        }
+    )
     service._store.upsert_mentions_link = AsyncMock()  # type: ignore[method-assign]
     service._store.append_edge_episode = AsyncMock()  # type: ignore[method-assign]
     service._store.lock_provenance_targets = AsyncMock(  # type: ignore[method-assign]
         return_value=[]
+    )
+    service._store.write_evidence_links = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    service._store.write_manifest_root_and_chunks = AsyncMock(  # type: ignore[method-assign]
+        return_value={'uuid': 'manifest-1', 'manifest_sha256': 'a' * 64, 'chunk_count': 1}
+    )
+    real_store = CatalogNeo4jStore()
+    service._store.prepare_entity_params = real_store.prepare_entity_params  # type: ignore[method-assign]
+    service._store.prepare_edge_params = real_store.prepare_edge_params  # type: ignore[method-assign]
+    service._store.prepare_source_episode_params = (  # type: ignore[method-assign]
+        real_store.prepare_source_episode_params
+    )
+    service._store.prepare_batch_status_params = (  # type: ignore[method-assign]
+        real_store.prepare_batch_status_params
+    )
+    service._store.prepare_evidence_link_params = (  # type: ignore[method-assign]
+        real_store.prepare_evidence_link_params
+    )
+    service._store.prepare_manifest_root_params = (  # type: ignore[method-assign]
+        real_store.prepare_manifest_root_params
+    )
+    service._store.prepare_manifest_chunk_params = (  # type: ignore[method-assign]
+        real_store.prepare_manifest_chunk_params
     )
 
 
@@ -2925,7 +3668,7 @@ def _wire_batch_preflight(service: CatalogService) -> None:
 async def test_batch_dry_run_endpoint_union_no_writes_or_status():
     employee = _entity()
     department = _entity(
-        graph_key='TABLE::HR.DEPARTMENTS',
+        graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
         name_raw='DEPARTMENTS',
         name_canonical='departments',
         database_qualified_name='HR.DEPARTMENTS',
@@ -3011,6 +3754,118 @@ async def test_batch_committed_same_hash_returns_unchanged_short_circuit():
 
 
 @pytest.mark.asyncio
+async def test_batch_committed_same_hash_counts_evidence_links_as_unchanged():
+    """Committed replay counts sources + evidence_links as provenance_unchanged."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    provenance = NestedProvenancePayload(
+        sources=[],
+        evidence_links=[_evidence_link()],
+    )
+    request = _batch_request(entities=[], provenance=provenance)
+    expected_hash = CatalogService.batch_request_sha256(request)
+    service._store.get_batch_status = AsyncMock(  # type: ignore[method-assign]
+        return_value={'status': 'committed', 'request_sha256': expected_hash}
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.status == 'committed'
+    assert resp.error_code is None
+    assert resp.provenance_unchanged == 1
+    assert resp.entity_unchanged == 0
+    assert resp.edge_unchanged == 0
+    client.embedder.create.assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_batch_in_tx_already_committed_counts_evidence_links_as_unchanged():
+    """In-transaction already_committed replay counts sources + evidence_links."""
+    employee = _entity()
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    events = _install_batch_write_mocks(service, client)
+    source = _source()
+    provenance = NestedProvenancePayload(
+        sources=[source],
+        evidence_links=[
+            _evidence_link(
+                source_key=source.source_key,
+                entity_target={
+                    'entity_type': employee.entity_type,
+                    'graph_key': employee.graph_key,
+                },
+            )
+        ],
+    )
+    request = _batch_request(entities=[employee], provenance=provenance)
+    expected_hash = CatalogService.batch_request_sha256(request)
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service._store.claim_batch_status = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            'uuid': 'claim',
+            'status': 'committed',
+            'request_sha256': expected_hash,
+        }
+    )
+
+    resp = await service.upsert_catalog_batch(client=client, request=request)
+
+    assert resp.status == 'committed'
+    assert resp.error_code is None
+    assert resp.provenance_unchanged == 2
+    assert resp.entity_unchanged == 1
+    assert resp.edge_unchanged == 0
+    assert 'entity_write' not in events
+    cast(AsyncMock, service._store.upsert_batch_status).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_batch_status_provenance_count_includes_evidence_links():
+    """Committed batch status stores sources + evidence_links as provenance_count."""
+    employee = _entity()
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    events = _install_batch_write_mocks(service, client)
+    source = _source()
+    provenance = NestedProvenancePayload(
+        sources=[source],
+        evidence_links=[
+            _evidence_link(
+                source_key=source.source_key,
+                entity_target={
+                    'entity_type': employee.entity_type,
+                    'graph_key': employee.graph_key,
+                },
+            )
+        ],
+    )
+    service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service._store.upsert_source_episode = AsyncMock(  # type: ignore[method-assign]
+        return_value={'uuid': 'src', 'status': 'created'}
+    )
+    service._store.upsert_mentions_link = AsyncMock(  # type: ignore[method-assign]
+        return_value={'uuid': 'mention', 'status': 'created'}
+    )
+
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(entities=[employee], provenance=provenance),
+    )
+
+    assert resp.status == 'committed'
+    status_call = cast(AsyncMock, service._store.upsert_batch_status).await_args
+    assert status_call is not None
+    assert status_call.kwargs['params']['status'] == 'committed'
+    assert status_call.kwargs['params']['provenance_count'] == 2
+    assert 'status_committed' in events
+
+
+@pytest.mark.asyncio
 async def test_batch_dry_run_rejects_bad_nested_source_hash_before_side_effects():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -3039,8 +3894,13 @@ async def test_batch_dry_run_resolves_missing_provenance_target_before_side_effe
     service._store.get_source_episode_by_uuid = AsyncMock(return_value=None)  # type: ignore[method-assign]
     provenance = NestedProvenancePayload(
         sources=[_source()],
-        entity_targets=[
-            CatalogProvenanceEntityTarget(entity_type='Table', graph_key='TABLE::HR.MISSING')
+        evidence_links=[
+            _evidence_link(
+                entity_target={
+                    'entity_type': 'Table',
+                    'graph_key': 'TABLE::FE::ORCL.HR.MISSING',
+                }
+            )
         ],
     )
 
@@ -3121,9 +3981,13 @@ async def test_batch_unchanged_provenance_link_read_failure_is_structured(read_n
     employee = _entity()
     provenance_kwargs = {
         'sources': [source],
-        'entity_targets': [
-            CatalogProvenanceEntityTarget(
-                entity_type=employee.entity_type, graph_key=employee.graph_key
+        'evidence_links': [
+            _evidence_link(
+                source_key=source.source_key,
+                entity_target={
+                    'entity_type': employee.entity_type,
+                    'graph_key': employee.graph_key,
+                },
             )
         ],
     }
@@ -3131,8 +3995,20 @@ async def test_batch_unchanged_provenance_link_read_failure_is_structured(read_n
         service._store.get_mentions_link = AsyncMock(side_effect=TimeoutError('timed out'))
     else:
         edge = _edge()
-        provenance_kwargs['edge_targets'] = [
-            CatalogProvenanceEdgeTarget(edge_type=edge.edge_type, edge_key=edge.edge_key)
+        provenance_kwargs['evidence_links'] = [
+            CatalogEvidenceLink.model_validate(
+                {
+                    'source_key': source.source_key,
+                    'edge_target': {
+                        'edge_type': edge.edge_type,
+                        'edge_key': edge.edge_key,
+                    },
+                    'evidence_kind': 'ddl',
+                    'extractor_name': 'oracle-ddl-extractor',
+                    'extractor_version': '1.0.0',
+                    'excerpt': 'fk evidence',
+                }
+            )
         ]
         service._store.get_edge_by_uuid = AsyncMock(
             side_effect=[
@@ -3146,7 +4022,7 @@ async def test_batch_unchanged_provenance_link_read_failure_is_structured(read_n
     if read_name == 'get_edge_by_uuid':
         entities.append(
             _entity(
-                graph_key='TABLE::HR.DEPARTMENTS',
+                graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
                 name_raw='DEPARTMENTS',
                 name_canonical='departments',
                 database_qualified_name='HR.DEPARTMENTS',
@@ -3323,7 +4199,7 @@ def _install_batch_write_mocks(service: CatalogService, client) -> list[str]:
 async def test_batch_embedding_completes_before_single_domain_transaction():
     employee = _entity()
     department = _entity(
-        graph_key='TABLE::HR.DEPARTMENTS',
+        graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
         name_raw='DEPARTMENTS',
         name_canonical='departments',
         database_qualified_name='HR.DEPARTMENTS',
@@ -3419,7 +4295,7 @@ async def test_batch_unchanged_domain_drift_aborts_before_commit_status(kind):
         service._store.get_entity_by_uuid = AsyncMock(side_effect=_entity_by_uuid)
     else:
         department = _entity(
-            graph_key='TABLE::HR.DEPARTMENTS',
+            graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
             name_raw='DEPARTMENTS',
             name_canonical='departments',
             database_qualified_name='HR.DEPARTMENTS',
@@ -3542,10 +4418,13 @@ async def test_batch_atomic_cas_or_locked_link_drift_aborts_before_link_mutation
     )
     provenance = NestedProvenancePayload(
         sources=[source],
-        entity_targets=[
-            CatalogProvenanceEntityTarget(
-                entity_type=employee.entity_type,
-                graph_key=employee.graph_key,
+        evidence_links=[
+            _evidence_link(
+                source_key=source.source_key,
+                entity_target={
+                    'entity_type': employee.entity_type,
+                    'graph_key': employee.graph_key,
+                },
             )
         ],
     )
@@ -3636,7 +4515,7 @@ async def test_batch_failed_status_write_failure_preserves_original_error():
 async def test_batch_writes_edges_before_provenance_append_in_same_transaction():
     employee = _entity()
     department = _entity(
-        graph_key='TABLE::HR.DEPARTMENTS',
+        graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
         name_raw='DEPARTMENTS',
         name_canonical='departments',
         database_qualified_name='HR.DEPARTMENTS',
@@ -3644,10 +4523,19 @@ async def test_batch_writes_edges_before_provenance_append_in_same_transaction()
     )
     provenance = NestedProvenancePayload(
         sources=[_source()],
-        edge_targets=[
-            CatalogProvenanceEdgeTarget(
-                edge_type='ForeignKeyTo',
-                edge_key='FK::HR.EMPLOYEES->HR.DEPARTMENTS',
+        evidence_links=[
+            CatalogEvidenceLink.model_validate(
+                {
+                    'source_key': 'SRC::ddl.sql#employees',
+                    'edge_target': {
+                        'edge_type': 'ForeignKeyTo',
+                        'edge_key': 'FK::HR.EMPLOYEES->HR.DEPARTMENTS',
+                    },
+                    'evidence_kind': 'ddl',
+                    'extractor_name': 'oracle-ddl-extractor',
+                    'extractor_version': '1.0.0',
+                    'excerpt': 'fk evidence',
+                }
             )
         ],
     )
@@ -3692,16 +4580,1885 @@ async def test_mcp_tool_upsert_catalog_batch_registered():
 
 
 @pytest.mark.asyncio
-async def test_mcp_registers_exactly_seven_catalog_tools_and_preserves_legacy_tools():
+async def test_mcp_registers_exactly_fourteen_catalog_tools_and_preserves_legacy_tools():
+    """04-06 / TEST-09: 14 catalog tools (13 request-bound + capabilities) + 14 legacy = 28."""
     server = _mcp_server()
     tools = await server.mcp.list_tools()
     names = {tool.name for tool in tools}
     registered_catalog = {name for name in names if name in CATALOG_TOOL_NAMES}
 
     assert registered_catalog == CATALOG_TOOL_NAMES
+    assert 'get_catalog_capabilities' in registered_catalog
+    assert 'prepare_catalog_batch' in registered_catalog
+    assert 'commit_prepared_catalog_batch' in registered_catalog
+    assert 'discard_prepared_catalog_batch' in registered_catalog
+    assert 'upsert_catalog_batch' in registered_catalog
+    assert 'get_catalog_batch_manifest' in registered_catalog
+    assert 'resolve_typed_edges' in registered_catalog
+    assert 'get_catalog_evidence' in registered_catalog
+    assert len(CATALOG_TOOL_NAMES) == 14
+    assert len(CATALOG_REQUEST_TOOL_NAMES) == 13
     assert LEGACY_TOOL_NAMES.issubset(names)
-    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 21
+    assert len(LEGACY_TOOL_NAMES) == 14
+    assert len(names) == len(CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES) == 28
+    assert names == (CATALOG_TOOL_NAMES | LEGACY_TOOL_NAMES)
 
     schemas = {tool.name: tool.inputSchema for tool in tools if tool.name in CATALOG_TOOL_NAMES}
     assert schemas.keys() == CATALOG_TOOL_NAMES
     assert all(schema['type'] == 'object' for schema in schemas.values())
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_get_catalog_batch_manifest_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'get_catalog_batch_manifest')
+    assert callable(server.get_catalog_batch_manifest)
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_resolve_typed_edges_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'resolve_typed_edges')
+    assert callable(server.resolve_typed_edges)
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_get_catalog_evidence_registered():
+    server = _mcp_server()
+    assert hasattr(server, 'get_catalog_evidence')
+    assert callable(server.get_catalog_evidence)
+
+
+@pytest.mark.asyncio
+async def test_catalog_read_wrappers_never_lazy_init_client():
+    """GATE-04 / D-21: six catalog read MCP wrappers reuse initialized client only.
+
+    Never call get_client()/initialize()/build_indices_and_constraints on reads.
+    Absent client fails closed with structured ErrorResponse.
+    """
+    server = _mcp_server()
+    from models.catalog_batch import GetCatalogIngestStatusRequest
+    from models.catalog_entities import (
+        CatalogEvidenceEntityTarget,
+        GetCatalogBatchManifestRequest,
+        GetCatalogEvidenceRequest,
+        ResolveEdgeRef,
+        ResolveEntityRef,
+        ResolveTypedEdgesRequest,
+        ResolveTypedEntitiesRequest,
+        VerifyCatalogBatchRequest,
+        VerifyEntityRef,
+    )
+
+    read_tools = (
+        'resolve_typed_entities',
+        'verify_catalog_batch',
+        'get_catalog_ingest_status',
+        'get_catalog_batch_manifest',
+        'resolve_typed_edges',
+        'get_catalog_evidence',
+    )
+
+    def _payload(name: str):
+        if name == 'resolve_typed_entities':
+            return ResolveTypedEntitiesRequest(
+                identity_schema_version='catalog-v2',
+                system_key='FE',
+                group_id=GROUP,
+                entities=[
+                    ResolveEntityRef(
+                        entity_type='Table',
+                        graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+                    )
+                ],
+            )
+        if name == 'verify_catalog_batch':
+            return VerifyCatalogBatchRequest(
+                identity_schema_version='catalog-v2',
+                system_key='FE',
+                group_id=GROUP,
+                batch_id=BATCH,
+                entities=[
+                    VerifyEntityRef(
+                        entity_type='Table',
+                        graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+                    )
+                ],
+            )
+        if name == 'get_catalog_ingest_status':
+            return GetCatalogIngestStatusRequest(group_id=GROUP, batch_id=BATCH)
+        if name == 'get_catalog_batch_manifest':
+            return GetCatalogBatchManifestRequest(group_id=GROUP, batch_id=BATCH)
+        if name == 'resolve_typed_edges':
+            return ResolveTypedEdgesRequest(
+                identity_schema_version='catalog-v2',
+                system_key='FE',
+                group_id=GROUP,
+                edges=[
+                    ResolveEdgeRef(
+                        edge_type='Contains',
+                        edge_key='CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
+                    )
+                ],
+            )
+        return GetCatalogEvidenceRequest(
+            group_id=GROUP,
+            system_key='FE',
+            entity_target=CatalogEvidenceEntityTarget(
+                entity_type='Table',
+                graph_key='TABLE::FE::ORCL.HR.EMPLOYEES',
+            ),
+        )
+
+    # Absent service → structured error; no get_client path. patch restores globals.
+    with (
+        patch.object(server, 'graphiti_service', None),
+        patch.object(server, 'catalog_service', None),
+    ):
+        for name in read_tools:
+            fn = getattr(server, name)
+            resp = await fn(_payload(name))
+            assert isinstance(resp, dict)
+            assert 'error' in resp
+            assert 'not initialized' in resp['error'].lower()
+
+    existing_client = object()
+    get_client = AsyncMock(side_effect=AssertionError('get_client must not run on reads'))
+    initialize = AsyncMock(side_effect=AssertionError('initialize must not run on reads'))
+
+    fake_service = MagicMock()
+    fake_service.client = existing_client
+    fake_service.get_client = get_client
+    fake_service.initialize = initialize
+    fake_service.config = SimpleNamespace(
+        catalog_upsert=CatalogConfig(
+            enabled=False, reads_enabled=True, uuid_namespace=str(FIXED_NS)
+        )
+    )
+
+    seen_clients: list[Any] = []
+
+    async def _capture(*, client, request):  # noqa: ARG001
+        seen_clients.append(client)
+        return SimpleNamespace(group_id=GROUP, results=[], found=False, found_target=False)
+
+    fake_catalog = MagicMock()
+    fake_catalog.resolve_typed_entities = AsyncMock(side_effect=_capture)
+    fake_catalog.verify_catalog_batch = AsyncMock(side_effect=_capture)
+    fake_catalog.get_catalog_ingest_status = AsyncMock(side_effect=_capture)
+    fake_catalog.get_catalog_batch_manifest = AsyncMock(side_effect=_capture)
+    fake_catalog.resolve_typed_edges = AsyncMock(side_effect=_capture)
+    fake_catalog.get_catalog_evidence = AsyncMock(side_effect=_capture)
+
+    with (
+        patch.object(server, 'graphiti_service', fake_service),
+        patch.object(server, 'catalog_service', fake_catalog),
+    ):
+        for name in read_tools:
+            await getattr(server, name)(_payload(name))
+
+        get_client.assert_not_called()
+        initialize.assert_not_called()
+        assert len(seen_clients) == 6
+        assert all(c is existing_client for c in seen_clients)
+
+        fake_service.client = None
+        seen_clients.clear()
+        for name in read_tools:
+            resp = await getattr(server, name)(_payload(name))
+            assert isinstance(resp, dict)
+            assert 'not initialized' in resp['error'].lower()
+        get_client.assert_not_called()
+        initialize.assert_not_called()
+        assert seen_clients == []
+
+
+# ---------------------------------------------------------------------------
+# CONT-07 / SAFE-08 production boundary + no-side-effect spies (01-04)
+# ---------------------------------------------------------------------------
+
+
+_FROZEN_CATALOG_TOOL_REQUEST_MODELS = {
+    'upsert_typed_entities': UpsertTypedEntitiesRequest,
+    'resolve_typed_entities': ResolveTypedEntitiesRequest,
+    'resolve_typed_edges': None,  # filled at runtime
+    'verify_catalog_batch': VerifyCatalogBatchRequest,
+    'upsert_typed_edges': UpsertTypedEdgesRequest,
+    'upsert_provenance': None,  # filled at runtime
+    'get_catalog_ingest_status': GetCatalogIngestStatusRequest,
+    'get_catalog_batch_manifest': None,  # filled at runtime
+    'get_catalog_evidence': None,  # filled at runtime
+    'upsert_catalog_batch': UpsertCatalogBatchRequest,
+    'prepare_catalog_batch': None,  # filled at runtime
+    'commit_prepared_catalog_batch': None,  # filled at runtime
+    'discard_prepared_catalog_batch': None,  # filled at runtime
+}
+
+
+def _catalog_request_models():
+    from models.catalog_entities import (
+        GetCatalogBatchManifestRequest,
+        GetCatalogEvidenceRequest,
+        ResolveTypedEdgesRequest,
+    )
+    from models.catalog_prepare import (
+        CommitPreparedCatalogBatchRequest,
+        DiscardPreparedCatalogBatchRequest,
+        PrepareCatalogBatchRequest,
+    )
+    from models.catalog_provenance import UpsertProvenanceRequest
+
+    mapping = dict(_FROZEN_CATALOG_TOOL_REQUEST_MODELS)
+    mapping['upsert_provenance'] = UpsertProvenanceRequest
+    mapping['prepare_catalog_batch'] = PrepareCatalogBatchRequest
+    mapping['commit_prepared_catalog_batch'] = CommitPreparedCatalogBatchRequest
+    mapping['discard_prepared_catalog_batch'] = DiscardPreparedCatalogBatchRequest
+    mapping['resolve_typed_edges'] = ResolveTypedEdgesRequest
+    mapping['get_catalog_batch_manifest'] = GetCatalogBatchManifestRequest
+    mapping['get_catalog_evidence'] = GetCatalogEvidenceRequest
+    return mapping
+
+
+def _minimal_entity_dict():
+    return {
+        'entity_type': 'Table',
+        'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+        'name_raw': 'EMPLOYEES',
+        'name_canonical': 'employees',
+        'database_qualified_name': 'ORCL.HR.EMPLOYEES',
+        'summary': 'Employee master table',
+    }
+
+
+def _minimal_edge_dict():
+    return {
+        'edge_type': 'Contains',
+        'edge_key': 'CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
+        'source_graph_key': 'SCHEMA::FE::ORCL.HR',
+        'source_entity_type': 'Schema',
+        'target_graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+        'target_entity_type': 'Table',
+        'fact': 'Schema HR contains table EMPLOYEES',
+    }
+
+
+def _minimal_source_dict():
+    return {
+        'source_key': 'DOC::HR.PDF#p12',
+        'reference_time': '2024-01-15T10:30:00+00:00',
+    }
+
+
+def _v2_request_payload(tool_name: str, **overrides):
+    """Build a minimal valid nested payload for each frozen catalog tool."""
+    base = {
+        'identity_schema_version': 'catalog-v2',
+        'system_key': 'FE',
+        'group_id': GROUP,
+        'batch_id': 'cont07-batch',
+    }
+    if tool_name == 'upsert_typed_entities':
+        payload = {**base, 'entities': [_minimal_entity_dict()]}
+    elif tool_name == 'resolve_typed_entities':
+        payload = {
+            **base,
+            'entities': [
+                {
+                    'entity_type': 'Table',
+                    'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                }
+            ],
+        }
+        payload.pop('batch_id', None)
+    elif tool_name == 'verify_catalog_batch':
+        payload = {
+            **base,
+            'entities': [
+                {
+                    'entity_type': 'Table',
+                    'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+                }
+            ],
+        }
+    elif tool_name == 'upsert_typed_edges':
+        payload = {**base, 'edges': [_minimal_edge_dict()]}
+    elif tool_name == 'upsert_provenance':
+        payload = {**base, 'sources': [_minimal_source_dict()]}
+    elif tool_name == 'get_catalog_ingest_status':
+        payload = {'group_id': GROUP, 'batch_id': 'cont07-status'}
+    elif tool_name == 'get_catalog_batch_manifest':
+        payload = {'group_id': GROUP, 'batch_id': 'cont07-manifest'}
+    elif tool_name == 'resolve_typed_edges':
+        payload = {
+            **base,
+            'edges': [
+                {
+                    'edge_type': 'Contains',
+                    'edge_key': 'CONTAINS::SCHEMA::FE::ORCL.HR->TABLE::FE::ORCL.HR.EMPLOYEES',
+                }
+            ],
+        }
+        payload.pop('batch_id', None)
+    elif tool_name == 'get_catalog_evidence':
+        payload = {
+            **base,
+            'entity_target': {
+                'entity_type': 'Table',
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+            },
+        }
+        payload.pop('batch_id', None)
+    elif tool_name == 'upsert_catalog_batch' or tool_name == 'prepare_catalog_batch':
+        payload = {**base, 'entities': [_minimal_entity_dict()], 'catalog_sha256': 'a' * 64}
+    elif (
+        tool_name == 'commit_prepared_catalog_batch'
+        or tool_name == 'discard_prepared_catalog_batch'
+    ):
+        payload = {'plan_token': 'x' * 32}
+    else:
+        raise AssertionError(f'unknown tool {tool_name}')
+    payload.update(overrides)
+    return payload
+
+
+def _side_effect_spies(server):
+    """Install spies on wrapper body globals and CatalogService methods."""
+    store = MagicMock()
+    store.upsert_entity_item = AsyncMock()
+    store.ensure_schema = AsyncMock()
+    embedder = MagicMock()
+    embedder.create = AsyncMock(return_value=[0.1, 0.2])
+    embedder.create_batch = AsyncMock(return_value=[[0.1]])
+    client = MagicMock()
+    client.embedder = embedder
+    client.driver = MagicMock()
+    client.driver.execute_query = AsyncMock()
+
+    catalog_svc = MagicMock()
+    for name in (
+        'upsert_typed_entities',
+        'resolve_typed_entities',
+        'resolve_typed_edges',
+        'verify_catalog_batch',
+        'upsert_typed_edges',
+        'upsert_provenance',
+        'get_catalog_ingest_status',
+        'get_catalog_batch_manifest',
+        'get_catalog_evidence',
+        'upsert_catalog_batch',
+        'prepare_catalog_batch',
+        'commit_prepared_catalog_batch',
+        'discard_prepared_catalog_batch',
+    ):
+        setattr(catalog_svc, name, AsyncMock(return_value={'status': 'spy-should-not-run'}))
+
+    graphiti_svc = MagicMock()
+    graphiti_svc.get_client = AsyncMock(return_value=client)
+    graphiti_svc.config = MagicMock()
+    graphiti_svc.config.catalog_upsert = _enabled_config()
+
+    server.graphiti_service = graphiti_svc
+    server.catalog_service = catalog_svc
+    if hasattr(server, 'queue_service'):
+        server.queue_service = MagicMock()
+        if hasattr(server.queue_service, 'add_episode'):
+            server.queue_service.add_episode = AsyncMock()
+    return {
+        'catalog_service': catalog_svc,
+        'graphiti_service': graphiti_svc,
+        'client': client,
+        'embedder': embedder,
+        'store': store,
+    }
+
+
+def _assert_no_backend_side_effects(spies, body_entered: list):
+    assert body_entered == [], f'tool body entered: {body_entered}'
+    cs = spies['catalog_service']
+    for name in (
+        'upsert_typed_entities',
+        'resolve_typed_entities',
+        'resolve_typed_edges',
+        'verify_catalog_batch',
+        'upsert_typed_edges',
+        'upsert_provenance',
+        'get_catalog_ingest_status',
+        'get_catalog_batch_manifest',
+        'get_catalog_evidence',
+        'upsert_catalog_batch',
+        'prepare_catalog_batch',
+        'commit_prepared_catalog_batch',
+        'discard_prepared_catalog_batch',
+    ):
+        getattr(cs, name).assert_not_called()
+    spies['graphiti_service'].get_client.assert_not_called()
+    spies['embedder'].create.assert_not_called()
+    spies['embedder'].create_batch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_catalog_tools_bind_typed_pydantic_request_models():
+    """Production CONT-07: all request-bound catalog tools bind typed Pydantic request models."""
+    import typing
+
+    server = _mcp_server()
+    tools = await server.mcp.list_tools()
+    by_name = {t.name: t for t in tools}
+    models = _catalog_request_models()
+    assert set(models) == CATALOG_REQUEST_TOOL_NAMES
+    # Read-only capabilities has no request body (CAPA-01); exclude from request-model contract.
+    assert 'get_catalog_capabilities' not in models
+    assert 'get_catalog_capabilities' in by_name
+
+    for name, expected_model in models.items():
+        assert name in by_name, f'missing registered tool {name}'
+        tool = server.mcp._tool_manager.get_tool(name)
+        assert tool is not None
+        field = tool.fn_metadata.arg_model.model_fields.get('request')
+        assert field is not None, f'{name} missing request parameter'
+        ann = field.annotation
+        origin = typing.get_origin(ann)
+        assert origin is None, f'{name} request annotation must not be bare container {ann}'
+        assert ann is expected_model, f'{name} bound {ann}, expected {expected_model}'
+        hints = typing.get_type_hints(tool.fn)
+        assert hints.get('request') is expected_model
+        schema = by_name[name].inputSchema
+        assert schema.get('type') == 'object'
+        props = schema.get('properties') or {}
+        assert 'request' in props
+        req_schema = props['request']
+        assert '$ref' in req_schema or req_schema.get('additionalProperties') is False
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_call_tool_rejects_invalid_nested_payloads_before_body_no_side_effect():
+    """Production CONT-07: FastMCP call_tool validates before wrapper/service/backends."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+
+    cases = [
+        (
+            'upsert_typed_entities',
+            {'identity_schema_version': 'catalog-v1'},
+            'identity_schema_version',
+        ),
+        (
+            'upsert_typed_entities',
+            {'system_key': 'fe'},
+            'system_key',
+        ),
+        (
+            'upsert_typed_entities',
+            {
+                'entities': [
+                    {
+                        **_minimal_entity_dict(),
+                        'graph_key': 'TABLE::ORCL.HR.EMPLOYEES',
+                    }
+                ]
+            },
+            'graph_key',
+        ),
+        (
+            'upsert_typed_entities',
+            {'atomic': False},
+            'atomic',
+        ),
+        (
+            'upsert_typed_entities',
+            {'unknown_shell_field': True},
+            'unknown_shell_field',
+        ),
+        (
+            'resolve_typed_entities',
+            {'identity_schema_version': 'catalog-v0'},
+            'identity_schema_version',
+        ),
+        (
+            'verify_catalog_batch',
+            {'system_key': 'UNKNOWN'},
+            'system_key',
+        ),
+        (
+            'upsert_typed_edges',
+            {'strict_endpoints': False},
+            'strict_endpoints',
+        ),
+        (
+            'upsert_provenance',
+            {'sources': [{**_minimal_source_dict(), 'extra_bad': 1}]},
+            'extra_bad',
+        ),
+        (
+            'get_catalog_ingest_status',
+            {'extra_status_field': 'nope'},
+            'extra_status_field',
+        ),
+        (
+            'upsert_catalog_batch',
+            {'identity_schema_version': 'catalog-v1'},
+            'identity_schema_version',
+        ),
+    ]
+
+    for tool_name, overrides, _hint in cases:
+        body_entered: list = []
+        tool = server.mcp._tool_manager.get_tool(tool_name)
+        original_fn = tool.fn
+
+        async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+            _entered.append(request)
+            return await _orig(request)
+
+        tool.fn = wrapped_fn
+        payload = _v2_request_payload(tool_name, **overrides)
+        try:
+            with pytest.raises(ToolError) as exc:
+                await server.mcp.call_tool(tool_name, {'request': payload})
+            err = exc.value
+            # SAFE-08: structured ToolError, no ValidationError chain leak
+            chain = err
+            while chain is not None:
+                assert not isinstance(chain, ValidationError), f'{tool_name} leaked ValidationError'
+                chain = getattr(chain, '__cause__', None) or getattr(chain, '__context__', None)
+            raw = str(err)
+            assert 'Input should be' not in raw
+            assert 'pydantic' not in raw.lower()
+            js = raw.find('{')
+            assert js >= 0, f'{tool_name}: missing structured JSON: {raw!r}'
+            import json
+
+            structured = json.loads(raw[js:])
+            assert set(structured.keys()) == {
+                'code',
+                'message',
+                'field_path',
+                'retryable',
+                'correlation_id',
+            }
+            assert structured['retryable'] is False
+            _assert_no_backend_side_effects(spies, body_entered)
+        finally:
+            tool.fn = original_fn
+            for name in (
+                'upsert_typed_entities',
+                'resolve_typed_entities',
+                'verify_catalog_batch',
+                'upsert_typed_edges',
+                'upsert_provenance',
+                'get_catalog_ingest_status',
+                'upsert_catalog_batch',
+            ):
+                getattr(spies['catalog_service'], name).reset_mock()
+            spies['graphiti_service'].get_client.reset_mock()
+            spies['embedder'].create.reset_mock()
+            spies['embedder'].create_batch.reset_mock()
+
+
+def test_invalid_identity_schema_never_calls_service_store_or_embedder():
+    """CONT-07: invalid identity_schema_version fails at model_validate; zero service entry."""
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store = MagicMock()
+    service._store.upsert_entity_item = AsyncMock()
+    service._ensure_schema = AsyncMock()  # type: ignore[method-assign]
+    client = MagicMock()
+    client.embedder = MagicMock()
+    client.embedder.create = AsyncMock()
+    client.embedder.create_batch = AsyncMock()
+
+    with pytest.raises(ValidationError):
+        UpsertTypedEntitiesRequest.model_validate(
+            _v2_request_payload(
+                'upsert_typed_entities',
+                identity_schema_version='catalog-v1',
+            )
+        )
+
+    service._store.upsert_entity_item.assert_not_called()
+    service._ensure_schema.assert_not_called()
+    client.embedder.create.assert_not_called()
+    client.embedder.create_batch.assert_not_called()
+
+
+def test_invalid_system_key_never_calls_service():
+    """CONT-07: invalid/unknown/lowercase system_key never reaches CatalogService."""
+    service = CatalogService(catalog_config=_enabled_config())
+    service.upsert_typed_entities = AsyncMock()  # type: ignore[method-assign]
+    for bad in ('fe', 'Fe', 'UNKNOWN', '', None):
+        with pytest.raises(ValidationError):
+            UpsertTypedEntitiesRequest.model_validate(
+                _v2_request_payload('upsert_typed_entities', system_key=bad)
+            )
+    service.upsert_typed_entities.assert_not_called()
+
+
+def test_invalid_grammar_never_calls_service():
+    """CONT-07: malformed/v1 graph keys fail validation before service."""
+    service = CatalogService(catalog_config=_enabled_config())
+    service.upsert_typed_entities = AsyncMock()  # type: ignore[method-assign]
+    bad_keys = (
+        'TABLE::ORCL.HR.EMPLOYEES',
+        'table::fe::orcl.hr.employees',
+        'TABLE::FE::',
+        'NOTAPREFIX::FE::ORCL.HR.EMPLOYEES',
+    )
+    for key in bad_keys:
+        with pytest.raises(ValidationError):
+            UpsertTypedEntitiesRequest.model_validate(
+                _v2_request_payload(
+                    'upsert_typed_entities',
+                    entities=[{**_minimal_entity_dict(), 'graph_key': key}],
+                )
+            )
+    service.upsert_typed_entities.assert_not_called()
+
+
+def test_no_side_effect_on_false_immutable_flags_and_unknown_nested_fields():
+    """CONT-07 matrix: atomic/strict_endpoints false + unknown nested fields."""
+    service = CatalogService(catalog_config=_enabled_config())
+    service.upsert_typed_entities = AsyncMock()  # type: ignore[method-assign]
+    service.upsert_typed_edges = AsyncMock()  # type: ignore[method-assign]
+    service.upsert_catalog_batch = AsyncMock()  # type: ignore[method-assign]
+
+    with pytest.raises(ValidationError):
+        UpsertTypedEntitiesRequest.model_validate(
+            _v2_request_payload('upsert_typed_entities', atomic=False)
+        )
+    with pytest.raises(ValidationError):
+        UpsertTypedEdgesRequest.model_validate(
+            _v2_request_payload('upsert_typed_edges', strict_endpoints=False)
+        )
+    with pytest.raises(ValidationError):
+        UpsertTypedEntitiesRequest.model_validate(
+            _v2_request_payload(
+                'upsert_typed_entities',
+                entities=[{**_minimal_entity_dict(), 'unknown_nested': 1}],
+            )
+        )
+    with pytest.raises(ValidationError):
+        UpsertTypedEntitiesRequest.model_validate(
+            _v2_request_payload('upsert_typed_entities', entities=[])
+        )
+
+    service.upsert_typed_entities.assert_not_called()
+    service.upsert_typed_edges.assert_not_called()
+    service.upsert_catalog_batch.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('function_name', 'request_factory'),
+    [
+        ('resolve_typed_entities', _resolve_request),
+        ('verify_catalog_batch', _verify_request),
+        ('get_catalog_ingest_status', _status_request),
+    ],
+)
+async def test_catalog_wrapper_failure_logs_omit_group_id_runtime(
+    caplog: pytest.LogCaptureFixture,
+    function_name: str,
+    request_factory,
+):
+    server = _mcp_server()
+    request = request_factory()
+    # Read wrappers use require_initialized_client (no get_client). Provide .client so
+    # the body runs; catalog method raises so ERROR log path still executes.
+    failing_catalog = MagicMock()
+    setattr(
+        failing_catalog,
+        function_name,
+        AsyncMock(side_effect=RuntimeError('forced wrapper failure')),
+    )
+    failing_graphiti = SimpleNamespace(
+        config=SimpleNamespace(catalog_upsert=_enabled_config()),
+        client=object(),
+        get_client=AsyncMock(side_effect=AssertionError('get_client must not run on reads')),
+    )
+
+    with (
+        patch.object(server, 'graphiti_service', failing_graphiti),
+        patch.object(server, 'catalog_service', failing_catalog),
+        caplog.at_level(logging.ERROR),
+    ):
+        await getattr(server, function_name)(request)
+
+    records = [record for record in caplog.records if function_name in record.getMessage()]
+    _assert_group_id_absent(records)
+    failing_graphiti.get_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_catalog_validation_returns_structured_safe_tool_error():
+    """Production SAFE-08: catalog validation ToolError carries structured JSON only."""
+    import json
+    import re
+    import uuid as uuid_mod
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    secret = 'super-secret-token-xyz-DO-NOT-LEAK'
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool('upsert_typed_entities')
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    payload: dict = _v2_request_payload(
+        'upsert_typed_entities',
+        identity_schema_version='catalog-v1',
+        password=secret,
+        authorization=f'Bearer {secret}',
+    )
+    # also embed secret in a nested field that will be rejected as extra
+    payload['entities'] = [{**_minimal_entity_dict(), 'secret_nested': secret}]
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool('upsert_typed_entities', {'request': payload})
+        err = exc.value
+        # Fresh ToolError: no ValidationError in cause/context chain
+        chain = err
+        while chain is not None:
+            assert not isinstance(chain, ValidationError), f'ValidationError leaked: {chain!r}'
+            chain = getattr(chain, '__cause__', None) or getattr(chain, '__context__', None)
+        raw = str(err)
+        assert secret not in raw
+        assert 'password' not in raw.lower() or 'password' not in raw  # no field dump
+        assert 'Bearer' not in raw
+        assert 'validation error' not in raw.lower() or 'Request validation' in raw
+        assert 'pydantic' not in raw.lower()
+        assert 'Traceback' not in raw
+        assert 'Input should be' not in raw
+        # Message is JSON structured error
+        # ToolError may wrap as "Error executing..." or pure JSON; accept JSON object parse
+        json_start = raw.find('{')
+        assert json_start >= 0, f'no JSON in ToolError: {raw!r}'
+        structured = json.loads(raw[json_start:])
+        assert set(structured.keys()) == {
+            'code',
+            'message',
+            'field_path',
+            'retryable',
+            'correlation_id',
+        }
+        assert structured['retryable'] is False
+        assert isinstance(structured['message'], str)
+        assert 0 < len(structured['message']) <= 512
+        assert secret not in structured['message']
+        assert 'catalog-v1' not in structured['message']
+        # correlation_id is server UUID
+        uuid_mod.UUID(structured['correlation_id'])
+        # field_path sanitized dotted path or None
+        fp = structured['field_path']
+        if fp is not None:
+            assert isinstance(fp, str)
+            assert len(fp) <= 256
+            assert re.fullmatch(r'[A-Za-z0-9_.\[\]]+', fp), fp
+            assert secret not in fp
+        # code is a known catalog error code string/value
+        code = structured['code']
+        code_val = code.value if hasattr(code, 'value') else str(code)
+        assert code_val in {
+            'unsupported_identity_schema',
+            'invalid_system_key',
+            'validation_error',
+        }
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_unrelated_tool_error_not_rewritten_to_structured():
+    """Arbitrary ToolError outside catalog validation must not be rewritten."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    # Use a legacy tool path: force unknown tool → framework ToolError
+    with pytest.raises(ToolError) as exc:
+        await server.mcp.call_tool('definitely_not_a_real_tool', {'x': 1})
+    raw = str(exc.value)
+    assert 'Unknown tool' in raw or 'definitely_not_a_real_tool' in raw
+    assert 'correlation_id' not in raw
+    assert '"code"' not in raw
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_legacy_tool_validation_not_structured_catalog_shape():
+    """Legacy tools keep framework errors; no SAFE-08 catalog rewrite."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    # get_status takes no request model; invalid args still ToolError without catalog shape
+    # Prefer call_tool with bad args on a typed legacy path if any; else unknown is enough.
+    # add_memory typically has many params — force type failure via wrong structure if registered.
+    tools = await server.mcp.list_tools()
+    legacy = [t for t in tools if t.name == 'get_status']
+    assert legacy, 'get_status must remain registered'
+    # get_status has empty/no required request; calling with extra junk may be ignored or error.
+    # Inject a ToolError from tool body by temporarily replacing fn.
+    tool = server.mcp._tool_manager.get_tool('get_status')
+    original = tool.fn
+
+    async def boom():
+        raise RuntimeError('legacy-body-failure-secret-xyz')
+
+    tool.fn = boom
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool('get_status', {})
+        raw = str(exc.value)
+        # Must NOT be rewritten into catalog structured JSON
+        if '{' in raw:
+            import json
+
+            try:
+                obj = json.loads(raw[raw.find('{') :])
+            except Exception:
+                obj = None
+            if isinstance(obj, dict):
+                assert set(obj.keys()) != {
+                    'code',
+                    'message',
+                    'field_path',
+                    'retryable',
+                    'correlation_id',
+                }
+        # legacy error text path remains framework-owned
+        assert 'legacy-body-failure-secret-xyz' in raw or 'Error executing tool' in raw
+    finally:
+        tool.fn = original
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_all_seven_catalog_tools_emit_structured_on_invalid():
+    """All seven catalog tools surface SAFE-08 structured ToolError on invalid nested input."""
+    import json
+    import uuid as uuid_mod
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    cases = [
+        ('upsert_typed_entities', {'identity_schema_version': 'catalog-v1'}),
+        ('resolve_typed_entities', {'identity_schema_version': 'catalog-v0'}),
+        ('verify_catalog_batch', {'system_key': 'UNKNOWN'}),
+        ('upsert_typed_edges', {'strict_endpoints': False}),
+        ('upsert_provenance', {'sources': [{**_minimal_source_dict(), 'extra_bad': 1}]}),
+        ('get_catalog_ingest_status', {'extra_status_field': 'nope'}),
+        ('upsert_catalog_batch', {'identity_schema_version': 'catalog-v1'}),
+    ]
+    for tool_name, overrides in cases:
+        body_entered: list = []
+        tool = server.mcp._tool_manager.get_tool(tool_name)
+        original_fn = tool.fn
+
+        async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+            _entered.append(request)
+            return await _orig(request)
+
+        tool.fn = wrapped_fn
+        payload = _v2_request_payload(tool_name, **overrides)
+        try:
+            with pytest.raises(ToolError) as exc:
+                await server.mcp.call_tool(tool_name, {'request': payload})
+            raw = str(exc.value)
+            assert 'Input should be' not in raw
+            assert 'pydantic' not in raw.lower()
+            js = raw.find('{')
+            assert js >= 0, f'{tool_name}: {raw!r}'
+            structured = json.loads(raw[js:])
+            assert set(structured.keys()) == {
+                'code',
+                'message',
+                'field_path',
+                'retryable',
+                'correlation_id',
+            }
+            uuid_mod.UUID(structured['correlation_id'])
+            assert structured['retryable'] is False
+            assert len(structured['message']) <= 512
+            _assert_no_backend_side_effects(spies, body_entered)
+        finally:
+            tool.fn = original_fn
+            for name in (
+                'upsert_typed_entities',
+                'resolve_typed_entities',
+                'verify_catalog_batch',
+                'upsert_typed_edges',
+                'upsert_provenance',
+                'get_catalog_ingest_status',
+                'upsert_catalog_batch',
+            ):
+                getattr(spies['catalog_service'], name).reset_mock()
+            spies['graphiti_service'].get_client.reset_mock()
+            spies['embedder'].create.reset_mock()
+            spies['embedder'].create_batch.reset_mock()
+
+
+# ---------------------------------------------------------------------------
+# Plan 01-06 contract gap coverage
+# ---------------------------------------------------------------------------
+
+
+def test_source_ref_canonical_payload_contains_plain_json_dicts():
+    from models import catalog_entities
+
+    source_ref_model = getattr(catalog_entities, 'CatalogSourceRef', None)
+    assert source_ref_model is not None, 'CatalogSourceRef missing'
+    raw_text = 'DDL  \n'
+    item = _entity(
+        source_refs=[
+            source_ref_model(document_id='ddl.sql', page=12, raw_text=raw_text),
+            source_ref_model(page=1, raw_text=''),
+        ]
+    )
+
+    payload = CatalogService.entity_canonical_payload(item)
+
+    assert payload['source_refs'] == [
+        {'document_id': 'ddl.sql', 'page': 12, 'raw_text': raw_text},
+        {'document_id': None, 'page': 1, 'raw_text': ''},
+    ]
+    assert all(isinstance(ref, dict) for ref in payload['source_refs'])
+    import json
+
+    assert json.loads(json.dumps(payload))['source_refs'][0]['raw_text'] == raw_text
+    assert canonical_sha256(payload) == canonical_sha256(payload)
+
+
+def _fastmcp_graph_key_mismatch_cases():
+    entity_bo = {**_minimal_entity_dict(), 'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES'}
+    edge_source_bo = {**_minimal_edge_dict(), 'source_graph_key': 'SCHEMA::BO::ORCL.HR'}
+    edge_target_bo = {
+        **_minimal_edge_dict(),
+        'target_graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES',
+    }
+    provenance_target_bo = {
+        'entity_type': 'Table',
+        'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES',
+    }
+    return [
+        ('upsert_typed_entities', {'entities': [entity_bo]}, 'entities.0.graph_key'),
+        (
+            'resolve_typed_entities',
+            {
+                'entities': [
+                    {
+                        'entity_type': 'Table',
+                        'graph_key': 'TABLE::BO::ORCL.HR.EMPLOYEES',
+                    }
+                ]
+            },
+            'entities.0.graph_key',
+        ),
+        (
+            'verify_catalog_batch',
+            {'entities': [provenance_target_bo]},
+            'entities.0.graph_key',
+        ),
+        (
+            'upsert_typed_edges',
+            {'edges': [edge_source_bo]},
+            'edges.0.source_graph_key',
+        ),
+        (
+            'upsert_typed_edges',
+            {'edges': [edge_target_bo]},
+            'edges.0.target_graph_key',
+        ),
+        (
+            'upsert_provenance',
+            {'entity_targets': [provenance_target_bo]},
+            'entity_targets.0.graph_key',
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [entity_bo]},
+            'entities.0.graph_key',
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [], 'edges': [edge_source_bo]},
+            'edges.0.source_graph_key',
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [], 'edges': [edge_target_bo]},
+            'edges.0.target_graph_key',
+        ),
+        (
+            'upsert_catalog_batch',
+            {
+                'entities': [],
+                'provenance': {
+                    'sources': [_minimal_source_dict()],
+                    'evidence_links': [
+                        {
+                            'source_key': 'DOC::HR.PDF#p12',
+                            'entity_target': provenance_target_bo,
+                            'evidence_kind': 'ddl',
+                            'extractor_name': 'oracle-ddl-extractor',
+                            'extractor_version': '1.0.0',
+                        }
+                    ],
+                },
+            },
+            'provenance.evidence_links.0.entity_target.graph_key',
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('tool_name', 'overrides', 'expected_path'), _fastmcp_graph_key_mismatch_cases()
+)
+async def test_fastmcp_graph_key_mismatch_reports_exact_path_before_side_effects(
+    tool_name, overrides, expected_path
+):
+    import json
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool(tool_name)
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool(
+                tool_name,
+                {'request': _v2_request_payload(tool_name, **overrides)},
+            )
+        raw = str(exc.value)
+        structured = json.loads(raw[raw.find('{') :])
+        assert structured['code'] == 'invalid_system_key'
+        assert structured['field_path'] == expected_path
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entities_override', [[], pytest.param(None, id='missing')])
+async def test_fastmcp_empty_resolve_rejected_before_service(entities_override):
+    import json
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool('resolve_typed_entities')
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    payload = _v2_request_payload('resolve_typed_entities')
+    if entities_override is None:
+        payload.pop('entities')
+    else:
+        payload['entities'] = entities_override
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool('resolve_typed_entities', {'request': payload})
+        raw = str(exc.value)
+        structured = json.loads(raw[raw.find('{') :])
+        assert structured['code'] == 'validation_error'
+        assert structured['field_path'] == 'entities'
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
+
+
+# ---------------------------------------------------------------------------
+# Plan 01-09 gap coverage: CR-02 / WR-01 FastMCP protocol
+# ---------------------------------------------------------------------------
+
+
+def _assert_safe_tool_error_payload(err, *, expected_field_path: str, sentinel: str):
+    import json
+
+    from pydantic import ValidationError
+
+    chain = err
+    while chain is not None:
+        assert not isinstance(chain, ValidationError), 'ValidationError leaked into protocol chain'
+        chain = getattr(chain, '__cause__', None) or getattr(chain, '__context__', None)
+    raw = str(err)
+    assert sentinel not in raw
+    assert 'fromisoformat' not in raw.lower()
+    assert 'Invalid isoformat' not in raw
+    assert 'pydantic' not in raw.lower()
+    assert 'Traceback' not in raw
+    js = raw.find('{')
+    assert js >= 0, f'missing structured JSON: {raw!r}'
+    structured = json.loads(raw[js:])
+    assert set(structured.keys()) == {
+        'code',
+        'message',
+        'field_path',
+        'retryable',
+        'correlation_id',
+    }
+    assert structured['code'] == 'validation_error'
+    assert structured['field_path'] == expected_field_path
+    assert structured['retryable'] is False
+    assert isinstance(structured['correlation_id'], str) and structured['correlation_id']
+    assert sentinel not in structured['message']
+    assert 'fromisoformat' not in structured['message'].lower()
+    return structured
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('tool_name', 'overrides', 'expected_path', 'sentinel'),
+    [
+        (
+            'upsert_provenance',
+            {
+                'sources': [
+                    {
+                        **_minimal_source_dict(),
+                        'reference_time': 'CR02-TS-SENTINEL-not-iso',
+                    }
+                ]
+            },
+            'sources.0.reference_time',
+            'CR02-TS-SENTINEL-not-iso',
+        ),
+        (
+            'upsert_catalog_batch',
+            {
+                'entities': [],
+                'provenance': {
+                    'sources': [
+                        {
+                            **_minimal_source_dict(),
+                            'reference_time': 'CR02-TS-SENTINEL-batch',
+                        }
+                    ]
+                },
+            },
+            'provenance.sources.0.reference_time',
+            'CR02-TS-SENTINEL-batch',
+        ),
+    ],
+)
+async def test_gap_cr02_fastmcp_malformed_reference_time_no_leak_no_side_effect(
+    tool_name, overrides, expected_path, sentinel
+):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool(tool_name)
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool(
+                tool_name,
+                {'request': _v2_request_payload(tool_name, **overrides)},
+            )
+        _assert_safe_tool_error_payload(
+            exc.value, expected_field_path=expected_path, sentinel=sentinel
+        )
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
+
+
+def _gap_wr01_fastmcp_malformed_cases():
+    bad = 'TABLE::ORCL.HR.EMPLOYEES'
+    bad_entity = {**_minimal_entity_dict(), 'graph_key': bad}
+    bad_edge_source = {
+        **_minimal_edge_dict(),
+        'source_graph_key': bad,
+        'source_entity_type': 'Table',
+    }
+    bad_edge_target = {
+        **_minimal_edge_dict(),
+        'target_graph_key': bad,
+        'target_entity_type': 'Table',
+    }
+    bad_target = {'entity_type': 'Table', 'graph_key': bad}
+    return [
+        ('upsert_typed_entities', {'entities': [bad_entity]}, 'entities.0.graph_key', bad),
+        (
+            'resolve_typed_entities',
+            {'entities': [{'entity_type': 'Table', 'graph_key': bad}]},
+            'entities.0.graph_key',
+            bad,
+        ),
+        (
+            'verify_catalog_batch',
+            {'entities': [bad_target]},
+            'entities.0.graph_key',
+            bad,
+        ),
+        (
+            'upsert_typed_edges',
+            {'edges': [bad_edge_source]},
+            'edges.0.source_graph_key',
+            bad,
+        ),
+        (
+            'upsert_typed_edges',
+            {'edges': [bad_edge_target]},
+            'edges.0.target_graph_key',
+            bad,
+        ),
+        (
+            'upsert_provenance',
+            {'entity_targets': [bad_target]},
+            'entity_targets.0.graph_key',
+            bad,
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [bad_entity]},
+            'entities.0.graph_key',
+            bad,
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [], 'edges': [bad_edge_source]},
+            'edges.0.source_graph_key',
+            bad,
+        ),
+        (
+            'upsert_catalog_batch',
+            {'entities': [], 'edges': [bad_edge_target]},
+            'edges.0.target_graph_key',
+            bad,
+        ),
+        (
+            'upsert_catalog_batch',
+            {
+                'entities': [],
+                'provenance': {
+                    'sources': [_minimal_source_dict()],
+                    'evidence_links': [
+                        {
+                            'source_key': 'DOC::HR.PDF#p12',
+                            'entity_target': bad_target,
+                            'evidence_kind': 'ddl',
+                            'extractor_name': 'oracle-ddl-extractor',
+                            'extractor_version': '1.0.0',
+                        }
+                    ],
+                },
+            },
+            'provenance.evidence_links.0.entity_target.graph_key',
+            bad,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('tool_name', 'overrides', 'expected_path', 'sentinel'),
+    _gap_wr01_fastmcp_malformed_cases(),
+)
+async def test_gap_wr01_fastmcp_malformed_graph_key_exact_path_no_side_effect(
+    tool_name, overrides, expected_path, sentinel
+):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool(tool_name)
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool(
+                tool_name,
+                {'request': _v2_request_payload(tool_name, **overrides)},
+            )
+        structured = _assert_safe_tool_error_payload(
+            exc.value, expected_field_path=expected_path, sentinel=sentinel
+        )
+        assert structured['code'] == 'validation_error'
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
+
+
+@pytest.mark.asyncio
+async def test_gap_wr01_fastmcp_shell_mismatch_keeps_invalid_system_key():
+    import json
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = _mcp_server()
+    spies = _side_effect_spies(server)
+    body_entered: list = []
+    tool = server.mcp._tool_manager.get_tool('upsert_typed_entities')
+    original_fn = tool.fn
+
+    async def wrapped_fn(request, _orig=original_fn, _entered=body_entered):
+        _entered.append(request)
+        return await _orig(request)
+
+    tool.fn = wrapped_fn
+    payload = _v2_request_payload(
+        'upsert_typed_entities',
+        system_key='BO',
+        entities=[
+            {
+                **_minimal_entity_dict(),
+                'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+            }
+        ],
+    )
+    try:
+        with pytest.raises(ToolError) as exc:
+            await server.mcp.call_tool('upsert_typed_entities', {'request': payload})
+        raw = str(exc.value)
+        structured = json.loads(raw[raw.find('{') :])
+        assert structured['code'] == 'invalid_system_key'
+        assert structured['field_path'] == 'entities.0.graph_key'
+        assert 'TABLE::FE::ORCL.HR.EMPLOYEES' not in structured['message']
+        _assert_no_backend_side_effects(spies, body_entered)
+    finally:
+        tool.fn = original_fn
+
+
+# ---------------------------------------------------------------------------
+# gap_cr01: barrier-driven entity race across three write routes
+# ---------------------------------------------------------------------------
+
+
+class _RaceEntityStore:
+    """Event/barrier-driven fake store for concurrent conflicting-name entity races."""
+
+    def __init__(self, *, loser_name_raw: str | None = None) -> None:
+        self.entities: dict[tuple[str, str], dict[str, Any]] = {}
+        self.checkpoints: list[str] = []
+        self._lock = asyncio.Lock()
+        self._pre_reads_done = 0
+        self._both_pre_read = asyncio.Event()
+        self._loser_at_merge = asyncio.Event()
+        self._winner_committed = asyncio.Event()
+        self.loser_name_raw = loser_name_raw
+        self.upsert_calls = 0
+        self.batch_status_writes: list[dict[str, Any]] = []
+
+    async def ensure_uuid_uniqueness_constraints(self, driver: Any) -> None:
+        _ = driver
+        return None
+
+    async def ensure_evidence_manifest_schema(self, driver: Any) -> None:
+        _ = driver
+        return None
+
+    async def write_evidence_links(
+        self, tx: Any, *, links: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        _ = tx
+        return list(links)
+
+    async def write_manifest_root_and_chunks(
+        self, tx: Any, *, root: dict[str, Any], chunks: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        _ = tx, chunks
+        return {
+            'uuid': root.get('uuid'),
+            'manifest_sha256': root.get('manifest_sha256'),
+            'chunk_count': len(chunks),
+        }
+
+    def prepare_evidence_link_params(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+    def prepare_manifest_root_params(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+    def prepare_manifest_chunk_params(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+    async def get_entity_by_uuid(
+        self,
+        executor: Any,
+        *,
+        uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        _ = executor
+        if tx is None:
+            row = self.entities.get((uuid, group_id))
+            self.checkpoints.append(f'pre_read:{"hit" if row else "miss"}:{uuid[:8]}')
+            self._pre_reads_done += 1
+            if self._pre_reads_done >= 2:
+                self._both_pre_read.set()
+            # Concurrent race: both pre-reads observe absence before either commits.
+            if self.loser_name_raw is not None:
+                await self._both_pre_read.wait()
+                return None
+            return None if row is None else dict(row)
+        row = self.entities.get((uuid, group_id))
+        self.checkpoints.append(f'in_tx_recheck:{"hit" if row else "miss"}:{uuid[:8]}')
+        return None if row is None else dict(row)
+
+    def prepare_entity_params(self, **kwargs: Any) -> dict[str, Any]:
+        from services.catalog_store import CatalogNeo4jStore
+
+        return CatalogNeo4jStore().prepare_entity_params(**kwargs)
+
+    def resolve_entity_label(self, entity_type: str) -> str:
+        from services.catalog_store import CatalogNeo4jStore
+
+        return CatalogNeo4jStore().resolve_entity_label(entity_type)
+
+    def _conflict_row(self, existing: dict[str, Any]) -> dict[str, Any]:
+        return {
+            'uuid': existing['uuid'],
+            'status': 'error',
+            'error_code': CatalogErrorCode.deterministic_uuid_conflict.value,
+            'name': existing['name'],
+            'graph_key': existing['graph_key'],
+            'name_raw': existing['name_raw'],
+            'name_canonical': existing['name_canonical'],
+            'labels': existing['labels'],
+            'neo4j_labels': existing['neo4j_labels'],
+            'content_sha256': existing['content_sha256'],
+            'summary': existing['summary'],
+            'batch_id': existing['batch_id'],
+            'created_at': existing['created_at'],
+            'updated_at': existing['updated_at'],
+            'has_name_embedding': True,
+        }
+
+    def _identity_conflict(self, existing: dict[str, Any], params: dict[str, Any]) -> bool:
+        return any(
+            existing.get(field) != params.get(field)
+            for field in ('name', 'graph_key', 'name_raw', 'name_canonical')
+        )
+
+    async def upsert_entity_item(
+        self,
+        tx: Any,
+        *,
+        entity_type: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        _ = tx, entity_type
+        self.upsert_calls += 1
+        key = (params['uuid'], params['group_id'])
+        self.checkpoints.append(f'merge_enter:{params["name_raw"]}')
+
+        # Loser reaches MERGE and blocks until winner commits (real checkpoint order).
+        if self.loser_name_raw is not None and params['name_raw'] == self.loser_name_raw:
+            self._loser_at_merge.set()
+            self.checkpoints.append(f'merge_block:{params["name_raw"]}')
+            await self._winner_committed.wait()
+
+        async with self._lock:
+            existing = self.entities.get(key)
+            if existing is not None:
+                if self._identity_conflict(existing, params):
+                    self.checkpoints.append(f'merge_conflict:{params["name_raw"]}')
+                    return self._conflict_row(existing)
+                self.checkpoints.append(f'merge_unchanged:{params["name_raw"]}')
+                return {
+                    'uuid': existing['uuid'],
+                    'status': 'unchanged',
+                    'error_code': None,
+                    'name': existing['name'],
+                    'graph_key': existing['graph_key'],
+                    'name_raw': existing['name_raw'],
+                    'name_canonical': existing['name_canonical'],
+                    'labels': existing['labels'],
+                    'neo4j_labels': existing['neo4j_labels'],
+                    'content_sha256': existing['content_sha256'],
+                    'summary': existing['summary'],
+                    'batch_id': existing['batch_id'],
+                    'created_at': existing['created_at'],
+                    'updated_at': existing['updated_at'],
+                    'has_name_embedding': True,
+                }
+
+            # Winner may wait until loser is parked at MERGE.
+            if (
+                self.loser_name_raw is not None
+                and params['name_raw'] != self.loser_name_raw
+                and not self._winner_committed.is_set()
+            ):
+                await self._loser_at_merge.wait()
+
+            created = {
+                'uuid': params['uuid'],
+                'group_id': params['group_id'],
+                'name': params['name'],
+                'graph_key': params['graph_key'],
+                'name_raw': params['name_raw'],
+                'name_canonical': params['name_canonical'],
+                'labels': params['labels'],
+                'neo4j_labels': list(params['labels']),
+                'content_sha256': params['content_sha256'],
+                'summary': params['summary'],
+                'batch_id': params['batch_id'],
+                'created_at': params['created_at'],
+                'updated_at': params['updated_at'],
+                'attributes': params.get('attributes'),
+                'has_name_embedding': True,
+            }
+            self.entities[key] = created
+            self.checkpoints.append(f'merge_commit:{params["name_raw"]}')
+            self._winner_committed.set()
+            return {
+                'uuid': created['uuid'],
+                'status': 'created',
+                'error_code': None,
+                'name': created['name'],
+                'graph_key': created['graph_key'],
+                'name_raw': created['name_raw'],
+                'name_canonical': created['name_canonical'],
+                'labels': created['labels'],
+                'neo4j_labels': created['neo4j_labels'],
+                'content_sha256': created['content_sha256'],
+                'summary': created['summary'],
+                'batch_id': created['batch_id'],
+                'created_at': created['created_at'],
+                'updated_at': created['updated_at'],
+                'has_name_embedding': True,
+            }
+
+    def prepare_batch_status_params(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+    async def claim_batch_status(self, tx: Any, *, params: dict[str, Any]) -> dict[str, Any]:
+        _ = tx
+        # WR-03 reclaimable claim status is writing|failed; unknown collapses batch path.
+        return {
+            'uuid': params['uuid'],
+            'status': 'writing',
+            'request_sha256': params['request_sha256'],
+        }
+
+    async def upsert_batch_status(self, tx: Any, *, params: dict[str, Any]) -> dict[str, Any]:
+        _ = tx
+        self.batch_status_writes.append(dict(params))
+        self.checkpoints.append(f'batch_status:{params.get("status")}')
+        return dict(params)
+
+    async def get_batch_status(
+        self,
+        executor: Any,
+        *,
+        uuid: str,
+        group_id: str,
+        tx: Any | None = None,
+    ) -> dict[str, Any] | None:
+        _ = executor, uuid, group_id, tx
+        return None
+
+    async def get_edge_by_uuid(self, *args: Any, **kwargs: Any) -> None:
+        _ = args, kwargs
+        return None
+
+    async def upsert_edge_item(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        _ = args, kwargs
+        raise AssertionError('edge write not expected in entity race tests')
+
+    async def upsert_source_episode(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        _ = args, kwargs
+        raise AssertionError('source write not expected in entity race tests')
+
+
+@pytest.mark.asyncio
+async def test_gap_cr01_write_status_from_row_error_never_falls_back_to_updated():
+    row = {
+        'status': 'error',
+        'error_code': CatalogErrorCode.deterministic_uuid_conflict.value,
+        'uuid': 'u',
+    }
+    status = CatalogService._write_status_from_row(row, 'created')
+    assert status != 'updated'
+    assert status != 'created'
+
+
+@pytest.mark.asyncio
+async def test_gap_cr01_atomic_route_race_rolls_back_typed_conflict():
+    winner = _entity(
+        graph_key='TABLE::FE::ORCL.HR.RACE',
+        name_raw='RACE_WIN',
+        name_canonical='race_win',
+        summary='winner',
+        database_qualified_name='ORCL.HR.RACE',
+    )
+    loser = _entity(
+        graph_key='TABLE::FE::ORCL.HR.RACE',
+        name_raw='RACE_LOSE',
+        name_canonical='race_lose',
+        summary='loser',
+        database_qualified_name='ORCL.HR.RACE',
+    )
+    store = _RaceEntityStore(loser_name_raw=loser.name_raw)
+    client_a = _make_client()
+    client_b = _make_client()
+    service_a = CatalogService(catalog_config=_enabled_config())
+    service_b = CatalogService(catalog_config=_enabled_config())
+    service_a._store = store  # type: ignore[method-assign]
+    service_b._store = store  # type: ignore[method-assign]
+    service_a._ensure_schema = AsyncMock()  # type: ignore[method-assign]
+    service_b._ensure_schema = AsyncMock()  # type: ignore[method-assign]
+
+    req_a = _request([winner], batch_id='race-a')
+    req_b = _request([loser], batch_id='race-b')
+    task_a = asyncio.create_task(service_a.upsert_typed_entities(client=client_a, request=req_a))
+    task_b = asyncio.create_task(service_b.upsert_typed_entities(client=client_b, request=req_b))
+    await store._both_pre_read.wait()
+    # Loser remains pending at MERGE until winner commits.
+    await store._loser_at_merge.wait()
+    assert not task_b.done() or not task_a.done()
+    results = await asyncio.gather(task_a, task_b)
+    statuses = [r.results[0].status for r in results]
+    codes = [r.results[0].error_code for r in results]
+    success = [s for s in statuses if s in ('created', 'updated', 'unchanged')]
+    assert len(success) == 1
+    assert any(c == CatalogErrorCode.deterministic_uuid_conflict for c in codes)
+    assert all(c != CatalogErrorCode.neo4j_transaction_failed for c in codes if c is not None)
+    assert len(store.entities) == 1
+    stored = next(iter(store.entities.values()))
+    if stored['name_raw'] == winner.name_raw:
+        assert stored['name_canonical'] == winner.name_canonical
+        assert stored['summary'] == winner.summary
+    else:
+        assert stored['name_canonical'] == loser.name_canonical
+        assert stored['summary'] == loser.summary
+    assert any(cp.startswith('merge_commit:') for cp in store.checkpoints)
+
+
+@pytest.mark.asyncio
+async def test_gap_cr01_per_item_route_returns_exact_conflict_not_tx_failed():
+    from datetime import datetime, timezone
+
+    from services.catalog_service import _PreparedEntity
+
+    loser = _entity(
+        graph_key='TABLE::FE::ORCL.HR.RACE2',
+        name_raw='L',
+        name_canonical='l',
+        summary='loser',
+        database_qualified_name='ORCL.HR.RACE2',
+    )
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._ensure_schema = AsyncMock()  # type: ignore[method-assign]
+    service._store.get_entity_by_uuid = AsyncMock(return_value=None)
+    ent_uuid = catalog_entity_uuid(FIXED_NS, GROUP, loser.entity_type, loser.graph_key)
+    service._store.upsert_entity_item = AsyncMock(
+        return_value={
+            'uuid': ent_uuid,
+            'status': 'error',
+            'error_code': CatalogErrorCode.deterministic_uuid_conflict.value,
+            'name': 'TABLE::FE::ORCL.HR.RACE2',
+            'graph_key': 'TABLE::FE::ORCL.HR.RACE2',
+            'name_raw': 'W',
+            'name_canonical': 'w',
+            'content_sha256': 'a' * 64,
+            'summary': 'winner',
+            'has_name_embedding': True,
+        }
+    )
+    prep = _PreparedEntity(
+        index=0,
+        item=loser,
+        entity_uuid=ent_uuid,
+        content_sha256=canonical_sha256(service.entity_canonical_payload(loser)),
+        projected_status='created',
+        name_embedding=[0.1, 0.2, 0.3],
+    )
+    req = _request([loser], batch_id='l1')
+    resp = await service._write_per_item(
+        client,
+        req,
+        [prep],
+        {},
+        datetime.now(timezone.utc),
+    )
+    assert resp.results[0].status == 'error'
+    assert resp.results[0].error_code == CatalogErrorCode.deterministic_uuid_conflict
+    assert resp.results[0].error_code != CatalogErrorCode.neo4j_transaction_failed
+
+
+@pytest.mark.asyncio
+async def test_gap_cr01_combined_batch_rolls_back_and_returns_typed_conflict():
+    winner = _entity(
+        graph_key='TABLE::FE::ORCL.HR.RACE3',
+        name_raw='W',
+        name_canonical='w',
+        summary='winner',
+        database_qualified_name='ORCL.HR.RACE3',
+    )
+    loser = _entity(
+        graph_key='TABLE::FE::ORCL.HR.RACE3',
+        name_raw='L',
+        name_canonical='l',
+        summary='loser',
+        database_qualified_name='ORCL.HR.RACE3',
+    )
+    store = _RaceEntityStore()
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store = store  # type: ignore[method-assign]
+    service._ensure_schema = AsyncMock()  # type: ignore[method-assign]
+
+    # Seed winner under lock so batch loser hits MERGE conflict row, not preflight only.
+    await service.upsert_typed_entities(client=client, request=_request([winner], batch_id='seed'))
+    store.batch_status_writes.clear()
+    # Force batch pre-read to treat entity as absent so write path reaches MERGE.
+    original_get = store.get_entity_by_uuid
+
+    async def _absent_pre_read(executor, *, uuid, group_id, tx=None):
+        if tx is None:
+            return None
+        return await original_get(executor, uuid=uuid, group_id=group_id, tx=tx)
+
+    store.get_entity_by_uuid = _absent_pre_read  # type: ignore[method-assign]
+
+    batch_req = UpsertCatalogBatchRequest(
+        identity_schema_version='catalog-v2',
+        system_key='FE',
+        group_id=GROUP,
+        batch_id='batch-race',
+        entities=[loser],
+        catalog_sha256='a' * 64,
+    )
+    resp = await service.upsert_catalog_batch(client=client, request=batch_req)
+    assert resp.status == 'failed'
+    assert resp.error_code == CatalogErrorCode.deterministic_uuid_conflict
+    assert resp.error_code != CatalogErrorCode.neo4j_transaction_failed
+    assert any(w.get('status') == 'failed' for w in store.batch_status_writes)
+    stored = next(iter(store.entities.values()))
+    assert stored['name_raw'] == winner.name_raw
+    assert stored['summary'] == winner.summary
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 SAFE-04/06 service boundary proofs (05-02 GREEN)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_phase5_same_batch_endpoint_union_no_extra_creation():
+    """SAFE-04: same-batch endpoints resolve from request entity union only."""
+    employee = _entity()
+    department = _entity(
+        graph_key='TABLE::FE::ORCL.HR.DEPARTMENTS',
+        name_raw='DEPARTMENTS',
+        name_canonical='departments',
+        database_qualified_name='ORCL.HR.DEPARTMENTS',
+        summary='Department master table',
+    )
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+    resp = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(
+            entities=[employee, department],
+            edges=[_edge()],
+            dry_run=True,
+        ),
+    )
+    assert resp.dry_run is True
+    assert resp.failed == 0
+    cast(AsyncMock, service._store.resolve_endpoint_typed).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_entity_item).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_edge_item).assert_not_awaited()
+    cast(AsyncMock, service._store.upsert_batch_status).assert_not_awaited()
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_phase5_missing_endpoint_structured_error_zero_writes():
+    """SAFE-04: missing persisted endpoints return missing_endpoint; zero writes."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.resolve_endpoint_typed = AsyncMock(return_value=('missing_endpoint', None))
+    service._store.upsert_edge_item = AsyncMock()
+    service._store.upsert_entity_item = AsyncMock()
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+    assert any(r.error_code == CatalogErrorCode.missing_endpoint for r in resp.results)
+    assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+    service._store.upsert_edge_item.assert_not_awaited()
+    service._store.upsert_entity_item.assert_not_awaited()
+    client.embedder.create.assert_not_awaited()
+
+    service2 = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service2)
+    batch_resp = await service2.upsert_catalog_batch(
+        client=_make_client(),
+        request=_batch_request(entities=[], edges=[_edge()]),
+    )
+    assert batch_resp.error_code in (
+        CatalogErrorCode.missing_endpoint,
+        CatalogErrorCode.batch_conflict,
+    )
+    cast(AsyncMock, service2._store.upsert_entity_item).assert_not_awaited()
+    cast(AsyncMock, service2._store.upsert_edge_item).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_phase5_fail_closed_conflict_no_silent_merge():
+    """SAFE-06: conflict paths return structured codes; zero silent repair/merge."""
+    client = _make_client()
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service)
+
+    mismatch = await service.upsert_catalog_batch(
+        client=client,
+        request=_batch_request(request_sha256='b' * 64),
+    )
+    assert mismatch.error_code == CatalogErrorCode.content_hash_mismatch
+    cast(AsyncMock, service._store.upsert_entity_item).assert_not_awaited()
+
+    service2 = CatalogService(catalog_config=_enabled_config())
+    _wire_batch_preflight(service2)
+    dup = await service2.upsert_catalog_batch(
+        client=_make_client(),
+        request=_batch_request(
+            entities=[_entity(summary='first'), _entity(summary='second')],
+        ),
+    )
+    assert dup.error_code == CatalogErrorCode.batch_conflict
+    assert all(r.error_code == CatalogErrorCode.deterministic_uuid_conflict for r in dup.results)
+    cast(AsyncMock, service2._store.upsert_entity_item).assert_not_awaited()
+    cast(AsyncMock, service2._store.upsert_edge_item).assert_not_awaited()

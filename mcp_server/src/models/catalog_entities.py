@@ -5,23 +5,29 @@ from __future__ import annotations
 import math
 import re
 import uuid
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, StrictInt, StrictStr, field_validator, model_validator
 
 from models.catalog_common import (
     ENTITY_TYPE_PREFIXES,
     HARD_MAX_EDGES_PER_BATCH,
     HARD_MAX_ENTITIES_PER_BATCH,
     MAX_ATTRIBUTE_KEYS,
+    MAX_EVIDENCE_LENGTH,
     MAX_GRAPH_KEY_LENGTH,
     MAX_SHORT_STRING_LENGTH,
     MAX_SOURCE_REFS,
     MAX_SUMMARY_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
+    CatalogStrictModel,
+    StrictTrue,
+    SystemKey,
     validate_nested_json,
 )
+from models.catalog_evidence import CatalogEvidenceEdgeTarget, CatalogEvidenceEntityTarget
+from models.catalog_graph_key import validate_entity_graph_key_at
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -39,7 +45,19 @@ def _require_non_empty_str(v: str, field_name: str) -> str:
     return v
 
 
-class CatalogEntityItem(BaseModel):
+class CatalogSourceRef(CatalogStrictModel):
+    """Exact source evidence reference for a catalog entity."""
+
+    document_id: StrictStr | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_SHORT_STRING_LENGTH,
+    )
+    page: StrictInt = Field(..., gt=0)
+    raw_text: StrictStr = Field(..., max_length=MAX_EVIDENCE_LENGTH)
+
+
+class CatalogEntityItem(CatalogStrictModel):
     """Single typed catalog entity for upsert/resolve."""
 
     entity_type: str
@@ -49,7 +67,7 @@ class CatalogEntityItem(BaseModel):
     database_qualified_name: str = Field(..., min_length=1, max_length=MAX_GRAPH_KEY_LENGTH)
     summary: str = Field(..., min_length=1, max_length=MAX_SUMMARY_LENGTH)
     attributes: dict[str, Any] | None = None
-    source_refs: list[Any] | None = None
+    source_refs: list[CatalogSourceRef] | None = Field(default=None, max_length=MAX_SOURCE_REFS)
     content_sha256: str | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
@@ -87,16 +105,6 @@ class CatalogEntityItem(BaseModel):
         validate_nested_json(v, 'attributes')
         return v
 
-    @field_validator('source_refs')
-    @classmethod
-    def _validate_source_refs(cls, v: list[Any] | None) -> list[Any] | None:
-        if v is None:
-            return v
-        if len(v) > MAX_SOURCE_REFS:
-            raise ValueError(f'source_refs exceed max ({MAX_SOURCE_REFS})')
-        validate_nested_json(v, 'source_refs')
-        return v
-
     @field_validator('confidence')
     @classmethod
     def _finite_confidence(cls, v: float | None) -> float | None:
@@ -107,16 +115,18 @@ class CatalogEntityItem(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def _graph_key_prefix(self) -> CatalogEntityItem:
-        prefix = ENTITY_TYPE_PREFIXES[self.entity_type]
-        if not self.graph_key.startswith(prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: {self.entity_type} requires prefix {prefix}'
-            )
+    def _graph_key_grammar(self) -> CatalogEntityItem:
+        # Shell-less: fullmatch only; parent re-validates against shell system_key.
+        validate_entity_graph_key_at(
+            entity_type=self.entity_type,
+            graph_key=self.graph_key,
+            title=type(self).__name__,
+            loc=('graph_key',),
+        )
         return self
 
 
-class ResolveEntityRef(BaseModel):
+class ResolveEntityRef(CatalogStrictModel):
     """Minimal entity identity for resolve_typed_entities."""
 
     entity_type: str
@@ -130,25 +140,28 @@ class ResolveEntityRef(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def _graph_key_prefix(self) -> ResolveEntityRef:
-        prefix = ENTITY_TYPE_PREFIXES[self.entity_type]
-        if not self.graph_key.startswith(prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: {self.entity_type} requires prefix {prefix}'
-            )
+    def _graph_key_grammar(self) -> ResolveEntityRef:
+        validate_entity_graph_key_at(
+            entity_type=self.entity_type,
+            graph_key=self.graph_key,
+            title=type(self).__name__,
+            loc=('graph_key',),
+        )
         return self
 
 
-class UpsertTypedEntitiesRequest(BaseModel):
+class UpsertTypedEntitiesRequest(CatalogStrictModel):
     """Request for upsert_typed_entities. No excluded_entity_types field."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     entities: list[CatalogEntityItem] = Field(
         ..., min_length=1, max_length=HARD_MAX_ENTITIES_PER_BATCH
     )
     dry_run: bool = False
-    atomic: bool = True
+    atomic: StrictTrue = True
 
     @field_validator('group_id')
     @classmethod
@@ -158,15 +171,28 @@ class UpsertTypedEntitiesRequest(BaseModel):
         _validate_group_id(v)
         return v
 
+    @model_validator(mode='after')
+    def _nested_graph_keys_match_shell_system(self) -> UpsertTypedEntitiesRequest:
+        for index, item in enumerate(self.entities):
+            validate_entity_graph_key_at(
+                entity_type=item.entity_type,
+                graph_key=item.graph_key,
+                system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entities', index, 'graph_key'),
+            )
+        return self
 
-class ResolveTypedEntitiesRequest(BaseModel):
+
+class ResolveTypedEntitiesRequest(CatalogStrictModel):
     """Request for resolve_typed_entities (read-only)."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     entities: list[ResolveEntityRef] = Field(
-        default_factory=list, max_length=HARD_MAX_ENTITIES_PER_BATCH
+        ..., min_length=1, max_length=HARD_MAX_ENTITIES_PER_BATCH
     )
-    graph_keys: list[str] | None = Field(default=None, max_length=HARD_MAX_ENTITIES_PER_BATCH)
 
     @field_validator('group_id')
     @classmethod
@@ -176,8 +202,20 @@ class ResolveTypedEntitiesRequest(BaseModel):
         _validate_group_id(v)
         return v
 
+    @model_validator(mode='after')
+    def _nested_graph_keys_match_shell_system(self) -> ResolveTypedEntitiesRequest:
+        for index, item in enumerate(self.entities):
+            validate_entity_graph_key_at(
+                entity_type=item.entity_type,
+                graph_key=item.graph_key,
+                system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entities', index, 'graph_key'),
+            )
+        return self
 
-class VerifyEntityRef(BaseModel):
+
+class VerifyEntityRef(CatalogStrictModel):
     """Optional explicit entity key for verify_catalog_batch."""
 
     entity_type: str
@@ -191,26 +229,21 @@ class VerifyEntityRef(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def _graph_key_prefix(self) -> VerifyEntityRef:
-        prefix = ENTITY_TYPE_PREFIXES[self.entity_type]
-        if not self.graph_key.startswith(prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: {self.entity_type} requires prefix {prefix}'
-            )
+    def _graph_key_grammar(self) -> VerifyEntityRef:
+        validate_entity_graph_key_at(
+            entity_type=self.entity_type,
+            graph_key=self.graph_key,
+            title=type(self).__name__,
+            loc=('graph_key',),
+        )
         return self
 
 
-class VerifyEdgeRef(BaseModel):
-    """Optional explicit edge key and expected endpoints for verify_catalog_batch."""
+class VerifyEdgeRef(CatalogStrictModel):
+    """Optional explicit edge key and expected endpoint UUIDs for verify_catalog_batch."""
 
     edge_type: str
     edge_key: str = Field(..., min_length=1, max_length=MAX_GRAPH_KEY_LENGTH)
-    expected_source_graph_key: str | None = Field(
-        default=None, min_length=1, max_length=MAX_GRAPH_KEY_LENGTH
-    )
-    expected_target_graph_key: str | None = Field(
-        default=None, min_length=1, max_length=MAX_GRAPH_KEY_LENGTH
-    )
     expected_source_uuid: str | None = Field(default=None, min_length=1)
     expected_target_uuid: str | None = Field(default=None, min_length=1)
 
@@ -234,9 +267,11 @@ class VerifyEdgeRef(BaseModel):
             raise ValueError('expected endpoint UUID must be valid') from exc
 
 
-class VerifyCatalogBatchRequest(BaseModel):
+class VerifyCatalogBatchRequest(CatalogStrictModel):
     """Request for verify_catalog_batch (read-only)."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     batch_id: str | None = Field(default=None, max_length=MAX_SHORT_STRING_LENGTH)
     entities: list[VerifyEntityRef] = Field(
@@ -254,7 +289,117 @@ class VerifyCatalogBatchRequest(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def _require_scope(self) -> VerifyCatalogBatchRequest:
+    def _require_scope_and_system(self) -> VerifyCatalogBatchRequest:
         if not self.batch_id and not self.entities and not self.edges:
             raise ValueError('verify requires batch_id and/or explicit entity/edge keys')
+        for index, item in enumerate(self.entities):
+            validate_entity_graph_key_at(
+                entity_type=item.entity_type,
+                graph_key=item.graph_key,
+                system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entities', index, 'graph_key'),
+            )
         return self
+
+
+class ResolveEdgeRef(CatalogStrictModel):
+    """Minimal edge identity for resolve_typed_edges (RESE-01)."""
+
+    edge_type: str
+    edge_key: str = Field(..., min_length=1, max_length=MAX_GRAPH_KEY_LENGTH)
+
+    @field_validator('edge_type')
+    @classmethod
+    def _edge_type_allowlisted(cls, v: str) -> str:
+        from models.catalog_common import CATALOG_EDGE_TYPES
+
+        if v not in CATALOG_EDGE_TYPES:
+            raise ValueError(f'edge_type not allowlisted: {v}')
+        return v
+
+    @field_validator('edge_key')
+    @classmethod
+    def _non_empty_edge_key(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError('edge_key must be a non-empty string')
+        return v
+
+
+class ResolveTypedEdgesRequest(CatalogStrictModel):
+    """Request for resolve_typed_edges (read-only, RESE-01..03)."""
+
+    identity_schema_version: Literal['catalog-v2']
+    system_key: SystemKey
+    group_id: str = Field(..., min_length=1)
+    edges: list[ResolveEdgeRef] = Field(..., min_length=1, max_length=HARD_MAX_EDGES_PER_BATCH)
+
+    @field_validator('group_id')
+    @classmethod
+    def _validate_group_id_field(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('group_id is required and must be non-empty')
+        _validate_group_id(v)
+        return v
+
+
+class GetCatalogEvidenceRequest(CatalogStrictModel):
+    """Request for get_catalog_evidence (read-only, EVID-12).
+
+    Exactly one of entity_target or edge_target is required. Pagination is
+    offset/limit over stable uuid order; limit defaults at the service layer.
+    """
+
+    group_id: str = Field(..., min_length=1)
+    identity_schema_version: Literal['catalog-v2'] = 'catalog-v2'
+    system_key: SystemKey
+    entity_target: CatalogEvidenceEntityTarget | None = None
+    edge_target: CatalogEvidenceEdgeTarget | None = None
+    offset: int = Field(default=0, ge=0)
+    limit: int | None = Field(default=None, ge=1)
+    include_excerpts: bool = False
+
+    @field_validator('group_id')
+    @classmethod
+    def _validate_group_id_field(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('group_id is required and must be non-empty')
+        _validate_group_id(v)
+        return v
+
+    @model_validator(mode='after')
+    def _exactly_one_target_and_validate(self) -> GetCatalogEvidenceRequest:
+        has_entity = self.entity_target is not None
+        has_edge = self.edge_target is not None
+        if has_entity == has_edge:
+            raise ValueError('exactly one of entity_target or edge_target is required')
+        if self.entity_target is not None:
+            validate_entity_graph_key_at(
+                entity_type=self.entity_target.entity_type,
+                graph_key=self.entity_target.graph_key,
+                system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entity_target', 'graph_key'),
+            )
+        return self
+
+
+class GetCatalogBatchManifestRequest(CatalogStrictModel):
+    """Request for get_catalog_batch_manifest (read-only, MANI-05).
+
+    Pagination is offset/limit over durable Phase 3B category order.
+    Limit defaults to configured max_page_size when omitted at the service layer.
+    """
+
+    group_id: str = Field(..., min_length=1)
+    batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
+    offset: int = Field(default=0, ge=0)
+    limit: int | None = Field(default=None, ge=1)
+
+    @field_validator('group_id')
+    @classmethod
+    def _validate_group_id_field(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('group_id is required and must be non-empty')
+        _validate_group_id(v)
+        return v

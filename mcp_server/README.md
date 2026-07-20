@@ -568,28 +568,30 @@ For HTTP transport (default), you can use this configuration:
 
 ## Available Tools
 
-The Graphiti MCP server exposes the following tools:
+The Graphiti MCP server exposes **28 total** tools: **14 legacy** semantic-memory tools plus **14 catalog-v2** deterministic tools. Catalog tools are additive; legacy tool names, parameters, and behavior remain frozen.
+
+### Legacy tool inventory (14)
 
 - `add_memory`: Add an episode to the knowledge graph (supports text, JSON, and message formats).
   Supports the bi-temporal `reference_time`, `excluded_entity_types`, `custom_extraction_instructions`,
   `previous_episode_uuids`, `update_communities`, and `saga` / `saga_previous_episode_uuid`.
-- `add_triplet`: Add a single fact (source entity -> fact -> target entity) directly, bypassing extraction.
 - `search_nodes`: Search the knowledge graph for relevant entities; supports `entity_types` and `center_node_uuid`.
 - `search_memory_facts`: Search for relevant facts (edges); supports `edge_types`, `center_node_uuid`,
   and `valid_at` / `invalid_at` date-range filters.
-- `summarize_saga`: Generate or refresh the running summary of a saga's episodes.
-- `build_communities`: Detect entity communities and produce higher-level community summaries.
-- `get_episode_entities`: Trace provenance — the entities and facts created by specific episode UUIDs.
-- `delete_entity_edge`: Delete an entity edge from the knowledge graph.
-- `delete_episode`: Delete an episode and cascade-delete the entities/facts it solely created.
+- `add_triplet`: Add a single fact (source entity -> fact -> target entity) directly, bypassing extraction.
 - `get_entity_edge`: Get an entity edge by its UUID.
+- `get_episodes`: Get the most recent episodes for a specific group.
+- `get_episode_entities`: Trace provenance — the entities and facts created by specific episode UUIDs.
 - `update_entity`: Directly repair an existing entity's name, summary, attributes, or labels by UUID.
   Attributes merge with existing values; labels replace existing custom labels. Neo4j label replacement is
   transactional; FalkorDB uses its supported literal-label `REMOVE` syntax. The entity UUID, group,
   creation time, and embedding are not caller-editable; renaming regenerates the embedding automatically.
   This administrative operation does not create episode provenance or temporal history, so prefer
   `add_memory` for normal knowledge corrections.
-- `get_episodes`: Get the most recent episodes for a specific group.
+- `build_communities`: Detect entity communities and produce higher-level community summaries.
+- `summarize_saga`: Generate or refresh the running summary of a saga's episodes.
+- `delete_episode`: Delete an episode and cascade-delete the entities/facts it solely created.
+- `delete_entity_edge`: Delete an entity edge from the knowledge graph.
 - `clear_graph`: Clear all data from the knowledge graph for the given group(s).
 - `get_status`: Get the status of the Graphiti MCP server and database connection.
 
@@ -597,241 +599,405 @@ Custom entity types and edge (fact) types — including which edge types may con
 can be configured under the `graphiti` section of `config/config.yaml`. See the `entity_types`,
 `edge_types`, and `edge_type_map` keys there.
 
-## Deterministic Catalog Ingestion (Neo4j Only)
+### Catalog tool inventory (14)
 
 > [!WARNING]
-> These seven catalog tools are an administrative structured-ingestion surface for trusted PDF-catalog,
-> DDL, Oracle-dictionary, and SQL-parser pipelines. They write synchronously and return only after commit,
-> rollback, or a structured error. Keep them disabled unless an operator has approved the source, target
-> `group_id`, fixed UUID namespace, allowlists, and batch limits. The implementation supports Neo4j 5.26+
-> only; other backends return `backend_unavailable`.
+> Catalog tools are an administrative structured-ingestion surface for trusted PDF-catalog, DDL,
+> Oracle-dictionary, and SQL-parser pipelines. They write synchronously and return only after commit,
+> rollback, or a structured error. Keep writes disabled unless an operator has approved the source,
+> target `group_id`, fixed UUID namespace, allowlists, and batch limits. **Catalog tools support
+> Neo4j 5.26+ only**; other backends return `backend_unavailable`. No non-Neo4j portability claim is made.
 
-### Seven catalog tools
+Stable catalog tool inventory:
 
-The catalog tools have a stable documented order:
+1. `upsert_typed_entities` — validate and synchronously upsert allowlisted typed entities. Server derives UUIDv5 identities; embeds searchable text before the write transaction; never accepts caller UUIDs as identity authority.
+2. `upsert_typed_edges` — validate and synchronously upsert allowlisted facts between exact typed endpoints. Endpoints must already exist; no implicit create/relabel.
+3. `resolve_typed_entities` — read-only. Resolve expected typed entities; report missing, generic, duplicate, mistyped, UUID-mismatch, and missing-embedding conditions without writing or embedding.
+4. `resolve_typed_edges` — read-only. Resolve expected typed edges and endpoint pairing conditions without writing.
+5. `verify_catalog_batch` — read-only. Verify entity, edge, endpoint, embedding, and optional provenance/manifest expectations by batch ID, explicit keys, or both.
+6. `upsert_provenance` — attach deterministic sources to existing targets using installed Graphiti provenance shapes. Missing/mistyped target → `provenance_target_missing` with no partial write.
+7. `get_catalog_ingest_status` — read-only. The caller supplies `group_id` + `batch_id`; the server derives the deterministic batch UUID internally and loads restart-safe state from a non-`Entity` `CatalogIngestBatch` node.
+8. `get_catalog_batch_manifest` — read-only. Paginated durable membership projection for a committed batch (compact identity + content hashes only; never embeddings, payload, or credentials).
+9. `get_catalog_evidence` — read-only. Paginated compact evidence links for one entity or edge target.
+10. `upsert_catalog_batch` — validate a complete nested request, resolve same-request and persisted endpoints, create all embeddings before one domain transaction, then commit entities/edges/provenance/status atomically. Requires `atomic=true`. Kept for compatibility; **not** the preferred large-payload path.
+11. `get_catalog_capabilities` — read-only. Mutation-free discovery of gates, versions, registries, limits, and feature flags. Never returns the raw UUID namespace (only a one-way `namespace_fingerprint` when configured).
+12. `prepare_catalog_batch` — validate full catalog-v2 domain body, embed, store an immutable prepared plan, return one-time `plan_token` + hashes/counts/expiry. Preferred first step for large payloads.
+13. `commit_prepared_catalog_batch` — **token-only** commit of a prepared plan (`plan_token` + optional compare-only `expected_request_sha256`). No replacement payload.
+14. `discard_prepared_catalog_batch` — **token-only** discard of a prepared plan.
 
-1. `upsert_typed_entities` validates and synchronously upserts allowlisted typed entities. The server
-   derives UUIDv5 identities, embeds searchable text before opening the write transaction, and never
-   accepts caller UUIDs as identity authority.
-2. `upsert_typed_edges` validates and synchronously upserts allowlisted facts between exact typed
-   endpoints. Endpoints must already exist; the tool never creates or relabels them implicitly.
-3. `resolve_typed_entities` is read-only. It resolves expected typed entities and reports missing,
-   generic, duplicate, mistyped, UUID-mismatch, and missing-embedding conditions without writing or
-   embedding.
-4. `verify_catalog_batch` is read-only. It verifies entity, edge, endpoint, embedding, and optional
-   provenance expectations by batch ID, explicit keys, or both.
-5. `upsert_provenance` synchronously attaches deterministic sources to existing targets using installed
-   Graphiti provenance shapes. A missing or mistyped target returns `provenance_target_missing` with no
-   partial write.
-6. `get_catalog_ingest_status` is read-only. It loads restart-safe state from a non-`Entity`
-   `CatalogIngestBatch` node scoped by `group_id` and deterministic batch UUID.
-7. `upsert_catalog_batch` validates a complete nested request, resolves same-request and persisted
-   endpoints, creates all entity and edge embeddings before opening one domain transaction, then commits
-   entities, edges, provenance, and committed status atomically. It requires `atomic=true`.
+All catalog tools require catalog configuration to be loadable. Write tools additionally require `catalog_upsert.enabled=true` and a valid fixed namespace. Every request is isolated by its validated `group_id`.
 
-All seven require catalog configuration even though the two resolve/verify tools and status lookup are
-read-only. Every request is isolated by its validated `group_id`.
+## Catalog-v2 Operator Reference
 
-### Required configuration
+Migration and offline canary regeneration: see [`docs/CATALOG_V2_MIGRATION.md`](docs/CATALOG_V2_MIGRATION.md).
+
+### Preferred large-payload path
+
+For large or agent-driven catalog batches, prefer:
+
+1. `prepare_catalog_batch` with the full catalog-v2 domain body (`identity_schema_version`, `system_key`, `group_id`, `batch_id`, entities/edges/provenance, required `catalog_sha256`, optional client `request_sha256`, `atomic=true` only).
+2. `commit_prepared_catalog_batch` with **only** `plan_token` (and optional `expected_request_sha256` compare guard). No entities/edges/sources/evidence/catalog_sha256/group/batch replacement is accepted on commit.
+3. On abandon before commit: `discard_prepared_catalog_batch` with `plan_token` only.
+
+Direct tools (`upsert_typed_entities`, `upsert_typed_edges`, `upsert_provenance`, `upsert_catalog_batch`) remain for compatibility and small administrative fixes. Operator policy does not approve them as the hardened canary procedure; regenerated canary work uses the preferred prepare/commit path after separate authorization.
+
+#### Identity schema and system keys
+
+- `identity_schema_version` must be exactly `catalog-v2`. Other values → `unsupported_identity_schema`.
+- `system_key` is a closed set: `FE`, `BO`, `COMMON`.
+- **FE/BO single-group guidance:** keep FE and BO catalog objects in one group_id. `system_key` and the embedded graph-key system segment keep otherwise-identical Oracle names distinct. Each request/batch has one `system_key`, so ingest FE and BO as separate batches within that same group. `COMMON` is explicit shared ownership, never a fallback for ambiguous ownership. Every entity/edge endpoint `graph_key` must embed the same `system_key` as the request shell.
+- Server derives all UUIDv5 identities from the configured namespace + canonical material. Caller UUIDs are never identity authority.
+- Canonicalization version: `catalog-canonical-v1`. Catalog schema version: `catalog-schema-v1`.
+
+### Catalog-v2 graph-key grammar and group scope
+
+All entity `graph_key` values fullmatch a server registry. Form:
+
+```text
+<PREFIX>::<SYSTEM>::<body>
+```
+
+- `<PREFIX>` comes from the entity-type prefix table below (exact, including trailing `::`).
+- `<SYSTEM>` is exactly one of `FE`, `BO`, `COMMON` and must equal request `system_key` when the shell supplies one.
+- Body segments use uppercase Oracle-ish identifiers `[A-Z][A-Z0-9_$#]*` unless noted. No NFC rewrite, no case folding, fail-closed.
+- Max length: 1024 characters.
+
+| Entity type | Prefix | Body pattern (after `PREFIX::{SYSTEM}::`) |
+|---|---|---|
+| `System` | `SYSTEM::` | `<IDENT>` |
+| `Database` | `DATABASE::` | `<IDENT>` |
+| `DictionaryDocument` | `DOC::` | `<IDENT>.<IDENT>` |
+| `Schema` | `SCHEMA::` | `<IDENT>.<IDENT>` |
+| `Table` | `TABLE::` | `<IDENT>.<IDENT>.<IDENT>` |
+| `View` | `VIEW::` | `<IDENT>.<IDENT>.<IDENT>` |
+| `MaterializedView` | `MVIEW::` | `<IDENT>.<IDENT>.<IDENT>` |
+| `Column` | `COLUMN::` | `<IDENT>.<IDENT>.<IDENT>.<IDENT>` |
+| `Constraint` | `CONSTRAINT::` | `<IDENT>.<IDENT>.<IDENT>` |
+| `Index` | `INDEX::` | `<IDENT>.<IDENT>.<IDENT>` |
+| `Package` | `PACKAGE::` | `<IDENT>.<IDENT>.<IDENT>` |
+| `Procedure` | `PROCEDURE::` | `<DB>.<SCHEMA>.(<PACKAGE>.)?<NAME>#<OVERLOAD>` |
+| `Function` | `FUNCTION::` | `<DB>.<SCHEMA>.(<PACKAGE>.)?<NAME>#<OVERLOAD>` |
+| `Trigger` | `TRIGGER::` | `<IDENT>.<IDENT>.<IDENT>` |
+| `Sequence` | `SEQUENCE::` | `<IDENT>.<IDENT>.<IDENT>` |
+| `Synonym` | `SYNONYM::` | `<IDENT>.<IDENT>.<IDENT>` |
+| `DatabaseLink` | `DBLINK::` | `<IDENT>.<IDENT>` |
+| `SourceArtifact` | `SOURCE::` | path-ish `[A-Za-z0-9._\-/\#]+` (no spaces) |
+
+Examples:
+
+```text
+TABLE::FE::APP.SALES.ORDERS
+COLUMN::BO::APP.SALES.ORDERS.ORDER_ID
+PROCEDURE::FE::APP.SALES.PKG_ORDERS.PLACE_ORDER#1
+FUNCTION::COMMON::APP.UTIL.F_HASH#VARCHAR2
+SOURCE::FE::ddl/app/sales/orders.sql
+```
+
+#### Overload handling
+
+- `Procedure` and `Function` keys **require** an overload token after `#`.
+- Overload token pattern: nonempty `[A-Za-z0-9_$,#()]+` (no rewrite).
+- Distinct overload tokens produce distinct graph keys and therefore distinct server UUIDv5 identities.
+- Callers must supply the exact overload token from the source catalog/DDL/parser; the server does not invent, normalize, or collapse overloads.
+
+### Entity and edge registries
+
+#### Entity registry (18 types)
+
+`System`, `Database`, `DictionaryDocument`, `Schema`, `Table`, `View`, `MaterializedView`, `Column`, `Constraint`, `Index`, `Package`, `Procedure`, `Function`, `Trigger`, `Sequence`, `Synonym`, `DatabaseLink`, `SourceArtifact`.
+
+Protected entity properties (cannot be supplied via `attributes`): `uuid`, `group_id`, `labels`, `graph_key`, `name_embedding`, `created_at`, `updated_at`, `content_sha256`.
+
+#### Edge registry (16 types)
+
+`Contains`, `PrimaryKeyOf`, `UniqueKeyOf`, `ForeignKeyTo`, `EnforcedBy`, `TriggerOn`, `SynonymFor`, `DocumentedBy`, `Calls`, `ReadsFrom`, `WritesTo`, `JoinsWith`, `ReferencesByCode`, `DependsOn`, `DerivedFrom`, `UsesSequence`.
+
+`EnforcedBy` requires explicit DDL or Oracle-dictionary evidence. Deferred types (`LikelyReferencesTo`, `MapsTo`, `SynchronizesTo`) are intentionally absent.
+
+### Endpoint type map
+
+A single server-owned endpoint map is authoritative. Illegal pairs return `edge_endpoint_pair_not_allowed`. Client-supplied maps are never accepted.
+
+| Edge type | Allowed `(source_entity_type → target_entity_type)` pairs |
+|---|---|
+| `Contains` | `System→Database`; `Database→Schema`; `Database→DatabaseLink`; `Schema→{Table,View,MaterializedView,Package,Procedure,Function,Trigger,Sequence,Synonym,Index,Constraint,SourceArtifact}`; `Table→Column`; `View→Column`; `MaterializedView→Column`; `Package→Procedure`; `Package→Function`; `DictionaryDocument→SourceArtifact` |
+| `PrimaryKeyOf` | `Constraint→Table`; `Constraint→Column` |
+| `UniqueKeyOf` | `Constraint→Table`; `Constraint→Column` |
+| `ForeignKeyTo` | `Column→Column`; `Table→Table` |
+| `EnforcedBy` | `Constraint→Table`; `Constraint→Column` |
+| `TriggerOn` | `Trigger→Table`; `Trigger→View`; `Trigger→MaterializedView` |
+| `SynonymFor` | `Synonym→{Table,View,MaterializedView,Sequence,Procedure,Function,Package,Synonym}` |
+| `DocumentedBy` | every allowlisted entity type → `DictionaryDocument` or `SourceArtifact` |
+| `Calls` | `{Procedure,Function,Trigger,Package} → {Procedure,Function,Package}` |
+| `ReadsFrom` | `{Procedure,Function,Trigger,Package,View,MaterializedView} → {Table,View,MaterializedView,Column,Synonym}` |
+| `WritesTo` | `{Procedure,Function,Trigger,Package} → {Table,Column,View,MaterializedView,Synonym}` |
+| `JoinsWith` | `{Table,View,MaterializedView,Column} × same set` |
+| `ReferencesByCode` | `{Package,Procedure,Function,Trigger,SourceArtifact} → {Table,View,MaterializedView,Column,Sequence,Synonym,Package,Procedure,Function}` |
+| `DependsOn` | union of `Contains` ∪ `Calls` ∪ `ReadsFrom` ∪ `WritesTo` pairs |
+| `DerivedFrom` | `{View,MaterializedView,SourceArtifact} → {Table,View,MaterializedView,Column,SourceArtifact}` |
+| `UsesSequence` | `{Procedure,Function,Trigger,Package,View,MaterializedView} → Sequence` |
+
+Live authoritative export: `get_catalog_capabilities` → `endpoint_map`.
+
+### Hash contracts
+
+Server is the only hash authority. All digests are 64-character lowercase hex SHA-256.
+
+**Entity `content_sha256` includes:** `entity_type`, `graph_key`, `name_raw`, `name_canonical`, `database_qualified_name`, `summary`, `attributes`, `source_refs`, `confidence`.
+
+**Edge `content_sha256` includes:** `edge_type`, `edge_key`, source/target graph keys and entity types, `fact`, `evidence`, `attributes`, `confidence`.
+
+**Source `content_sha256` includes:** `source_key`, `reference_time`, `attributes`, `metadata`.
+
+**Evidence `link_key` identity excludes** transport-only `content_sha256`, excerpt, and confidence; material is `source_key|target_kind|target_type|target_key|evidence_kind|extractor_name|extractor_version|rule_id|locator_canonical`.
+
+**Evidence content hash includes** excerpt bytes, confidence, and nested targets/locator; excludes client transport-only `content_sha256`.
+
+**Batch `request_sha256` includes (HASH-02):** `canonicalization_version`, `identity_schema_version`, `system_key`, `group_id`, `batch_id`, `catalog_sha256`, sorted entities/edges/sources/evidence_links (evidence post byte-identical coalesce).
+
+**Batch `request_sha256` excludes (HASH-03):** `dry_run`, caller-supplied `request_sha256`, generated timestamps, retry counters, plan tokens, and correlation IDs. Embeddings are outside the canonical request recipe.
+
+If the client supplies `content_sha256` / `request_sha256` / `expected_request_sha256`, mismatch → `content_hash_mismatch` (compare-only; never identity authority).
+
+### Capabilities contract
+
+`get_catalog_capabilities` returns these read-only response fields:
+
+| Field | Meaning |
+|---|---|
+| `package_version` | MCP server package version |
+| `backend` | Graph backend name when known (`neo4j`, etc.) |
+| `connectivity` | `ok` \| `error` \| `unknown` — already-initialized client only |
+| `catalog_writes_enabled` | `catalog_upsert.enabled` |
+| `catalog_reads_enabled` | `catalog_upsert.reads_enabled` |
+| `uuid_namespace_configured` | whether a parseable namespace is configured |
+| `namespace_fingerprint` | one-way 16-hex SHA-256 prefix; **never** the raw namespace |
+| `identity_schema_version` | `catalog-v2` |
+| `canonicalization_version` | `catalog-canonical-v1` |
+| `catalog_schema_version` | `catalog-schema-v1` |
+| `entity_types` / `entity_prefixes` | sorted registry |
+| `edge_types` | sorted registry |
+| `endpoint_map` | sorted allowed pairs per edge type |
+| `limits.configured` | configured batch, prepared-payload, active-plan, TTL, chunk-size, and page ceilings |
+| `limits.hard` | exported hard batch, prepared-payload, active-plan, TTL, and page ceilings; chunk-size/chunk-count hard constants are not exported here |
+| `embeddings` | provider/model/ready (see readiness rules below) |
+| `neo4j_indexes` | legacy field name: Catalog-v2 uniqueness-constraint readiness (`ready` \| `unknown` \| `n/a`) |
+| `features.prepare_commit` | prepare/commit control plane available |
+| `features.explicit_evidence_links` | non-Cartesian evidence links available |
+| `features.manifests` | durable manifests co-committed |
+| `features.manifest_verification` | manifest-backed verify path available |
+
+#### Truthful readiness probes (mutation-free)
+
+`get_catalog_capabilities` reports evidence-backed readiness when a Graphiti client is already initialized. It uses `require_initialized_client` only — **never** `get_client`, `initialize`, `build_indices_and_constraints`, `ensure_*`, embed generation, LLM, or queue enqueue. Probe timeout is pinned at **2.0s**.
+
+| Signal | When | How | States |
+|---|---|---|---|
+| `connectivity` | backend `neo4j` + initialized client | raw Neo4j driver `verify_connectivity()` | `ok` on success; `error` on raise/timeout; `unknown` if service/client uninitialized |
+| `neo4j_indexes` | backend `neo4j` + initialized client | read-only `SHOW CONSTRAINTS` inspection over the **14** required Catalog-v2 uniqueness constraints (legacy field name — product has **no** Catalog-v2-specific indexes) | `ready` only when all 14 present with exact shape; missing/uninitialized/`SHOW` failure → `unknown`; non-neo4j → `n/a` |
+| `embeddings.ready` | embedder provider `ollama` + configured `api_url` | HTTP `GET {api_url}/api/tags` only (never `/api/embed`, never `embedder.create`) | tags 200 + configured model present (strip/casefold; bare name also matches `name:latest`) → `ready`; tags 200 + model absent → `error`; request fail/timeout/non-200 → `error`; non-ollama or missing api_url → `unknown` |
+
+Required uniqueness constraints (14 names; field `neo4j_indexes` means this full set):
+
+1. `catalog_entity_identity_unique`
+2. `catalog_relates_to_identity_unique`
+3. `catalog_episodic_identity_unique`
+4. `catalog_mentions_identity_unique`
+5. `catalog_batch_identity_unique`
+6. `catalog_prepared_plan_identity_unique`
+7. `catalog_prepared_plan_token_digest_unique`
+8. `catalog_prepared_plan_chunk_identity_unique`
+9. `catalog_prepared_plan_chunk_index_unique`
+10. `catalog_evidence_link_identity_unique`
+11. `catalog_evidence_link_key_unique`
+12. `catalog_batch_manifest_identity_unique`
+13. `catalog_batch_manifest_chunk_identity_unique`
+14. `catalog_batch_manifest_chunk_index_unique`
+
+Capabilities never probe with writes, never CREATE/DROP/ALTER/ensure schema, and never return secrets, the raw UUID namespace, passwords, API keys, raw Neo4j URIs (`bolt://`, `neo4j://`), or raw embedder `api_url`.
+
+### Prepare, commit, and discard lifecycle
+
+Plan states: `PREPARED`, `COMMITTING`, `COMMITTED`, `DISCARDED`, `EXPIRED`.
+
+1. **prepare** — full validation + pre-transaction embeddings + immutable plan store → one-time `plan_token`, `plan_uuid`, `request_sha256`, `catalog_sha256`, `artifact_sha256`, `expires_at`, counts/projections. Receipt never includes canonical payload, membership, or embeddings.
+2. **commit** — claim token, compare optional `expected_request_sha256`, commit domain objects + status + durable manifest atomically (or roll back). Receipt includes plan/state/hashes/counts/`manifest_sha256`/`batch_uuid`; never returns `plan_token`, membership, payload, or embeddings.
+3. **discard** — token-only terminal discard before commit.
+4. Matching commit replay may return the stable `COMMITTED` receipt without rewriting domain data; repeated discard is idempotent. Commit after discard returns `prepared_plan_not_found`. Discard while `COMMITTING` or after `COMMITTED` returns `prepared_plan_conflict`. TTL exceeded returns `prepared_plan_expired`; binding/state conflicts return `prepared_plan_conflict`; contradictory or incomplete terminal evidence may return `prepared_plan_already_consumed`.
+
+### Limits and overload handling
+
+| Limit | Default | Hard max |
+|---|---:|---:|
+| entities per batch | 500 | 5000 |
+| edges per batch | 2000 | 10000 |
+| provenance links per batch | 5000 | 20000 |
+| plan TTL (seconds) | 3600 | 86400 |
+| prepared payload bytes | 4_194_304 (4 MiB) | 16_777_216 (16 MiB) |
+| prepared chunk bytes | 131_072 | 262_144 |
+| chunks per plan | — | 128 |
+| active plans per group | 8 | 32 |
+| diagnostic page size | 100 | 500 |
+| short string | — | 512 |
+| graph_key / edge_key | — | 1024 |
+| summary / fact | — | 4096 |
+| evidence excerpt | — | 8192 |
+| attribute keys | — | 64 |
+| source refs | — | 32 |
+| nested JSON depth / nodes | — | 32 / 10000 |
+
+Configured values may be lower than hard max; requests above the effective limit fail before persistent side effects (`batch_limit_exceeded`).
+
+### Explicit evidence links
+
+Evidence is **non-Cartesian**: each `CatalogEvidenceLink` names exactly one source and exactly one target (entity **or** edge).
+
+Allowed `evidence_kind`: `oracle_dictionary`, `ddl`, `view_sql`, `plsql_source`, `comment`, `manual`.
+
+Entity-target example:
+
+```json
+{
+  "source_key": "SOURCE::FE::ddl/app/sales/orders.sql",
+  "entity_target": {
+    "entity_type": "Table",
+    "graph_key": "TABLE::FE::APP.SALES.ORDERS"
+  },
+  "evidence_kind": "ddl",
+  "locator": {"object_name": "ORDERS", "start_line": 10, "end_line": 40},
+  "excerpt": "CREATE TABLE APP.SALES.ORDERS ( ... )",
+  "extractor_name": "ddl-parser",
+  "extractor_version": "1.0.0",
+  "rule_id": "table-from-create",
+  "confidence": 1.0
+}
+```
+
+Edge-target example:
+
+```json
+{
+  "source_key": "SOURCE::FE::ddl/app/sales/orders.sql",
+  "edge_target": {
+    "edge_type": "Contains",
+    "edge_key": "CONTAINS::TABLE::FE::APP.SALES.ORDERS->COLUMN::FE::APP.SALES.ORDERS.ORDER_ID"
+  },
+  "evidence_kind": "ddl",
+  "extractor_name": "ddl-parser",
+  "extractor_version": "1.0.0",
+  "confidence": 1.0
+}
+```
+
+Read back with `get_catalog_evidence` (paginated compact projection).
+
+### Manifest semantics
+
+- On successful atomic commit, a durable **manifest** is co-committed with compact membership for entities, edges, sources, and evidence links (uuid + type/key + `content_sha256` + optional projected status).
+- Manifests never store embeddings, `payload_b64`, source text, or credentials.
+- `get_catalog_batch_manifest` returns paginated compact membership plus `request_sha256` / `catalog_sha256` / `artifact_sha256` / `manifest_sha256` and schema/canon versions when found.
+- `verify_catalog_batch` can compare live graph state against expected keys and/or committed manifest membership (manifest mismatch → `manifest_mismatch`).
+
+### Read and write gates
+
+| Gate | Config field | Default | Controls |
+|---|---|---|---|
+| Write gate | `catalog_upsert.enabled` | `false` | prepare/commit and all catalog write tools |
+| Read gate | `catalog_upsert.reads_enabled` | `true` | resolve/verify/status/manifest/evidence reads |
+
+Gates are independent: reads do not require writes enabled. `get_catalog_capabilities` remains available regardless of `reads_enabled` because it is a mutation-free config view. Disabled write → `feature_disabled`. Non-Neo4j backend on catalog write path → `backend_unavailable`.
+
+### Catalog error codes
+
+Every structured catalog failure uses one of these codes (do not parse exception text as API contract):
+
+| Code | Typical cause |
+|---|---|
+| `validation_error` | Request failed strict schema/validation |
+| `feature_disabled` | Catalog writes (or required feature) disabled |
+| `invalid_uuid_namespace` | Namespace missing/invalid when writes enabled |
+| `batch_limit_exceeded` | Entities/edges/links/page/payload above effective limit |
+| `content_hash_mismatch` | Client hash does not match server digest |
+| `entity_type_conflict` | Same key claimed under conflicting entity types |
+| `graph_key_prefix_mismatch` | Prefix does not match entity type (legacy mismatch path) |
+| `deterministic_uuid_conflict` | Server UUID collides with different identity material |
+| `missing_endpoint` | Edge endpoint entity not present |
+| `endpoint_type_mismatch` | Endpoint exists with wrong type |
+| `generic_endpoint_conflict` | Generic/untyped endpoint conflicts with typed catalog object |
+| `edge_identity_conflict` | Edge identity collision / conflicting fact identity |
+| `batch_conflict` | Committed `batch_id` reused with different content |
+| `provenance_target_missing` | Provenance target missing or mistyped |
+| `neo4j_transaction_failed` | Neo4j transaction aborted |
+| `embedding_failed` | Embedder failed before write transaction |
+| `internal_error` | Unexpected server failure (bounded message) |
+| `backend_unavailable` | Non-Neo4j or backend not usable for catalog |
+| `unsupported_identity_schema` | `identity_schema_version` ≠ `catalog-v2` |
+| `invalid_system_key` | `system_key` / embedded system segment not in `{FE,BO,COMMON}` or mismatch |
+| `edge_endpoint_pair_not_allowed` | Edge type forbids that source/target entity pair |
+| `prepared_plan_not_found` | Unknown `plan_token` / plan |
+| `prepared_plan_expired` | Plan past TTL |
+| `prepared_plan_conflict` | Plan binding/state conflict |
+| `prepared_plan_already_consumed` | Contradictory or incomplete terminal plan evidence prevents a stable receipt |
+| `manifest_mismatch` | Live/expected membership disagrees with durable manifest |
+| `provenance_link_conflict` | Evidence/provenance link identity conflict |
+
+### Rollout configuration
 
 ```yaml
-# config.yaml or a Kubernetes ConfigMap data entry; no credentials belong here.
+# config.yaml or ConfigMap data; credentials do not belong here.
 catalog_upsert:
-  enabled: true
+  enabled: false                 # write gate; default off
+  reads_enabled: true            # read/diagnostic gate; independent of writes
   uuid_namespace: ${GRAPHITI_CATALOG_UUID_NAMESPACE}
   max_entities_per_batch: 500
   max_edges_per_batch: 2000
   max_provenance_links_per_batch: 5000
+  plan_ttl_seconds: 3600
+  max_prepared_payload_bytes: 4194304
+  max_active_plans_per_group: 8
+  prepared_chunk_bytes: 131072
+  max_page_size: 100
 ```
 
-```yaml
-# Kubernetes workload environment excerpt. Secret values and database credentials are omitted.
-env:
-  - name: GRAPHITI_CATALOG_UUID_NAMESPACE
-    valueFrom:
-      configMapKeyRef:
-        name: graphiti-catalog-config
-        key: GRAPHITI_CATALOG_UUID_NAMESPACE
-  - name: CONFIG_PATH
-    value: /app/config/config.yaml
-```
+Environment / config keys (names only; never commit secret values):
 
-`catalog_upsert.enabled` defaults to `false`. `GRAPHITI_CATALOG_UUID_NAMESPACE` must be a fixed valid UUID
-when catalog writes are enabled. It is immutable deployment configuration: changing it changes every
-server-derived entity, edge, source, MENTIONS-link, and batch identity. Never generate it at startup,
-rotate it during a retry, or accept a namespace from a catalog request.
+| Name | Role |
+|---|---|
+| `GRAPHITI_CATALOG_UUID_NAMESPACE` | Fixed UUIDv5 namespace for all catalog identities (immutable deployment config) |
+| `CONFIG_PATH` | Path to YAML config |
+| `catalog_upsert.enabled` | Write gate |
+| `catalog_upsert.reads_enabled` | Read gate |
+| `catalog_upsert.uuid_namespace` | YAML form of the namespace (or via env expansion) |
+| `catalog_upsert.max_entities_per_batch` | Configured entity ceiling |
+| `catalog_upsert.max_edges_per_batch` | Configured edge ceiling |
+| `catalog_upsert.max_provenance_links_per_batch` | Configured provenance/evidence link ceiling |
+| `catalog_upsert.plan_ttl_seconds` | Prepared-plan TTL |
+| `catalog_upsert.max_prepared_payload_bytes` | Prepared payload ceiling |
+| `catalog_upsert.max_active_plans_per_group` | Concurrent plan ceiling per `group_id` |
+| `catalog_upsert.prepared_chunk_bytes` | Prepared artifact chunk size |
+| `catalog_upsert.max_page_size` | Diagnostic list page ceiling |
 
-The defaults are 500 entities, 2,000 edges, and 5,000 provenance links per batch. Lower deployment limits
-are allowed. Requests above the configured limit fail before persistent side effects.
-
-### Server-owned allowlists
-
-Client values never become Cypher labels or property names. Supported entity types and required
-`graph_key` prefixes are:
-
-| Entity type | Prefix | Entity type | Prefix | Entity type | Prefix |
-|---|---|---|---|---|---|
-| `Database` | `DATABASE::` | `DictionaryDocument` | `DOC::` | `Schema` | `SCHEMA::` |
-| `Table` | `TABLE::` | `View` | `VIEW::` | `MaterializedView` | `MVIEW::` |
-| `Column` | `COLUMN::` | `Constraint` | `CONSTRAINT::` | `Index` | `INDEX::` |
-| `Package` | `PACKAGE::` | `Procedure` | `PROCEDURE::` | `Function` | `FUNCTION::` |
-| `Trigger` | `TRIGGER::` | `Sequence` | `SEQUENCE::` | `Synonym` | `SYNONYM::` |
-
-Supported edge types are `Contains`, `PrimaryKeyOf`, `UniqueKeyOf`, `ForeignKeyTo`, `EnforcedBy`,
-`TriggerOn`, `SynonymFor`, `DocumentedBy`, `Calls`, `ReadsFrom`, `WritesTo`, `JoinsWith`,
-`ReferencesByCode`, `DependsOn`, `DerivedFrom`, and `UsesSequence`. `EnforcedBy` requires explicit DDL or
-Oracle-dictionary evidence. Protected entity properties such as `uuid`, `group_id`, labels, graph key,
-embeddings, timestamps, and content hash cannot be supplied through `attributes`.
-
-### Identity, idempotency, atomicity, and errors
-
-The server derives UUIDv5 values from the configured namespace and canonical identity strings; mutable
-payloads receive canonical 64-character lowercase SHA-256 hashes. Identical retries return `unchanged` and
-preserve one logical object. Changed mutable content updates in place while preserving identity and
-`created_at`. Reusing a committed `batch_id` with different content returns `batch_conflict` without domain
-mutation. If supplied, `content_sha256` or `request_sha256` must match the server's canonical hash.
-
-Primitive entity, edge, and provenance requests honor their documented atomic request behavior. The
-combined `upsert_catalog_batch` accepts only `atomic=true`: after full validation and pre-transaction
-embedding, one Neo4j transaction commits every domain object plus committed status, or rolls everything
-back. A write failure may persist only bounded, sanitized `failed` status in a separate safe transaction.
-Dry runs perform planning and conflict checks without domain or status writes.
-
-Expected failures use structured codes including `validation_error`, `feature_disabled`,
-`invalid_uuid_namespace`, `batch_limit_exceeded`, `content_hash_mismatch`, `entity_type_conflict`,
-`graph_key_prefix_mismatch`, `deterministic_uuid_conflict`, `missing_endpoint`,
-`endpoint_type_mismatch`, `generic_endpoint_conflict`, `edge_identity_conflict`, `batch_conflict`,
-`provenance_target_missing`, `neo4j_transaction_failed`, `embedding_failed`, `internal_error`, and
-`backend_unavailable`. Do not parse exception text as an API contract.
+`GRAPHITI_CATALOG_UUID_NAMESPACE` must be a fixed valid UUID when writes are enabled. Changing it changes every primary server-derived entity, edge, source, evidence-link, batch, manifest, and plan identity; mention and related control IDs change indirectly because they derive from those UUIDs. Never generate it at startup, rotate it during a retry, accept it from a catalog request, or log/print its value in operator docs.
 
 ### Semantic memory versus deterministic catalog ingestion
 
-Use `add_memory` for semantic ingestion of prose, messages, or loosely structured JSON. It queues an
-asynchronous episode and uses the configured LLM to extract, deduplicate, summarize, and evolve the graph.
+Use `add_memory` for semantic ingestion of prose, messages, or loosely structured JSON. It queues an asynchronous episode and uses the configured LLM to extract, deduplicate, summarize, and evolve the graph.
 
-Use the seven catalog tools for trusted PDF-catalog, DDL, Oracle-dictionary, or SQL-parser output where
-identity, type, endpoints, hash, and commit boundaries must be exact. These tools bypass `add_memory`, LLM
-extraction, and the ingestion queue. Entity and edge embeddings still use the configured embedder before
-writes so existing search remains interoperable.
-
-### Sanitized ACCEPT_TAB batch
-
-This synthetic sample contains no production catalog text or credentials. The server derives all UUIDs and
-hashes; callers omit them.
-
-```json
-{
-  "group_id": "oracle-catalog-tool-test",
-  "batch_id": "accept-tab-batch-001",
-  "entities": [
-    {
-      "entity_type": "Table",
-      "graph_key": "TABLE::APP.ACCEPT_TAB",
-      "name_raw": "ACCEPT_TAB",
-      "name_canonical": "accept_tab",
-      "database_qualified_name": "APP.ACCEPT_TAB",
-      "summary": "Synthetic acceptance table",
-      "attributes": {"fixture": "sanitized"},
-      "confidence": 1.0
-    },
-    {
-      "entity_type": "Column",
-      "graph_key": "COLUMN::APP.ACCEPT_TAB.ACCEPT_ID",
-      "name_raw": "ACCEPT_ID",
-      "name_canonical": "accept_id",
-      "database_qualified_name": "APP.ACCEPT_TAB.ACCEPT_ID",
-      "summary": "Synthetic acceptance identifier column",
-      "attributes": {"fixture": "sanitized", "ordinal": 1},
-      "confidence": 1.0
-    },
-    {
-      "entity_type": "Table",
-      "graph_key": "TABLE::APP.ACCEPT_PARENT",
-      "name_raw": "ACCEPT_PARENT",
-      "name_canonical": "accept_parent",
-      "database_qualified_name": "APP.ACCEPT_PARENT",
-      "summary": "Synthetic referenced parent table",
-      "attributes": {"fixture": "sanitized"},
-      "confidence": 1.0
-    }
-  ],
-  "edges": [
-    {
-      "edge_type": "Contains",
-      "edge_key": "CONTAINS::TABLE::APP.ACCEPT_TAB->COLUMN::APP.ACCEPT_TAB.ACCEPT_ID",
-      "source_graph_key": "TABLE::APP.ACCEPT_TAB",
-      "source_entity_type": "Table",
-      "target_graph_key": "COLUMN::APP.ACCEPT_TAB.ACCEPT_ID",
-      "target_entity_type": "Column",
-      "fact": "ACCEPT_TAB contains ACCEPT_ID",
-      "attributes": {"fixture": "sanitized"},
-      "confidence": 1.0
-    },
-    {
-      "edge_type": "ForeignKeyTo",
-      "edge_key": "FK::APP.ACCEPT_TAB.ACCEPT_ID->APP.ACCEPT_PARENT.ACCEPT_ID",
-      "source_graph_key": "TABLE::APP.ACCEPT_TAB",
-      "source_entity_type": "Table",
-      "target_graph_key": "TABLE::APP.ACCEPT_PARENT",
-      "target_entity_type": "Table",
-      "fact": "ACCEPT_TAB.ACCEPT_ID references ACCEPT_PARENT.ACCEPT_ID",
-      "attributes": {"fixture": "sanitized"},
-      "confidence": 1.0
-    }
-  ],
-  "provenance": {
-    "sources": [{
-      "source_key": "SOURCE::SYNTHETIC.ACCEPT_TAB.DDL#1",
-      "reference_time": "2026-01-01T00:00:00Z",
-      "attributes": {"fixture": "sanitized"},
-      "metadata": {"format": "synthetic-ddl"}
-    }],
-    "entity_targets": [
-      {"entity_type": "Table", "graph_key": "TABLE::APP.ACCEPT_TAB"},
-      {"entity_type": "Column", "graph_key": "COLUMN::APP.ACCEPT_TAB.ACCEPT_ID"},
-      {"entity_type": "Table", "graph_key": "TABLE::APP.ACCEPT_PARENT"}
-    ],
-    "edge_targets": [
-      {
-        "edge_type": "Contains",
-        "edge_key": "CONTAINS::TABLE::APP.ACCEPT_TAB->COLUMN::APP.ACCEPT_TAB.ACCEPT_ID"
-      },
-      {
-        "edge_type": "ForeignKeyTo",
-        "edge_key": "FK::APP.ACCEPT_TAB.ACCEPT_ID->APP.ACCEPT_PARENT.ACCEPT_ID"
-      }
-    ]
-  },
-  "dry_run": false,
-  "atomic": true
-}
-```
+Use catalog tools for trusted PDF-catalog, DDL, Oracle-dictionary, or SQL-parser output where identity, type, endpoints, hash, and commit boundaries must be exact. These tools bypass `add_memory`, LLM extraction, and the ingestion queue. Entity and edge embeddings still use the configured embedder before writes so existing search remains interoperable.
 
 ### Graphiti and Neo4j provenance limits
 
-A deterministic source is an installed-schema `Episodic` node. Entity provenance uses deterministic
-`MENTIONS` relationships. Neo4j cannot attach a relationship directly to another relationship without a
-new schema object, so fact provenance appends source episode UUIDs to the existing `RELATES_TO.episodes`
-list. This is the closest compatible Graphiti representation; it does not claim a separate relationship-
-to-relationship provenance edge.
+A deterministic source is an installed-schema `Episodic` node. Entity provenance uses deterministic `MENTIONS` relationships. Neo4j cannot attach a relationship directly to another relationship without a new schema object, so fact provenance appends source episode UUIDs to the existing `RELATES_TO.episodes` list. Catalog-v2 additionally persists explicit non-`Entity` `CatalogEvidenceLink` control records that target exact entities or edges; these are not relationship-to-relationship provenance edges.
 
-Catalog batch status uses only the `CatalogIngestBatch` label, never `Entity`, so normal entity search and
-community clustering exclude it. Normal catalog upserts are community-neutral: they never invoke
-`build_communities`. Run that existing maintenance tool explicitly after a separately approved ingest when
-community summaries are desired.
+Catalog batch status uses only the `CatalogIngestBatch` label, never `Entity`, so normal entity search and community clustering exclude it. Control-plane prepared-plan and manifest records are likewise non-`Entity`. Normal catalog upserts are community-neutral: they never invoke `build_communities`.
 
-### Rollout and rollback guidance
+### Catalog safety and backend scope
 
-Before rollout, validate the fixed namespace and allowlists, set conservative limits, list MCP schemas,
-exercise a dry run in a fresh non-production group, then restart the MCP workload so configuration changes
-are loaded. Do not use `oracle-catalog-v2` for validation. A production canary requires separate approval.
-
-After a committed batch, re-run the identical request to confirm `unchanged`, query
-`get_catalog_ingest_status`, then run `verify_catalog_batch`. On failure, inspect only structured codes and
-bounded status summaries; correct the input or configuration and retry the same `batch_id` only with
-identical content. If content must change after a committed batch, use a new `batch_id`. Roll back the MCP
-application/configuration to the prior image and namespace; never change the namespace to undo data, run
-`clear_graph`, or delete existing catalog objects as part of this procedure.
+- Catalog backend claim: **Neo4j 5.26+ only**.
+- Do not query or mutate `oracle-catalog-v2` for validation or Phase 5 work.
+- Do not treat historical canary files or old ACCEPT_TAB SHA values as identity authority; see migration guide.
+- Log batch IDs and counts only — never credentials, complete catalog payloads, raw documents, or complete source text.
+- Phase 5 never executes canary. This reference does not authorize deployment, live canary execution, graph clear, or existing-data deletion as catalog rollout steps.
 
 ## Working with JSON Data
 

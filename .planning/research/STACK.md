@@ -1,329 +1,319 @@
 # Stack Research
 
-**Domain:** Deterministic catalog-ingestion tools on existing Graphiti MCP + Neo4j
-**Researched:** 2026-07-16
+**Domain:** Catalog-v2 pre-canary hardening (deterministic MCP catalog layer)
+**Researched:** 2026-07-17
 **Confidence:** HIGH
+**Milestone:** v1.1 — subsequent to shipped v1.0 typed primitives
+
+## Verdict
+
+**Add zero new runtime dependencies.** Harden with already-installed Pydantic 2.11.x, Neo4j 5.26+/driver 5.28.x, stdlib (`uuid`, `hashlib`, `hmac`, `secrets`, `json`, `datetime`, `re`, `asyncio`), and existing `CatalogNeo4jStore` / `CatalogService` / FastMCP surface.
+
+v1.0 already delivered seven tools, UUIDv5, SHA-256, allowlists, embeddings-before-tx, dry-run/atomic, provenance, and `CatalogIngestBatch` status. v1.1 is **contract and control-plane hardening**, not a stack rewrite.
 
 ## Recommended Stack
 
-Use the **already-installed** MCP server stack. Add no runtime packages for Phase 1–2 catalog upserts. Prefer stdlib + installed Graphiti/Neo4j primitives. Milestone is Neo4j-only for write path; do not claim multi-backend support.
+### Core Technologies (unchanged — reuse)
 
-### Core Technologies
-
-| Technology | Version (locked / required) | Purpose | Why Recommended |
-|------------|----------------------------|---------|-----------------|
-| Python | `>=3.10,<4` (images 3.11/3.12) | Runtime | Entire monorepo is async Python; MCP + Graphiti APIs are `async` |
-| `uv` | `0.8.15` in standalone Docker; lockfile-driven | Install / lock | Existing package manager; `mcp_server/uv.lock` is source of truth |
-| `mcp` (FastMCP) | **1.27.2** (`>=1.27.2,<2`) | MCP tool surface | Existing server uses `from mcp.server.fastmcp import FastMCP`; register new tools with `@mcp.tool()` only |
-| `graphiti-core` | **0.29.2** (`>=0.29.2`, PyPI wheel in lock) | Graph models, embedder, search recipes | Same version as root library; models `EntityNode`/`EntityEdge`/`EpisodicNode`, hybrid search, Neo4j driver |
-| `neo4j` (Python driver) | **5.28.1** (req `>=5.26.0`) | Async Bolt driver | Official driver; `Neo4jDriver` wraps `AsyncGraphDatabase`; real `transaction()` |
-| Neo4j server | **5.26.0** image (`neo4j:5.26.0` compose); **5.26+** required | Graph DB | Project constraint; vector property procs + MERGE upserts used by Graphiti |
-| Pydantic | **2.11.7** (req `>=2.11.5`) | Request/response models | Validation, allowlists, protected fields; matches Graphiti node/edge models |
-| `pydantic-settings` | **2.10.1** | Config | Existing `GraphitiConfig` YAML + env merge; extend for catalog UUID namespace |
-| `openai` | **2.43.0** (MCP req `>=2.41.0`) | Default embedder transport | Embeddings only for catalog tools — **no LLM calls** |
-| `pyyaml` | **6.0.3** | Config load | Existing YAML configs under `mcp_server/config/` |
+| Technology | Version (verified in worktree) | Purpose | Why for v1.1 |
+|------------|--------------------------------|---------|--------------|
+| Python | `>=3.10,<4` (runtime 3.10.20 checked) | Runtime | Keep 3.10 min; no 3.11-only APIs (`enum.StrEnum` already polyfilled) |
+| `uv` + `mcp_server/uv.lock` | lockfile-driven | Install truth | Do not hand-edit versions; no new deps → no lock churn |
+| `mcp` (FastMCP) | **1.27.2** (`>=1.27.2,<2`) | Tool registration | Additive tools only; same `@mcp.tool()` pattern |
+| `graphiti-core` | **0.29.2** | Embedder + search interop | Catalog writes stay off `EntityNode.save` / queue / LLM |
+| `neo4j` driver | **5.28.1** (req `>=5.26.0`) | Async Bolt + real txs | Control-plane + domain writes via `tx.run` |
+| Neo4j server | **5.26+** (compose `neo4j:5.26.0`) | Graph storage | Composite UNIQUE, MERGE, parameterized Cypher only |
+| Pydantic | **2.11.7** (req `>=2.11.5`) | Strict recursive contracts | `ConfigDict(extra='forbid')` on **every** nested model |
+| `pydantic-settings` | **2.10.1** | CatalogConfig gates | Split read/write flags without new config libs |
+| `openai` (embedder transport) | **2.43.0** range | Embeddings only | Still no LLM extraction for catalog tools |
+| `pyyaml` | **6.0.3** | YAML config | Existing `${VAR}` expansion |
 
 ### Supporting Libraries (already present — reuse)
 
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `python-dotenv` | (via graphiti-core) | `.env` load | Server boot only; catalog tools read config via `GraphitiConfig` |
-| `tenacity` | (via graphiti-core) | Retries in LLM clients | **Do not use** for catalog writes; fail and return structured error |
-| `httpx` | **0.28.1** | HTTP in MCP/tests | Integration tests against MCP HTTP transport |
-| `typing-extensions` | **4.14.0** | `TypedDict` on <3.12 | Response types (`models/response_types.py` pattern) |
-| `starlette` / `uvicorn` | **1.3.1** / **0.34.3** (MCP transitive) | HTTP transport | Existing MCP HTTP path; no FastAPI addition in MCP package |
-| `falkordb` | **1.2.0** (optional extra) | Alternate backend | **Out of milestone write path**; leave factory branches untouched |
+| Library | Version | Purpose | When for v1.1 |
+|---------|---------|---------|---------------|
+| stdlib `uuid` | 3.10 | UUIDv5 identities + FE/BO/COMMON name material | Extend identity strings; never caller UUID authority |
+| stdlib `hashlib` | 3.10 | SHA-256 canonical audit | Combined batch/manifest hashes |
+| stdlib `hmac` + `secrets` | 3.10 | Opaque prepare/commit tokens | `secrets.token_urlsafe(32)`; store **hash only**; `hmac.compare_digest` on verify |
+| stdlib `json` | 3.10 | Canonical dumps + nested serialization | Existing `sort_keys=True, separators=(',', ':')` |
+| stdlib `datetime` (UTC) | 3.10 | `expires_at`, `prepared_at`, `committed_at` | Bounded plan TTL; no external scheduler |
+| `typing-extensions` | locked | TypedDict on <3.12 | Response shapes only if needed |
+| `httpx` (dev) | **0.28.1** | MCP HTTP tests | Gate-split / tool-list tests |
+| `tenacity` | via graphiti-core | LLM retries | **Do not** wrap catalog writes |
 
-### Development Tools
+### Development Tools (unchanged)
 
-| Tool | Locked version | Purpose | Notes |
-|------|----------------|---------|-------|
-| pytest | **9.0.3** | Unit + Neo4j integration | Markers: `unit`, `integration`, `requires_neo4j`; follow `mcp_server/tests/` |
-| pytest-asyncio | **1.4.0** | Async tests | Use existing async fixtures pattern |
-| pytest-timeout | **2.4.0** | Hang protection | Integration tests against Neo4j |
-| pytest-xdist | (dev group `>=3.8.0`) | Parallel unit only | Avoid parallel Neo4j write tests on shared group |
-| ruff | **0.15.18** | Format + lint | line-length 100, single quotes; `make format` / `ruff` |
-| pyright | **1.1.408** | Typecheck | `typeCheckingMode = "basic"` for mcp_server |
-| faker | **40.23.0** | Synthetic data | Optional; prefer fixed catalog fixtures for determinism |
-| psutil | (dev) | Stress tests | Not required for catalog tools |
+| Tool | Locked | Purpose | Notes |
+|------|--------|---------|-------|
+| pytest | **9.0.3** | Unit/service/store/MCP/live | Markers: unit, integration, requires_neo4j |
+| pytest-asyncio | **1.4.0** | Async fixtures | Existing patterns |
+| pytest-timeout | **2.4.0** | Hang protection | Live Neo4j |
+| pytest-xdist | dev group | Parallel **unit** only | Never parallelize shared-group Neo4j writes |
+| ruff | **0.15.x** | Format/lint | line-length 100, single quotes |
+| pyright | **1.1.408** | basic typecheck | mcp_server mode |
+| faker | **40.x** | Optional noise | Prefer fixed fixtures for determinism |
 
-## Exact APIs to Use (prescriptive)
+## Exact Mechanisms for v1.1 Scope
 
-### MCP registration
+### 1. Strict recursive Pydantic contracts
 
-- Server: `mcp = FastMCP('Graphiti Agent Memory', instructions=...)` in `mcp_server/src/graphiti_mcp_server.py`
-- New tools: same `@mcp.tool()` async functions; return Pydantic/`TypedDict` responses + `ErrorResponse`
-- Do **not** introduce a second MCP app or FastAPI router in the MCP package
-- Keep tools **synchronous from caller POV**: `await` Neo4j commit before return (unlike `add_memory` → `QueueService`)
-
-### Graphiti client construction (reuse existing)
+**Use (installed):**
 
 ```python
-# Existing path — GraphitiService.initialize()
-Graphiti(
-    uri=db_config['uri'],
-    user=db_config['user'],
-    password=db_config['password'],
-    llm_client=llm_client,      # may be None; catalog writes must not call it
-    embedder=embedder_client,   # required for name/fact embeddings
-    max_coroutines=semaphore_limit,
-)
-await client.build_indices_and_constraints()
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+class CatalogStrictModel(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',          # reject unknown fields
+        strict=True,             # no str→int / truthy coercion at trust boundary
+        validate_assignment=True # immutable-feeling flags stay valid after setattr
+        # frozen=True optional for pure value objects (identity refs, endpoint maps)
+    )
 ```
 
-- Neo4j path uses URI ctor (not `graph_driver=`). Falkor path remains for other deployments; **catalog write code must gate on Neo4j** and return `feature_disabled` / clear error if not Neo4j.
-- Factory: `DatabaseDriverFactory.create_config`, `EmbedderFactory.create` — already in `services/factories.py`.
+**Contract note (v1.1):** Catalog-v2 **intentionally breaks** seven deterministic request identity/provenance/hash contracts where required. Preserve MCP **tool names** and legacy semantic tools; do **not** claim catalog-v1 request payloads remain accepted. Capabilities work whenever server initialization succeeds, even if catalog writes are disabled.
 
-### Models for domain objects
+**Critical fact (verified against Pydantic docs + local 2.11.7):**
+- `extra='forbid'` is **per-model**. Outer forbid does **not** cascade into nested models.
+- `revalidate_instances` also does **not** propagate to nested models.
+- Every nested request model (`CatalogEntityItem`, edge items, provenance targets, prepare plan body, evidence links, manifest sections) must declare its own `model_config`.
 
-| Model | Module | Key fields for catalog |
-|-------|--------|------------------------|
-| `EntityNode` | `graphiti_core.nodes` | `uuid`, `name`, `group_id`, `labels`, `created_at`, `name_embedding`, `summary`, `attributes` |
-| `EntityEdge` | `graphiti_core.edges` | `uuid`, `name` (edge type), `fact`, `group_id`, `source_node_uuid`, `target_node_uuid`, `fact_embedding`, `episodes`, `valid_at`/`invalid_at`/`expired_at`, `reference_time`, `attributes`, `created_at` |
-| `EpisodicNode` | `graphiti_core.nodes` | Provenance (Phase 2): `source=EpisodeType`, `content`, `valid_at`, `entity_edges`, `source_description` |
-| `EpisodicEdge` | `graphiti_core.edges` | `MENTIONS` episode→entity; save via installed query |
-| `SearchFilters` | `graphiti_core.search.search_filters` | `node_labels`, `edge_types`, date filters, `edge_uuids` |
-| `EpisodeType` | `graphiti_core.nodes` | `text` / `json` / `message` / `fact_triple` |
+**Current gap:** `mcp_server/src/models/catalog_*.py` use bare `BaseModel` (default `extra='ignore'`). v1.1 must set forbid/strict on the full tree and add unit tests for nested extras + type coercion.
 
-**Identity rule (project):** server UUIDv5 only — never treat caller UUID as authority. Store `graph_key`, `entity_type`/`edge_type`, content hash in **attributes** (or dedicated properties via custom Cypher), not by inventing free-form labels.
+**Immutable execution flags:** model `dry_run`, `atomic`, prepare/commit mode as `Literal[...]` (already used for batch `atomic: Literal[True]`) plus `validate_assignment=True` or `frozen=True` on request shells so post-parse mutation cannot flip gates.
 
-**Labels:** always include Graphiti base `Entity` plus allowlisted type label (e.g. `Table`). Never interpolate client-supplied label strings into Cypher; map from fixed allowlist to Cypher fragments.
+**Do not add:** `pydantic[email]`, `pydantic-extra-types`, `jsonschema`, `marshmallow`, `cerberus`, `attrs`.
 
-### Persist / upsert methods
+### 2. Catalog-v2 FE/BO system-scoped identities
 
-| Method | Behavior | Use for catalog? |
-|--------|----------|------------------|
-| `EntityNode.save(driver)` / `EntityEdge.save(driver)` | `MERGE` on `uuid`, `SET` properties + labels/embeddings | Prefer for single-object paths **if** attributes/labels/embeddings are complete |
-| `add_nodes_and_edges_bulk(driver, [], [], nodes, edges, embedder)` | Session `execute_write` bulk MERGE | OK if you accept Graphiti bulk shape; still runs embedder if embeddings missing |
-| `Neo4jDriver.transaction()` → `tx.run(cypher, **params)` | Real commit/rollback (`begin_transaction` / commit / rollback) | **Preferred for atomic batch** and property-preserving upserts |
-| `driver.execute_query(cypher, **kwargs)` | Auto-commit query via driver | Reads and non-atomic single ops |
-| `client.driver.session()` | Native Neo4j async session | Status checks (`get_status` pattern); bulk write helper uses `session.execute_write` |
-| `Graphiti.add_triplet(...)` | Embeddings + **LLM** `resolve_extracted_nodes` / `resolve_extracted_edge` + bulk save | **Forbidden** for catalog — non-deterministic, can create generic endpoints |
-| `Graphiti.add_episode(...)` | Full extraction pipeline | **Forbidden** for catalog domain writes |
-| `QueueService.add_episode` / `add_memory` | Async queue | **Forbidden** for catalog tools |
+**Use:** existing `catalog_identity.py` UUIDv5 helpers + stdlib `uuid.uuid5`.
 
-Installed Neo4j entity save shape (Graphiti):
+**Pattern (extend, do not replace):**
+- Keep configured `GRAPHITI_CATALOG_UUID_NAMESPACE` as sole namespace authority.
+- Materialize system scope **inside the name string** before uuid5, e.g.  
+  `group_id|entity_type|FE|graph_key`, `...|BO|...`, `...|COMMON|...`  
+  (exact grammar is product decision; stack requirement is: scope is server-owned name material, never a second namespace UUID and never a client-supplied UUID).
+- Edge / source / batch / evidence-link identities follow the same server-name composition.
+- Visible graph_key grammar (prefix + system tag) is validation-layer only; identity remains uuid5 of composed name.
 
-```cypher
-MERGE (n:Entity {uuid: $entity_data.uuid})
-SET n:<AllowlistedLabels>
-SET n = $entity_data
-WITH n CALL db.create.setNodeVectorProperty(n, "name_embedding", $entity_data.name_embedding)
-RETURN n.uuid AS uuid
-```
+**Do not add:** `ulid`, `shortuuid`, `hashids`, custom base58 libs, caller UUID fields as authority.
 
-Installed Neo4j edge save shape:
+### 3. Server-owned edge endpoint maps + capabilities + hashes
 
-```cypher
-MATCH (source:Entity {uuid: $edge_data.source_uuid})
-MATCH (target:Entity {uuid: $edge_data.target_uuid})
-MERGE (source)-[e:RELATES_TO {uuid: $edge_data.uuid}]->(target)
-SET e = $edge_data
-WITH e CALL db.create.setRelationshipVectorProperty(e, "fact_embedding", $edge_data.fact_embedding)
-RETURN e.uuid AS uuid
-```
+**Use:**
+- Module-level `frozenset` / `dict[str, frozenset[tuple[str, str]]]` (or nested frozensets) in `catalog_common.py` / new `catalog_endpoint_map.py` — pure Python constants.
+- Existing `canonical_sha256` for domain content + combined batch hash covering entities, edges, provenance, evidence, system scopes.
+- Capabilities discovery: pure function returning a **fixed** Pydantic response (supported entity/edge types, endpoint map digest, limits, feature flags, protocol version). No reflection over Neo4j schema.
 
-**Caveat (why custom Cypher may be required):** `EntityNode.save` / bulk flatten `attributes` onto node properties and set labels via string join. For catalog, you must:
+**Do not add:** dynamic ontology DB, GraphQL, OpenAPI codegen packages, Redis capability cache.
 
-1. Preserve `created_at` on update; set `updated_at` (not in base model — store as property/attribute deliberately).
-2. Keep exact `name_raw` / `name_canonical` / `graph_key` / `content_sha256` without protected-key collisions (`uuid`, `name`, `group_id`, `name_embedding`, `summary`, `created_at`, `labels` are reserved).
-3. Ensure type labels survive `SET n = $entity_data` (labels set separately; do not put free-form labels in client input).
-4. Edge type lives in `EntityEdge.name` (string), relationship type remains `RELATES_TO` — matches Graphiti search (`e.name in $edge_types`).
+### 4. Restart-safe prepare / commit / discard control plane
 
-**Transaction API to use for Phase 1–2 writes:**
+**Storage primitive (already proven in v1.0):** non-`Entity` Neo4j label nodes with composite uniqueness.
+
+| Concern | Mechanism | Why |
+|---------|-----------|-----|
+| Durable plan/status | New label e.g. `CatalogBatchPlan` (or extend `CatalogIngestBatch` with explicit lifecycle) | Same isolation pattern as `CatalogIngestBatch`; excluded from Graphiti entity search |
+| Identity uniqueness | `CREATE CONSTRAINT ... IF NOT EXISTS FOR (n:Label) REQUIRE (n.uuid, n.group_id) IS UNIQUE` | Already used for Entity/RELATES_TO/Episodic/MENTIONS/CatalogIngestBatch; coexists with Graphiti RANGE indexes where single-prop UNIQUE does not |
+| Upsert semantics | `MERGE (n:Label {uuid:$uuid, group_id:$group_id}) ON CREATE SET ... ON MATCH SET ...` selective properties | Neo4j docs: MERGE does not take free property maps; selective SET preserves fields; never `SET n = $map` |
+| Concurrency | Claim row under uniqueness + status CAS (`FOREACH` guard like existing batch status) | MERGE alone ≠ uniqueness under races; constraint + conditional SET is the v1.0 pattern |
+| Terminal immutability | Refuse overwrite of `committed` / hash mismatch → `batch_conflict` | Existing `already_committed` / `hash_conflict` guards |
+| Bounded TTL | Store `expires_at` (UTC datetime); expire = status transition or delete in app logic on read/commit | Community Neo4j has **no** built-in property TTL without Enterprise/APOC jobs; app-enforced expiry is correct |
+| Payload bound | Store **bounded immutable canonical catalog payload** server-side (restart-safe) so commit receives only a token — hashes/counts alone are **insufficient** | Approved contract: commit must rehydrate domain content from prepare snapshot; chunk non-Entity control nodes if needed |
+| Manifest | Separate non-Entity node or properties on committed batch: exact entity/edge/evidence UUID lists as JSON **strings** (bounded) via existing `serialize_nested_json` | Neo4j properties are primitives; nested structures already stringified |
+
+**Transactions (approved contract):**
+- Prepare: control-plane write only — persist immutable plan + **full bounded canonical payload** (chunked non-Entity nodes OK); **no domain Entity writes**; **does NOT compute required embeddings**.
+- Commit: load payload from plan → compute embeddings from stored payload **before** opening domain tx → **one Neo4j transaction** writes domain data + evidence + manifest + terminal batch status + plan terminal state where supported.
+- Discard: write tx flips plan to discarded/expired; never domain delete of unrelated data.
+- Failed domain write: full rollback of the commit domain/control unit; **separate post-rollback failure-status transaction allowed only for failure reporting**.
+
+**Driver APIs to keep using:**
+- `Neo4jDriver.transaction()` / session `execute_write` with `tx.run(cypher, **params)`
+- `executor.execute_query` only for schema init / reads outside multi-statement atomicity
+- Parameterized values only; labels from fixed server maps
+
+**Do not add:** Redis/RQ/Celery for plans, SQLite sidecar, file-backed plan store, Kafka, temporal/workflow engines, APOC as required dependency, Neo4j Fabric.
+
+### 5. Secure opaque prepare/commit tokens
+
+**Use stdlib only:**
 
 ```python
-async with client.driver.transaction() as tx:  # Neo4jDriver.transaction
-    await tx.run(FIXED_CYPHER, **params)
-# commit on clean exit; rollback on exception
+import hashlib
+import hmac
+import secrets
+
+def issue_plan_token() -> tuple[str, str]:
+    """Return (token_plaintext_once, token_sha256_hex_to_store)."""
+    token = secrets.token_urlsafe(32)  # ~43 chars, 256-bit entropy
+    digest = hashlib.sha256(token.encode('ascii')).hexdigest()
+    return token, digest
+
+def verify_plan_token(presented: str, stored_digest_hex: str) -> bool:
+    presented_digest = hashlib.sha256(presented.encode('ascii')).hexdigest()
+    return hmac.compare_digest(presented_digest, stored_digest_hex)
 ```
 
-Do not open the write transaction until embeddings succeed.
+**Rules:**
+- Return plaintext token **once** on prepare response; persist only SHA-256 (or HMAC with server secret if multi-instance shared secret exists — default single-digest is enough when Neo4j is the sole store).
+- Never log token plaintext or full plan payload.
+- Constant-time compare always (`hmac.compare_digest`).
+- Bind token to `(group_id, batch_uuid, request_sha256, expires_at)` server-side; ignore client identity claims.
+- Optional: `hmac.new(server_secret, token, hashlib.sha256)` if operators inject a deploy secret; still no new packages (`hmac` is stdlib).
 
-### Embeddings
+**Do not add:** `PyJWT` / `jose` / `itsdangerous` / `authlib` for plan tokens (overkill; no need for portable signed JWTs inside a Neo4j-bound control plane). No OAuth libraries.
 
-| API | Usage |
-|-----|--------|
-| `EmbedderClient.create(input_data=...)` | Single string → `list[float]` |
-| `EmbedderClient.create_batch(...)` | Optional batch; default abstract raises — OpenAI embedder may implement; fall back to sequential `create` |
-| `EntityNode.generate_name_embedding(embedder)` | Embeds `name` |
-| `EntityEdge.generate_embedding(embedder)` | Embeds `fact` |
+### 6. Explicit evidence links (no Cartesian expansion)
 
-Config defaults (`schema.py` / Neo4j docker YAML):
+**Use:** existing provenance path (Episodic + MENTIONS + fact attachment) + **explicit** link rows with server uuid5 (`catalog_mentions_uuid` pattern).
 
-- Embedder provider: `openai`
-- Model: `text-embedding-3-small`
-- Dimensions: `1536` (MCP config); core default `EMBEDDING_DIM` env defaults to `1024` — **use MCP `EmbedderConfig.dimensions` / configured client**, not the bare env default
-- Pre-compute embeddings **before** Neo4j write TX; on failure return `embedding_failed` with no partial graph write
+**Stack rule:** reject nested “all sources × all targets” expansion as the write shape. v1.0 `NestedProvenancePayload` already bounds `sources * targets`; v1.1 should prefer explicit `(source_key, target_ref)` lists and hash those links into the combined batch hash.
 
-Catalog tools must not call `LLMClient` / factories for LLM.
+**Do not add:** graph algorithms packages, networkx for link expansion.
 
-### Search / verify (read path)
+### 7. Read/write gate split
 
-| API | Recipe | Use |
-|-----|--------|-----|
-| `client.search_(query, config=..., group_ids=..., search_filter=..., center_node_uuid=...)` | `NODE_HYBRID_SEARCH_RRF` or `NODE_HYBRID_SEARCH_NODE_DISTANCE` | Interop tests for typed entities via `search_nodes` behavior |
-| `client.search(query, group_ids=..., num_results=..., search_filter=..., center_node_uuid=...)` | `EDGE_HYBRID_SEARCH_RRF` / node-distance | Interop for facts; filters on `edge_types` = `EntityEdge.name` |
-| `EntityNode.get_by_uuid` / `get_by_uuids` / `get_by_group_ids` | Direct reads | `resolve_typed_entities`, verify |
-| `EntityEdge.get_by_uuid` / `get_between_nodes` | Direct reads | Edge conflict / endpoint checks |
-| Cypher via `execute_query` with `group_id` predicate | Exact key/uuid lookup | Deterministic verify (preferred over hybrid search for identity checks) |
+**Use:** extend `CatalogConfig` in `config/schema.py` with pydantic-settings / YAML:
 
-Hybrid search is for **compatibility**, not identity authority. Verification must use exact UUID / `graph_key` + `group_id` queries.
+| Flag | Default | Effect |
+|------|---------|--------|
+| `enabled` (existing) | `false` | Master write gate |
+| `reads_enabled` (new, optional) | `true` when diagnostics needed | `resolve_*`, `verify_*`, `get_*_status`, capabilities |
+| `writes_enabled` or keep `enabled` | `false` | All mutate/prepare/commit/discard/upsert |
 
-### Configuration pattern
+Return existing structured codes (`feature_disabled`, `backend_unavailable`) — no new HTTP framework.
 
-Extend existing stack — do not invent a second settings system:
+**Do not add:** feature-flag SaaS SDKs, LaunchDarkly, Unleash clients.
 
-| Mechanism | Detail |
-|-----------|--------|
-| `GraphitiConfig` (`pydantic-settings`) | Priority: CLI init > env > YAML (`CONFIG_PATH`) > defaults |
-| YAML | `mcp_server/config/config-docker-neo4j.yaml` pattern; `${VAR}` / `${VAR:default}` |
-| Env for Neo4j | `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `NEO4J_DATABASE` (factory also overrides from env) |
-| Required new config | `GRAPHITI_CATALOG_UUID_NAMESPACE` — fixed UUID string, immutable for deployment |
-| Recommended new config | Catalog batch limits (defaults: 500 entities, 2000 edges, 5000 provenance), enable flag |
-| `group_id` | Existing `graphiti.group_id` / per-call override; tests **only** `oracle-catalog-tool-test` |
-| `SEMAPHORE_LIMIT` | Existing concurrency for LLM episodes; catalog tools should not share LLM pressure but may still respect process limits |
+### 8. Pagination for verify/manifest reads
 
-Database default in schema is `falkordb`; Neo4j docker config sets `database.provider: neo4j`. Milestone assumes Neo4j runtime.
+**Use:** request fields `limit` + `cursor`/`offset` with hard caps; Cypher `SKIP $skip LIMIT $limit` with **integer parameters** only (never string-concat limits). Default small pages; total counts via separate `count()` query or precomputed manifest counts.
 
-### Identity / hashing (stdlib only)
+**Do not add:** GraphQL cursor libs, elasticsearch for catalog admin reads.
 
-| Primitive | Module | Role |
-|-----------|--------|------|
-| UUIDv5 | `uuid.uuid5(namespace, name)` | Entity: `group_id\|entity_type\|graph_key`; Edge: `group_id\|edge_type\|edge_key`; Source/Batch similar |
-| Namespace | `uuid.UUID(GRAPHITI_CATALOG_UUID_NAMESPACE)` | Reject invalid → `invalid_uuid_namespace` |
-| SHA-256 | `hashlib.sha256` | Canonical payload audit; exactly 64 lowercase hex; **no MD5** |
-| JSON canonicalization | stdlib `json` with sorted keys / project-defined canonical form | Stable hash input |
+### 9. Tests (dev stack only — already installed)
 
-### Provenance (Phase 2 only — installed schema)
+| Layer | Tool | Focus |
+|-------|------|-------|
+| Unit | pytest | recursive extra forbid, strict coercion, FE/BO identity vectors, endpoint map, hash coverage, token hash+compare, gate split |
+| Service | pytest + mocks | prepare→commit→discard state machine, replay identical hash, conflict, expiry |
+| Store | pytest + Neo4j | composite UNIQUE, MERGE guards, non-Entity labels absent from search |
+| MCP | pytest + tool list | schema surface, read tools live when writes disabled |
+| Concurrency | asyncio gather | single logical plan/domain object under concurrent prepare/commit |
+| Security | unit | Cypher injection attempts on labels/props, token timing-safe path, no payload logging |
+| Compatibility | existing MCP tests | seven v1 tools + semantic tools unchanged |
 
-- Prefer `EpisodicNode` + `MENTIONS` (`EpisodicEdge`) + `entity_edges` UUID list on episode — installed Graphiti representation.
-- Do **not** call `add_episode` / extraction.
-- Status nodes: non-`Entity` label e.g. `CatalogIngestBatch` so hybrid entity search does not pick them up.
-- If direct episode→entity-edge link is incomplete in schema, document closest compatible form; do not invent new edge types outside Graphiti’s `MENTIONS` / `RELATES_TO` / saga edges without research flag.
+**Do not add:** hypothesis (optional later only if property tests requested), testcontainers (compose Neo4j already), factory_boy, tox, nox.
 
 ## Installation
 
-No new packages for the feature itself. Work from `mcp_server/`:
-
 ```bash
+# No new packages for v1.1 hardening.
 cd mcp_server
 uv sync --group dev
 
-# Neo4j for integration (existing compose)
-docker compose -f docker/docker-compose-neo4j.yml up -d neo4j
-
-# Unit (no DB)
-uv run pytest tests/ -k "not _int and not integration" -q
-
-# Catalog-focused Neo4j tests (to be added); isolate group_id
-# uv run pytest tests/test_catalog_*.py -m "requires_neo4j"
+# Verify installed pins (example from this worktree)
+uv run python -c "import pydantic,neo4j; from importlib.metadata import version; \
+print(pydantic.VERSION, neo4j.__version__, version('mcp'), version('graphiti-core'))"
 ```
 
-Root library (if editing shared core — prefer **not** to for this milestone):
-
-```bash
-uv sync --extra dev
-make format && make lint && make test
-```
+If a lock refresh is unavoidable for unrelated reasons, still **do not** introduce new direct dependencies for this milestone.
 
 ## Alternatives Considered
 
-| Recommended | Alternative | When to Use Alternative |
-|-------------|-------------|-------------------------|
-| Neo4j 5.26+ + `neo4j` 5.28.1 driver | FalkorDB 1.2.0 | Other deployments only; **not** this milestone’s write path |
-| Custom `transaction()` Cypher upserts | `add_triplet` | Never for catalog — LLM + generic endpoints |
-| Custom deterministic tools | `add_memory` / queue | Never — async + extraction |
-| `EntityNode`/`EntityEdge` + Graphiti labels | Arbitrary Cypher labels/properties from client | Never — injection + search pollution |
-| OpenAI embedder (configured) | Voyage / Gemini / Azure embedders | Only if deployment already configures them via `EmbedderFactory`; same `EmbedderClient` interface |
-| UUIDv5 + SHA-256 | Caller UUIDs / MD5 | Never — project forbids |
-| pytest + Neo4j integration | Live MCP against `oracle-catalog-v2` | Never during implementation |
+| Recommended | Alternative | When alternative might win | Why not now |
+|-------------|-------------|----------------------------|-------------|
+| Neo4j non-Entity plan nodes | Redis plan store | Multi-region ephemeral cache | Extra ops surface; breaks single-store restart story; not installed as required |
+| `secrets` + SHA-256 digest | JWT (PyJWT) | Cross-service portable claims | Plan is bound to local Neo4j row; JWT adds key mgmt without benefit |
+| Pydantic `extra='forbid'` tree | jsonschema draft validators | Non-Python clients share one schema file | Server already Pydantic; dual validators drift |
+| App-enforced `expires_at` | APOC TTL / Enterprise TTL | Ops wants automatic background purge | APOC not a hard dep; Community TTL absent; explicit discard is enough pre-canary |
+| Module frozenset endpoint map | DB-stored ontology | Frequent type additions by non-devs | Catalog types are fixed allowlists by design |
+| Cypher `SKIP`/`LIMIT` | Application-only slicing after full MATCH | Tiny result sets | Manifests can be large; push bound to Neo4j |
+| Extend `CatalogIngestBatch` | Second graph DB | Isolation fashion | Violates single Neo4j backend decision |
 
-## What NOT to Use
+## What NOT to Use / NOT to Add
 
-| Avoid | Why | Use Instead |
+| Avoid | Why | Use instead |
 |-------|-----|-------------|
-| `Graphiti.add_episode` / `add_memory` / `QueueService` | Async, LLM extraction, non-idempotent for catalogs | Sync catalog upsert tools |
-| `Graphiti.add_triplet` | LLM resolve; can create generic `Entity` endpoints | Typed endpoint enforcement + deterministic edge upsert |
-| FalkorDB / Kuzu / Neptune write paths | Milestone is Neo4j-only; no portability claim | `Neo4jDriver.transaction` / Neo4j Cypher |
-| New ORM / OGM (neomodel, etc.) | Extra dependency; fights Graphiti schema | Installed driver + fixed Cypher |
-| New web framework in MCP | Duplicates FastMCP | `@mcp.tool()` only |
-| `clear_graph` / bulk delete in tests against shared groups | Data loss risk | Isolated `oracle-catalog-tool-test` only; no live-group mutation |
-| Client-supplied DB UUIDs as identity | Breaks idempotency | Server UUIDv5 from namespace + keys |
-| MD5 / non-canonical hashing | Audit mismatch | SHA-256 hex64 |
-| Interpolating labels/property names from requests into Cypher | Injection / schema drift | Allowlist → fixed query fragments |
-| Calling LLM client in catalog tools | Non-determinism, cost, latency | Embedder only |
-| Automatic community build on upsert | Side-effecting maintenance | Optional separate `build_communities` interop test only |
-| Editing `mcp_server/k8s/graphiti-neo4j.yaml` / unrelated dirty files | Out of scope / preserve worktree | Leave untouched unless approved |
+| Any new runtime PyPI package for this milestone | YAGNI; lock/review cost; attack surface | Installed Pydantic, neo4j, stdlib |
+| FalkorDB/Kuzu/Neptune catalog write path | Explicit non-goal; no portability claim | Neo4j gate + `backend_unavailable` |
+| LLM / queue / `add_episode` for catalog-v2 | Breaks deterministic identity | Existing deterministic upserts |
+| `EntityNode.save` / bulk SET-map for control plane | Label/property loss; search pollution | Dedicated store Cypher (v1.0 pattern) |
+| Caller UUID as identity | Violates server authority | UUIDv5 only |
+| MD5 / non-canonical hashes | Forbidden / unstable audit | SHA-256 lowercase 64 hex + canonical JSON |
+| Interpolating client labels/property names into Cypher | Injection | Fixed allowlists → fixed Cypher fragments |
+| `SET n = $map` / free property maps on MERGE | Wipes preserved fields; Neo4j MERGE map limits | Selective `SET n.prop = $prop` |
+| Redis/Celery/RQ/Temporal for prepare state | New infra; dual-write failure modes | Neo4j plan nodes + TTL fields |
+| PyJWT / OAuth / session middleware for plan tokens | Overkill inside MCP tool params | `secrets` + hashed token on plan node |
+| APOC as required | Not guaranteed in target deployments | Pure Cypher + app logic |
+| Automatic v1→v2 identity migration | Silent re-key risk | Explicit dual-read docs only; no code migration |
+| Production canary / live `oracle-catalog-v2` writes | Out of scope | Tests only on `oracle-catalog-tool-test` |
+| `clear_graph` / DROP CONSTRAINT repair | Data destruction / schema fights with Graphiti | CREATE IF NOT EXISTS only; fail closed on dup data |
+| Hypothesis/property-based **framework** (unless later requested) | Extra dep | Table-driven exhaustive vectors |
+| NetworkX / graph-tool | Not needed for endpoint maps | Dict/frozenset constants |
 
 ## Stack Patterns by Variant
 
-**If deployment is Neo4j (this milestone):**
+**If only read diagnostics are needed in an environment:**
+- `writes_enabled=false` (or `enabled=false`), keep resolve/verify/status/capabilities registered
+- No prepare/commit code paths open txs that mutate domain labels
 
-- Gate catalog writes: `config.database.provider == 'neo4j'` (case-insensitive).
-- Use `client.driver` as `Neo4jDriver` (has `.transaction()` with real commit/rollback).
-- Compose image `neo4j:5.26.0`; driver package 5.28.1 against server 5.26+ is the installed combo.
+**If prepare/commit is enabled:**
+- Require valid `uuid_namespace` (existing validator)
+- Embeddings run at **commit** from stored prepare payload (not at prepare)
+- Plan token required for commit/discard; hash compare constant-time
+- Prepare stores full bounded payload (chunk if needed); not hashes-only
 
-**If deployment is FalkorDB (existing product path, not catalog milestone):**
+**If manifest exceeds property size comfort:**
+- Store manifest as chunked non-Entity child nodes keyed by `(batch_uuid, chunk_index)` with composite uniqueness — still pure Neo4j, no object store
+- Chunk oversized prepare payloads the same way; hashes/counts alone are not a valid prepare store
 
-- Do not implement catalog persistence against Falkor.
-- Return explicit disabled/error; keep factory code paths intact.
-
-**If embedder is OpenAI-compatible custom base URL:**
-
-- Still use `EmbedderFactory` / `OpenAIEmbedder`; same `create()` contract.
-- Dimensions must match index/config (`1536` default in MCP Neo4j YAML).
-
-**If running unit tests without Neo4j:**
-
-- Mock `EmbedderClient.create` and driver/transaction; pure UUIDv5/hash/validation tests need no DB.
+**If multi-instance MCP shares one Neo4j:**
+- All plan state in Neo4j (already); optional shared HMAC secret via env for token digests
+- No sticky sessions required
 
 ## Version Compatibility
 
 | Package A | Compatible With | Notes |
 |-----------|-----------------|-------|
-| `graphiti-core` 0.29.2 | `neo4j` 5.28.1, Neo4j server 5.26+ | Vector property helpers in save queries |
-| `mcp` 1.27.2 | `pydantic` 2.11.x, starlette 1.3.x, uvicorn 0.34.x | FastMCP HTTP + stdio |
-| MCP `openai` 2.43.0 | graphiti-core OpenAI clients | Root library allows `openai>=1.91.0`; MCP pins 2.x |
-| `pydantic` 2.11.7 | `pydantic-settings` 2.10.1 | Nested config models |
-| Python 3.10 | All above | pyright `pythonVersion = "3.10"` |
-| pytest 9.x | pytest-asyncio 1.4 | Async tests for MCP tools |
+| pydantic **2.11.7** | Python 3.10+ | `ConfigDict`, `strict=True`, `extra='forbid'` verified locally |
+| neo4j driver **5.28.1** | Neo4j server **5.26+** | Composite node/rel UNIQUE; async transactions |
+| graphiti-core **0.29.2** | neo4j `>=5.26.0` | Catalog store bypasses fragile save paths intentionally |
+| mcp **1.27.2** | pydantic v2 | Tool schema from function signatures / models |
+| pytest **9** + pytest-asyncio **1.4** | Python 3.10 | Existing mcp_server dev group |
 
-**Lockfile note:** `mcp_server/uv.lock` resolves `graphiti-core` from **PyPI 0.29.2**, not a path editable to this monorepo. Local `graphiti_core/` matches version **0.29.2**. Prefer implementing catalog tools **inside `mcp_server/`** against public 0.29.2 APIs so lockfile and code stay aligned. Only change core if an API gap is proven; then version/path strategy becomes an explicit decision.
+**Transaction limitations (document in operator notes, not “solved” by new libs):**
+- Neo4j Community: no multi-DB XA; one database per driver config.
+- Long prepare windows are **not** held open as Bolt transactions — durable plan node + later commit tx.
+- Schema `CREATE CONSTRAINT` is auto-commit DDL; run before write traffic (existing `ensure_uuid_uniqueness_constraints`).
+- Uniqueness constraint creation fails closed on pre-existing duplicate `(uuid, group_id)` — no automatic repair.
 
-## Milestone API Checklist (what to build on)
+## Integration Points (code)
 
-| Tool | Stack building blocks |
-|------|----------------------|
-| `upsert_typed_entities` | Pydantic request → UUIDv5 → embedder.create → `Neo4jDriver.transaction` MERGE Entity+labels → structured result |
-| `resolve_typed_entities` | Read-only Cypher / `get_by_uuid` + label/embedding checks; no writes |
-| `upsert_typed_edges` | Require existing typed endpoints → UUIDv5 → fact embed → MERGE `RELATES_TO` with `name`=edge type |
-| `verify_catalog_batch` | Read-only exact checks (+ optional hybrid interop) |
-| `upsert_provenance` (P2) | `EpisodicNode`/`EpisodicEdge` save patterns; no `add_episode` |
-| `upsert_catalog_batch` (P2) | Validate all → embed all → one domain TX → status node outside Entity |
-| `get_catalog_ingest_status` (P2) | Read `CatalogIngestBatch` by UUIDv5 batch id |
+| Concern | Integration point |
+|---------|-------------------|
+| Strict models | `mcp_server/src/models/catalog_*.py` — shared `CatalogStrictModel` base |
+| Identity scope | `services/catalog_identity.py` — extend name composition; keep pure |
+| Endpoint map / capabilities | `models/catalog_common.py` (+ small map module); MCP read tool |
+| Plan/manifest store | `services/catalog_store.py` — mirror `CatalogIngestBatch` helpers |
+| Orchestration | `services/catalog_service.py` — prepare/commit/discard state machine |
+| Config gates | `config/schema.py` `CatalogConfig` |
+| MCP surface | `graphiti_mcp_server.py` `@mcp.tool` registrations |
+| Tests | `mcp_server/tests/` — unit without Neo4j; `*_int` for live |
 
 ## Sources
 
-- `mcp_server/pyproject.toml`, `mcp_server/uv.lock` — locked versions (mcp 1.27.2, graphiti-core 0.29.2, neo4j 5.28.1, pydantic 2.11.7, openai 2.43.0, pytest 9.0.3, …)
-- Root `pyproject.toml` — graphiti-core 0.29.2, neo4j `>=5.26.0`, pydantic `>=2.11.5`
-- `.planning/PROJECT.md` — milestone requirements, Neo4j-only, identity rules
-- `.planning/codebase/STACK.md` — monorepo stack map
-- `mcp_server/src/graphiti_mcp_server.py` — FastMCP tools, GraphitiService init, search/triplet patterns
-- `mcp_server/src/config/schema.py`, `config/config-docker-neo4j.yaml` — config + Neo4j defaults
-- `mcp_server/src/services/factories.py` — LLM/embedder/DB factories
-- `graphiti_core/graphiti.py` — `add_triplet` / `search` / `search_` behavior
-- `graphiti_core/nodes.py`, `edges.py` — model fields + `save`/`get_by_uuid`
-- `graphiti_core/models/nodes/node_db_queries.py`, `models/edges/edge_db_queries.py` — MERGE Cypher
-- `graphiti_core/driver/neo4j_driver.py` — `transaction()`, `execute_query`, `session`
-- `graphiti_core/utils/bulk_utils.py` — bulk write path
-- `graphiti_core/embedder/client.py` — `EmbedderClient.create`
-- `graphiti_core/search/search_filters.py` — `SearchFilters`
-- `mcp_server/docker/docker-compose-neo4j.yml` — Neo4j **5.26.0** image
-- `mcp_server/tests/README.md`, `conftest.py` — test tooling
-
-Confidence: **HIGH** for installed versions and APIs (lockfile + source). **MEDIUM** only for whether `EntityNode.save` alone preserves every catalog attribute without custom Cypher — validate in Phase 1 integration; prefer explicit Neo4j TX queries if any property/label loss appears.
+- Local worktree pins: `mcp_server` uv env — pydantic **2.11.7**, neo4j **5.28.1**, graphiti-core **0.29.2**, mcp **1.27.2** (2026-07-17)
+- Local verification: nested `extra='forbid'` requires per-model config; outer-only forbid allows nested extras (HIGH)
+- [Pydantic ConfigDict](https://pydantic.dev/docs/validation/latest/api/pydantic/config/) — `extra`, `strict`, `frozen`, `validate_assignment`; non-propagation of some options (HIGH)
+- [Neo4j 5 constraints syntax](https://neo4j.com/docs/cypher-manual/5/constraints/syntax/) — composite UNIQUE, `IF NOT EXISTS` (HIGH)
+- [Neo4j 5 MERGE](https://neo4j.com/docs/cypher-manual/5/clauses/merge/) — no free property map on MERGE; constraints needed for concurrent uniqueness (HIGH)
+- Python stdlib docs: `secrets.token_urlsafe`, `hmac.compare_digest`, `hashlib.sha256`, `uuid.uuid5` (HIGH)
+- Existing implementation: `catalog_store.py` `CatalogIngestBatch` MERGE/claim/status guards; `catalog_identity.py` uuid5 + canonical SHA-256 (HIGH)
+- Project constraints: `.planning/PROJECT.md` v1.1 scope; Neo4j-first; no production/canary (HIGH)
 
 ---
-*Stack research for: Deterministic catalog ingestion on Graphiti MCP*
-*Researched: 2026-07-16*
+*Stack research for: Catalog-v2 pre-canary hardening*
+*Researched: 2026-07-17*
+*Replaces obsolete v1.0-oriented stack notes for this milestone*

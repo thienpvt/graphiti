@@ -11,6 +11,16 @@ from models.catalog_common import CatalogErrorCode
 ItemStatus = Literal['created', 'updated', 'unchanged', 'rolled_back', 'error']
 
 
+class CatalogStructuredError(BaseModel):
+    """SAFE-08 structured validation error DTO (non-strict response surface)."""
+
+    code: CatalogErrorCode
+    message: str = Field(..., max_length=512)
+    field_path: str | None = None
+    retryable: bool = False
+    correlation_id: str
+
+
 class CatalogItemResult(BaseModel):
     """Per-item result preserving input order."""
 
@@ -69,17 +79,84 @@ class ResolveTypedEntitiesResponse(BaseModel):
     results: list[ResolveEntityResult] = Field(default_factory=list)
 
 
+class ResolveEdgeResult(BaseModel):
+    """Per-edge resolve outcome (RESE-01..02)."""
+
+    index: int
+    edge_type: str
+    edge_key: str
+    status: str = 'missing'
+    found: bool = False
+    uuid: str | None = None
+    verified_type: str | None = None
+    source_uuid: str | None = None
+    target_uuid: str | None = None
+    source_graph_key: str | None = None
+    target_graph_key: str | None = None
+    source_entity_type: str | None = None
+    target_entity_type: str | None = None
+    content_sha256: str | None = None
+    has_fact_embedding: bool | None = None
+    duplicate_uuids: list[str] = Field(default_factory=list)
+    anomalies: list[str] = Field(default_factory=list)
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
+class ResolveTypedEdgesResponse(BaseModel):
+    """Response for resolve_typed_edges."""
+
+    group_id: str
+    results: list[ResolveEdgeResult] = Field(default_factory=list)
+
+
+class CompactEvidenceLink(BaseModel):
+    """Compact evidence-link projection (EVID-12). No embeddings/raw source."""
+
+    uuid: str
+    link_key: str
+    content_sha256: str | None = None
+    source_uuid: str | None = None
+    target_kind: str | None = None
+    target_uuid: str | None = None
+    evidence_kind: str | None = None
+    extractor_name: str | None = None
+    extractor_version: str | None = None
+    rule_id: str | None = None
+    confidence: float | None = None
+    excerpt: str | None = None
+
+
+class GetCatalogEvidenceResponse(BaseModel):
+    """Paginated compact evidence read for one target (EVID-12, IDEN-08)."""
+
+    group_id: str
+    target_kind: str
+    target_uuid: str | None = None
+    target_graph_key: str | None = None
+    target_edge_key: str | None = None
+    found_target: bool = False
+    offset: int = 0
+    limit: int = 0
+    total: int = 0
+    links: list[CompactEvidenceLink] = Field(default_factory=list)
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
 class VerifyEntitySection(BaseModel):
     """Entity verification counts and anomaly lists (VERI-02)."""
 
     expected: int = 0
     found: int = 0
     missing: list[str] = Field(default_factory=list)
+    extras: list[str] = Field(default_factory=list)
     wrong_type: list[str] = Field(default_factory=list)
     generic_duplicate: list[str] = Field(default_factory=list)
     typed_duplicate: list[str] = Field(default_factory=list)
     uuid_mismatch: list[str] = Field(default_factory=list)
     missing_embedding: list[str] = Field(default_factory=list)
+    content_hash_mismatch: list[str] = Field(default_factory=list)
 
 
 class VerifyEdgeSection(BaseModel):
@@ -88,11 +165,24 @@ class VerifyEdgeSection(BaseModel):
     expected: int = 0
     found: int = 0
     missing: list[str] = Field(default_factory=list)
+    extras: list[str] = Field(default_factory=list)
     duplicate_edge_key: list[str] = Field(default_factory=list)
     edge_type_mismatch: list[str] = Field(default_factory=list)
     endpoint_mismatch: list[str] = Field(default_factory=list)
     uuid_mismatch: list[str] = Field(default_factory=list)
     missing_embedding: list[str] = Field(default_factory=list)
+    content_hash_mismatch: list[str] = Field(default_factory=list)
+
+
+class VerifyEvidenceSection(BaseModel):
+    """Evidence-link verification vs durable manifest (EVID-13)."""
+
+    expected: int = 0
+    found: int = 0
+    missing: list[str] = Field(default_factory=list)
+    extras: list[str] = Field(default_factory=list)
+    link_key_mismatch: list[str] = Field(default_factory=list)
+    content_hash_mismatch: list[str] = Field(default_factory=list)
 
 
 class VerifyCatalogBatchResponse(BaseModel):
@@ -100,13 +190,18 @@ class VerifyCatalogBatchResponse(BaseModel):
 
     group_id: str
     batch_id: str | None = None
+    # GATE-05 style absence for missing batch status on batch-scoped verify.
+    found: bool = True
     results: list[CatalogItemResult] = Field(default_factory=list)
     entities: VerifyEntitySection = Field(default_factory=VerifyEntitySection)
     edges: VerifyEdgeSection = Field(default_factory=VerifyEdgeSection)
+    evidence: VerifyEvidenceSection = Field(default_factory=VerifyEvidenceSection)
     missing: list[str] = Field(default_factory=list)
+    extras: list[str] = Field(default_factory=list)
     anomalies: list[dict[str, Any]] = Field(default_factory=list)
     require_provenance: bool = False
     missing_provenance: list[str] = Field(default_factory=list)
+    manifest_sha256: str | None = None
     error_code: CatalogErrorCode | None = None
     error_message: str | None = None
 
@@ -128,6 +223,9 @@ class CatalogIngestStatusResponse(BaseModel):
     batch_id: str
     batch_uuid: str
     status: CatalogIngestStatus
+    # GATE-05: distinguish pure absence (found=False, error_code=None) from
+    # validation/gate failures (error_code set). Default True for found rows.
+    found: bool = True
     request_sha256: str | None = None
     catalog_sha256: str | None = None
     entity_count: int = 0
@@ -149,6 +247,11 @@ class CatalogBatchWriteResponse(BaseModel):
     dry_run: bool = False
     atomic: bool = True
     status: CatalogIngestStatus | None = None
+    # HASH-05 authoritative identity/hash echo (derivable after parse)
+    identity_schema_version: str | None = None
+    canonicalization_version: str | None = None
+    request_sha256: str | None = None
+    catalog_sha256: str | None = None
     results: list[CatalogItemResult] = Field(default_factory=list)
     entity_created: int = 0
     entity_updated: int = 0
@@ -161,5 +264,154 @@ class CatalogBatchWriteResponse(BaseModel):
     provenance_unchanged: int = 0
     failed: int = 0
     rolled_back: int = 0
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
+class CatalogCapabilitiesResponse(BaseModel):
+    """Read-only catalog-v2 capabilities discovery (CAPA-01..08). No secrets."""
+
+    package_version: str
+    backend: str | None = None
+    connectivity: Literal['ok', 'error', 'unknown'] = 'unknown'
+    catalog_writes_enabled: bool = False
+    catalog_reads_enabled: bool = True
+    uuid_namespace_configured: bool = False
+    namespace_fingerprint: str | None = None
+    identity_schema_version: str
+    canonicalization_version: str
+    catalog_schema_version: str
+    entity_types: list[str] = Field(default_factory=list)
+    entity_prefixes: dict[str, str] = Field(default_factory=dict)
+    edge_types: list[str] = Field(default_factory=list)
+    endpoint_map: dict[str, list[list[str]]] = Field(default_factory=dict)
+    limits: dict[str, Any] = Field(default_factory=dict)
+    embeddings: dict[str, Any] = Field(default_factory=dict)
+    neo4j_indexes: Literal['ready', 'unknown', 'n/a'] = 'unknown'
+    features: dict[str, bool] = Field(default_factory=dict)
+
+
+class CompactManifestEntityMember(BaseModel):
+    """Compact durable entity identity from committed manifest (MANI-05, IDEN-08)."""
+
+    uuid: str
+    entity_type: str
+    graph_key: str
+    content_sha256: str
+    projected_status: str | None = None
+
+
+class CompactManifestEdgeMember(BaseModel):
+    """Compact durable edge identity from committed manifest."""
+
+    uuid: str
+    edge_type: str
+    edge_key: str
+    content_sha256: str
+    projected_status: str | None = None
+
+
+class CompactManifestSourceMember(BaseModel):
+    """Compact durable source identity from committed manifest."""
+
+    uuid: str
+    source_key: str
+    content_sha256: str
+    projected_status: str | None = None
+
+
+class CompactManifestEvidenceLinkMember(BaseModel):
+    """Compact durable evidence-link identity from committed manifest."""
+
+    uuid: str
+    link_key: str
+    content_sha256: str
+
+
+class GetCatalogBatchManifestResponse(BaseModel):
+    """Paginated durable membership read (MANI-05). Compact projection only.
+
+    Never includes embeddings, payload_b64, source text, or credentials.
+    """
+
+    group_id: str
+    batch_id: str
+    found: bool = False
+    request_sha256: str | None = None
+    catalog_sha256: str | None = None
+    artifact_sha256: str | None = None
+    manifest_sha256: str | None = None
+    identity_schema_version: str | None = None
+    canonicalization_version: str | None = None
+    catalog_schema_version: str | None = None
+    entity_count: int = 0
+    edge_count: int = 0
+    source_count: int = 0
+    evidence_link_count: int = 0
+    offset: int = 0
+    limit: int = 0
+    entities: list[CompactManifestEntityMember] = Field(default_factory=list)
+    edges: list[CompactManifestEdgeMember] = Field(default_factory=list)
+    sources: list[CompactManifestSourceMember] = Field(default_factory=list)
+    evidence_links: list[CompactManifestEvidenceLinkMember] = Field(default_factory=list)
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
+class PrepareCatalogBatchResponse(BaseModel):
+    """One-time prepare receipt — hashes/counts/projections only (D-19, PLAN-06).
+
+    Never includes canonical payload, membership, or embeddings.
+    """
+
+    plan_token: str
+    plan_uuid: str
+    request_sha256: str
+    catalog_sha256: str
+    artifact_sha256: str
+    identity_schema_version: str
+    expires_at: str
+    entity_count: int = 0
+    edge_count: int = 0
+    source_count: int = 0
+    evidence_link_count: int = 0
+    projected_created: int = 0
+    projected_updated: int = 0
+    projected_unchanged: int = 0
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
+class CommitPreparedCatalogBatchResponse(BaseModel):
+    """Commit claim receipt — plan_uuid/hashes/state/counts only (PLAN-10/12).
+
+    Never includes membership, payload, embeddings, or plan_token.
+    Additive Phase 3B fields (D-28): batch_uuid, manifest_sha256, committed_* counts.
+    """
+
+    plan_uuid: str
+    request_sha256: str | None = None
+    catalog_sha256: str | None = None
+    artifact_sha256: str | None = None
+    state: str
+    entity_count: int = 0
+    edge_count: int = 0
+    source_count: int = 0
+    evidence_link_count: int = 0
+    # Additive committed-outcome fields (D-28); default-safe for old constructors.
+    batch_uuid: str | None = None
+    manifest_sha256: str | None = None
+    committed_created: int = 0
+    committed_updated: int = 0
+    committed_unchanged: int = 0
+    error_code: CatalogErrorCode | None = None
+    error_message: str | None = None
+
+
+class DiscardPreparedCatalogBatchResponse(BaseModel):
+    """Discard receipt — plan_uuid + terminal state (D-11)."""
+
+    plan_uuid: str | None = None
+    state: str = 'DISCARDED'
     error_code: CatalogErrorCode | None = None
     error_message: str | None = None

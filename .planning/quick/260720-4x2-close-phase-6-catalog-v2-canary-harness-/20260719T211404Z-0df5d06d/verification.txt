@@ -1,0 +1,26 @@
+Baseline HEAD: 44b922dca838c388961ab97d0dc337611014f1c9
+Resulting HEAD: 44b922dca838c388961ab97d0dc337611014f1c9
+
+Focused pytest:
+uv run --project mcp_server --group dev python -m pytest tests/script/build_catalog_canary_requests.py tests/script/run_catalog_canary_batch.py -q --tb=short
+24 passed, 1 pre-existing Pydantic deprecation warning
+
+Phase 5 canary regressions:
+uv run --project mcp_server --group dev python -m pytest mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_canary_review_regressions.py -q --tb=line
+37 passed
+
+Static checks:
+uv run --project mcp_server ruff check scripts/build_catalog_canary_requests.py scripts/run_catalog_canary_batch.py tests/script/build_catalog_canary_requests.py tests/script/run_catalog_canary_batch.py
+All checks passed
+
+uv run --project mcp_server pyright --project mcp_server/pyproject.toml scripts/build_catalog_canary_requests.py scripts/run_catalog_canary_batch.py tests/script/build_catalog_canary_requests.py tests/script/run_catalog_canary_batch.py
+0 errors, 0 warnings, 0 informations
+
+Golden proof:
+Temp regeneration matched tracked before/after SHA-256 values for all five files. Tracked golden directory was not used as regeneration output.
+
+Secret scan:
+Clean over changed source, focused tests, operator prompt, and evidence.
+
+Network/live operations:
+None. No MCP, Neo4j, Docker, Kubernetes, deployment, prepared plan, commit, or canary execution.

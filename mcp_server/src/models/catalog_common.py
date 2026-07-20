@@ -3,11 +3,65 @@
 from __future__ import annotations
 
 import math
+import re
+import uuid as _uuid
 from enum import Enum
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError, WithJsonSchema
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 
 class StrEnum(str, Enum):
     """str Enum compatible with Python 3.10 (stdlib StrEnum is 3.11+)."""
+
+
+class CatalogStrictModel(BaseModel):
+    """Fail-closed request base: unknown fields rejected at every nesting depth."""
+
+    model_config = ConfigDict(extra='forbid')
+
+
+# Catalog-v2 identity shell constants (immutable request contract)
+IDENTITY_SCHEMA_VERSION = 'catalog-v2'
+SYSTEM_KEYS: frozenset[str] = frozenset({'FE', 'BO', 'COMMON'})
+
+
+def _validate_strict_true(value: Any) -> Any:
+    if value is not True:
+        raise PydanticCustomError('strict_true', 'Input must be true')
+    return value
+
+
+def _validate_system_key(value: Any) -> Any:
+    if not isinstance(value, str) or value not in SYSTEM_KEYS:
+        raise PydanticCustomError('invalid_system_key', 'Invalid system key')
+    return value
+
+
+StrictTrue = Annotated[
+    Literal[True],
+    BeforeValidator(_validate_strict_true),
+    WithJsonSchema({'type': 'boolean', 'const': True}),
+]
+SystemKey = Annotated[
+    Literal['FE', 'BO', 'COMMON'],
+    BeforeValidator(_validate_system_key),
+]
+
+
+def invalid_system_key_validation_error(
+    *,
+    title: str,
+    loc: tuple[str | int, ...],
+    input_value: Any,
+) -> ValidationError:
+    line_error: InitErrorDetails = {
+        'type': PydanticCustomError('invalid_system_key', 'Invalid system key'),
+        'loc': loc,
+        'input': input_value,
+    }
+    return ValidationError.from_exception_data(title, [line_error])
 
 
 # Default batch collection limits (CONF-04)
@@ -17,6 +71,33 @@ DEFAULT_MAX_PROVENANCE_LINKS_PER_BATCH = 5000
 HARD_MAX_ENTITIES_PER_BATCH = 5000
 HARD_MAX_EDGES_PER_BATCH = 10000
 HARD_MAX_PROVENANCE_LINKS_PER_BATCH = 20000
+
+# Prepared-plan control-plane limits (PLAN-08 / D-24; research-locked)
+DEFAULT_PLAN_TTL_SECONDS = 3600
+HARD_PLAN_TTL_SECONDS = 86400
+DEFAULT_PREPARED_PAYLOAD_BYTES = 4_194_304
+HARD_MAX_PREPARED_PAYLOAD_BYTES = 16_777_216
+DEFAULT_PREPARED_CHUNK_BYTES = 131_072
+HARD_PREPARED_CHUNK_BYTES = 262_144
+HARD_MAX_CHUNKS_PER_PLAN = 128
+DEFAULT_MAX_ACTIVE_PLANS_PER_GROUP = 8
+HARD_MAX_ACTIVE_PLANS_PER_GROUP = 32
+
+# Plan state constants for store/service reuse (D-10)
+PLAN_STATE_PREPARED = 'PREPARED'
+PLAN_STATE_COMMITTING = 'COMMITTING'
+PLAN_STATE_COMMITTED = 'COMMITTED'
+PLAN_STATE_DISCARDED = 'DISCARDED'
+PLAN_STATE_EXPIRED = 'EXPIRED'
+PLAN_STATES: frozenset[str] = frozenset(
+    {
+        PLAN_STATE_PREPARED,
+        PLAN_STATE_COMMITTING,
+        PLAN_STATE_COMMITTED,
+        PLAN_STATE_DISCARDED,
+        PLAN_STATE_EXPIRED,
+    }
+)
 
 # String / raw-text limits (SAFE-03)
 MAX_SHORT_STRING_LENGTH = 512
@@ -78,8 +159,9 @@ def validate_nested_json(obj: object, path: str = 'value') -> None:
                 stack.append((value[index], f'{current_path}[{index}]', depth + 1, False))
 
 
-# Fixed entity type → graph_key prefix map (15 types)
+# Fixed entity type → graph_key prefix map (18 types; System/DatabaseLink/SourceArtifact only adds)
 ENTITY_TYPE_PREFIXES: dict[str, str] = {
+    'System': 'SYSTEM::',
     'Database': 'DATABASE::',
     'DictionaryDocument': 'DOC::',
     'Schema': 'SCHEMA::',
@@ -95,6 +177,8 @@ ENTITY_TYPE_PREFIXES: dict[str, str] = {
     'Trigger': 'TRIGGER::',
     'Sequence': 'SEQUENCE::',
     'Synonym': 'SYNONYM::',
+    'DatabaseLink': 'DBLINK::',
+    'SourceArtifact': 'SOURCE::',
 }
 
 CATALOG_ENTITY_TYPES: frozenset[str] = frozenset(ENTITY_TYPE_PREFIXES.keys())
@@ -160,3 +244,95 @@ class CatalogErrorCode(StrEnum):
     embedding_failed = 'embedding_failed'
     internal_error = 'internal_error'
     backend_unavailable = 'backend_unavailable'
+    # Phase 1 CONT-08 (append-only; never remove preexisting members)
+    unsupported_identity_schema = 'unsupported_identity_schema'
+    invalid_system_key = 'invalid_system_key'
+    edge_endpoint_pair_not_allowed = 'edge_endpoint_pair_not_allowed'
+    prepared_plan_not_found = 'prepared_plan_not_found'
+    prepared_plan_expired = 'prepared_plan_expired'
+    prepared_plan_conflict = 'prepared_plan_conflict'
+    prepared_plan_already_consumed = 'prepared_plan_already_consumed'
+    manifest_mismatch = 'manifest_mismatch'
+    provenance_link_conflict = 'provenance_link_conflict'
+
+
+_MAX_STRUCTURED_ERROR_MESSAGE_LENGTH = 512
+_MAX_STRUCTURED_FIELD_PATH_LENGTH = 256
+_SAFE_FIELD_PATH_RE = re.compile(r'^[A-Za-z0-9_.\[\]]+$')
+_SAFE_LOC_PART_RE = re.compile(r'^[A-Za-z0-9_\[\]]{1,64}$')
+
+
+def _normalize_correlation_id(correlation_id: str | None) -> str:
+    """Accept UUID-like transport ids only; otherwise mint a fresh uuid4."""
+    if isinstance(correlation_id, str):
+        try:
+            return str(_uuid.UUID(correlation_id))
+        except (ValueError, AttributeError, TypeError):
+            pass
+    return str(_uuid.uuid4())
+
+
+def _sanitize_field_path(loc: tuple[Any, ...]) -> str | None:
+    """Build a bounded dotted path from loc; drop hostile/unknown segments."""
+    if not loc:
+        return None
+    parts: list[str] = []
+    for part in loc:
+        if isinstance(part, int):
+            parts.append(str(part))
+            continue
+        text = str(part)
+        if not _SAFE_LOC_PART_RE.fullmatch(text):
+            # Hostile or free-form loc segment — stop before leaking it.
+            break
+        parts.append(text)
+    if not parts:
+        return None
+    path = '.'.join(parts)
+    if len(path) > _MAX_STRUCTURED_FIELD_PATH_LENGTH:
+        path = path[:_MAX_STRUCTURED_FIELD_PATH_LENGTH]
+    if not _SAFE_FIELD_PATH_RE.fullmatch(path):
+        return None
+    return path
+
+
+def catalog_validation_error_to_structured(
+    exc: ValidationError,
+    *,
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
+    """Convert a Pydantic ValidationError into a SAFE-08 structured error dict.
+
+    Pure adapter for catch/log paths and the catalog FastMCP call_tool boundary.
+    Never copies input, payload, stack, or secrets. Correlation ids are
+    normalized to UUID strings (server-minted when missing/invalid).
+    """
+    errors = exc.errors()
+    first = errors[0] if errors else {}
+    loc = tuple(first.get('loc') or ())
+    # Strip FastMCP arg wrapper prefix so field_path is request-relative.
+    if loc and str(loc[0]) == 'request':
+        loc = loc[1:]
+    field_path = _sanitize_field_path(loc)
+    loc_names = {str(part) for part in loc}
+
+    if first.get('type') == 'invalid_system_key':
+        code = CatalogErrorCode.invalid_system_key
+        message = 'Invalid system key'
+    elif 'identity_schema_version' in loc_names:
+        code = CatalogErrorCode.unsupported_identity_schema
+        message = 'Unsupported identity schema version'
+    else:
+        code = CatalogErrorCode.validation_error
+        message = 'Request validation failed'
+
+    if len(message) > _MAX_STRUCTURED_ERROR_MESSAGE_LENGTH:
+        message = message[:_MAX_STRUCTURED_ERROR_MESSAGE_LENGTH]
+
+    return {
+        'code': code,
+        'message': message,
+        'field_path': field_path,
+        'retryable': False,
+        'correlation_id': _normalize_correlation_id(correlation_id),
+    }

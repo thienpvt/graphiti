@@ -1,0 +1,594 @@
+{
+  "audits": {
+    "review": {
+      "path": ".planning/phases/05-verification-security-compatibility-and-migration-docs/05-REVIEW.md",
+      "sha256": "552c293a2e990d59dab7730a23eaca04507a252716f93aa66a184b722d2f5609",
+      "status": "pass"
+    },
+    "security": {
+      "path": ".planning/phases/05-verification-security-compatibility-and-migration-docs/05-SECURITY.md",
+      "sha256": "d89c8a855fa208a84aa12e68feaaacbdf40f18e07ccc0e96d270fd9f3330112c",
+      "status": "pass"
+    },
+    "validation": {
+      "path": ".planning/phases/05-verification-security-compatibility-and-migration-docs/05-VALIDATION.md",
+      "sha256": "4400a53d9a10840c8f54a71e1a2de8decd8c6728952a8f8c72bc683c104aa3f6",
+      "status": "pass"
+    },
+    "verification": {
+      "path": ".planning/phases/05-verification-security-compatibility-and-migration-docs/05-VERIFICATION.md",
+      "sha256": "c58b21eaa53ecca31042ab06160d475541a2cfdcfde68d8351eb67abdde8afba",
+      "status": "pass"
+    }
+  },
+  "authoritative_ledger_sha256": "012a5a2129719755babed6cc0850b1ede25f54125f6c6e560c555db79b1041d5",
+  "baseline": {
+    "historical_audit_commit": "a67789a",
+    "legacy_tools": 14,
+    "pre_phase_5_catalog_tools": 14,
+    "tool_union": 28
+  },
+  "blockers": [],
+  "canary_executed": false,
+  "changed_files_and_modules": [
+    "mcp_server/src/services/catalog_service.py",
+    "mcp_server/src/services/catalog_store.py",
+    "mcp_server/src/graphiti_mcp_server.py",
+    "scripts/build_catalog_canary_requests.py",
+    "scripts/run_catalog_canary_batch.py",
+    "mcp_server/tests/catalog_phase5_gate_runner.py",
+    "mcp_server/tests/test_catalog_canary_scripts.py",
+    "mcp_server/tests/test_catalog_security_matrix.py",
+    "mcp_server/tests/test_legacy_mcp_contract_compatibility.py",
+    "mcp_server/README.md",
+    "mcp_server/docs/CATALOG_V2_MIGRATION.md"
+  ],
+  "clear_graph_called": false,
+  "closure_evidence": {
+    "evaluated_head": "27c4e2e4e5000d84d18cde24a99b010831771fe7",
+    "execution_input_digest": "43d85a2b3dc74a65c9b49b5154917f4bec7dc1179cbd3bcebc5c10a7003d3e68",
+    "input_digest": "8d086bec81da405469c8327d99e09e4c0682f0a5a0ec78a0c989b29a760b139b",
+    "reviewed_worktree_digest": "e1cf97bcc69650c6680598363f9fd222c2dcf0bc09be1ee16aaa6f492bc7a27b",
+    "spec_sha256": "eb5da45d34fcbcacbbc79519cb6268854ac722744c0f7ced1fb7cac93fa1f1ea"
+  },
+  "commands": [
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "-m",
+        "pytest",
+        "-c",
+        "mcp_server/pytest.ini",
+        "mcp_server/tests/test_catalog_phase5_gate_runner.py",
+        "-q",
+        "--tb=line"
+      ],
+      "availability_reason": null,
+      "check_id": "runner_self_tests",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "-m",
+        "pytest",
+        "-c",
+        "mcp_server/pytest.ini",
+        "mcp_server/tests/test_catalog_security_matrix.py",
+        "mcp_server/tests/test_catalog_canary_scripts.py",
+        "mcp_server/tests/test_catalog_canary_review_regressions.py",
+        "mcp_server/tests/test_catalog_service.py",
+        "mcp_server/tests/test_catalog_capabilities.py",
+        "mcp_server/tests/test_catalog_gates.py",
+        "mcp_server/tests/test_catalog_commit_recovery.py",
+        "mcp_server/tests/test_catalog_concurrency.py",
+        "mcp_server/tests/test_catalog_store_unit.py",
+        "mcp_server/tests/test_legacy_mcp_contract_compatibility.py",
+        "-q",
+        "--tb=line"
+      ],
+      "availability_reason": null,
+      "check_id": "focused_pytest",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "-m",
+        "pytest",
+        "-c",
+        "mcp_server/pytest.ini",
+        "mcp_server/tests/test_catalog_security_matrix.py",
+        "-q",
+        "--tb=line"
+      ],
+      "availability_reason": null,
+      "check_id": "security_matrix",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "-m",
+        "pytest",
+        "-c",
+        "mcp_server/pytest.ini",
+        "mcp_server/tests/test_legacy_mcp_contract_compatibility.py",
+        "-q",
+        "--tb=line"
+      ],
+      "availability_reason": null,
+      "check_id": "legacy_contract_14",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "catalog_registration_14"
+      ],
+      "availability_reason": null,
+      "check_id": "catalog_registration_14",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "-m",
+        "pytest",
+        "-c",
+        "mcp_server/pytest.ini",
+        "mcp_server/tests/test_legacy_mcp_contract_compatibility.py",
+        "-k",
+        "tool_union_exact_28",
+        "-q",
+        "--tb=line"
+      ],
+      "availability_reason": null,
+      "check_id": "tool_union_28",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "cypher_identifier_authority"
+      ],
+      "availability_reason": null,
+      "check_id": "cypher_identifier_authority",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "endpoint_no_implicit_creation"
+      ],
+      "availability_reason": null,
+      "check_id": "endpoint_no_implicit_creation",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "safety_no_v2_current"
+      ],
+      "availability_reason": null,
+      "check_id": "safety_no_v2_current",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "historical_axis_preserved"
+      ],
+      "availability_reason": null,
+      "check_id": "historical_axis_preserved",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "historical_artifacts_unchanged"
+      ],
+      "availability_reason": null,
+      "check_id": "historical_artifacts_unchanged",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "hardened_artifacts_strict"
+      ],
+      "availability_reason": null,
+      "check_id": "hardened_artifacts_strict",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "canary_not_executed"
+      ],
+      "availability_reason": null,
+      "check_id": "canary_not_executed",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "offline_canary_pure"
+      ],
+      "availability_reason": null,
+      "check_id": "offline_canary_pure",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "docs_operator_sections"
+      ],
+      "availability_reason": null,
+      "check_id": "docs_operator_sections",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "check",
+        "docs_migration_phrases"
+      ],
+      "availability_reason": null,
+      "check_id": "docs_migration_phrases",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "ruff",
+        "check",
+        "mcp_server/src/services/catalog_service.py",
+        "mcp_server/src/services/catalog_store.py",
+        "scripts/build_catalog_canary_requests.py",
+        "scripts/run_catalog_canary_batch.py",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "mcp_server/tests/test_catalog_phase5_gate_runner.py",
+        "mcp_server/tests/test_catalog_security_matrix.py",
+        "mcp_server/tests/test_catalog_canary_scripts.py",
+        "mcp_server/tests/test_catalog_canary_review_regressions.py",
+        "mcp_server/tests/test_catalog_ollama_e2e.py"
+      ],
+      "availability_reason": null,
+      "check_id": "ruff",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "pyright",
+        "--project",
+        "mcp_server/pyproject.toml",
+        "mcp_server/src/services/catalog_service.py",
+        "mcp_server/src/services/catalog_store.py",
+        "scripts/build_catalog_canary_requests.py",
+        "scripts/run_catalog_canary_batch.py",
+        "mcp_server/tests/catalog_phase5_gate_runner.py",
+        "mcp_server/tests/test_catalog_phase5_gate_runner.py",
+        "mcp_server/tests/test_catalog_security_matrix.py",
+        "mcp_server/tests/test_catalog_canary_scripts.py",
+        "mcp_server/tests/test_catalog_canary_review_regressions.py",
+        "mcp_server/tests/test_catalog_ollama_e2e.py"
+      ],
+      "availability_reason": null,
+      "check_id": "pyright",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "-m",
+        "pytest",
+        "-c",
+        "mcp_server/pytest.ini",
+        "mcp_server/tests/test_catalog_neo4j_int.py",
+        "mcp_server/tests/test_catalog_commit_neo4j_int.py",
+        "mcp_server/tests/test_catalog_prepare_neo4j_int.py",
+        "-q",
+        "--tb=line"
+      ],
+      "availability_reason": null,
+      "check_id": "live_neo4j_test11",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "mcp_server",
+        "python",
+        "-m",
+        "pytest",
+        "-c",
+        "mcp_server/pytest.ini",
+        "mcp_server/tests/test_catalog_ollama_e2e.py",
+        "-q",
+        "--tb=line"
+      ],
+      "availability_reason": null,
+      "check_id": "ollama_e2e",
+      "evidence_source": "final_rerun",
+      "status": "pass"
+    }
+  ],
+  "compatibility": {
+    "catalog_tools": 14,
+    "compatibility_breaks": [],
+    "legacy_tools": 14,
+    "tool_union": 28
+  },
+  "compatibility_breaks": [],
+  "compatibility_decisions": [
+    "preserve all 14 legacy MCP tool names and public contracts",
+    "catalog-v2 contract changes are explicit and separately versioned",
+    "Neo4j-only deterministic catalog support; no portability claim"
+  ],
+  "completed_phases": [
+    "phase_0",
+    "phase_1",
+    "phase_2",
+    "phase_3a",
+    "phase_3b",
+    "phase_4",
+    "phase_5"
+  ],
+  "content_digest": "8d086bec81da405469c8327d99e09e4c0682f0a5a0ec78a0c989b29a760b139b",
+  "contract_and_schema_changes": [
+    "catalog-v2 system-scoped graph keys and UUIDv5 identity",
+    "14 legacy plus 14 catalog MCP tools with exact disjoint union 28",
+    "prepare/token-only-commit lifecycle and explicit evidence links",
+    "durable manifest-backed verification contracts"
+  ],
+  "database_migration_changes": [
+    "Neo4j 5.26+ catalog-v2 constraints, labels, and control records",
+    "no automatic catalog-v1 identity migration or graph rewrite",
+    "offline hardened canary artifacts replace historical hashes as authority"
+  ],
+  "edge_probes": {
+    "dispositions": {
+      "DOCS-01-adjacency": "resolved",
+      "DOCS-01-empty": "resolved",
+      "DOCS-01-ordering": "resolved",
+      "DOCS-02-adjacency": "resolved",
+      "DOCS-02-concurrency": "resolved",
+      "DOCS-02-empty": "resolved",
+      "DOCS-02-ordering": "resolved",
+      "DOCS-03-unclassified": "resolved",
+      "DOCS-04-adjacency": "resolved",
+      "DOCS-04-empty": "resolved",
+      "DOCS-04-ordering": "resolved",
+      "DOCS-05-unclassified": "resolved",
+      "DOCS-06-unclassified": "resolved",
+      "IDEN-13-unclassified": "resolved",
+      "REPT-01-adjacency": "resolved",
+      "REPT-01-empty": "resolved",
+      "REPT-01-ordering": "resolved",
+      "SAFE-03-unclassified": "resolved",
+      "SAFE-04-concurrency": "resolved",
+      "SAFE-06-concurrency": "resolved",
+      "SAFE-07-empty": "resolved",
+      "SAFE-07-encoding": "resolved",
+      "SAFE-09-concurrency": "resolved",
+      "SAFE-09-empty": "resolved",
+      "SAFE-09-encoding": "resolved",
+      "SAFE-10-adjacency": "resolved",
+      "SAFE-10-empty": "resolved",
+      "SAFE-10-ordering": "resolved",
+      "TEST-10-empty": "resolved",
+      "TEST-10-encoding": "resolved",
+      "TEST-11-empty": "resolved",
+      "TEST-11-encoding": "resolved",
+      "TEST-12-adjacency": "resolved",
+      "TEST-12-concurrency": "resolved",
+      "TEST-12-empty": "resolved",
+      "TEST-12-idempotency": "resolved",
+      "TEST-12-ordering": "resolved"
+    },
+    "expected": 37
+  },
+  "evaluated_head": "27c4e2e4e5000d84d18cde24a99b010831771fe7",
+  "implementation_status": "complete",
+  "initial_evidence": {
+    "content_digest": "61b7e74a3407123a80572e833e034cb20360aeaebff3d56ea000bcb45fef5542",
+    "evaluated_head": "27c4e2e4e5000d84d18cde24a99b010831771fe7",
+    "ledger_sha256": "403c575443a93738901610bc015e0bcb9b268207825f11b9b9f8b49165287ca3",
+    "spec_sha256": "eb5da45d34fcbcacbbc79519cb6268854ac722744c0f7ced1fb7cac93fa1f1ea"
+  },
+  "known_limitations": [
+    "Neo4j 5.26+ catalog writes only; no non-Neo4j portability claim",
+    "no automatic catalog-v1 to catalog-v2 migration",
+    "Phase 6 canary remains separate and unexecuted"
+  ],
+  "migration_status": "offline_hardened_artifacts_only",
+  "migrations_added": [
+    "offline catalog-v2 hardened artifact regeneration",
+    "prepare/token-only-commit future canary path"
+  ],
+  "phase_5_complete": true,
+  "post_execution_audits_pending": false,
+  "proof_package_marker": ".planning/phases/05-verification-security-compatibility-and-migration-docs/05-PROOF-PACKAGE.json",
+  "ready_to_regenerate_canary": true,
+  "ready_to_regenerate_canary_payload": true,
+  "report_sha256": "e2aeb2a0fa67835b4513d05c1a4fd58a03a442b9c1f046290268f7a3fc94b36d",
+  "requirements": {
+    "implemented": 138,
+    "mapped": 138,
+    "phase_5_expected": 17,
+    "phase_5_ids": [
+      "IDEN-13",
+      "SAFE-03",
+      "SAFE-04",
+      "SAFE-06",
+      "SAFE-07",
+      "SAFE-09",
+      "SAFE-10",
+      "TEST-10",
+      "TEST-11",
+      "TEST-12",
+      "DOCS-01",
+      "DOCS-02",
+      "DOCS-03",
+      "DOCS-04",
+      "DOCS-05",
+      "DOCS-06",
+      "REPT-01"
+    ],
+    "phase_5_verified": 17,
+    "total_expected": 138,
+    "verified": 138
+  },
+  "reviewed_worktree_digest": "e1cf97bcc69650c6680598363f9fd222c2dcf0bc09be1ee16aaa6f492bc7a27b",
+  "risks": [
+    "changing GRAPHITI_CATALOG_UUID_NAMESPACE changes every deterministic identity",
+    "historical catalog-v1 ACCEPT_TAB hashes remain audit-only and invalid for catalog-v2"
+  ],
+  "schema_version": "phase5-implementation-report.v1",
+  "security_and_operational_limits": [
+    "catalog writes require fixed server allowlists and Neo4j 5.26+",
+    "all reads and writes are constrained by group_id",
+    "commit performs no embedding, LLM, queue, HTTP, or payload replacement",
+    "default batch ceilings: 500 entities, 2000 edges, 5000 provenance links",
+    "Phase 5 never executes canary, clear_graph, deployment, or deletion"
+  ],
+  "spec_sha256": "eb5da45d34fcbcacbbc79519cb6268854ac722744c0f7ced1fb7cac93fa1f1ea",
+  "tests": {
+    "deselected": 8,
+    "errors": 0,
+    "failed": 0,
+    "passed": 550,
+    "skipped": 0
+  },
+  "two_axis_safety": {
+    "current_oracle_catalog_v2_mutated": false,
+    "current_oracle_catalog_v2_queried": false,
+    "historical": {
+      "checkpoint_attempt_count": 2,
+      "checkpoint_sha256": "b367e7f395782d13e72671e1b66d36b24432cb2c1b48c7fa45974d232039ace4",
+      "class": "test_policy",
+      "commit": "a67789a",
+      "historical_oracle_catalog_v2_queried": true,
+      "note": "initial 03B-06 live suite (a67789a) queried oracle-catalog-v2 read-only for before/after group counts; local test-policy violation on local Neo4j with no corresponding production/second-schema data; permanent audit record; never query or mutate oracle-catalog-v2 again; Phase 5 preserves pointer only",
+      "scope": "local_neo4j_no_corresponding_data"
+    }
+  }
+}

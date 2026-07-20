@@ -1,0 +1,694 @@
+{
+  "entries": [
+    {
+      "category": "adjacency",
+      "plan": "02-01",
+      "requirement_id": "EDGE-01",
+      "resolution": "equal/touch pairs remain distinct map entries; no merge of adjacent endpoint pairs",
+      "row_index": 0,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_allowed_pairs_remain_separate_entries_no_merge",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-01",
+      "requirement_id": "EDGE-01",
+      "resolution": "empty map export still sorted/complete; no phantom pairs",
+      "row_index": 1,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_endpoint_map_export_sorted_and_complete",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-01",
+      "requirement_id": "EDGE-01",
+      "resolution": "endpoint map lookup order stable and reentrant",
+      "row_index": 2,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_map_lookup_order_stable_and_reentrant",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-01",
+      "requirement_id": "EDGE-01",
+      "resolution": "pure allow check has no shared mutable state under reentry",
+      "row_index": 3,
+      "task": "02-01-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_is_edge_endpoint_pair_allowed_pure_no_mutation",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-01",
+      "requirement_id": "EDGE-02",
+      "resolution": "EDGE_ENDPOINT_MAP keys equal CATALOG_EDGE_TYPES exactly",
+      "row_index": 4,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_edge_endpoint_map_keys_equal_catalog_edge_types",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-01",
+      "requirement_id": "EDGE-03",
+      "resolution": "ForeignKeyTo dual Column-Column and Table-Table; Column-Table rejected",
+      "row_index": 5,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_foreign_key_dual_pairs_and_column_table_reject",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-01",
+      "requirement_id": "EDGE-04",
+      "resolution": "deferred LikelyReferencesTo/MapsTo/SynchronizesTo not registered",
+      "row_index": 6,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_deferred_edge_types_not_registered",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-01",
+      "requirement_id": "EDGE-05",
+      "resolution": "every pair member in CATALOG_ENTITY_TYPES",
+      "row_index": 7,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_every_pair_member_in_catalog_entity_types",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-01",
+      "requirement_id": "EDGE-06",
+      "resolution": "disallowed endpoint pairs rejected by validator",
+      "row_index": 8,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_validate_rejects_disallowed_pairs",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-01",
+      "requirement_id": "EDGE-07",
+      "resolution": "service preflight rejects illegal topology before resolve/embed/write",
+      "row_index": 9,
+      "task": "02-01-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_service.py::test_edge_topology_disallowed_pair_skips_resolve_embed_write",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-01",
+      "requirement_id": "EDGE-08",
+      "resolution": "fail-before-side-effect spies prove no concurrent partial write path",
+      "row_index": 10,
+      "task": "02-01-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_service.py::test_edge_topology_disallowed_pair_skips_resolve_embed_write",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-01",
+      "requirement_id": "EDGE-09",
+      "resolution": "CatalogEdgeItem model rejects disallowed pair at validation boundary",
+      "row_index": 11,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_catalog_edge_item_rejects_disallowed_endpoint_pair",
+      "verification": "explicit"
+    },
+    {
+      "category": "adjacency",
+      "plan": "02-03",
+      "requirement_id": "HASH-01",
+      "resolution": "adjacent field mutations change digest; equality only for identical domain",
+      "row_index": 12,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_mutate_included_fields_changes_digest",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-03",
+      "requirement_id": "HASH-01",
+      "resolution": "empty collections hash stable",
+      "row_index": 13,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_empty_collections_and_evidence_only_hash_stable",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-03",
+      "requirement_id": "HASH-01",
+      "resolution": "collection reorder preserves digest",
+      "row_index": 14,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_reorder_collections_same_digest",
+      "verification": "explicit"
+    },
+    {
+      "category": "adjacency",
+      "plan": "02-03",
+      "requirement_id": "HASH-02",
+      "resolution": "recipe includes versions/system key/collections",
+      "row_index": 15,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_recipe_includes_versions_system_key_and_collections",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-03",
+      "requirement_id": "HASH-02",
+      "resolution": "catalog_sha256 required 64 lowercase hex",
+      "row_index": 16,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_catalog_sha256_required_and_lowercase_hex",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-03",
+      "requirement_id": "HASH-02",
+      "resolution": "canonicalization version constants pin recipe order",
+      "row_index": 17,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_canonicalization_version_constants",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-03",
+      "requirement_id": "HASH-02",
+      "resolution": "hash helpers reentrant and idempotent",
+      "row_index": 18,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_hash_reentrant_and_idempotent",
+      "verification": "explicit"
+    },
+    {
+      "category": "idempotency",
+      "plan": "02-03",
+      "requirement_id": "HASH-03",
+      "resolution": "identical input yields identical digest twice",
+      "row_index": 19,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_hash_reentrant_and_idempotent",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-03",
+      "requirement_id": "HASH-03",
+      "resolution": "service static delegates to pure recipe without shared state",
+      "row_index": 20,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_service_static_delegates_to_pure_recipe",
+      "verification": "explicit"
+    },
+    {
+      "category": "adjacency",
+      "plan": "02-03",
+      "requirement_id": "HASH-04",
+      "resolution": "transport/excluded fields do not change digest",
+      "row_index": 21,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_excluded_fields_do_not_change_digest",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-03",
+      "requirement_id": "HASH-04",
+      "resolution": "dry-run echoes hash fields with zero writes",
+      "row_index": 22,
+      "task": "02-03-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_dry_run_echoes_authoritative_hash_fields_zero_write",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-03",
+      "requirement_id": "HASH-04",
+      "resolution": "duplicate identical items retain multiplicity in hash",
+      "row_index": 23,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_duplicate_identical_items_retain_multiplicity",
+      "verification": "explicit"
+    },
+    {
+      "category": "adjacency",
+      "plan": "02-03",
+      "requirement_id": "HASH-05",
+      "resolution": "byte-identical evidence links coalesce before hash",
+      "row_index": 24,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_byte_identical_evidence_links_coalesce_before_hash",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-03",
+      "requirement_id": "HASH-05",
+      "resolution": "evidence-only empty entity/edge collections hash stable",
+      "row_index": 25,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_empty_collections_and_evidence_only_hash_stable",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-03",
+      "requirement_id": "HASH-05",
+      "resolution": "evidence collection order independence",
+      "row_index": 26,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_reorder_collections_same_digest",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-03",
+      "requirement_id": "HASH-06",
+      "resolution": "caller request hash mismatch still echoes server authoritative hash",
+      "row_index": 27,
+      "task": "02-03-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_caller_request_hash_mismatch_echoes_server_hash",
+      "verification": "explicit"
+    },
+    {
+      "category": "adjacency",
+      "plan": "02-03",
+      "requirement_id": "HASH-07",
+      "resolution": "batch gate counts evidence_links not cartesian expansion",
+      "row_index": 28,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_batch_gate_counts_evidence_links_not_cartesian",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-03",
+      "requirement_id": "HASH-07",
+      "resolution": "hash fields present on empty dry-run path",
+      "row_index": 29,
+      "task": "02-03-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_dry_run_echoes_authoritative_hash_fields_zero_write",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-03",
+      "requirement_id": "HASH-07",
+      "resolution": "version-tagged full-domain recipe order fixed",
+      "row_index": 30,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_recipe_includes_versions_system_key_and_collections",
+      "verification": "explicit"
+    },
+    {
+      "category": "idempotency",
+      "plan": "02-03",
+      "requirement_id": "HASH-07",
+      "resolution": "request hash idempotent for same batch",
+      "row_index": 31,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_hash_reentrant_and_idempotent",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-03",
+      "requirement_id": "HASH-07",
+      "resolution": "dry-run zero-write under concurrent call spies",
+      "row_index": 32,
+      "task": "02-03-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_dry_run_echoes_authoritative_hash_fields_zero_write",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-04",
+      "requirement_id": "CAPA-01",
+      "resolution": "capabilities build when writes disabled / namespace missing",
+      "row_index": 33,
+      "task": "02-04-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py::test_build_capabilities_disabled_writes_missing_namespace",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-04",
+      "requirement_id": "CAPA-02",
+      "resolution": "versions sourced from identity constants",
+      "row_index": 34,
+      "task": "02-04-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py::test_build_capabilities_versions_from_identity_constants",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-04",
+      "requirement_id": "CAPA-03",
+      "resolution": "namespace fingerprint domain-separated non-reversible",
+      "row_index": 35,
+      "task": "02-04-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py::test_namespace_fingerprint_stable_domain_separated_prefix",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-04",
+      "requirement_id": "CAPA-04",
+      "resolution": "endpoint map exported from topology authority",
+      "row_index": 36,
+      "task": "02-04-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py::test_build_capabilities_endpoint_map_from_topology_export",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-04",
+      "requirement_id": "CAPA-05",
+      "resolution": "zero mutation spies under capabilities tool",
+      "row_index": 37,
+      "task": "02-04-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py::test_get_catalog_capabilities_zero_mutation_spies",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-04",
+      "requirement_id": "CAPA-06",
+      "resolution": "configured and hard limits reported",
+      "row_index": 38,
+      "task": "02-04-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py::test_build_capabilities_limits_configured_and_hard",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-04",
+      "requirement_id": "CAPA-07",
+      "resolution": "feature flags phase-truthful",
+      "row_index": 39,
+      "task": "02-04-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py::test_build_capabilities_features_phase_truthful",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-04",
+      "requirement_id": "CAPA-08",
+      "resolution": "namespace and secrets redacted from response",
+      "row_index": 40,
+      "task": "02-04-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py::test_build_capabilities_redacts_namespace_and_secrets",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-04",
+      "requirement_id": "CAPA-09",
+      "resolution": "missing namespace yields empty/none fingerprint path",
+      "row_index": 41,
+      "task": "02-04-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py::test_namespace_fingerprint_none_when_missing",
+      "verification": "explicit"
+    },
+    {
+      "category": "encoding",
+      "plan": "02-04",
+      "requirement_id": "CAPA-09",
+      "resolution": "source omits raw namespace from logs (encoding safety)",
+      "row_index": 42,
+      "task": "02-04-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_capabilities.py::test_capabilities_source_omits_raw_namespace_logging",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-02",
+      "requirement_id": "EVID-01",
+      "resolution": "CatalogEvidenceLink entity target constructs",
+      "row_index": 43,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_entity_target_link_constructs",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-02",
+      "requirement_id": "EVID-02",
+      "resolution": "CatalogEvidenceLink edge target constructs",
+      "row_index": 44,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_edge_target_link_constructs",
+      "verification": "explicit"
+    },
+    {
+      "category": "unclassified",
+      "plan": "02-02",
+      "requirement_id": "EVID-03",
+      "resolution": "both entity and edge targets fail (exclusive target)",
+      "row_index": 45,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_both_targets_fail",
+      "verification": "explicit"
+    },
+    {
+      "category": "boundary",
+      "plan": "02-02",
+      "requirement_id": "EVID-04",
+      "resolution": "confidence bounds and finite (no NaN/inf)",
+      "row_index": 46,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_confidence_bounds_and_finite",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-02",
+      "requirement_id": "EVID-04",
+      "resolution": "empty locator allowed",
+      "row_index": 47,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_empty_locator_allowed",
+      "verification": "explicit"
+    },
+    {
+      "category": "encoding",
+      "plan": "02-02",
+      "requirement_id": "EVID-04",
+      "resolution": "excerpt preserves trailing spaces encoding",
+      "row_index": 48,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_excerpt_preserves_trailing_spaces_when_non_empty",
+      "verification": "explicit"
+    },
+    {
+      "category": "precision",
+      "plan": "02-02",
+      "requirement_id": "EVID-04",
+      "resolution": "locator line/statement precision bounds",
+      "row_index": 49,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_locator_start_line_ge_1_statement_index_ge_0",
+      "verification": "explicit"
+    },
+    {
+      "category": "adjacency",
+      "plan": "02-02",
+      "requirement_id": "EVID-05",
+      "resolution": "evidence link key deterministic for equal inputs",
+      "row_index": 50,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_evidence_link_key_deterministic",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-02",
+      "requirement_id": "EVID-05",
+      "resolution": "coalesce empty list stable",
+      "row_index": 51,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_coalesce_empty_list",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-02",
+      "requirement_id": "EVID-05",
+      "resolution": "canonical payload/hash order-stable",
+      "row_index": 52,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_evidence_canonical_payload_and_hash_stable",
+      "verification": "explicit"
+    },
+    {
+      "category": "adjacency",
+      "plan": "02-02",
+      "requirement_id": "EVID-06",
+      "resolution": "batch rejects cartesian entity targets",
+      "row_index": 53,
+      "task": "02-02-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_batch_rejects_cartesian_entity_targets",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-02",
+      "requirement_id": "EVID-06",
+      "resolution": "empty evidence_links with sources ok",
+      "row_index": 54,
+      "task": "02-02-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_batch_empty_evidence_links_with_sources_ok",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-02",
+      "requirement_id": "EVID-06",
+      "resolution": "no cartesian product expansion in batch",
+      "row_index": 55,
+      "task": "02-02-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_batch_no_cartesian_product_expansion",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-02",
+      "requirement_id": "EVID-06",
+      "resolution": "evidence helpers reentrant no shared state",
+      "row_index": 56,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_evidence_helpers_reentrant_no_shared_state",
+      "verification": "explicit"
+    },
+    {
+      "category": "adjacency",
+      "plan": "02-02",
+      "requirement_id": "EVID-14",
+      "resolution": "byte-identical links coalesce",
+      "row_index": 57,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_coalesce_byte_identical_links",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-02",
+      "requirement_id": "EVID-14",
+      "resolution": "neither target fails closed",
+      "row_index": 58,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_neither_target_fails",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-02",
+      "requirement_id": "EVID-14",
+      "resolution": "non-identical multiplicity retained in order-independent coalesce",
+      "row_index": 59,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_coalesce_retains_non_identical_multiplicity",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-02",
+      "requirement_id": "EVID-14",
+      "resolution": "model_validate does not invent links under concurrent shapes",
+      "row_index": 60,
+      "task": "02-02-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_evidence.py::test_model_validate_does_not_invent_links_from_cartesian",
+      "verification": "explicit"
+    },
+    {
+      "category": "adjacency",
+      "plan": "02-01",
+      "requirement_id": "TEST-02",
+      "resolution": "exhaustive allow matrix for registered pairs (TEST-02 adjacency)",
+      "row_index": 61,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_validate_allows_every_registered_pair",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-01",
+      "requirement_id": "TEST-02",
+      "resolution": "empty/unknown edge type fails closed in matrix",
+      "row_index": 62,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_deferred_and_unknown_edge_types_fail",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-01",
+      "requirement_id": "TEST-02",
+      "resolution": "expected map matches authority ordering",
+      "row_index": 63,
+      "task": "02-01-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_expected_map_matches_authority",
+      "verification": "explicit"
+    },
+    {
+      "category": "concurrency",
+      "plan": "02-01",
+      "requirement_id": "TEST-02",
+      "resolution": "pure topology helpers reentrant (TEST-02 concurrency)",
+      "row_index": 64,
+      "task": "02-01-T2",
+      "test_or_backstop": "mcp_server/tests/test_catalog_topology.py::test_is_edge_endpoint_pair_allowed_pure_no_mutation",
+      "verification": "explicit"
+    },
+    {
+      "category": "adjacency",
+      "plan": "02-03",
+      "requirement_id": "TEST-04",
+      "resolution": "TEST-04 mutation matrix: each included field flips digest",
+      "row_index": 65,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_mutate_included_fields_changes_digest",
+      "verification": "explicit"
+    },
+    {
+      "category": "empty",
+      "plan": "02-03",
+      "requirement_id": "TEST-04",
+      "resolution": "TEST-04 empty collection stability",
+      "row_index": 66,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_empty_collections_and_evidence_only_hash_stable",
+      "verification": "explicit"
+    },
+    {
+      "category": "ordering",
+      "plan": "02-03",
+      "requirement_id": "TEST-04",
+      "resolution": "TEST-04 ordering independence",
+      "row_index": 67,
+      "task": "02-03-T1",
+      "test_or_backstop": "mcp_server/tests/test_catalog_hash.py::test_reorder_collections_same_digest",
+      "verification": "explicit"
+    }
+  ],
+  "no_silent_drop": {
+    "key_equality": true,
+    "null_dispositions": 0,
+    "resolution_count": 68,
+    "source_count": 68
+  },
+  "raw_item_count": 68,
+  "raw_sha256": "16144e5ebc2ae9a46cda9b45ce0206e1290b954988c227ce97ec0a05f6149ce0",
+  "raw_source": "02-EDGE-PROBE.json",
+  "schema_version": "phase2-edge-probe-resolution.v1"
+}

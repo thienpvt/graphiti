@@ -1,466 +1,516 @@
 # Architecture Research
 
-**Domain:** Deterministic catalog-ingestion MCP tools (Graphiti MCP extension)
-**Researched:** 2026-07-16
-**Confidence:** HIGH
+**Domain:** Catalog-v2 pre-canary hardening for deterministic catalog MCP tools
+**Researched:** 2026-07-17
+**Confidence:** HIGH (repo-sourced live catalog modules + PROJECT.md v1.1 scope)
 
 ## Standard Architecture
 
 ### System Overview
 
-Seven new MCP tools sit **beside** existing semantic tools. They do **not** go through `Graphiti.add_episode` / `QueueService` / LLM extraction. They share the live `GraphitiService` client (driver + embedder + `group_id`) and write Neo4j with server-owned Cypher.
+Catalog-v1 is live. Seven MCP tools, identity helpers, service orchestration, and a dedicated Neo4j store already exist beside the semantic Graphiti path. Catalog-v2 hardens that substrate: breaking FE/BO identity grammar, server-owned endpoint maps, full-domain hashing, capabilities, restart-safe immutable prepared plans, exact evidence links, durable manifests, typed-edge resolve, manifest-backed verify, and split read/write gates.
+
+**No silent identity migration.** Preserve tool names and legacy semantic tools. Catalog-v2 **intentionally breaks** seven deterministic request identity/provenance/hash contracts where required — do not claim old catalog-v1 request payloads remain accepted. Identities are never silently reinterpreted.
 
 ```
-┌────────────────────────────────────────────────────────────────────────────┐
-│ MCP TRANSPORT (FastMCP)                                                    │
-│  mcp_server/src/graphiti_mcp_server.py                                     │
-│  EXISTING: add_memory, search_nodes, search_memory_facts, add_triplet, ... │
-│  NEW: upsert_typed_entities | resolve_typed_entities | upsert_typed_edges  │
-│       verify_catalog_batch | upsert_provenance | upsert_catalog_batch      │
-│       get_catalog_ingest_status                                            │
-└───────────────────────────────┬────────────────────────────────────────────┘
-                                │ sync await (no queue)
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ MCP TRANSPORT (FastMCP) — mcp_server/src/graphiti_mcp_server.py              │
+│ UNCHANGED (14 legacy semantic tools): add_memory, search_*, add_triplet, …  │
+│ LIVE v1 CATALOG (7): upsert_typed_entities|edges, resolve_typed_entities,    │
+│   verify_catalog_batch, upsert_provenance, upsert_catalog_batch,             │
+│   get_catalog_ingest_status                                                  │
+│ v2 ADDITIVE: get_catalog_capabilities, resolve_typed_edges,                  │
+│   prepare_catalog_batch, commit_prepared_catalog_batch, discard_prepared_catalog_batch,        │
+│   get_catalog_batch_manifest, get_catalog_evidence                     │
+│   (+ verify_catalog_batch gains manifest-backed mode)                        │
+└───────────────────────────────┬──────────────────────────────────────────────┘
+                                │ sync await; no QueueService
                                 ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│ MCP BOUNDARY                                                               │
-│  models/catalog_*   strict Pydantic request/response + error codes         │
-│  services/catalog_service.py   orchestration, feature gate, batch status   │
-│  (does NOT call LLMClientFactory / QueueService)                           │
-└───────────────┬───────────────────────────────┬────────────────────────────┘
-                │                               │
-                │ embedder.create_batch         │ Neo4j writes
-                ▼                               ▼
-┌──────────────────────────┐   ┌─────────────────────────────────────────────┐
-│ EmbedderClient           │   │ CatalogNeo4jStore (dedicated persistence)   │
-│ graphiti_core/embedder/  │   │ mcp_server/src/services/catalog_store.py    │
-│ (pre-tx only)            │   │ uses driver.transaction() + fixed Cypher    │
-└──────────────────────────┘   │ reuses: Entity/Episodic labels, RELATES_TO, │
-                               │ MENTIONS, name_embedding, fact_embedding    │
-                               │ NEW: CatalogIngestBatch (non-Entity)        │
-                               └──────────────────┬──────────────────────────┘
-                                                  │
-                                                  ▼
-                               ┌─────────────────────────────────────────────┐
-                               │ Neo4j 5.26+  (Neo4jDriver)                  │
-                               │ graphiti_core/driver/neo4j_driver.py        │
-                               └─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ BOUNDARY                                                                     │
+│ MODIFIED models/catalog_*  — recursive extra=forbid; FE/BO grammar;          │
+│   endpoint-map refs; full-domain hash fields; evidence-link + manifest DTOs  │
+│ MODIFIED services/catalog_identity.py — v2 name-string rules; domain hash    │
+│ MODIFIED services/catalog_service.py  — gates, prepare/commit, verify modes  │
+│ NEW     services/catalog_endpoint_map.py — finite server edge→endpoint map   │
+│ NEW     services/catalog_plan.py — immutable prepared plan + token lifecycle │
+│ NEW     services/catalog_manifest.py — durable commit manifest assembly      │
+│ MODIFIED services/catalog_store.py — control nodes, CAS, evidence, manifest  │
+│ config CatalogConfig — split write/read gates; plan TTL; capabilities flags  │
+│ DOES NOT call LLMClient / QueueService / Graphiti.add_episode|add_triplet    │
+└───────────┬──────────────────────────────┬───────────────────────────────────┘
+            │ embedder (pre-domain-tx)     │ Neo4j 5.26+ only
+            ▼                              ▼
+┌──────────────────────┐   ┌───────────────────────────────────────────────────┐
+│ EmbedderClient       │   │ CatalogNeo4jStore                                 │
+│ (existing)           │   │ DOMAIN: Entity + typed labels, RELATES_TO,        │
+│                      │   │   Episodic, MENTIONS (searchable)                 │
+│                      │   │ CONTROL (never Entity):                           │
+│                      │   │   CatalogIngestBatch (v1 status — keep)           │
+│                      │   │   CatalogPreparedPlan (v2 NEW)                    │
+│                      │   │   CatalogBatchManifest (v2 NEW)                   │
+│                      │   │   CatalogEvidenceLink (v2 NEW, non-Entity)        │
+└──────────────────────┘   └───────────────────────┬───────────────────────────┘
+                                                   ▼
+                               Neo4jDriver.transaction() — real commit/rollback
 ```
 
 ### Component Responsibilities
 
-| Component | Responsibility | Typical Implementation |
-|-----------|----------------|------------------------|
-| FastMCP tool functions | Protocol surface, thin adapters | `@mcp.tool()` in `graphiti_mcp_server.py` (or thin import/register from `catalog_tools.py`) |
-| Catalog request models | Allowlists, limits, hash/prefix/UUID validation | New `mcp_server/src/models/catalog_*.py` (Pydantic `BaseModel`, not TypedDict) |
-| Catalog response models | Structured success + item-level errors | Extend pattern of `models/response_types.py` with typed error codes |
-| `CatalogService` | Feature gate, UUIDv5 identity, SHA-256 audit, embed-then-tx ordering, status nodes | New `mcp_server/src/services/catalog_service.py` |
-| `CatalogNeo4jStore` | Parameterized Neo4j Cypher inside real transactions | New `mcp_server/src/services/catalog_store.py` (Neo4j-first; **dedicated persistence required**) |
-| `CatalogConfig` | Immutable UUID namespace + batch limits + enable flag | Extend `mcp_server/src/config/schema.py` |
-| Existing `GraphitiService` | Provide live `Graphiti` client (`driver`, `embedder`) | Reuse `GraphitiService.client` — do not re-init drivers |
-| Existing search tools | Interop only (`search_nodes` / `search_memory_facts`) | Unchanged; catalog entities must be `Entity` + `name_embedding` searchable |
-| Existing `QueueService` | Semantic episode queue | **Out of path** for all seven tools |
+| Component | Status | Responsibility |
+|-----------|--------|----------------|
+| FastMCP tool adapters | MODIFY (register) | Thin `@mcp.tool`; Pydantic in, structured out; no Cypher |
+| 14 legacy semantic tools | UNCHANGED | Preserve contracts; never route catalog through them |
+| 7 v1 catalog tools | KEEP (+ verify mode) | Deterministic sync path; v2 must not break them |
+| `CatalogConfig` | MODIFY | `enabled` write gate, optional `reads_enabled`, namespace, limits, plan TTL/capacity, capabilities surface |
+| `models/catalog_*` | MODIFY | Recursive forbid-unknown; immutable flags; FE/BO keys; endpoint map fields; evidence + manifest DTOs |
+| `catalog_identity.py` | MODIFY | UUIDv5 + canonical SHA-256; v2 identity name grammar; full-domain batch hash |
+| `catalog_endpoint_map.py` | NEW | Finite server map edge_type → allowed (source_type, target_type) pairs |
+| `catalog_service.py` | MODIFY | Orchestration: validate → identity → map check → hash → embed → tx; prepare/commit/discard; verify modes |
+| `catalog_plan.py` | NEW | Immutable prepared plan hash, token mint, replay equality, discard semantics |
+| `catalog_manifest.py` | NEW | Exact post-commit inventory (uuids, hashes, counts, evidence ids) |
+| `catalog_store.py` | MODIFY | Domain MERGEs + control-plane nodes; CAS; bounded state; no conflict repair |
+| `GraphitiService.client` | REUSE | driver + embedder only |
+| `QueueService` / LLM | OUT OF PATH | |
 
 ## Recommended Project Structure
 
 ```
-mcp_server/
-├── src/
-│   ├── graphiti_mcp_server.py          # register 7 tools; keep existing tools untouched
-│   ├── config/
-│   │   └── schema.py                   # + CatalogConfig (namespace, limits, enabled)
-│   ├── models/
-│   │   ├── entity_types.py             # existing semantic extraction types (do not overload)
-│   │   ├── response_types.py           # existing TypedDicts
-│   │   ├── catalog_entities.py         # allowlisted entity request items
-│   │   ├── catalog_edges.py            # allowlisted edge request items
-│   │   ├── catalog_provenance.py       # source / link / batch models
-│   │   └── catalog_responses.py        # structured results + error codes
-│   ├── services/
-│   │   ├── factories.py                # reuse EmbedderFactory / DatabaseDriverFactory
-│   │   ├── queue_service.py            # DO NOT use for catalog writes
-│   │   ├── catalog_service.py          # orchestration (Phase 1 + 2)
-│   │   ├── catalog_identity.py         # UUIDv5 + canonical SHA-256 helpers
-│   │   └── catalog_store.py            # Neo4j Cypher + transaction boundaries
-│   └── utils/
-│       └── formatting.py               # optional to_node_result reuse for search interop
+mcp_server/src/
+├── graphiti_mcp_server.py          # MODIFY: register v2 tools; leave 14+7 intact
+├── config/schema.py                # MODIFY: CatalogConfig split gates + plan bounds
+├── models/
+│   ├── catalog_common.py           # MODIFY: error codes, FE/BO prefixes, map constants
+│   ├── catalog_entities.py         # MODIFY: recursive forbid; v2 graph_key grammar
+│   ├── catalog_edges.py            # MODIFY: endpoint types validated vs server map
+│   ├── catalog_provenance.py       # MODIFY: exact evidence-link payload (no Cartesian)
+│   ├── catalog_batch.py            # MODIFY: prepare/commit/discard + domain hash fields
+│   ├── catalog_responses.py        # MODIFY: capabilities, plan, manifest, evidence DTOs
+│   └── catalog_manifest.py         # NEW (or section in responses): durable manifest shape
+├── services/
+│   ├── catalog_identity.py         # MODIFY: v2 name strings + full_domain_sha256
+│   ├── catalog_endpoint_map.py     # NEW: EDGE_ENDPOINT_MAP + check helpers
+│   ├── catalog_plan.py             # NEW: prepare token + immutability checks
+│   ├── catalog_manifest.py         # NEW: build/read manifest records
+│   ├── catalog_service.py          # MODIFY: gates, prepare/commit, resolve_typed_edges
+│   └── catalog_store.py            # MODIFY: control labels, CAS, evidence, manifest CRUD
 └── tests/
-    ├── test_catalog_models.py          # unit: validation / allowlists / hashes
-    ├── test_catalog_identity.py        # unit: UUIDv5 determinism
-    ├── test_catalog_service.py         # unit: embed-before-tx ordering (mocked)
-    └── test_catalog_neo4j_int.py       # Neo4j integration, group_id=oracle-catalog-tool-test
+    ├── test_catalog_identity.py    # MODIFY: FE/BO isolation, domain hash
+    ├── test_catalog_models.py      # MODIFY: recursive forbid, endpoint map, flags
+    ├── test_catalog_service.py     # MODIFY: prepare/commit ordering, gates
+    ├── test_catalog_store_unit.py  # MODIFY: control nodes never Entity
+    ├── test_catalog_neo4j_int.py   # MODIFY: restart-safe plan; manifest; isolation
+    ├── test_catalog_endpoint_map.py# NEW
+    ├── test_catalog_plan.py        # NEW
+    └── test_catalog_manifest.py    # NEW
 ```
 
 ### Structure Rationale
 
-- **Keep tools in MCP package, not `graphiti_core`:** catalog allowlists and admin semantics are MCP-product concerns; core remains general-purpose.
-- **Dedicated `catalog_store.py`:** required. Stock `EntityNode.save` / `get_entity_node_save_query` uses `SET n = $entity_data` and label interpolation that loses `updated_at`/`content_hash` control, drops non-allowlisted property discipline, and is not multi-statement atomic for entity+edge+provenance batches. Neo4j ops accept `tx=` but bulk episode path (`add_nodes_and_edges_bulk`) still embeds *inside* the write session and can create generic endpoints via `add_triplet`.
-- **Separate models from semantic `entity_types.py`:** catalog types (Table, Column, …) are identity allowlists, not LLM extraction schemas.
-- **Status nodes outside Entity search:** label `CatalogIngestBatch` only (no `:Entity`) so `search_nodes` / fulltext entity indexes ignore them.
+- **Stay in `mcp_server`:** catalog-v2 is product/admin surface, not `graphiti_core`.
+- **New modules for map/plan/manifest:** keep service under control; pure helpers unit-testable without Neo4j.
+- **Modify store, do not fork:** one Neo4j-first store; control labels coexist with domain writes.
+- **No silent v1 identity migration module:** separate docs only; identities never auto-rewritten.
 
 ## Architectural Patterns
 
-### Pattern 1: Thin MCP tool → service → store
+### Pattern 1: Additive tools, shared service
 
-**What:** `@mcp.tool` validates via Pydantic, calls `CatalogService`, returns structured dict. No Cypher in tool body.
-**When to use:** All seven tools.
-**Trade-offs:** Extra module vs. monolithic `graphiti_mcp_server.py` (already large). Clear test seams.
+**What:** New MCP tools call the same `CatalogService` singleton as v1. v1 methods remain; v2 methods added.
+**When:** All v2 surface.
+**Trade-offs:** Larger service file; one gate/config path; no dual clients.
 
-**Example:**
-```python
-@mcp.tool()
-async def upsert_typed_entities(request: UpsertTypedEntitiesRequest) -> CatalogWriteResponse | ErrorResponse:
-    if graphiti_service is None:
-        return ErrorResponse(error='Graphiti service not initialized')
-    return await catalog_service.upsert_typed_entities(graphiti_service.client, request)
+### Pattern 2: Validate → map → identity → domain-hash → (prepare: store payload) / (commit: embed → one domain+control success tx)
+
+**What:** Hard ordering. Side effects only after full validation. Embeddings never inside domain write tx.
+**When:** Every write / prepare / commit.
+**Trade-offs:** More preflight work; zero partial domain graph on embed fail.
+
+```
+1. Feature/backend/namespace/split-gate checks
+2. Pydantic recursive validation (extra=forbid)
+3. Server endpoint-map check (edges) — fail closed
+4. UUIDv5 identity (v2 grammar when catalog_version=v2)
+5. Full-domain canonical hash (entities+edges+provenance+flags)
+6. Optional client hash assert
+7. Embeddings (create_batch) — outside Neo4j write
+8. Domain write transaction (entities → edges → provenance/evidence)
+9. Control-plane writes (plan state / manifest / batch status) — separate tx boundaries as specified
+10. Return structured result only after commit or full rollback
 ```
 
-### Pattern 2: Embed before open transaction
+### Pattern 3: Control nodes never Entity
 
-**What:** Call configured `embedder.create_batch` / name+fact embedding helpers **before** `async with driver.transaction()`. Fail with `embedding_failed` without touching Neo4j.
-**When to use:** Every write that stores `name_embedding` or `fact_embedding`.
-**Trade-offs:** Embeddings not rolled back with graph (acceptable: pure functions of text). Avoids partial graph writes on embed timeout.
+**What:** `CatalogIngestBatch`, `CatalogPreparedPlan`, `CatalogBatchManifest`, `CatalogEvidenceLink` use fixed non-`Entity` labels. No `name_embedding`. Invisible to `search_nodes` / entity fulltext.
+**When:** All bookkeeping / evidence indexes.
+**Trade-offs:** Separate read APIs required (`get_catalog_*`); correct isolation from semantic graph.
 
-**Ordering (hard):**
-1. Full request validation (Pydantic + business rules)
-2. Deterministic identity (UUIDv5) + content hash
-3. Endpoint existence checks (reads; outside write tx or first statements that only MATCH)
-4. **Embeddings**
-5. **Single write transaction** (MERGE/SET domain data)
-6. Commit → return; exception → rollback → `neo4j_transaction_failed`
+### Pattern 4: Immutable prepared plan + opaque token
 
-### Pattern 3: Server-owned Cypher with fixed labels
+**What:** `prepare_catalog_batch` validates/resolves/projects, hashes domain, and persists `CatalogPreparedPlan` with **bounded immutable canonical payload** (chunked non-Entity nodes if needed), `plan_sha256`, `domain_sha256`, counts, expiry, status=`prepared`. **Does not compute required embeddings. Does not write domain entities.** Returns opaque token once (hash stored). `commit_prepared_catalog_batch(token)` loads plan + payload, embeds from stored payload **before** domain tx, then in **one Neo4j transaction** writes domain + evidence + manifest + terminal batch status + plan terminal state. `discard_prepared_catalog_batch` marks discarded. Restart-safe: payload+plan in Neo4j, not process memory. Hashes/counts alone are **insufficient** prepare storage.
+**When:** Agent multi-step ingest needing restart safety.
+**Trade-offs:** Larger control nodes / chunks; bounded plan store (TTL + max open plans per group).
 
-**What:** Labels, relationship types, and property keys come only from server allowlists. Parameters carry values. Never interpolate client strings into label positions (beyond validated allowlist members already checked by `validate_node_labels` pattern).
-**When to use:** All catalog Cypher.
-**Trade-offs:** Less flexible than generic property maps; required for injection safety and schema stability.
+### Pattern 5: Server-owned edge endpoint map
 
-### Pattern 4: Deterministic identity (UUIDv5 + SHA-256)
+**What:** Finite map in code (not client): e.g. `Contains → {(Schema,Table),(Table,Column),…}`. Checked before any write. Reject `endpoint_type_mismatch` without repair.
+**When:** `upsert_typed_edges`, batch, prepare, `resolve_typed_edges`.
+**Trade-offs:** Map updates are code changes; required for fail-closed typing.
 
-**What:**
-- Entity: `uuid5(namespace, f"{group_id}|{entity_type}|{graph_key}")`
-- Edge: `uuid5(namespace, f"{group_id}|{edge_type}|{edge_key}")`
-- Source: `uuid5(namespace, f"{group_id}|Source|{source_key}")`
-- Batch: `uuid5(namespace, f"{group_id}|Batch|{batch_id}")`
-- Payload: canonical JSON → SHA-256 hex (64 lowercase); MD5 forbidden
-**When to use:** All upserts and verifiers.
-**Trade-offs:** Namespace is immutable deployment config (`GRAPHITI_CATALOG_UUID_NAMESPACE`). Caller UUIDs never authority.
+### Pattern 6: Exact evidence links (no Cartesian)
 
-### Pattern 5: Provenance via installed episodic schema (Phase 2)
+**What:** Provenance links are explicit `(source_key, target_ref)` rows. No expand-all sources × all targets. Identity: UUIDv5(`group_id|Evidence|source_uuid|target_kind|target_uuid`) or retain Mentions uuid scheme for entity links; edge episode attach stays installed Graphiti list semantics.
+**When:** v2 provenance + evidence read API.
+**Trade-offs:** Callers list links; avoids 5k-link explosions from nested product.
 
-**What:** Reuse `Episodic` nodes + `MENTIONS` edges (`EPISODIC_EDGE_SAVE`) and `EntityEdge.episodes` list when linking facts — **not** `add_episode` / LLM / queue.
-**When to use:** `upsert_provenance` and batch orchestration.
-**Trade-offs:** If a desired link shape is unsupported, document closest compatible form; do not invent parallel provenance labels.
+### Pattern 7: Split read/write gates
+
+**What:** `catalog_upsert.enabled=false` blocks mutations (upsert/prepare/commit) but `reads_enabled` (default true when feature present) keeps resolve/verify/status/manifest/capabilities/evidence reads.
+**When:** Pre-canary / rollback windows.
+**Trade-offs:** Two flags; clearer ops than all-or-nothing.
+
+### Pattern 8: No conflict repair
+
+**What:** On `deterministic_uuid_conflict`, type conflict, uniqueness failure: fail closed, rollback, surface code. Never DROP constraints, never rewrite uuid, never merge dissimilar types.
+**When:** All store paths.
+**Trade-offs:** Ops may need manual cleanup in test group only; production safe.
 
 ## Data Flow
 
-### Request Flow — Phase 1 write (`upsert_typed_entities` / `upsert_typed_edges`)
+### Key Data Flows
+
+1. **Legacy-named direct upserts:** request → gate → identity → embed → domain tx → response. Catalog-v2 may fail closed on v1-shaped identity/provenance/hash payloads; tool **names** preserved.
+2. **v2 prepare → commit:** request → validation/resolution/projections + domain hash → control tx write `CatalogPreparedPlan` **+ full bounded payload** (no embed, no domain) → token; later `commit_prepared_catalog_batch(token)` → load payload → **embed** → **one** domain+evidence+manifest+status+plan-terminal tx.
+3. **v2 discard:** token → plan=`discarded` (no domain write).
+4. **resolve_typed_edges (NEW read):** edge refs → UUIDv5 + MATCH endpoints/types/map → report missing/generic/mismatch/unembedded — no write.
+5. **manifest-backed verify / get_catalog_batch_manifest / get_catalog_evidence:** load control nodes by group+batch → compare live graph / return inventory.
+6. **get_catalog_capabilities:** pure config/code surface after server init — works even when catalog **writes** disabled.
+7. **Search interop:** domain Entity/RELATES_TO only; control labels excluded.
+
+### Request Flow — prepare / commit (atomicity)
 
 ```
-MCP client
-  → FastMCP tool (sync await)
-  → CatalogService.validate (Pydantic + limits + allowlists + hashes)
-  → CatalogService.identity (UUIDv5)
-  → CatalogStore.read checks (typed endpoints / conflicts)   [read path]
-  → EmbedderClient.create_batch                              [outside tx]
-  → Neo4jDriver.transaction()
-       → MERGE Entity {uuid} SET labels + props + vector
-       → or MATCH endpoints + MERGE RELATES_TO {uuid}
-  → commit
-  → structured response (created/updated/unchanged + item errors)
-```
+prepare_catalog_batch
+  validate+map+identity+domain_hash (+ projections)
+  NO embeddings
+  control tx: MERGE CatalogPreparedPlan {status:prepared, plan_sha256, domain_sha256, expires_at}
+              + store bounded immutable CANONICAL PAYLOAD (chunked non-Entity children OK)
+  return prepare_token once  # no domain Entity/edge mutation
 
-### Request Flow — Phase 1 read (`resolve_typed_entities` / `verify_catalog_batch`)
-
-```
-MCP client → tool → CatalogService.validate → CatalogStore MATCH-only queries
-  → report missing / generic / duplicate / mistyped / uuid-mismatch / unembedded
-  → no writes, no embeddings
-```
-
-### Request Flow — Phase 2 batch (`upsert_catalog_batch`)
-
-```
-validate entire batch (entities + edges + provenance + limits)
-resolve same-request endpoints in memory (graph_key → uuid map)
-embed ALL domain texts
-open ONE domain write transaction:
-  entities → edges → provenance (Episodic + MENTIONS + edge.episodes)
-commit domain tx
-separately persist CatalogIngestBatch status
-  success: status=committed
-  failure after domain rollback: status=failed (best-effort second write; never re-open domain data)
-return batch result + get_catalog_ingest_status-compatible fields
+commit_prepared_catalog_batch(prepare_token)
+  load plan+payload by token+group_id
+  reject: prepared_plan_not_found | prepared_plan_expired | prepared_plan_conflict
+          | prepared_plan_already_consumed | content_hash_mismatch
+  embed ALL texts from STORED payload  # before domain tx
+  ONE Neo4j tx: domain entities/edges + evidence + CatalogBatchManifest
+                + terminal batch status + plan terminal state
+  on failure: full rollback of that tx; optional separate failure-status tx only
+  never open domain write if gate off / plan invalid
 ```
 
 ### State Management
 
-- Graph state: Neo4j only. Service process is stateless beyond live `Graphiti` client.
-- Batch status: `(:CatalogIngestBatch {uuid, group_id, batch_id, status, ...})` — restart-safe, not searchable as Entity.
-- Semantic queue (`QueueService`): unused; `add_memory` remains async and unchanged.
+| State | Storage | Restart-safe | Entity-searchable |
+|-------|---------|--------------|-------------------|
+| Domain catalog nodes/edges | Neo4j Entity/RELATES_TO | Yes | Yes |
+| Provenance episodic + MENTIONS | Neo4j Episodic | Yes | Episode paths only |
+| Batch status | `CatalogIngestBatch` | Yes | No |
+| Prepared plan + canonical payload | `CatalogPreparedPlan` (+ chunk children) | Yes | No |
+| Commit manifest | `CatalogBatchManifest` | Yes | No |
+| Evidence link index | `CatalogEvidenceLink` and/or MENTIONS | Yes | No (control) / mention path |
+| Process memory | none for plans | N/A | N/A |
 
-### Key Data Flows
+**Bounded state:** max open prepared plans per `group_id`; TTL expiry; discard/commit free slots. Expired plans not auto-committed.
 
-1. **Typed entity upsert:** catalog item → UUIDv5 → name embed → MERGE `:Entity:Table` (etc.) with `group_id`, `name`, `name_raw`, `name_canonical`, `graph_key`, `content_hash`, `created_at` preserved / `updated_at` set.
-2. **Typed edge upsert:** require both endpoints exist with expected labels → fact embed → MERGE `(a)-[:RELATES_TO {uuid}]->(b)` with `name` = edge type, `fact`, `fact_embedding`, no implicit endpoint create.
-3. **Provenance:** create/merge `Episodic` source records + `MENTIONS` to entities; attach episode uuid onto related `EntityEdge.episodes` when facts are covered.
-4. **Search interop:** entities remain `Entity` with `name_embedding` so existing `search_nodes` hybrid path works; status nodes omit `Entity` label.
+### Token lifecycle
+
+```
+mint (prepare) → prepared
+  ├─ commit success → committed (terminal)
+  ├─ discard → discarded (terminal)
+  ├─ expire → expired (terminal; not commitable)
+  └─ commit fail → prepared (retry) OR failed_commit (policy: prefer remain prepared for exact retry)
+```
+
+Token is server secret-ish opaque id derived from UUIDv5(`group_id|PrepareToken|batch_id|plan_sha256`) or random uuid stored on plan — **not** caller identity authority for domain objects.
 
 ## Transaction Boundaries
 
-| Operation | Transaction scope | Embed timing | Notes |
-|-----------|-------------------|--------------|-------|
-| `upsert_typed_entities` | One write tx for all entities in request | Before tx | Item-level validation errors may short-circuit pre-tx; post-embed failures roll back all |
-| `upsert_typed_edges` | One write tx for all edges | Before tx | Endpoint checks fail closed with `missing_endpoint` / `generic_endpoint_conflict` |
-| `resolve_typed_entities` | Read-only (no tx / auto-commit reads) | None | |
-| `verify_catalog_batch` | Read-only | None | Optional provenance checks |
-| `upsert_provenance` | One write tx | Only if source text needs embedding (prefer episodic content without entity-name re-embed unless required) | No LLM; no queue |
-| `upsert_catalog_batch` | **One atomic domain tx** for entities+edges+provenance | All embeddings before domain tx | Status node write **outside** domain tx so failed status can persist after rollback |
-| `get_catalog_ingest_status` | Read-only | None | |
+| Operation | Domain tx | Control tx | Embed timing | Atomicity claim |
+|-----------|-----------|------------|--------------|-----------------|
+| `upsert_typed_entities` | 1 write | none | before domain | All entities in request commit or roll back together |
+| `upsert_typed_edges` | 1 write | none | before domain | All edges; endpoints must pre-exist |
+| `upsert_provenance` | 1 write | none | before if needed | Sources+links |
+| `upsert_catalog_batch` | 1 domain | status after | all before domain | Domain all-or-nothing; status may persist failed after rollback |
+| `prepare_catalog_batch` | **none** | 1 plan + **payload** write | **none** | Plan+payload durable; **zero domain mutation** |
+| `commit_prepared_catalog_batch` | domain+evidence+manifest+terminal status+plan terminal **same tx** | (included) | **at commit from payload** | Single atomic success unit; post-rollback failure status optional |
+| `discard_prepared_catalog_batch` | none | 1 plan update | none | No domain |
+| resolve / verify / status / manifest / evidence / capabilities | read | read | none | No writes |
+| Schema ensure (constraints) | auto-commit DDL | — | — | CREATE IF NOT EXISTS only; fail closed on duplicates; **no repair** |
 
-**Neo4j primitive:** `Neo4jDriver.transaction()` → `_Neo4jTransaction` (`neo4j_driver.py:151-161, 228-235`). Commit on clean exit; rollback on exception.
+**Neo4j semantics bound claims:** one `async with driver.transaction()` = one atomic unit. Cross-tx (domain then status) is **not** single atomic unit — by design so failed status can be recorded after domain rollback. Prepare and domain commit are deliberately separate so prepare cannot leave half-entities.
 
-**Do not use for catalog domain writes:**
-- `QueueService.add_episode` / `add_memory` (async + LLM)
-- `Graphiti.add_triplet` (can create generic endpoints; may call LLM resolve)
-- `add_nodes_and_edges_bulk` alone (embeds inside write session; not catalog-identity aware)
+**Embeddings before domain write:** absolute. Embed fail → `embedding_failed`, no domain tx.
 
-## Schemas / Index Constraints
+## Control-Plane Labels (server-owned)
 
-### Reused Graphiti baseline (do not break)
+| Label | Purpose | Key properties |
+|-------|---------|----------------|
+| `CatalogIngestBatch` | v1 status (keep) | uuid, group_id, batch_id, status, counts, hashes, timestamps |
+| `CatalogPreparedPlan` | v2 immutable plan | uuid/token, group_id, batch_id, status, plan_sha256, domain_sha256, expires_at, embedding_fingerprint, counts |
+| `CatalogBatchManifest` | v2 durable exact inventory | uuid, group_id, batch_id, domain_sha256, entity_uuids[], edge_uuids[], evidence_ids[], counts, committed_at |
+| `CatalogEvidenceLink` | v2 exact link index (if not solely MENTIONS) | uuid, group_id, source_uuid, target_kind, target_uuid, confidence, content_sha256 |
 
-| Kind | Neo4j shape | Source |
-|------|-------------|--------|
-| Entity node | `(:Entity:Label {uuid, name, group_id, name_embedding, summary, created_at, ...attrs})` | `nodes.py` `EntityNode`, `get_entity_node_save_query` |
-| Entity edge | `()-[:RELATES_TO {uuid, name, fact, fact_embedding, group_id, episodes, valid_at, invalid_at, created_at, ...}]->()` | `edges.py` `EntityEdge`, `get_entity_edge_save_query` |
-| Episode / provenance | `(:Episodic {uuid, name, group_id, source, source_description, content, entity_edges, created_at, valid_at})` | `get_episode_node_save_query` |
-| Mention | `(:Episodic)-[:MENTIONS {uuid, group_id, created_at}]->(:Entity)` | `EPISODIC_EDGE_SAVE` |
-| Range indexes | uuid / group_id / name / temporal on Entity, Episodic, RELATES_TO, MENTIONS | `graph_queries.get_range_indices` |
-| Fulltext | Entity name/summary/group_id; edge name/fact/group_id; episode content/source | `get_fulltext_indices` |
+All constrained by `group_id`. Composite uniqueness `(uuid, group_id)` pattern from v1 store. Never dual-label with `Entity`.
 
-### Catalog-specific properties (server-owned)
-
-On Entity (in addition to Graphiti fields): `graph_key`, `entity_type`, `name_raw`, `name_canonical`, `content_hash`, `updated_at` (preserve original `created_at` on retry).
-
-On RELATES_TO: `edge_key`, `edge_type` (mirror `name`), `content_hash`, `updated_at`, endpoint type metadata as needed — never free-form client property names.
-
-### New label (Phase 2)
+## Canonicalization Flow
 
 ```
-(:CatalogIngestBatch {
-  uuid,              // UUIDv5(group_id|Batch|batch_id)
-  group_id,
-  batch_id,
-  status,            // pending|committed|failed|conflict
-  content_hash,
-  entity_count, edge_count, provenance_count,
-  error_code, error_message,  // safe summaries only
-  created_at, updated_at
-})
+item fields (identity keys excluded from content hash)
+  → strip protected props
+  → reject non-finite floats
+  → json.dumps(sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+  → sha256 → 64 lowercase hex
+
+full_domain_sha256 =
+  canonical_sha256({
+    'catalog_version': 'v2',
+    'group_id', 'batch_id',
+    'entities': [entity_canonical… ordered stable],
+    'edges': [edge_canonical…],
+    'provenance': [explicit links…],
+    'flags': {atomic, dry_run, … allowed immutables}
+  })
 ```
 
-Indexes (add in catalog store bootstrap, IF NOT EXISTS):
-- `CatalogIngestBatch(uuid)`, `(group_id, batch_id)`, `(group_id, status)`
-- Optional uniqueness: composite uniqueness on `(group_id, graph_key)` for entities if Neo4j edition allows; otherwise enforce in application with conflict detection queries (Community often lacks multi-property node key — plan app-level checks).
+**v2 identity grammar (breaking, fail-closed):** graph_key / name strings visibly isolate FE, BO, COMMON (e.g. required zone segment or prefix policy defined in models). FE and BO objects with same logical name produce **different** UUIDv5 names (`group_id|entity_type|graph_key` still formula; graph_key carries zone). **No auto-migration** of v1 keys.
 
-### Allowlists (identity + Cypher safety)
+## Read Paths
 
-**Entity types / prefixes:** Database `DATABASE::`, DictionaryDocument `DOC::`, Schema `SCHEMA::`, Table `TABLE::`, View `VIEW::`, MaterializedView `MVIEW::`, Column `COLUMN::`, Constraint `CONSTRAINT::`, Index `INDEX::`, Package `PACKAGE::`, Procedure `PROCEDURE::`, Function `FUNCTION::`, Trigger `TRIGGER::`, Sequence `SEQUENCE::`, Synonym `SYNONYM::`.
+| API | Gate | Data source |
+|-----|------|-------------|
+| `resolve_typed_entities` | read | MATCH Entity by uuid/key |
+| `resolve_typed_edges` NEW | read | MATCH RELATES_TO + endpoint types + map |
+| `verify_catalog_batch` | read | Live graph; optional manifest mode |
+| `get_catalog_ingest_status` | read | CatalogIngestBatch |
+| `get_catalog_batch_manifest` NEW | read | CatalogBatchManifest |
+| `get_catalog_evidence` NEW | read | Evidence / MENTIONS by source or batch |
+| `get_catalog_capabilities` NEW | read | Config + code constants (maps, limits, versions) |
+| `search_nodes` / `search_memory_facts` | legacy | Domain only; control invisible |
 
-**Edge types:** Contains, PrimaryKeyOf, UniqueKeyOf, ForeignKeyTo, EnforcedBy, TriggerOn, SynonymFor, DocumentedBy, Calls, ReadsFrom, WritesTo, JoinsWith, ReferencesByCode, DependsOn, DerivedFrom, UsesSequence.
+## Failure Modes
 
-Labels must pass the same safety rules as `validate_node_labels` (`helpers.py` SAFE identifier pattern).
-
-## Existing Analogs (reuse map)
-
-| Need | Existing symbol | Reuse? | Caveat |
-|------|-----------------|--------|--------|
-| MCP tool registration | `@mcp.tool` in `graphiti_mcp_server.py` | Yes | Keep thin |
-| Service + client hold | `GraphitiService` | Yes | Add catalog service sibling; inject same client |
-| Config YAML + env | `config/schema.py` `GraphitiConfig` | Yes | Add `CatalogConfig` |
-| Embedder wiring | `EmbedderFactory.create` | Yes | Required for searchable upserts |
-| Neo4j real tx | `Neo4jDriver.transaction` | Yes | Catalog store must use this |
-| Entity save Cypher shape | `get_entity_node_save_query` / `Neo4jEntityNodeOperations.save` | Partial | Pattern only; dedicated store for hash/updated_at/label control |
-| Edge save Cypher shape | `get_entity_edge_save_query` | Partial | Same |
-| Bulk tx pattern | `add_nodes_and_edges_bulk_tx` | Partial | Ordering wrong for catalog (embed inside); no UUIDv5 |
-| Name/fact embeddings | `create_entity_node_embeddings`, `create_entity_edge_embeddings` | Yes | Call **before** catalog tx |
-| Provenance read | `get_episode_entities` / `get_nodes_and_edges_by_episode` | Yes (interop) | Writes must populate MENTIONS + episodes list |
-| Semantic ingest | `add_memory` + `QueueService` | **No** | Async + LLM |
-| Direct fact write | `add_triplet` | **No** as implementation | Creates generic endpoints; non-deterministic resolve |
-| Extraction entity types | `models/entity_types.py` ENTITY_TYPES | **No** for catalog allowlist | Different purpose |
-| group_id isolation | everywhere | Yes | Tests only `oracle-catalog-tool-test` |
-| Label validation | `validate_node_labels` | Yes | Call before any label interpolation |
-
-## Dedicated Persistence Verdict
-
-**Required: yes — Neo4j-specific `CatalogNeo4jStore`.**
-
-Reasons (code evidence):
-1. Atomic multi-entity/edge/provenance commit needs one `driver.transaction()` spanning custom statements; stock model `.save()` is single-object `execute_query`.
-2. `SET n = $entity_data` full-replace semantics risk wiping or mis-ordering `created_at` / catalog audit fields unless carefully built maps are used under catalog control.
-3. Endpoint enforcement (typed, existing-only) is not provided by `add_triplet` / bulk helpers.
-4. `CatalogIngestBatch` is outside Graphiti's node model hierarchy.
-5. Project decision: Neo4j first; no portability claim. Isolate store interface so a future backend could reimplement — do not pretend FalkorDB works in Phase 1/2.
-
-## Phase 1 / Phase 2 Build Order
-
-Dependency graph:
-
-```
-CatalogConfig + feature gate
-    → strict Pydantic models (entities, edges, errors, limits)
-        → catalog_identity (UUIDv5, SHA-256 canonicalize)
-            → CatalogNeo4jStore entity MERGE/read
-                → upsert_typed_entities
-                → resolve_typed_entities
-            → CatalogNeo4jStore edge MERGE/read (needs entity reads)
-                → upsert_typed_edges
-            → verify_catalog_batch (reads entities+edges [+ optional provenance later])
-                ◆ PHASE 1 GATE (unit + Neo4j int + format + types + MCP list + regression)
-            → provenance store (Episodic + MENTIONS)
-                → upsert_provenance
-            → CatalogIngestBatch status nodes
-                → get_catalog_ingest_status
-            → upsert_catalog_batch (composes all of the above)
-                → docs + search interop checks
-```
-
-### Phase 1 (foundation — ship first)
-
-1. **Config:** `CatalogConfig` — `enabled`, `uuid_namespace` (required UUID), limits (500 / 2000 / 5000 defaults), env `GRAPHITI_CATALOG_UUID_NAMESPACE`.
-2. **Models:** allowlisted entity/edge request items; protected props; hash/prefix/size/confidence/finite-number validators; structured error codes.
-3. **Identity helpers:** UUIDv5 + canonical SHA-256.
-4. **Store (entities):** MERGE by uuid; set labels from allowlist; preserve `created_at`; set `updated_at`; store embeddings via `db.create.setNodeVectorProperty` pattern.
-5. **Tool:** `upsert_typed_entities` (sync, embed-before-tx).
-6. **Tool:** `resolve_typed_entities` (read-only detector).
-7. **Store (edges):** MATCH typed endpoints; reject missing/generic; MERGE RELATES_TO.
-8. **Tool:** `upsert_typed_edges`.
-9. **Tool:** `verify_catalog_batch` (read-only; provenance section optional/no-op until Phase 2).
-10. **MCP registration** + unit tests + Neo4j integration (`oracle-catalog-tool-test` only).
-11. **Phase 1 report / gate** — blocks Phase 2.
-
-### Phase 2 (provenance + orchestration — only after gate)
-
-1. **Provenance store** using `Episodic` + `MENTIONS` (+ `entity_edges` / edge `episodes` lists as installed).
-2. **Tool:** `upsert_provenance`.
-3. **Status nodes:** `CatalogIngestBatch` + indexes.
-4. **Tool:** `get_catalog_ingest_status`.
-5. **Tool:** `upsert_catalog_batch` — full validation, same-request endpoint resolution, pre-tx embeddings, one domain tx, safe failed-status persistence, retry idempotency, `batch_conflict`.
-6. Docs: purpose, config, namespace immutability, allowlists, idempotency, atomicity, limits, ACCEPT_TAB examples, semantic-vs-deterministic guidance.
-7. Interop: `search_nodes`, `search_memory_facts`, safe `build_communities` on test group only.
-
-## Scaling Considerations
-
-| Scale | Architecture Adjustments |
-|-------|--------------------------|
-| Fixtures / canary (sample_catalog) | Single-request upserts; default limits fine |
-| ~14k entities / 30k edges (target catalog) | Chunk by batch limits (500 / 2000); sequential batches per `group_id`; rely on UUIDv5 idempotency |
-| Concurrent writers same group | Application-level batch_id conflict detection; avoid multi-writer without external lock |
-| Multi-backend | Not in scope; keep `CatalogStore` protocol thin for later |
-
-### Scaling Priorities
-
-1. **First bottleneck:** embedding batch latency — batch `create_batch`, fail whole request without partial Neo4j writes.
-2. **Second bottleneck:** large single transaction memory — enforce configured limits; never accept full 30k edges in one call.
-
-## Anti-Patterns
-
-### Anti-Pattern 1: Route catalog through `add_memory`
-
-**What people do:** JSON episode + extraction for tables/columns.
-**Why it's wrong:** Async queue, LLM nondeterminism, unwanted edges, non-stable UUIDs.
-**Do this instead:** Deterministic tools only; leave `add_memory` for semantic memory.
-
-### Anti-Pattern 2: Implement via `add_triplet`
-
-**What people do:** Loop triplets for FK/PK.
-**Why it's wrong:** Creates generic endpoints; may LLM-resolve edges; UUID not UUIDv5 catalog identity.
-**Do this instead:** `upsert_typed_edges` with pre-existing typed endpoints.
-
-### Anti-Pattern 3: Embed inside the write transaction
-
-**What people do:** Open tx, call embedder, write.
-**Why it's wrong:** Embed failures leave aborted/partial transactional state; slow locks.
-**Do this instead:** Pattern 2 — embed fully, then tx.
-
-### Anti-Pattern 4: Put status on `:Entity`
-
-**What people do:** Store batch status as entity nodes.
-**Why it's wrong:** Pollutes hybrid search and communities.
-**Do this instead:** `:CatalogIngestBatch` without `Entity`.
-
-### Anti-Pattern 5: Caller-supplied UUID as identity
-
-**What people do:** Trust client uuid fields.
-**Why it's wrong:** Breaks idempotency and namespace integrity.
-**Do this instead:** Server UUIDv5 only; reject or ignore caller identity authority.
-
-### Anti-Pattern 6: Interpolate client labels into Cypher
-
-**What people do:** `f"MERGE (n:{user_label})"`.
-**Why it's wrong:** Injection / schema drift.
-**Do this instead:** Allowlist map → fixed label strings; values only as parameters.
+| Failure | When | Effect | Code |
+|---------|------|--------|------|
+| Unknown field / bad grammar | model validate | No side effects | `validation_error` |
+| Write gate off | any mutate | No side effects; reads OK if split gate | `feature_disabled` |
+| Bad namespace | gate | No side effects | `invalid_uuid_namespace` |
+| Over limits | gate | No side effects | `batch_limit_exceeded` |
+| Client hash ≠ server | pre-tx | No side effects | `content_hash_mismatch` |
+| Endpoint map miss | pre-tx | No side effects | `endpoint_type_mismatch` |
+| Missing / generic endpoint | pre-tx or in-tx MATCH | Rollback if in tx | `missing_endpoint` / `generic_endpoint_conflict` |
+| Type / uuid conflict | in-tx | Rollback; no repair | `entity_type_conflict` / `deterministic_uuid_conflict` |
+| Embedder down | pre-tx | No Neo4j domain write | `embedding_failed` |
+| Neo4j error | in-tx | Full rollback of that tx | `neo4j_transaction_failed` |
+| Plan expired / not prepared | commit | No domain write | `batch_conflict` or dedicated `plan_invalid` |
+| Plan payload drift | commit | No domain write | `content_hash_mismatch` |
+| Duplicate open plan | prepare | Reject | `batch_conflict` |
+| Schema uniqueness blocked by dirty data | ensure | Fail closed | `neo4j_transaction_failed` / schema code |
 
 ## Integration Points
 
 ### External Services
 
-| Service | Integration Pattern | Notes |
-|---------|---------------------|-------|
-| Neo4j 5.26+ | `Neo4jDriver` via `GraphitiService.client.driver` | Real transactions; vector property API |
-| Embedder provider | `EmbedderFactory` → `client.embedder` | Same config as semantic path; required for search parity |
-| LLM providers | None for catalog tools | Feature must work even if LLM init failed |
+| Service | Pattern | Notes |
+|---------|---------|-------|
+| Neo4j 5.26+ | `GraphitiService.client.driver` + `transaction()` | Only supported backend for catalog writes |
+| Embedder | `client.embedder` | Same as semantic; pre-domain-tx only |
+| LLM | none | Catalog path must work if LLM broken |
 
 ### Internal Boundaries
 
 | Boundary | Communication | Notes |
 |----------|---------------|-------|
-| FastMCP tools ↔ CatalogService | async Python call | Sync from MCP client POV |
-| CatalogService ↔ CatalogNeo4jStore | methods + tx | No Cypher outside store |
-| CatalogService ↔ EmbedderClient | `create` / `create_batch` | Pre-tx only |
-| CatalogService ↔ Graphiti facade | **avoid** write APIs | Read helpers OK if needed |
-| Catalog tools ↔ QueueService | none | |
-| Catalog entities ↔ search_nodes | shared Entity index | Must write compatible properties |
-| CatalogIngestBatch ↔ search | none | Non-Entity label |
+| MCP tools ↔ CatalogService | async call | Thin adapters |
+| CatalogService ↔ identity/map/plan/manifest helpers | pure functions | No I/O in identity/map |
+| CatalogService ↔ CatalogNeo4jStore | methods + tx | All Cypher in store |
+| CatalogService ↔ Embedder | create_batch | Before domain tx |
+| Catalog ↔ QueueService | none | |
+| Catalog ↔ Graphiti write APIs | none | No add_episode/add_triplet |
+| Domain graph ↔ search | shared Entity indexes | Control labels excluded |
+| v1 tools ↔ v2 tools | shared service/store | No identity reinterpretation |
 
-## Error Code Surface (architecture contract)
+### Existing Analogs (reuse map)
 
-`validation_error`, `feature_disabled`, `invalid_uuid_namespace`, `batch_limit_exceeded`, `content_hash_mismatch`, `entity_type_conflict`, `graph_key_prefix_mismatch`, `deterministic_uuid_conflict`, `missing_endpoint`, `endpoint_type_mismatch`, `generic_endpoint_conflict`, `edge_identity_conflict`, `batch_conflict`, `provenance_target_missing`, `neo4j_transaction_failed`, `embedding_failed`, `internal_error`.
+| Need | Live symbol | Action |
+|------|-------------|--------|
+| Tool registration | `graphiti_mcp_server.py` catalog tools | Add v2 tools same pattern |
+| Orchestration | `CatalogService` | Extend methods |
+| Identity | `catalog_identity.py` | Extend; keep v1 functions |
+| Store + constraints | `CatalogNeo4jStore` | Add control labels; CREATE only |
+| Status pattern | `CatalogIngestBatch` | Template for plan/manifest |
+| Embed-before-tx | service entity/edge paths | Reuse ordering |
+| Endpoint existence | edge upsert MATCH | Extend with map |
+| Semantic tools | 14 legacy | Unchanged |
 
-Return item-level structured errors where possible; never log full payloads/credentials.
+## Phased Build Order (dependency-aware)
+
+Preserves atomicity and compatibility: pure/validation first, no domain write changes until maps+hashes land, prepare before commit, manifest before manifest-verify, tests per layer. **No canary / no production write / no v1 mass rewrite.**
+
+```
+P0  Config split gates + capabilities constants
+      → CatalogConfig.reads_enabled / write enabled; capabilities DTO fields
+P1  Models: recursive extra=forbid; immutable flags; v2 identity grammar validators
+      → unit tests only (no Neo4j)
+P2  catalog_endpoint_map + wire into edge model/service preflight
+      → unit tests; fail closed before any store change
+P3  Full-domain hash in catalog_identity + optional request fields
+      → unit tests; v1 per-item hash still works
+P4  resolve_typed_edges (read) + get_catalog_capabilities (read)
+      → MCP register; prove split-gate reads while writes disabled
+P5  Store: CatalogPreparedPlan CRUD + constraints; catalog_plan helpers
+      → unit + neo4j int (test group only)
+P6  prepare_catalog_batch + discard_prepared_catalog_batch
+      → control write with full payload; no embed; assert zero domain mutation
+P7  Store: CatalogBatchManifest + CatalogEvidenceLink (exact links)
+      → unit + neo4j int
+P8  commit_prepared_catalog_batch
+      → load payload → embed → one tx domain+evidence+manifest+terminals; concurrency
+P9  get_catalog_batch_manifest + get_catalog_evidence
+      → read APIs
+P10 verify_catalog_batch manifest-backed mode
+      → compare live vs manifest
+P11 Compatibility suite: 14 legacy + 7 v1 tools green; search interop;
+      control nodes absent from search_nodes; group isolation
+P12 Docs: migration guidance (manual), regenerated-canary procedure (do not run)
+```
+
+### Phase gates (suggested)
+
+| Gate | Must pass before |
+|------|------------------|
+| G1 models+map+hash unit | any store control write |
+| G2 prepare/discard int (no domain leak) | commit implementation |
+| G3 commit+manifest int + concurrency | manifest-backed verify |
+| G4 full compatibility + security (no Cypher inject, no Entity control) | milestone verify / canary *planning* only |
+
+### What not to build in this order
+
+- Automatic v1→v2 identity rewrite
+- Parser / full ingest / canary execution
+- Conflict repair / DROP CONSTRAINT
+- Queue or LLM integration
+- Writes outside `oracle-catalog-tool-test`
+
+## Scaling Considerations
+
+| Scale | Adjustment |
+|-------|------------|
+| Unit / fixture batches | Default limits; single prepare |
+| ~14k entities / 30k edges | Chunk by limits; sequential commits per group; manifests per batch_id |
+| Concurrent same group | Plan CAS on batch_id; one prepared plan wins; no silent merge |
+| Restart mid-flight | Resume via token; expire stale plans |
+
+### Scaling Priorities
+
+1. **Prepare payload size** — chunk non-Entity control nodes; never hashes-only.
+2. **Embed latency** — batch embed at **commit** from stored payload.
+3. **Tx size** — enforce limits; never one-shot full catalog.
+4. **Open plan cardinality** — TTL + max-open; discard path.
+
+## Anti-Patterns
+
+### Anti-Pattern 1: Silent v1 identity reinterpretation
+
+**What people do:** Accept old graph_keys under v2 uuid formula without zone segment.
+**Why wrong:** FE/BO collision; non-auditable migration.
+**Instead:** Fail closed on grammar; document manual migration; never auto-rewrite.
+
+### Anti-Pattern 2: Domain writes or embeddings inside prepare
+
+**What people do:** MERGE entities at prepare for speed, or embed at prepare and store only hashes.
+**Why wrong:** Discard leaves orphans; hashes-only prepare cannot rehydrate commit; wrong embed timing.
+**Instead:** Prepare = control plane + full bounded canonical payload only; embed at commit.
+
+### Anti-Pattern 3: Split success path across txs without atomic domain+manifest+terminal
+
+**What people do:** Commit domain in one tx then best-effort manifest/status in another as the success path.
+**Why wrong:** Domain can succeed without durable manifest/terminal plan state.
+**Instead:** On success, one Neo4j tx writes domain + evidence + manifest + terminal batch status + plan terminal state. Separate post-rollback failure-status tx is allowed only for failure reporting.
+
+### Anti-Pattern 4: Cartesian provenance expansion
+
+**What people do:** Every source links every entity in batch.
+**Why wrong:** Limit blowups; false evidence.
+**Instead:** Explicit evidence link list only.
+
+### Anti-Pattern 5: Control label + Entity
+
+**What people do:** `:Entity:CatalogPreparedPlan` for “reuse indexes”.
+**Why wrong:** Pollutes hybrid search and communities.
+**Instead:** Non-Entity control labels + dedicated read APIs.
+
+### Anti-Pattern 6: Embed inside domain transaction
+
+**What people do:** Open tx, call embedder, write.
+**Why wrong:** Long locks; embed fail aborts mid-flight.
+**Instead:** Embed fully before domain tx (v1 Pattern retained).
+
+### Anti-Pattern 7: Caller UUID / token as domain identity
+
+**What people do:** Client supplies entity uuid or reuses prepare token as node uuid.
+**Why wrong:** Breaks UUIDv5 determinism.
+**Instead:** Server UUIDv5 for domain; token only addresses plan row.
+
+### Anti-Pattern 8: Conflict repair
+
+**What people do:** On uniqueness failure, DELETE duplicate and retry.
+**Why wrong:** Data loss; hides corruption.
+**Instead:** Fail closed; operator resolves in test group manually.
+
+## Compatibility Contract (explicit)
+
+| Surface | v1.1 rule |
+|---------|-----------|
+| 14 legacy MCP tools | Bit-compatible behavior |
+| 7 catalog tool **names** | Preserve names + semantic tools; v2 breaks request identity/provenance/hash contracts where required — no claim that v1 payloads remain accepted |
+| Identity namespace env | Unchanged immutability rule |
+| Search interop | Domain entities remain searchable |
+| group_id isolation | All ops; tests only `oracle-catalog-tool-test` |
+| Neo4j-only catalog writes | Unchanged |
+| No queue / no LLM on catalog path | Unchanged |
+
+## Error Code Surface (v1 + v2)
+
+**v1 retained:** `validation_error`, `feature_disabled`, `invalid_uuid_namespace`, `batch_limit_exceeded`, `content_hash_mismatch`, `entity_type_conflict`, `graph_key_prefix_mismatch`, `deterministic_uuid_conflict`, `missing_endpoint`, `endpoint_type_mismatch`, `generic_endpoint_conflict`, `edge_identity_conflict`, `batch_conflict`, `provenance_target_missing`, `neo4j_transaction_failed`, `embedding_failed`, `internal_error`, `backend_unavailable`.
+
+**v2 required (approved names):** `unsupported_identity_schema`, `invalid_system_key`, `edge_endpoint_pair_not_allowed`, `prepared_plan_not_found`, `prepared_plan_expired`, `prepared_plan_conflict`, `prepared_plan_already_consumed`, `manifest_mismatch`, `provenance_link_conflict`.
 
 ## Test Architecture
 
-| Layer | Location | Scope |
-|-------|----------|-------|
-| Unit models/identity | `mcp_server/tests/test_catalog_*.py` | No DB |
-| Service ordering | mocked driver + embedder | Assert embed called before `transaction()` |
-| Neo4j integration | `test_catalog_neo4j_int.py` | `group_id=oracle-catalog-tool-test` only |
-| Regression | existing MCP tests | Unchanged tools still pass |
-| Interop | search_nodes / search_memory_facts after upsert | Same test group |
+| Layer | Focus |
+|-------|-------|
+| Unit identity/map/hash | FE/BO isolation; domain hash stability; map rejects |
+| Unit models | Recursive forbid; immutable flags |
+| Service ordering | Embed before domain; prepare no domain; commit order |
+| Store unit | Control labels; no Entity; no DROP |
+| Neo4j int | Restart plan; commit/discard; manifest verify; isolation; concurrency |
+| Compatibility | Legacy 14 + v1 7 + search_nodes ignore control |
+| Security | No client label interpolation; group isolation |
 
-Forbidden in tests: `clear_graph` on non-test groups; writes to `oracle-catalog-v2`; full catalog load.
+Forbidden: production groups, canary execution, clear_graph, conflict repair tests that delete live data.
 
 ## Sources
 
-- `.planning/PROJECT.md` — requirements, allowlists, phase gate, identity rules
-- `.planning/codebase/ARCHITECTURE.md` — system layers
-- `.planning/codebase/STRUCTURE.md` — package layout
-- `mcp_server/src/graphiti_mcp_server.py` — `GraphitiService`, tools, `add_memory` queue, `add_triplet`, `get_episode_entities`
-- `mcp_server/src/services/factories.py` — Embedder/DB factories
-- `mcp_server/src/services/queue_service.py` — semantic-only queue (bypass)
-- `mcp_server/src/config/schema.py` — config extension point
-- `graphiti_core/driver/neo4j_driver.py` — `transaction()`, indices bootstrap
-- `graphiti_core/driver/query_executor.py` — `Transaction` ABC
-- `graphiti_core/driver/neo4j/operations/entity_node_ops.py` — `save(..., tx=)`
-- `graphiti_core/models/nodes/node_db_queries.py` — entity/episode MERGE templates
-- `graphiti_core/models/edges/edge_db_queries.py` — RELATES_TO / MENTIONS templates
-- `graphiti_core/nodes.py` / `edges.py` — `EntityNode`, `EpisodicNode`, `EntityEdge`, embedding helpers
-- `graphiti_core/utils/bulk_utils.py` — bulk write/embed ordering analog
-- `graphiti_core/graph_queries.py` — index/constraint baseline
-- `graphiti_core/helpers.py` — `validate_node_labels`, `validate_group_id`
-- `mcp_server/sample_catalog.json` — fixture shape for later canary (not full ingest)
+- `.planning/PROJECT.md` — v1.1 active requirements, constraints, out-of-scope
+- Live `mcp_server/src/services/catalog_{identity,service,store}.py`
+- Live `mcp_server/src/models/catalog_*.py`
+- Live `mcp_server/src/graphiti_mcp_server.py` — tool registration
+- Live `mcp_server/tests/test_catalog_*.py`
+- `.planning/codebase/ARCHITECTURE.md` — Graphiti layers
+- Prior `.planning/research/ARCHITECTURE.md` (v1.0) — replaced by this document
 
 ---
-*Architecture research for: Deterministic catalog-ingestion MCP tools*
-*Researched: 2026-07-16*
-*Confidence: HIGH (repo-sourced; Neo4j-first; dedicated store required)*
+*Architecture research for: Catalog-v2 pre-canary hardening*
+*Researched: 2026-07-17*
+*Confidence: HIGH — integration points from live source; atomicity bounded to Neo4j single-tx; build order dependency-aware; no hidden v1 rewrite*

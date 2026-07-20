@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 from models.catalog_common import (
     CATALOG_EDGE_TYPES,
@@ -16,8 +18,12 @@ from models.catalog_common import (
     MAX_SHORT_STRING_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
+    CatalogStrictModel,
+    StrictTrue,
+    SystemKey,
     validate_nested_json,
 )
+from models.catalog_graph_key import validate_entity_graph_key_at
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -29,7 +35,7 @@ def _validate_group_id(group_id: str | None) -> bool:
     return True
 
 
-class CatalogSourceItem(BaseModel):
+class CatalogSourceItem(CatalogStrictModel):
     """Single provenance source (maps to Episodic later). PROV-02."""
 
     source_key: str = Field(..., min_length=1, max_length=MAX_GRAPH_KEY_LENGTH)
@@ -38,11 +44,32 @@ class CatalogSourceItem(BaseModel):
     metadata: dict[str, Any] | None = None
     content_sha256: str | None = None
 
-    @field_validator('source_key', 'reference_time')
+    @field_validator('source_key')
     @classmethod
-    def _non_empty(cls, v: str, info) -> str:
+    def _non_empty_source_key(cls, v: str) -> str:
         if not isinstance(v, str) or not v.strip():
-            raise ValueError(f'{info.field_name} must be a non-empty string')
+            raise ValueError('source_key must be a non-empty string')
+        return v
+
+    @field_validator('reference_time')
+    @classmethod
+    def _validate_reference_time(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise PydanticCustomError(
+                'value_error',
+                'reference_time must be a non-empty ISO-8601 timestamp',
+            )
+        # Temporary normalize for parse only; return original bytes unchanged.
+        normalized = v.strip()
+        if normalized.endswith('Z') or normalized.endswith('z'):
+            normalized = normalized[:-1] + '+00:00'
+        try:
+            datetime.fromisoformat(normalized)
+        except ValueError:
+            raise PydanticCustomError(
+                'value_error',
+                'reference_time must be a valid ISO-8601 timestamp',
+            ) from None
         return v
 
     @field_validator('content_sha256')
@@ -68,7 +95,7 @@ class CatalogSourceItem(BaseModel):
         return v
 
 
-class CatalogProvenanceEntityTarget(BaseModel):
+class CatalogProvenanceEntityTarget(CatalogStrictModel):
     """Entity identity target for provenance MENTIONS links."""
 
     entity_type: str
@@ -82,16 +109,17 @@ class CatalogProvenanceEntityTarget(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def _graph_key_prefix(self) -> CatalogProvenanceEntityTarget:
-        prefix = ENTITY_TYPE_PREFIXES[self.entity_type]
-        if not self.graph_key.startswith(prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: {self.entity_type} requires prefix {prefix}'
-            )
+    def _graph_key_grammar(self) -> CatalogProvenanceEntityTarget:
+        validate_entity_graph_key_at(
+            entity_type=self.entity_type,
+            graph_key=self.graph_key,
+            title=type(self).__name__,
+            loc=('graph_key',),
+        )
         return self
 
 
-class CatalogProvenanceEdgeTarget(BaseModel):
+class CatalogProvenanceEdgeTarget(CatalogStrictModel):
     """Edge identity target for provenance episode attachment."""
 
     edge_type: str
@@ -112,9 +140,11 @@ class CatalogProvenanceEdgeTarget(BaseModel):
         return v
 
 
-class UpsertProvenanceRequest(BaseModel):
+class UpsertProvenanceRequest(CatalogStrictModel):
     """Request for upsert_provenance (no LLM/queue)."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     sources: list[CatalogSourceItem] = Field(
@@ -127,7 +157,7 @@ class UpsertProvenanceRequest(BaseModel):
         default_factory=list, max_length=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
     )
     dry_run: bool = False
-    atomic: bool = True
+    atomic: StrictTrue = True
 
     @field_validator('group_id')
     @classmethod
@@ -138,10 +168,18 @@ class UpsertProvenanceRequest(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def _link_collection_bounds(self) -> UpsertProvenanceRequest:
+    def _link_collection_bounds_and_system(self) -> UpsertProvenanceRequest:
         total_links = len(self.sources) * (len(self.entity_targets) + len(self.edge_targets))
         if total_links > HARD_MAX_PROVENANCE_LINKS_PER_BATCH:
             raise ValueError(
                 f'provenance links exceed hard max ({HARD_MAX_PROVENANCE_LINKS_PER_BATCH})'
+            )
+        for index, target in enumerate(self.entity_targets):
+            validate_entity_graph_key_at(
+                entity_type=target.entity_type,
+                graph_key=target.graph_key,
+                system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('entity_targets', index, 'graph_key'),
             )
         return self

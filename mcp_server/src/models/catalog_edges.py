@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from models.catalog_common import (
     CATALOG_EDGE_TYPES,
@@ -19,8 +19,13 @@ from models.catalog_common import (
     MAX_SHORT_STRING_LENGTH,
     PROTECTED_ENTITY_PROPERTIES,
     SHA256_HEX_RE,
+    CatalogStrictModel,
+    StrictTrue,
+    SystemKey,
     validate_nested_json,
 )
+from models.catalog_graph_key import validate_entity_graph_key_at
+from models.catalog_topology import validate_edge_endpoint_pair
 
 
 def _validate_group_id(group_id: str | None) -> bool:
@@ -32,7 +37,7 @@ def _validate_group_id(group_id: str | None) -> bool:
     return True
 
 
-class CatalogEdgeItem(BaseModel):
+class CatalogEdgeItem(CatalogStrictModel):
     """Single typed catalog edge for upsert."""
 
     edge_type: str
@@ -103,30 +108,37 @@ class CatalogEdgeItem(BaseModel):
     def _enforced_by_requires_evidence(self) -> CatalogEdgeItem:
         if self.edge_type == 'EnforcedBy' and (not self.evidence or not self.evidence.strip()):
             raise ValueError('EnforcedBy requires non-empty evidence')
-        src_prefix = ENTITY_TYPE_PREFIXES[self.source_entity_type]
-        if not self.source_graph_key.startswith(src_prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: source {self.source_entity_type} '
-                f'requires prefix {src_prefix}'
-            )
-        tgt_prefix = ENTITY_TYPE_PREFIXES[self.target_entity_type]
-        if not self.target_graph_key.startswith(tgt_prefix):
-            raise ValueError(
-                f'graph_key_prefix_mismatch: target {self.target_entity_type} '
-                f'requires prefix {tgt_prefix}'
-            )
+        # Exact field-path grammar first so malformed keys never collapse to edges.N.
+        # Topology after grammar; still before any side effect.
+        validate_entity_graph_key_at(
+            entity_type=self.source_entity_type,
+            graph_key=self.source_graph_key,
+            title=type(self).__name__,
+            loc=('source_graph_key',),
+        )
+        validate_entity_graph_key_at(
+            entity_type=self.target_entity_type,
+            graph_key=self.target_graph_key,
+            title=type(self).__name__,
+            loc=('target_graph_key',),
+        )
+        validate_edge_endpoint_pair(
+            self.edge_type, self.source_entity_type, self.target_entity_type
+        )
         return self
 
 
-class UpsertTypedEdgesRequest(BaseModel):
+class UpsertTypedEdgesRequest(CatalogStrictModel):
     """Request for upsert_typed_edges. No excluded_entity_types field."""
 
+    identity_schema_version: Literal['catalog-v2']
+    system_key: SystemKey
     group_id: str = Field(..., min_length=1)
     batch_id: str = Field(..., min_length=1, max_length=MAX_SHORT_STRING_LENGTH)
     edges: list[CatalogEdgeItem] = Field(..., min_length=1, max_length=HARD_MAX_EDGES_PER_BATCH)
     dry_run: bool = False
-    atomic: bool = True
-    strict_endpoints: bool = True
+    atomic: StrictTrue = True
+    strict_endpoints: StrictTrue = True
 
     @field_validator('group_id')
     @classmethod
@@ -135,3 +147,22 @@ class UpsertTypedEdgesRequest(BaseModel):
             raise ValueError('group_id is required and must be non-empty')
         _validate_group_id(v)
         return v
+
+    @model_validator(mode='after')
+    def _nested_endpoint_keys_match_shell_system(self) -> UpsertTypedEdgesRequest:
+        for index, edge in enumerate(self.edges):
+            validate_entity_graph_key_at(
+                entity_type=edge.source_entity_type,
+                graph_key=edge.source_graph_key,
+                system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('edges', index, 'source_graph_key'),
+            )
+            validate_entity_graph_key_at(
+                entity_type=edge.target_entity_type,
+                graph_key=edge.target_graph_key,
+                system_key=self.system_key,
+                title=type(self).__name__,
+                loc=('edges', index, 'target_graph_key'),
+            )
+        return self

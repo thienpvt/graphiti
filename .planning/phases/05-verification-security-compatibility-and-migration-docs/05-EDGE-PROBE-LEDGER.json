@@ -1,0 +1,346 @@
+{
+  "items": [
+    {
+      "requirement_id": "IDEN-13",
+      "category": "unclassified",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::IDEN-13-unclassified",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "unclassified — review manually"
+    },
+    {
+      "requirement_id": "SAFE-03",
+      "category": "unclassified",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-03-unclassified",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "unclassified — review manually"
+    },
+    {
+      "requirement_id": "SAFE-04",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-04-concurrency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "SAFE-06",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-06-concurrency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "SAFE-07",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-07-empty",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "SAFE-07",
+      "category": "encoding",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-07-encoding",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+    },
+    {
+      "requirement_id": "SAFE-09",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-09-empty",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "SAFE-09",
+      "category": "encoding",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-09-encoding",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+    },
+    {
+      "requirement_id": "SAFE-09",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-09-concurrency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "SAFE-10",
+      "category": "adjacency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-10-adjacency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
+    },
+    {
+      "requirement_id": "SAFE-10",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-10-empty",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "SAFE-10",
+      "category": "ordering",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::SAFE-10-ordering",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When elements compare equal, is output order specified and stable?"
+    },
+    {
+      "requirement_id": "TEST-10",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::TEST-10-empty",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "TEST-10",
+      "category": "encoding",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::TEST-10-encoding",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+    },
+    {
+      "requirement_id": "TEST-11",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::TEST-11-empty",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "TEST-11",
+      "category": "encoding",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::TEST-11-encoding",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "Whose definition of length/equality applies — bytes, code points, grapheme clusters, or normalized form?"
+    },
+    {
+      "requirement_id": "TEST-12",
+      "category": "adjacency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::TEST-12-adjacency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
+    },
+    {
+      "requirement_id": "TEST-12",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::TEST-12-empty",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "TEST-12",
+      "category": "ordering",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::TEST-12-ordering",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When elements compare equal, is output order specified and stable?"
+    },
+    {
+      "requirement_id": "TEST-12",
+      "category": "idempotency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::TEST-12-idempotency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What happens if this runs twice on the same input?"
+    },
+    {
+      "requirement_id": "TEST-12",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::TEST-12-concurrency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "DOCS-01",
+      "category": "adjacency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-01-adjacency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
+    },
+    {
+      "requirement_id": "DOCS-01",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-01-empty",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "DOCS-01",
+      "category": "ordering",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-01-ordering",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When elements compare equal, is output order specified and stable?"
+    },
+    {
+      "requirement_id": "DOCS-02",
+      "category": "adjacency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-02-adjacency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
+    },
+    {
+      "requirement_id": "DOCS-02",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-02-empty",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "DOCS-02",
+      "category": "ordering",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-02-ordering",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When elements compare equal, is output order specified and stable?"
+    },
+    {
+      "requirement_id": "DOCS-02",
+      "category": "concurrency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-02-concurrency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "If interrupted or run in parallel, what is guaranteed?"
+    },
+    {
+      "requirement_id": "DOCS-03",
+      "category": "unclassified",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-03-unclassified",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "unclassified — review manually"
+    },
+    {
+      "requirement_id": "DOCS-04",
+      "category": "adjacency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-04-adjacency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
+    },
+    {
+      "requirement_id": "DOCS-04",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-04-empty",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "DOCS-04",
+      "category": "ordering",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-04-ordering",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When elements compare equal, is output order specified and stable?"
+    },
+    {
+      "requirement_id": "DOCS-05",
+      "category": "unclassified",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-05-unclassified",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "unclassified — review manually"
+    },
+    {
+      "requirement_id": "DOCS-06",
+      "category": "unclassified",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::DOCS-06-unclassified",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "unclassified — review manually"
+    },
+    {
+      "requirement_id": "REPT-01",
+      "category": "adjacency",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::REPT-01-adjacency",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When two things are exactly equal or just touch, do they merge, collide, or separate?"
+    },
+    {
+      "requirement_id": "REPT-01",
+      "category": "empty",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::REPT-01-empty",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "What is the result for empty, single-element, or null input?"
+    },
+    {
+      "requirement_id": "REPT-01",
+      "category": "ordering",
+      "status": "resolved",
+      "verification": "explicit",
+      "resolution": "05-EDGE-PROBE-RESOLUTION.md::REPT-01-ordering",
+      "reason": "Post-execution Nyquist audit confirmed the mapped runnable/static predicate.",
+      "probe": "When elements compare equal, is output order specified and stable?"
+    }
+  ],
+  "coverage": {
+    "applicable": 37,
+    "resolved": 37,
+    "unresolved": 0,
+    "byVerification": {
+      "explicit": 37,
+      "backstop": 0
+    }
+  }
+}

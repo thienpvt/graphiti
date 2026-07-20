@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from models.catalog_common import ENTITY_TYPE_PREFIXES  # noqa: E402
+from models.catalog_entities import CatalogEntityItem  # noqa: E402
 from services.catalog_store import (  # noqa: E402
     CATALOG_BATCH_IDENTITY_CONSTRAINT,
     CATALOG_ENTITY_IDENTITY_CONSTRAINT,
@@ -46,7 +49,7 @@ def _base_params(**overrides):
         'updated_at': FIXED_TS,
         'name_embedding': [0.1, 0.2, 0.3],
         'attributes': {'owner': 'HR'},
-        'source_refs': [{'doc': 'ddl', 'line': 10}],
+        'source_refs': [{'document_id': 'ddl', 'page': 10, 'raw_text': 'CREATE TABLE'}],
         'confidence': 0.9,
     }
     params.update(overrides)
@@ -148,11 +151,60 @@ def test_cypher_parameterizes_values_not_client_identifiers():
 
 
 def test_serialize_nested_json_source_refs():
-    refs = [{'page': 1, 'span': [2, 3]}, 'plain']
+    refs = [{'document_id': None, 'page': 1, 'raw_text': 'DDL  \n'}]
     out = serialize_nested_json(refs)
     assert isinstance(out, str)
     parsed = json.loads(out)
     assert parsed == refs
+
+
+def test_serialize_nested_json_source_ref_models_dump_plain_json():
+    item = CatalogEntityItem.model_validate(
+        {
+            'entity_type': 'Table',
+            'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+            'name_raw': 'EMPLOYEES',
+            'name_canonical': 'employees',
+            'database_qualified_name': 'ORCL.HR.EMPLOYEES',
+            'summary': 'Employee table',
+            'source_refs': [
+                {'document_id': None, 'page': 1, 'raw_text': 'DDL  \n'},
+            ],
+        }
+    )
+    assert item.source_refs is not None
+    assert not isinstance(item.source_refs[0], dict)
+
+    out = serialize_nested_json(item.source_refs)
+
+    assert isinstance(out, str)
+    assert json.loads(out) == [
+        {'document_id': None, 'page': 1, 'raw_text': 'DDL  \n'},
+    ]
+
+
+def test_prepare_entity_params_source_ref_models_serialize_plain_json():
+    item = CatalogEntityItem.model_validate(
+        {
+            'entity_type': 'Table',
+            'graph_key': 'TABLE::FE::ORCL.HR.EMPLOYEES',
+            'name_raw': 'EMPLOYEES',
+            'name_canonical': 'employees',
+            'database_qualified_name': 'ORCL.HR.EMPLOYEES',
+            'summary': 'Employee table',
+            'source_refs': [{'page': 1, 'raw_text': 'DDL  \n'}],
+        }
+    )
+    store = CatalogNeo4jStore()
+
+    params = store.prepare_entity_params(
+        entity_type='Table',
+        **_base_params(source_refs=item.source_refs),
+    )
+
+    assert json.loads(params['source_refs']) == [
+        {'document_id': None, 'page': 1, 'raw_text': 'DDL  \n'},
+    ]
 
 
 def test_serialize_nested_json_none():
@@ -431,6 +483,9 @@ def test_build_edge_upsert_cypher_uses_relates_to_and_param_name():
     assert '_catalog_create_token' in cypher
     assert 'REMOVE e._catalog_create_token' in cypher
     assert '$create_token' in cypher
+    # WR-04: under-lock identity arbitration mirrors entity pattern
+    assert 'edge_identity_conflict' in cypher
+    assert 'error_code' in cypher
 
 
 def test_edge_on_create_and_changed_match_include_batch_id():
@@ -608,6 +663,104 @@ def test_verify_edge_queries_return_physical_identity_and_provenance_is_group_sc
     provenance = store.build_match_provenance_presence_cypher()
     assert 'ep.group_id = $group_id' in provenance
     assert 'n.group_id = $group_id' in provenance
+
+
+def test_build_match_edges_for_resolve_cypher_returns_content_sha256_and_is_read_only():
+    """RESE-01/Q2: resolve MATCH always RETURNs content_sha256; no write verbs."""
+    store = CatalogNeo4jStore()
+    cypher = store.build_match_edges_for_resolve_cypher()
+    upper = cypher.upper()
+    assert 'MATCH' in upper
+    assert 'e.group_id = $group_id' in cypher or 'e.group_id = $group_id' in cypher.replace(
+        '\n', ' '
+    )
+    assert '$group_id' in cypher
+    assert '$edge_keys' in cypher
+    assert 'e.content_sha256 AS content_sha256' in cypher
+    assert 'e.fact_embedding IS NOT NULL AS has_fact_embedding' in cypher
+    assert 'CREATE' not in upper.replace('CREATED_AT', '')
+    assert 'MERGE' not in upper
+    assert 'SET ' not in cypher
+    assert 'DELETE' not in upper
+    assert 'DETACH' not in upper
+
+
+@pytest.mark.asyncio
+async def test_match_edges_for_resolve_uses_read_many_only():
+    store = CatalogNeo4jStore()
+    calls: list[tuple[str, dict]] = []
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = kwargs
+            calls.append((cypher, dict(params or {})))
+            return ([], None, [])
+
+    rows = await store.match_edges_for_resolve(_Exec(), group_id=GROUP, edge_keys=['EDGE::K'])
+    assert rows == []
+    assert len(calls) == 1
+    cypher, params = calls[0]
+    assert params['group_id'] == GROUP
+    assert params['edge_keys'] == ['EDGE::K']
+    assert 'MERGE' not in cypher.upper()
+    assert await store.match_edges_for_resolve(_Exec(), group_id=GROUP, edge_keys=[]) == []
+
+
+def test_build_match_evidence_links_for_target_cypher_group_scoped_read_only():
+    """EVID-12: fixed CatalogEvidenceLink MATCH; ORDER BY uuid; no write verbs."""
+    store = CatalogNeo4jStore()
+    cypher = store.build_match_evidence_links_for_target_cypher()
+    upper = cypher.upper()
+    assert 'MATCH (n:CatalogEvidenceLink)' in cypher.replace('\n', ' ').replace('  ', ' ') or (
+        'CatalogEvidenceLink' in cypher and 'MATCH' in upper
+    )
+    assert '$group_id' in cypher
+    assert '$target_kind' in cypher
+    assert '$target_uuid' in cypher
+    assert 'ORDER BY' in upper
+    assert 'n.uuid' in cypher
+    assert 'CREATE' not in upper.replace('CREATED_AT', '')
+    assert 'MERGE' not in upper
+    assert 'SET ' not in cypher
+    assert 'DELETE' not in upper
+
+
+@pytest.mark.asyncio
+async def test_match_evidence_links_for_target_uses_read_many_only():
+    store = CatalogNeo4jStore()
+    calls: list[dict] = []
+
+    class _Exec:
+        async def execute_query(self, cypher: str, params=None, **kwargs):
+            _ = cypher, kwargs
+            calls.append(dict(params or {}))
+            return (
+                [
+                    {
+                        'uuid': 'u1',
+                        'link_key': 'L1',
+                        'content_sha256': 'a' * 64,
+                        'target_kind': 'entity',
+                        'target_uuid': 't1',
+                    }
+                ],
+                None,
+                [],
+            )
+
+    rows = await store.match_evidence_links_for_target(
+        _Exec(), group_id=GROUP, target_kind='entity', target_uuid='t1'
+    )
+    assert len(rows) == 1
+    assert calls[0]['group_id'] == GROUP
+    assert calls[0]['target_kind'] == 'entity'
+    assert calls[0]['target_uuid'] == 't1'
+    assert (
+        await store.match_evidence_links_for_target(
+            _Exec(), group_id=GROUP, target_kind='bogus', target_uuid='t1'
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio
@@ -1158,6 +1311,9 @@ def test_batch_status_claim_and_terminal_write_are_conflict_guarded():
     assert 'MERGE (b:CatalogIngestBatch {uuid: $uuid, group_id: $group_id})' in claim
     assert "b.status = 'writing'" in claim
     assert 'b.request_sha256 = $request_sha256' in claim
+    # WR-03: CAS reclaim only from writing|failed; never blind rewrite committed/unknown.
+    assert 'ON MATCH SET' in claim
+    assert "b.status IN ['writing', 'failed']" in claim
     assert "coalesce(b.status, '') = 'committed' AS already_committed" in terminal
     assert 'b.request_sha256 <> $request_sha256 AS hash_conflict' in terminal
     assert 'NOT already_committed AND NOT hash_conflict' in terminal
@@ -1326,3 +1482,357 @@ async def test_get_batch_status_returns_row_or_none():
             return ([], None, None)
 
     assert await store.get_batch_status(_Empty(), uuid=UUID, group_id=GROUP) is None
+
+
+# ---------------------------------------------------------------------------
+# gap_cr01: lock-authoritative entity conflict Cypher structure
+# ---------------------------------------------------------------------------
+
+
+def test_gap_cr01_entity_upsert_cypher_lock_order_and_conflict_gating():
+    store = CatalogNeo4jStore()
+    label = store.resolve_entity_label('Table')
+    cypher = store.build_entity_upsert_cypher('Table')
+
+    merge_idx = cypher.index('MERGE (n:Entity {uuid: $uuid, group_id: $group_id})')
+    lock_idx = cypher.index('SET n.uuid = n.uuid')
+    assert merge_idx < lock_idx
+
+    assert 'deterministic_uuid_conflict' in cypher
+    assert 'error_code' in cypher
+    assert "'Entity' IN labels(n)" in cypher
+    assert f"'{label}' IN labels(n)" in cypher
+    assert "size([label IN labels(n) WHERE label <> 'Entity']) = 1" in cypher
+    assert 'n.labels' in cypher
+
+    error_status_idx = cypher.index("WHEN error_code IS NOT NULL THEN 'error'")
+    foreach_idx = cypher.index("status = 'updated'")
+    vector_idx = cypher.index("status IN ['created', 'updated']")
+    return_idx = cypher.index('RETURN')
+    assert lock_idx < error_status_idx < foreach_idx
+    assert error_status_idx < vector_idx < return_idx
+
+    set_block = cypher.split('FOREACH')[1].split('REMOVE')[0]
+    for forbidden in (
+        'n.created_at',
+        'n.name =',
+        'n.graph_key =',
+        'n.name_raw =',
+        'n.name_canonical =',
+        'n.labels =',
+        'name_embedding',
+    ):
+        assert forbidden not in set_block
+
+    for field in (
+        'error_code',
+        'n.name AS name',
+        'n.graph_key AS graph_key',
+        'n.name_raw AS name_raw',
+        'n.name_canonical AS name_canonical',
+        'n.labels AS labels',
+        'labels(n) AS neo4j_labels',
+        'n.content_sha256 AS content_sha256',
+        'n.summary AS summary',
+        'n.name_embedding IS NOT NULL AS has_name_embedding',
+    ):
+        assert field in cypher, field
+
+
+def test_gap_cr01_entity_upsert_type_contract_covers_label_mismatch_cases():
+    store = CatalogNeo4jStore()
+    cypher = store.build_entity_upsert_cypher('Table')
+    assert "'Entity' IN labels(n)" in cypher
+    assert "size([label IN labels(n) WHERE label <> 'Entity']) = 1" in cypher
+    assert 'n.labels' in cypher
+    assert ':Table' in cypher
+    assert 'deterministic_uuid_conflict' in cypher
+
+
+# --- 03B REVIEW WR focused unit contracts ---
+
+
+def test_wr03_claim_cypher_reclaims_writing_failed_only():
+    store = CatalogNeo4jStore()
+    claim = store.build_batch_status_claim_cypher()
+    assert 'ON CREATE SET' in claim
+    assert 'ON MATCH SET' in claim
+    assert "b.status IN ['writing', 'failed']" in claim
+    # committed path must not be rewritten to writing
+    assert "THEN 'writing'" in claim
+    assert 'b.request_sha256 = $request_sha256' in claim
+
+
+def test_wr04_edge_upsert_returns_error_code_on_identity_drift():
+    store = CatalogNeo4jStore()
+    cypher = store.build_edge_upsert_cypher()
+    assert "THEN 'edge_identity_conflict'" in cypher
+    assert 'error_code' in cypher
+    # mutable SET / vector only when status is not error
+    assert "WHEN error_code IS NOT NULL THEN 'error'" in cypher
+    assert "status IN ['created', 'updated']" in cypher
+
+
+def test_wr05_list_manifest_chunks_cypher_group_scoped():
+    store = CatalogNeo4jStore()
+    cypher = store.build_list_manifest_chunks_cypher()
+    assert 'CatalogBatchManifestChunk' in cypher
+    assert 'manifest_uuid: $manifest_uuid' in cypher
+    assert 'group_id: $group_id' in cypher
+    assert 'ORDER BY c.chunk_index ASC' in cypher
+    assert ':Entity' not in cypher
+
+
+def test_build_load_manifest_chunks_cypher_returns_payload():
+    """MANI-05: payload load Cypher returns payload_b64 + group-scoped params."""
+    store = CatalogNeo4jStore()
+    cypher = store.build_load_manifest_chunks_cypher()
+    assert 'CatalogBatchManifestChunk' in cypher
+    assert 'payload_b64' in cypher
+    assert 'c.payload_b64 AS payload_b64' in cypher
+    assert 'byte_offset' in cypher
+    assert 'byte_length' in cypher
+    assert 'chunk_sha256' in cypher
+    assert 'chunk_index' in cypher
+    assert 'chunk_count' in cypher
+    assert 'manifest_uuid: $manifest_uuid' in cypher
+    assert 'group_id: $group_id' in cypher
+    assert 'ORDER BY c.chunk_index ASC' in cypher
+    assert ':Entity' not in cypher
+    # Read-only: no write verbs as Cypher keywords (not substrings of property names).
+    assert not re.search(r'\bCREATE\b', cypher, re.IGNORECASE)
+    assert not re.search(r'\bMERGE\b', cypher, re.IGNORECASE)
+    assert not re.search(r'\bSET\b', cypher, re.IGNORECASE)
+    assert not re.search(r'\bDELETE\b', cypher, re.IGNORECASE)
+    assert not re.search(r'\bDETACH\b', cypher, re.IGNORECASE)
+
+
+@pytest.mark.asyncio
+async def test_load_manifest_chunks_with_payload_uses_read_many_only():
+    """D-21: load_manifest_chunks_with_payload uses _read_many; no write Cypher."""
+    import inspect
+
+    store = CatalogNeo4jStore()
+    src = inspect.getsource(store.load_manifest_chunks_with_payload)
+    assert '_read_many' in src
+    assert 'ensure_' not in src
+    assert 'write_' not in src
+    assert 'CREATE' not in src
+    assert 'MERGE' not in src
+    assert 'SET ' not in src
+
+    captured: dict[str, Any] = {}
+
+    async def fake_read_many(executor, cypher, params, *, tx=None):
+        captured['cypher'] = cypher
+        captured['params'] = params
+        return [
+            {
+                'uuid': 'c0',
+                'group_id': 'oracle-catalog-tool-test',
+                'manifest_uuid': 'm1',
+                'chunk_index': 0,
+                'chunk_count': 1,
+                'byte_offset': 0,
+                'byte_length': 4,
+                'chunk_sha256': 'ab' * 32,
+                'payload_b64': 'dGVzdA==',
+            }
+        ]
+
+    store._read_many = fake_read_many  # type: ignore[method-assign]
+    rows = await store.load_manifest_chunks_with_payload(
+        object(),
+        manifest_uuid='m1',
+        group_id='oracle-catalog-tool-test',
+    )
+    assert len(rows) == 1
+    assert rows[0]['payload_b64'] == 'dGVzdA=='
+    assert captured['params'] == {
+        'manifest_uuid': 'm1',
+        'group_id': 'oracle-catalog-tool-test',
+    }
+    assert 'payload_b64' in captured['cypher']
+    assert '$group_id' in captured['cypher']
+    assert '$manifest_uuid' in captured['cypher']
+
+
+@pytest.mark.asyncio
+async def test_load_manifest_chunks_with_payload_requires_ids():
+    store = CatalogNeo4jStore()
+    with pytest.raises(CatalogStoreError):
+        await store.load_manifest_chunks_with_payload(
+            object(), manifest_uuid='', group_id='oracle-catalog-tool-test'
+        )
+    with pytest.raises(CatalogStoreError):
+        await store.load_manifest_chunks_with_payload(object(), manifest_uuid='m1', group_id='')
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 TEST-10 / SAFE-04 store boundary proofs (05-02 GREEN)
+# ---------------------------------------------------------------------------
+
+
+def test_phase5_client_entity_type_rejected_before_cypher():
+    """TEST-10: client-controlled entity type fails before query execution."""
+    store = CatalogNeo4jStore()
+    bad_types = (
+        'Table; DROP TABLE Entity //',
+        'Table` WHERE 1=1 //',
+        'NotAType',
+        'Entity} DETACH DELETE n //',
+    )
+    for bad in bad_types:
+        with pytest.raises(CatalogStoreError):
+            store.resolve_entity_label(bad)
+        with pytest.raises(CatalogStoreError):
+            store.build_entity_upsert_cypher(bad)
+        with pytest.raises(CatalogStoreError):
+            store.build_resolve_endpoint_typed_cypher(bad)
+        with pytest.raises(CatalogStoreError):
+            store.prepare_entity_params(entity_type=bad, **_base_params())
+
+    # Allowlisted path: label originates only from ENTITY_TYPE_PREFIXES / _ENTITY_LABELS.
+    for entity_type in ENTITY_TYPE_PREFIXES:
+        label = store.resolve_entity_label(entity_type)
+        cypher = store.build_entity_upsert_cypher(entity_type)
+        assert label == entity_type
+        assert f':{label}' in cypher or f"'{label}'" in cypher
+        assert '$uuid' in cypher and '$group_id' in cypher
+        for bad in bad_types:
+            assert bad not in cypher
+
+
+def test_phase5_client_edge_type_rejected_before_cypher():
+    """TEST-10: client-controlled edge type fails before query execution."""
+    store = CatalogNeo4jStore()
+    bad_types = (
+        'ForeignKeyTo; DROP //',
+        'RELATES_TO` //',
+        'NotAnEdge',
+    )
+    for bad in bad_types:
+        with pytest.raises(CatalogStoreError):
+            store.resolve_edge_type(bad)
+        with pytest.raises(CatalogStoreError):
+            store.prepare_edge_params(
+                edge_type=bad,
+                uuid=UUID,
+                group_id=GROUP,
+                batch_id=BATCH,
+                edge_key='FK::A->B',
+                source_uuid='s',
+                target_uuid='t',
+                fact='f',
+                content_sha256=HASH,
+                created_at=FIXED_TS,
+                updated_at=FIXED_TS,
+                fact_embedding=[0.1],
+            )
+
+    cypher = store.build_edge_upsert_cypher()
+    assert 'RELATES_TO' in cypher
+    assert '$name' in cypher or 'e.name' in cypher
+    for bad in bad_types:
+        assert bad not in cypher
+
+
+def test_phase5_client_property_key_rejected_before_cypher():
+    """TEST-10: client-controlled property keys fail before query execution."""
+    store = CatalogNeo4jStore()
+    malicious_keys = (
+        'uuid; DROP',
+        '`injected`',
+        "name' OR 1=1 //",
+        'content_sha256); MATCH (x) DETACH DELETE x //',
+        'labels`',
+    )
+    attrs = {k: 'v' for k in malicious_keys}
+    attrs['owner'] = 'HR'
+    params = store.prepare_entity_params(entity_type='Table', **_base_params(attributes=attrs))
+    # Fixed server-owned key set only.
+    expected_keys = {
+        'uuid',
+        'group_id',
+        'batch_id',
+        'name',
+        'graph_key',
+        'name_raw',
+        'name_canonical',
+        'database_qualified_name',
+        'summary',
+        'content_sha256',
+        'created_at',
+        'updated_at',
+        'name_embedding',
+        'attributes',
+        'source_refs',
+        'confidence',
+        'labels',
+        'create_token',
+    }
+    assert set(params.keys()) == expected_keys
+    assert isinstance(params['attributes'], str)
+    cypher = store.build_entity_upsert_cypher('Table')
+    assert '$attributes' in cypher
+    for key in malicious_keys:
+        assert key not in cypher
+        assert f'n.{key}' not in cypher
+
+    edge_params = store.prepare_edge_params(
+        edge_type='ForeignKeyTo',
+        uuid=UUID,
+        group_id=GROUP,
+        batch_id=BATCH,
+        edge_key='FK::A->B',
+        source_uuid='s',
+        target_uuid='t',
+        fact='f',
+        content_sha256=HASH,
+        created_at=FIXED_TS,
+        updated_at=FIXED_TS,
+        fact_embedding=[0.1],
+        attributes=attrs,
+    )
+    edge_expected = {
+        'uuid',
+        'group_id',
+        'batch_id',
+        'name',
+        'edge_key',
+        'source_uuid',
+        'target_uuid',
+        'source_node_uuid',
+        'target_node_uuid',
+        'fact',
+        'evidence',
+        'content_sha256',
+        'created_at',
+        'updated_at',
+        'fact_embedding',
+        'attributes',
+        'confidence',
+        'episodes',
+        'create_token',
+    }
+    assert set(edge_params.keys()) == edge_expected
+    edge_cypher = store.build_edge_upsert_cypher()
+    for key in malicious_keys:
+        assert key not in edge_cypher
+
+
+def test_phase5_missing_endpoint_lookup_match_only_no_create():
+    """SAFE-04: missing endpoint store lookup is MATCH-only; zero implicit create."""
+    store = CatalogNeo4jStore()
+    cypher = store.build_resolve_endpoint_typed_cypher('Table')
+    upper = cypher.upper().replace('CREATED_AT', '')
+    assert 'MATCH' in upper
+    assert 'CREATE' not in upper
+    assert 'MERGE' not in upper
+    assert 'SET ' not in cypher
+    assert '$group_id' in cypher
+    assert '$name' in cypher or '$graph_key' in cypher
+
+    code, row = store.classify_endpoint_rows([], expected_type='Table')
+    assert code == 'missing_endpoint'
+    assert row is None
