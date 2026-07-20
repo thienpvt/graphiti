@@ -1,0 +1,57 @@
+{
+  "changed": [
+    {
+      "path": "graphiti_mcp_phase6_canary_agent_prompt_en.md",
+      "sha256": "0cf5d72b4c45e9d22c7c7bdd74c9ff719921ea73c0852130d707b3e7fd959b34"
+    },
+    {
+      "path": "mcp_server/README.md",
+      "sha256": "53f1b7c1ea5146f62d236e0b8106333c2640274d929e250837110019e57d4554"
+    },
+    {
+      "path": "mcp_server/docs/CATALOG_V2_MIGRATION.md",
+      "sha256": "7c018a0633a3856b947cde8256cf58ccc626265ea373d0ef351bd92fcb9423a9"
+    },
+    {
+      "path": "mcp_server/src/models/response_types.py",
+      "sha256": "876810ab73e3e0e9f404047cea3610338e3d2245c35b11f8e42b6c55bfa145fa"
+    },
+    {
+      "path": "mcp_server/src/utils/formatting.py",
+      "sha256": "a927c86a8806f1ce598ac879c7a3aa3b38e7a221f75cb66f81e9254ccfe711a5"
+    },
+    {
+      "path": "mcp_server/tests/test_catalog_canary_scripts.py",
+      "sha256": "661971046b2945e9d80d76aef2782c5fe03165ed5d5f9ce26b5add9107666fdb"
+    },
+    {
+      "path": "mcp_server/tests/test_catalog_schema_bootstrap.py",
+      "sha256": "fb91bfbdab13d56bcbd1898db76d6d36a62627b9815c47c8592734a2619c600a"
+    },
+    {
+      "path": "mcp_server/tests/test_formatting.py",
+      "sha256": "6063f5979a7083b7e6f6478dc9f114d01f5a646a63bf3b66f3f13d3b0da4898b"
+    },
+    {
+      "path": "scripts/bootstrap_catalog_v2_schema.py",
+      "sha256": "289f802da4a54bb3feb781bc52e7b1348aaa1c46053921a43ecd731002c5146e"
+    },
+    {
+      "path": "scripts/build_catalog_canary_requests.py",
+      "sha256": "b96b48875998bd50e0de98d0db7696a74004a45a14d8732b492ba6fc28dfd16f"
+    },
+    {
+      "path": "scripts/run_catalog_canary_batch.py",
+      "sha256": "e9188260671a0c6beee6f02ae374aba7bc310fdfa7597f94cac07b558e43a402"
+    },
+    {
+      "path": "tests/script/run_catalog_canary_batch.py",
+      "sha256": "45a392926c83f041b16631931598ef0da69eb97e7e2dd47f1e1e3f9df99bf676"
+    }
+  ],
+  "immutable_evidence": {
+    "schema": "5bea370f9e5ad0be675626a97efc5c1257db9307d04e237dd06a103e6c20ef4c",
+    "report": "3da57ea6f77903aadb791369a0643decc95df9315d9924056f13a63e58f34159",
+    "ledger": "3959d055f26bc20466d1d39cd92cd04a5091848d43e204d6d90a4a0a07b5925d"
+  }
+}

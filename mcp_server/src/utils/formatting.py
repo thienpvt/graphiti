@@ -5,7 +5,7 @@ from typing import Any
 from graphiti_core.edges import EntityEdge
 from graphiti_core.nodes import EntityNode
 
-from models.response_types import EdgeResult, NodeResult
+from models.response_types import EdgeResult, FactResult, NodeResult
 
 
 def _json_safe(value: Any) -> Any:
@@ -61,12 +61,13 @@ def format_node_result(node: EntityNode) -> dict[str, Any]:
     return dict(to_node_result(node))
 
 
-def format_fact_result(edge: EntityEdge) -> dict[str, Any]:
+def format_fact_result(edge: EntityEdge) -> FactResult:
     """Format an entity edge into a readable result without embedding vectors."""
-    result = dict(to_edge_result(edge))
-    result['attributes'] = {
-        key: _json_safe(value)
-        for key, value in (edge.attributes or {}).items()
-        if 'embedding' not in key.lower()
-    }
-    return result
+    return FactResult(
+        **to_edge_result(edge),
+        attributes={
+            key: _json_safe(value)
+            for key, value in (edge.attributes or {}).items()
+            if 'embedding' not in key.lower()
+        },
+    )

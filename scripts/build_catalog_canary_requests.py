@@ -181,6 +181,9 @@ LIVE_MANIFEST_FIELDS = frozenset(
         'counts',
         'builder',
         'builder_sha256',
+        'allow_unknown_embedding_provider',
+        'source_digest_origin',
+        'execution_surface',
         'canary_executed',
     }
 )
@@ -1679,8 +1682,11 @@ def build_live_canary(
     group_id: str,
     control_group_id: str,
     batch_id: str,
+    allow_unknown_embedding_provider: str | None = None,
 ) -> dict[str, Any]:
     """Build one deterministic live-canary request without transport or secret material."""
+    if allow_unknown_embedding_provider not in (None, 'openai'):
+        raise ValueError('allow_unknown_embedding_provider must be openai when supplied')
     identities = {
         name: _validate_live_id(name, value)
         for name, value in {
@@ -1754,6 +1760,9 @@ def build_live_canary(
         },
         'builder': 'scripts/build_catalog_canary_requests.py',
         'builder_sha256': builder_sha256,
+        'allow_unknown_embedding_provider': allow_unknown_embedding_provider,
+        'source_digest_origin': 'host',
+        'execution_surface': 'compose-graphiti-mcp-only',
         'canary_executed': False,
     }
     if set(manifest) != LIVE_MANIFEST_FIELDS:
@@ -1794,6 +1803,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument('--group-id')
     parser.add_argument('--control-group-id')
     parser.add_argument('--batch-id')
+    parser.add_argument('--allow-unknown-embedding-provider', choices=('openai',))
     args = parser.parse_args(argv)
     if args.profile is not None and args.mode is not None:
         parser.error('--profile and --mode are mutually exclusive')
@@ -1829,6 +1839,7 @@ def main() -> int:
             group_id=args.group_id,
             control_group_id=args.control_group_id,
             batch_id=args.batch_id,
+            allow_unknown_embedding_provider=args.allow_unknown_embedding_provider,
         )
     print(json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False))
     return 0

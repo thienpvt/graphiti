@@ -28,9 +28,22 @@ class NodeSearchResponse(TypedDict):
     nodes: list[NodeResult]
 
 
+class FactResult(TypedDict):
+    uuid: str
+    name: str
+    fact: str
+    source_node_uuid: str
+    target_node_uuid: str
+    group_id: str
+    created_at: str | None
+    valid_at: str | None
+    invalid_at: str | None
+    attributes: dict[str, Any]
+
+
 class FactSearchResponse(TypedDict):
     message: str
-    facts: list[dict[str, Any]]
+    facts: list[FactResult]
 
 
 class EpisodeSearchResponse(TypedDict):
