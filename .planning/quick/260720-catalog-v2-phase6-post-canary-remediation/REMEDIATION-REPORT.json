@@ -1,0 +1,34 @@
+{
+  "schema_version": "catalog-v2-phase6-remediation-v1",
+  "classification": "READY_FOR_REVIEW",
+  "baseline_sha": "3afc0980616eeab46b1c2e893285db120552a50d",
+  "resulting_sha": "3afc0980616eeab46b1c2e893285db120552a50d",
+  "failed_run": "20260720T085101Z-c230342b",
+  "root_cause": "search_memory_facts emits catalog edge_key under attributes; strict runner and fake expected top-level",
+  "canonical_fact_identity": "facts[].attributes.edge_key with exact UUID/group/type/source/target",
+  "openai_waiver": {
+    "policy": "allow_unknown_embedding_provider=openai",
+    "raw_response_mutated": false,
+    "raw_response_hashed": true,
+    "prepare_is_functional_proof": true
+  },
+  "schema_bootstrap": {
+    "raw_driver": true,
+    "graphiti_driver": false,
+    "store_methods": 3,
+    "post_inspections": 1,
+    "retry_count": 0
+  },
+  "ledger": {
+    "contiguous_ordinals": true,
+    "call_count_bound": true,
+    "digest_bound": true
+  },
+  "ready_for_new_canary": false,
+  "old_run_reclassified": false,
+  "runtime_calls": 0,
+  "warnings": [
+    "Full capability regression subset needs project dependencies; host Python lacked numpy.",
+    "Harness cannot prove unrelated external operator processes did not run Docker."
+  ]
+}

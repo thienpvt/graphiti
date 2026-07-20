@@ -23,6 +23,7 @@ def _load_formatting(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     models = ModuleType('models')
     response_types = ModuleType('models.response_types')
     response_types.EdgeResult = lambda **kwargs: kwargs
+    response_types.FactResult = lambda **kwargs: kwargs
     response_types.NodeResult = lambda **kwargs: kwargs
     for name, module in {
         'graphiti_core': graphiti,
@@ -80,7 +81,11 @@ def test_format_fact_result_serializes_nested_driver_values(
         created_at=datetime(2026, 7, 17, tzinfo=timezone.utc),
         valid_at=None,
         invalid_at=None,
-        attributes={'updated_at': Neo4jLikeDateTime(), 'fact_embedding': [1.0]},
+        attributes={
+            'edge_key': 'contains|TABLE::TEST.ITEM|COLUMN::TEST.ITEM.ID',
+            'updated_at': Neo4jLikeDateTime(),
+            'fact_embedding': [1.0],
+        },
     )
 
     assert formatting.format_fact_result(edge) == {
@@ -93,5 +98,8 @@ def test_format_fact_result_serializes_nested_driver_values(
         'created_at': '2026-07-17T00:00:00+00:00',
         'valid_at': None,
         'invalid_at': None,
-        'attributes': {'updated_at': '2026-07-17T12:00:00.000000000+00:00'},
+        'attributes': {
+            'edge_key': 'contains|TABLE::TEST.ITEM|COLUMN::TEST.ITEM.ID',
+            'updated_at': '2026-07-17T12:00:00.000000000+00:00',
+        },
     }

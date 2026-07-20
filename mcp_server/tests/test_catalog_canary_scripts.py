@@ -379,7 +379,9 @@ def test_historical_inventory_and_digests_preserved() -> None:
         (HISTORICAL_ARTIFACT_DIR / 'manifest.json').read_text(encoding='utf-8')
     )
     accept = next(
-        item for item in historical_manifest['batches'] if item['batch_id'] == 'canary-v2::accept-tab'
+        item
+        for item in historical_manifest['batches']
+        if item['batch_id'] == 'canary-v2::accept-tab'
     )
     assert accept['server_request_sha256'] == HISTORICAL_ACCEPT_TAB_REQUEST_SHA256
     assert accept['counts']['provenance_sources'] == 1
@@ -706,9 +708,7 @@ async def test_hardened_execute_uses_prepare_token_commit_without_persisting_tok
         f'44444444-4444-4444-4444-{index + 1:012d}'
         for index in range(len(request.provenance.evidence_links))
     ]
-    evidence_keys = [
-        runner.evidence_link_key(item) for item in request.provenance.evidence_links
-    ]
+    evidence_keys = [runner.evidence_link_key(item) for item in request.provenance.evidence_links]
     evidence_hashes = [
         runner.canonical_sha256(runner.evidence_canonical_payload(item))
         for item in request.provenance.evidence_links
@@ -875,10 +875,12 @@ async def test_hardened_execute_uses_prepare_token_commit_without_persisting_tok
             'facts': [
                 {
                     'uuid': edge_uuids[0],
-                    'edge_key': request.edges[0].edge_key,
                     'name': request.edges[0].edge_type,
                     'fact': request.edges[0].fact,
+                    'source_node_uuid': entity_uuids[0],
+                    'target_node_uuid': entity_uuids[1],
                     'group_id': request.group_id,
+                    'attributes': {'edge_key': request.edges[0].edge_key},
                 }
             ]
         },
@@ -1054,10 +1056,7 @@ async def test_hardened_execute_recovers_committed_receipt_without_prepare(
         'manifest_sha256': manifest_sha,
         'counts': runner._expected_domain_counts(request),
     }
-    post_commit = {
-        name: {'verified': name}
-        for name in runner.COMMIT_TOOL_SEQUENCE[2:]
-    }
+    post_commit = {name: {'verified': name} for name in runner.COMMIT_TOOL_SEQUENCE[2:]}
 
     async def fake_remote(session: Any, remote_request: Any, sha: str) -> dict[str, Any]:
         assert session is not None

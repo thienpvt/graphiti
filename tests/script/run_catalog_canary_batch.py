@@ -27,7 +27,7 @@ runner = load('corrective_runner', RUNNER)
 builder = load('corrective_builder', BUILDER)
 
 
-def artifact(tmp_path: Path):
+def artifact(tmp_path: Path, *, allow_unknown_embedding_provider: str | None = None):
     directory = tmp_path / 'artifact'
     manifest = builder.build_live_canary(
         FIXTURE,
@@ -36,6 +36,7 @@ def artifact(tmp_path: Path):
         group_id='oracle-catalog-v2-canary-20260720T010203Z-a',
         control_group_id='oracle-catalog-v2-canary-20260720T010203Z-a-empty-control',
         batch_id='accept-tab-catalog-v2-canary-20260720T010203Z-a',
+        allow_unknown_embedding_provider=allow_unknown_embedding_provider,
     )
     payload_path = directory / builder.LIVE_PAYLOAD_NAME
     return (
@@ -77,11 +78,18 @@ class ContractFake:
         request_sha: str,
         ambiguous: bool = False,
         reconcile_status: str = 'committed',
+        *,
+        embedding_provider: str = 'openai',
+        embedding_ready: str = 'ready',
+        prepare_error: bool = False,
     ):
         self.p = payload
         self.request_sha = request_sha
         self.ambiguous = ambiguous
         self.reconcile_status = reconcile_status
+        self.embedding_provider = embedding_provider
+        self.embedding_ready = embedding_ready
+        self.prepare_error = prepare_error
         self.committed = False
         self.commit_calls = 0
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -318,7 +326,11 @@ class ContractFake:
                 'edge_types': [],
                 'endpoint_map': {},
                 'limits': {'configured': {'max_page_size': 2}, 'hard': {'max_page_size': 500}},
-                'embeddings': {'ready': 'ready'},
+                'embeddings': {
+                    'provider': self.embedding_provider,
+                    'model': 'test',
+                    'ready': self.embedding_ready,
+                },
                 'neo4j_indexes': 'ready',
                 'features': {
                     'prepare_commit': True,
@@ -372,10 +384,26 @@ class ContractFake:
                 'facts': [
                     {
                         'uuid': self.edges[i],
-                        'edge_key': x['edge_key'],
                         'name': x['edge_type'],
                         'fact': x['fact'],
+                        'source_node_uuid': self.entities[
+                            next(
+                                j
+                                for j, entity in enumerate(p['entities'])
+                                if entity['entity_type'] == x['source_entity_type']
+                                and entity['graph_key'] == x['source_graph_key']
+                            )
+                        ],
+                        'target_node_uuid': self.entities[
+                            next(
+                                j
+                                for j, entity in enumerate(p['entities'])
+                                if entity['entity_type'] == x['target_entity_type']
+                                and entity['graph_key'] == x['target_graph_key']
+                            )
+                        ],
                         'group_id': p['group_id'],
+                        'attributes': {'edge_key': x['edge_key']},
                     }
                     for i, x in enumerate(p['edges'])
                     if x['fact'] == request['query']
@@ -433,6 +461,8 @@ class ContractFake:
                 'provenance_created': len(provenance['sources']),
             }
         if name == 'prepare_catalog_batch':
+            if self.prepare_error:
+                return {'error_code': 'embedding_failed', 'error_message': 'sanitized'}
             return {
                 'plan_token': self.token,
                 'plan_uuid': self.plan_uuid,
@@ -626,11 +656,15 @@ def test_strict_search_rejects_foreign_group_and_typed_aliases() -> None:
         'group_id': group_id,
         'labels': ['Entity', entity_type],
     }
+    source_uuid = uid(3)
+    target_uuid = uid(4)
     fact = {
         'uuid': expected,
-        'edge_key': edge_key,
         'name': edge_type,
+        'source_node_uuid': source_uuid,
+        'target_node_uuid': target_uuid,
         'group_id': group_id,
+        'attributes': {'edge_key': edge_key},
     }
     runner._validate_node_search_strict(
         {'nodes': [node, {**node, 'uuid': alias, 'name': 'unrelated'}]},
@@ -640,11 +674,22 @@ def test_strict_search_rejects_foreign_group_and_typed_aliases() -> None:
         graph_key=graph_key,
     )
     runner._validate_fact_search_strict(
-        {'facts': [fact, {**fact, 'uuid': alias, 'edge_key': 'unrelated'}]},
+        {
+            'facts': [
+                fact,
+                {
+                    **fact,
+                    'uuid': alias,
+                    'attributes': {'edge_key': 'unrelated'},
+                },
+            ]
+        },
         group_id=group_id,
         expected_uuid=expected,
         edge_type=edge_type,
         edge_key=edge_key,
+        expected_source_uuid=source_uuid,
+        expected_target_uuid=target_uuid,
     )
     for rows, validator, kwargs in (
         (
@@ -655,7 +700,12 @@ def test_strict_search_rejects_foreign_group_and_typed_aliases() -> None:
         (
             [fact, {**fact, 'uuid': alias}],
             runner._validate_fact_search_strict,
-            {'edge_type': edge_type, 'edge_key': edge_key},
+            {
+                'edge_type': edge_type,
+                'edge_key': edge_key,
+                'expected_source_uuid': source_uuid,
+                'expected_target_uuid': target_uuid,
+            },
         ),
     ):
         key = 'nodes' if validator is runner._validate_node_search_strict else 'facts'
@@ -667,6 +717,189 @@ def test_strict_search_rejects_foreign_group_and_typed_aliases() -> None:
                 group_id=group_id,
                 expected_uuid=expected,
                 **kwargs,
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('observed_provider', 'observed_ready', 'waiver', 'passes'),
+    [
+        ('openai', 'unknown', None, False),
+        ('openai', 'unknown', 'openai', True),
+        ('ollama', 'unknown', 'openai', False),
+        ('openai', 'ready', None, True),
+        ('openai', 'error', 'openai', False),
+    ],
+)
+async def test_embedding_readiness_policy_matrix(
+    tmp_path: Path,
+    observed_provider: str,
+    observed_ready: str,
+    waiver: str | None,
+    passes: bool,
+) -> None:
+    payload_path, manifest_path, payload, manifest = artifact(
+        tmp_path, allow_unknown_embedding_provider=waiver
+    )
+    fake = ContractFake(
+        payload,
+        manifest['request_sha256'],
+        embedding_provider=observed_provider,
+        embedding_ready=observed_ready,
+    )
+    raw_before = json.loads(
+        json.dumps(await fake.call('get_catalog_capabilities', {}), sort_keys=True)
+    )
+    expected_hash = runner.canonical_sha256(raw_before)
+    output = tmp_path / 'result'
+    call = runner.run_live_canary(
+        fake,
+        payload_path,
+        manifest_path,
+        confirm_run_id=manifest['run_id'],
+        confirm_group_id=manifest['group_id'],
+        confirm_control_group_id=manifest['control_group_id'],
+        confirm_batch_id=manifest['batch_id'],
+        source_head='1' * 40,
+        source_map_sha256='2' * 64,
+        runner_sha256='3' * 64,
+        output_dir=output,
+        source_attestor=attestor,
+        allow_unknown_embedding_provider=waiver,
+    )
+    if not passes:
+        with pytest.raises(runner.RunnerError):
+            await call
+        assert not any(name == 'upsert_catalog_batch' for name, _ in fake.calls)
+        return
+    result = await call
+    raw_after = await fake.call('get_catalog_capabilities', {})
+    assert raw_after == raw_before
+    assert result['runtime_capability_sha256'] == expected_hash
+    assert result['embedding_policy']['observed_ready'] == observed_ready
+    assert result['embedding_policy']['waiver_applied'] is (observed_ready == 'unknown')
+    assert result['functional_embedding_proof'] is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_embedding_failure_never_reaches_commit(tmp_path: Path) -> None:
+    payload_path, manifest_path, payload, manifest = artifact(
+        tmp_path, allow_unknown_embedding_provider='openai'
+    )
+    fake = ContractFake(
+        payload,
+        manifest['request_sha256'],
+        embedding_provider='openai',
+        embedding_ready='unknown',
+        prepare_error=True,
+    )
+    with pytest.raises((runner.RunnerError, runner.ValidationError)):
+        await runner.run_live_canary(
+            fake,
+            payload_path,
+            manifest_path,
+            confirm_run_id=manifest['run_id'],
+            confirm_group_id=manifest['group_id'],
+            confirm_control_group_id=manifest['control_group_id'],
+            confirm_batch_id=manifest['batch_id'],
+            source_head='1' * 40,
+            source_map_sha256='2' * 64,
+            runner_sha256='3' * 64,
+            output_dir=tmp_path / 'result',
+            source_attestor=attestor,
+            allow_unknown_embedding_provider='openai',
+        )
+    assert fake.commit_calls == 0
+    report = json.loads((tmp_path / 'result/final-report.json').read_text(encoding='utf-8'))
+    assert report['classification'] == 'FAILED_BEFORE_COMMIT'
+    assert report['functional_embedding_proof'] is False
+
+
+@pytest.mark.parametrize(
+    ('entries', 'message'),
+    [
+        (
+            [
+                {
+                    'ordinal': 1,
+                    'tool': 'get_status',
+                    'stage': 'PREFLIGHT',
+                    'success': True,
+                    'error_code': None,
+                },
+                {
+                    'ordinal': 1,
+                    'tool': 'get_catalog_capabilities',
+                    'stage': 'PREFLIGHT',
+                    'success': True,
+                    'error_code': None,
+                },
+            ],
+            'ordinals',
+        ),
+        (
+            [
+                {
+                    'ordinal': 2,
+                    'tool': 'get_status',
+                    'stage': 'PREFLIGHT',
+                    'success': True,
+                    'error_code': None,
+                }
+            ],
+            'ordinals',
+        ),
+        (
+            [
+                {
+                    'ordinal': 1,
+                    'tool': 'get_status',
+                    'stage': 'PREFLIGHT',
+                    'success': True,
+                    'error_code': 'wrong',
+                }
+            ],
+            'outcome',
+        ),
+    ],
+)
+def test_tool_ledger_rejects_duplicate_missing_and_inconsistent_entries(
+    entries: list[dict[str, Any]], message: str
+) -> None:
+    ledger = runner.ToolLedger()
+    ledger.entries = entries
+    with pytest.raises(runner.RunnerError, match=message):
+        ledger.finalize()
+
+
+@pytest.mark.parametrize(
+    'command',
+    [
+        ['docker', 'run', '--rm', 'image'],
+        ['docker', 'build', '.'],
+        ['docker', 'pull', 'image'],
+        ['docker', 'compose', 'up', 'neo4j'],
+        ['docker', 'exec', 'container'],
+    ],
+)
+def test_execution_boundary_rejects_all_docker_commands(command: list[str]) -> None:
+    with pytest.raises(runner.RunnerError, match='Docker'):
+        runner.validate_execution_boundary(
+            source_digest_origin='host',
+            execution_surface='compose-graphiti-mcp-only',
+            command=command,
+        )
+
+
+def test_execution_boundary_requires_host_digest_and_exact_surface() -> None:
+    for origin, surface in (
+        ('container', 'compose-graphiti-mcp-only'),
+        ('host', 'standalone-docker'),
+    ):
+        with pytest.raises(runner.RunnerError):
+            runner.validate_execution_boundary(
+                source_digest_origin=origin,
+                execution_surface=surface,
             )
 
 

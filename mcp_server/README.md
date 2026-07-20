@@ -314,6 +314,10 @@ Or use the Neo4j configuration file:
 uv run main.py --config config/config-docker-neo4j.yaml
 ```
 
+#### Catalog-v2 schema maintenance
+
+`scripts/bootstrap_catalog_v2_schema.py` is a separately authorized maintenance entry point for 14 fixed Catalog-v2 uniqueness constraints. It uses raw Neo4j sessions, never constructs Graphiti `Neo4jDriver`, and never runs stock indexes, data writes, repair, cleanup, rollback, or retry. Neo4j schema DDL auto-commits, so failure may leave partial schema. Preserve its sanitized report and stop for review; do not rerun automatically. A canary remains blocked until fresh verification reports exact 14/14 readiness. `RELATIONSHIP_UNIQUENESS` is accepted by application matcher.
+
 ### Running with FalkorDB
 
 #### Option 1: Using Docker Compose

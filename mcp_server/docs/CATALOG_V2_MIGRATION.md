@@ -75,6 +75,10 @@ Before any canary retry, call `get_catalog_capabilities` for truthful runtime re
 
 Probes are mutation-free (no CREATE/DROP/ensure/write/LLM). This readiness work **stops before canary** — no Phase 6 / live canary execution is authorized here.
 
+## Catalog-v2 schema bootstrap
+
+Missing Catalog-v2 constraints block canary. Run `scripts/bootstrap_catalog_v2_schema.py` only under separate maintenance authorization. Entry point uses raw Neo4j sessions and only application-owned fixed `CREATE CONSTRAINT ... IF NOT EXISTS` statements: five identity, four prepared-plan, five evidence/manifest. It never constructs Graphiti `Neo4jDriver`, runs stock indexes, rewrites data, retries, drops, repairs, or rolls back auto-committed schema. Failure can leave partial schema; stop and review report. `RELATIONSHIP_UNIQUENESS` is valid Neo4j output under application matcher semantics. Never invoke bootstrap from canary harness, and never start canary until one fresh bootstrap verification reports 14/14 ready.
+
 ## Future live path
 
 When a live write path is **separately approved** (after Phase 5 / canary readiness gates):

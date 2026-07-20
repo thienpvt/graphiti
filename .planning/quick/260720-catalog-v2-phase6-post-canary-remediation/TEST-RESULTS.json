@@ -1,0 +1,11 @@
+{
+  "focused": "69 passed",
+  "phase_regressions": "133 passed",
+  "ruff": "passed",
+  "ruff_format": "passed",
+  "pyright_changed_application": "passed",
+  "static_tool_registry": "28 exact",
+  "golden": "five pins unchanged",
+  "immutable_evidence": "three supplied hashes unchanged",
+  "secret_scan": "denylist-only documented strings; no new secret value"
+}
