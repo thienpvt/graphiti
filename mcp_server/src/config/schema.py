@@ -312,9 +312,7 @@ class CatalogConfig(BaseModel):
     max_provenance_links_per_batch: int = Field(
         default=5000, ge=1, le=HARD_MAX_PROVENANCE_LINKS_PER_BATCH
     )
-    plan_ttl_seconds: int = Field(
-        default=DEFAULT_PLAN_TTL_SECONDS, ge=1, le=HARD_PLAN_TTL_SECONDS
-    )
+    plan_ttl_seconds: int = Field(default=DEFAULT_PLAN_TTL_SECONDS, ge=1, le=HARD_PLAN_TTL_SECONDS)
     max_prepared_payload_bytes: int = Field(
         default=DEFAULT_PREPARED_PAYLOAD_BYTES, ge=1, le=HARD_MAX_PREPARED_PAYLOAD_BYTES
     )
@@ -326,9 +324,7 @@ class CatalogConfig(BaseModel):
     )
     # Phase 4: split read/write gates. Writes stay off by default; reads default on.
     # Do not couple reads_enabled validation to write `enabled` (GATE-01, D-17).
-    reads_enabled: bool = Field(
-        default=True, description='Enable catalog read/diagnostic tools'
-    )
+    reads_enabled: bool = Field(default=True, description='Enable catalog read/diagnostic tools')
     max_page_size: int = Field(
         default=100,
         ge=1,
@@ -342,7 +338,7 @@ class CatalogConfig(BaseModel):
         """Map GRAPHITI_CATALOG_UUID_NAMESPACE when uuid_namespace is unset."""
         if not isinstance(data, dict):
             return data
-        if data.get('uuid_namespace') in (None, ''):
+        if 'uuid_namespace' not in data:
             env_ns = os.environ.get('GRAPHITI_CATALOG_UUID_NAMESPACE')
             if env_ns:
                 data = {**data, 'uuid_namespace': env_ns}
