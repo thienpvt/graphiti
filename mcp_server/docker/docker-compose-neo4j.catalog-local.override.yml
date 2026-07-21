@@ -1,0 +1,6 @@
+services:
+  graphiti-mcp:
+    environment:
+      - CONFIG_PATH=/app/mcp/config/config.yaml
+    volumes:
+      - ../config/config-docker-neo4j.catalog-local.yaml:/app/mcp/config/config.yaml:ro

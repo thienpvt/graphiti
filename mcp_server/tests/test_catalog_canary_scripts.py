@@ -15,6 +15,7 @@ import hashlib
 import importlib.util
 import json
 import socket
+import subprocess
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -26,6 +27,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER_PATH = ROOT / 'scripts' / 'run_catalog_canary_batch.py'
 BUILDER_PATH = ROOT / 'scripts' / 'build_catalog_canary_requests.py'
+LAUNCHER_PATH = ROOT / 'scripts' / 'run_catalog_canary_launcher.py'
+MATERIALIZER_PATH = ROOT / 'scripts' / 'materialize_catalog_local_config.py'
 HISTORICAL_ARTIFACT_DIR = ROOT / 'catalog' / 'canary-v2-requests'
 HARDENED_ARTIFACT_DIR = ROOT / 'catalog' / 'canary-v2-requests-hardened'
 CHECKPOINT_PATH = ROOT / 'catalog' / 'catalog.json.graphiti-canary-v2-state.json'
@@ -1359,7 +1362,7 @@ def test_runner_search_validators_reject_wrong_or_missing_group() -> None:
     )
     entity = request.entities[0]
     edge = request.edges[0]
-    with pytest.raises(runner.RunnerError, match='fact retrieval'):
+    with pytest.raises(runner.RunnerError, match='fact retrieval|fact search'):
         runner._validate_fact_search(
             {
                 'facts': [
@@ -1393,7 +1396,7 @@ def test_runner_search_validators_reject_wrong_or_missing_group() -> None:
             entity_type=entity.entity_type,
             expected_uuid='11111111-1111-1111-1111-111111111111',
         )
-    with pytest.raises(runner.RunnerError, match='fact retrieval'):
+    with pytest.raises(runner.RunnerError, match='fact retrieval|fact search'):
         runner._validate_fact_search(
             {
                 'facts': [
@@ -1544,6 +1547,128 @@ def test_phase5_gate_never_shells_canary_runner() -> None:
                     )
 
 
+def test_catalog_local_authority_files_are_secret_free_lf() -> None:
+    paths = (
+        ROOT / 'mcp_server/docker/docker-compose-neo4j.catalog-local.override.yml',
+        ROOT / 'mcp_server/config/config-docker-neo4j.catalog-local.example.yaml',
+        MATERIALIZER_PATH,
+        LAUNCHER_PATH,
+    )
+    for path in paths:
+        raw = path.read_bytes()
+        assert raw and b'\r' not in raw
+    override = paths[0].read_text(encoding='utf-8')
+    assert override.count('graphiti-mcp:') == 1
+    assert 'neo4j:' not in override
+    assert 'env_file' not in override  # Base service retains existing environment file.
+    mount = next(
+        line.strip()[2:]
+        for line in override.splitlines()
+        if line.strip().startswith('- ../config/')
+    )
+    assert mount.split(':', 1)[0] == '../config/config-docker-neo4j.catalog-local.yaml'
+    assert mount.endswith(':/app/mcp/config/config.yaml:ro')
+
+    example = paths[1].read_text(encoding='utf-8')
+    assert 'GRAPHITI_CATALOG_UUID_NAMESPACE' in example
+    assert not __import__('re').search(r'(?i)(password|api_key):\s*[^$\s{]', example)
+
+
+def test_materializer_is_deterministic_and_quiet(
+    tmp_path: Path, capsys: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    materializer = _load_script('catalog_local_materializer_test', MATERIALIZER_PATH)
+    source = ROOT / 'mcp_server/config/config-docker-neo4j.catalog-local.example.yaml'
+    output = tmp_path / 'catalog-local.yaml'
+    namespace = '12345678-1234-5678-9234-567812345678'
+    materializer.materialize(source, output, namespace)
+    first = output.read_bytes()
+    assert b'\r' not in first
+    with pytest.raises(FileExistsError):
+        materializer.materialize(source, output, namespace)
+    materializer.materialize(source, output, namespace, overwrite=True)
+    assert output.read_bytes() == first
+    with pytest.raises(ValueError):
+        materializer.materialize(source, output, 'invalid', overwrite=True)
+    with pytest.raises(ValueError):
+        materializer.materialize(output, output, namespace, overwrite=True)
+
+    race = tmp_path / 'race.yaml'
+    real_link = materializer.os.link
+
+    def competing_link(source_path: Any, output_path: Any) -> None:
+        Path(output_path).write_bytes(b'competitor')
+        real_link(source_path, output_path)
+
+    monkeypatch.setattr(materializer.os, 'link', competing_link)
+    with pytest.raises(FileExistsError):
+        materializer.materialize(source, race, namespace)
+    assert race.read_bytes() == b'competitor'
+
+    captured = capsys.readouterr()
+    assert namespace not in captured.out + captured.err
+
+
+def test_launcher_attests_exact_argv_before_shell_false_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sys.modules['run_catalog_canary_batch'] = runner
+    launcher = _load_script('catalog_local_launcher_test', LAUNCHER_PATH)
+    events: list[Any] = []
+
+    real_attest = launcher.runner.attest_host_compose_argv
+
+    def authority() -> dict[str, str]:
+        events.append(('authority',))
+        return {'authority': 'ok'}
+
+    def attest(argv: list[str]) -> dict[str, Any]:
+        result = real_attest(argv)
+        events.append(('attest', argv, result))
+        return result
+
+    def run(argv: list[str], **kwargs: Any) -> None:
+        events.append(('run', argv, kwargs))
+
+    monkeypatch.setattr(launcher.runner, 'attest_host_compose_argv', attest)
+    monkeypatch.setattr(launcher.runner, 'host_side_execution_authority_digests', authority)
+    monkeypatch.setattr(launcher.subprocess, 'run', run)
+    monkeypatch.setenv('COMPOSE_PROJECT_NAME', 'foreign')
+    monkeypatch.setenv('COMPOSE_REMOVE_ORPHANS', '1')
+    monkeypatch.setenv('COMPOSE_FILE', 'evil.yml')
+    for action in ('up', 'ps', 'logs'):
+        launcher.run_compose(action)
+        expected = launcher.runner.compose_argv(action)
+        assert events[-3] == ('attest', expected, real_attest(expected))
+        assert events[-2] == ('authority',)
+        assert events[-1][0:2] == ('run', expected)
+        kwargs = events[-1][2]
+        assert kwargs['cwd'] == launcher.runner.ROOT
+        assert kwargs['shell'] is False
+        assert kwargs['check'] is True
+        assert kwargs['env']['COMPOSE_PROJECT_NAME'] == launcher.runner.COMPOSE_PROJECT_NAME
+        assert kwargs['env']['COMPOSE_REMOVE_ORPHANS'] == '0'
+        assert 'COMPOSE_FILE' not in kwargs['env']
+    events.clear()
+    monkeypatch.setattr(
+        launcher.runner,
+        'host_side_execution_authority_digests',
+        lambda: (_ for _ in ()).throw(
+            launcher.runner.RunnerError('execution_attestation_missing', 'missing generated config')
+        ),
+    )
+    with pytest.raises(launcher.runner.RunnerError):
+        launcher.run_compose('up')
+    assert not events or events[-1][0] != 'run'
+    with pytest.raises(SystemExit):
+        launcher.parse_args(['down'])
+    with pytest.raises(launcher.runner.RunnerError):
+        launcher.main(['up', 'extra'])
+    source = LAUNCHER_PATH.read_text(encoding='utf-8')
+    assert 'shell=True' not in source
+    assert subprocess.run is not None
+
+
 def test_hardened_checkpoint_attempt_count_zero_after_validation() -> None:
     offline = json.loads(
         (HARDENED_ARTIFACT_DIR / 'offline-checkpoint.json').read_text(encoding='utf-8')
@@ -1576,24 +1701,15 @@ def test_atomic_checkpoint_append_preserves_prior_content(tmp_path: Path) -> Non
     assert second['canary_executed'] is False
 
 
-def test_unknown_hardened_top_level_field_is_rejected() -> None:
+def test_unknown_hardened_top_level_field_is_rejected(tmp_path: Path) -> None:
     payload_path = HARDENED_ARTIFACT_DIR / 'accept-tab.payload.json'
     raw = json.loads(payload_path.read_text(encoding='utf-8'))
     raw['unexpected'] = True
-    # write temp non-canonical will fail canonical check; use reject on dict path
+    temp_path = tmp_path / 'unexpected-field.json'
+    temp_path.write_bytes(
+        (json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n').encode(
+            'utf-8'
+        )
+    )
     with pytest.raises(runner.RunnerError):
-        # construct via validate path with temp file
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(
-            mode='wb', suffix='.json', delete=False, dir=HARDENED_ARTIFACT_DIR
-        ) as handle:
-            data = (
-                json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n'
-            ).encode('utf-8')
-            handle.write(data)
-            temp_path = Path(handle.name)
-        try:
-            runner.validate_hardened_artifact(temp_path)
-        finally:
-            temp_path.unlink(missing_ok=True)
+        runner.validate_hardened_artifact(temp_path)

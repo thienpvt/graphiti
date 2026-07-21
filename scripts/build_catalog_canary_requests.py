@@ -18,10 +18,18 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
 MCP_SRC = REPO_ROOT / 'mcp_server' / 'src'
-if str(MCP_SRC) not in sys.path:
-    sys.path.insert(0, str(MCP_SRC))
+for import_path in (SCRIPT_DIR, MCP_SRC):
+    if str(import_path) not in sys.path:
+        sys.path.insert(0, str(import_path))
 
+from catalog_canary_manifest_contract import (  # pyright: ignore[reportMissingImports]
+    EXECUTION_SURFACE_COMPOSE,
+    LIVE_MANIFEST_FIELDS,
+    SOURCE_DIGEST_ORIGIN_HOST,
+    WAIVER_OPENAI,
+)
 from models.catalog_batch import NestedProvenancePayload, UpsertCatalogBatchRequest
 from models.catalog_edges import CatalogEdgeItem
 from models.catalog_entities import CatalogEntityItem
@@ -161,32 +169,6 @@ HISTORICAL_SHA256 = {
     ),
     'trans-type.payload.json': '97d1b81d4a11434020da0b9bb0c6dd3cb5a099c93ac9ce925c92c5f59e704024',
 }
-LIVE_MANIFEST_FIELDS = frozenset(
-    {
-        'artifact_schema_version',
-        'profile',
-        'run_id',
-        'group_id',
-        'control_group_id',
-        'batch_id',
-        'identity_schema_version',
-        'system_key',
-        'fixture',
-        'fixture_sha256',
-        'fixture_lf_sha256',
-        'catalog_sha256',
-        'request_sha256',
-        'artifact_sha256',
-        'payload',
-        'counts',
-        'builder',
-        'builder_sha256',
-        'allow_unknown_embedding_provider',
-        'source_digest_origin',
-        'execution_surface',
-        'canary_executed',
-    }
-)
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1685,7 +1667,7 @@ def build_live_canary(
     allow_unknown_embedding_provider: str | None = None,
 ) -> dict[str, Any]:
     """Build one deterministic live-canary request without transport or secret material."""
-    if allow_unknown_embedding_provider not in (None, 'openai'):
+    if allow_unknown_embedding_provider not in (None, WAIVER_OPENAI):
         raise ValueError('allow_unknown_embedding_provider must be openai when supplied')
     identities = {
         name: _validate_live_id(name, value)
@@ -1761,8 +1743,8 @@ def build_live_canary(
         'builder': 'scripts/build_catalog_canary_requests.py',
         'builder_sha256': builder_sha256,
         'allow_unknown_embedding_provider': allow_unknown_embedding_provider,
-        'source_digest_origin': 'host',
-        'execution_surface': 'compose-graphiti-mcp-only',
+        'source_digest_origin': SOURCE_DIGEST_ORIGIN_HOST,
+        'execution_surface': EXECUTION_SURFACE_COMPOSE,
         'canary_executed': False,
     }
     if set(manifest) != LIVE_MANIFEST_FIELDS:

@@ -6,6 +6,7 @@ import importlib.util
 import json
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -28,7 +29,7 @@ runner = load('corrective_runner', RUNNER)
 builder = load('corrective_builder', BUILDER)
 
 
-def artifact(tmp_path: Path):
+def artifact(tmp_path: Path, *, waiver: str | None = None):
     directory = tmp_path / 'artifact'
     manifest = builder.build_live_canary(
         FIXTURE,
@@ -37,6 +38,7 @@ def artifact(tmp_path: Path):
         group_id='oracle-catalog-v2-canary-20260720T010203Z-a',
         control_group_id='oracle-catalog-v2-canary-20260720T010203Z-a-empty-control',
         batch_id='accept-tab-catalog-v2-canary-20260720T010203Z-a',
+        allow_unknown_embedding_provider=waiver,
     )
     payload_path = directory / builder.LIVE_PAYLOAD_NAME
     return (
@@ -56,7 +58,7 @@ def attestor(**_kwargs: Any) -> dict[str, Any]:
         'source_head': '1' * 40,
         'source_map_sha256': '2' * 64,
         'runner_sha256': '3' * 64,
-        'source_files': 5,
+        'source_files': len(runner.SOURCE_AUTHORITY_PATHS),
     }
 
 
@@ -400,7 +402,10 @@ class ContractFake:
                         'group_id': p['group_id'],
                         'source_node_uuid': eu[(x['source_entity_type'], x['source_graph_key'])],
                         'target_node_uuid': eu[(x['target_entity_type'], x['target_graph_key'])],
-                        'attributes': {'edge_key': x['edge_key']},
+                        'created_at': '2026-07-20T00:00:00+00:00',
+                        'valid_at': None,
+                        'invalid_at': None,
+                        'attributes': {**(x.get('attributes') or {}), 'edge_key': x['edge_key']},
                     }
                     for i, x in enumerate(p['edges'])
                     if x['fact'] == request['query']
@@ -667,6 +672,9 @@ def _canonical_fact(
         'group_id': group_id,
         'source_node_uuid': source,
         'target_node_uuid': target,
+        'created_at': '2026-07-20T00:00:00+00:00',
+        'valid_at': None,
+        'invalid_at': None,
         'attributes': {'edge_key': edge_key} if attributes is None else attributes,
     }
     if top_level_edge_key is not None:
@@ -842,7 +850,40 @@ def test_gate9_canonical_nested_edge_key_and_regressions() -> None:
             source_node_uuid=source,
             target_node_uuid=target,
         )
-    # 7. foreign group
+    # 7. wrong target endpoint
+    with pytest.raises(runner.RunnerError, match='alias'):
+        runner._validate_fact_search_strict(
+            {'facts': [{**base, 'target_node_uuid': uid(98)}]},
+            group_id=group_id,
+            expected_uuid=expected,
+            edge_type=edge_type,
+            edge_key=edge_key,
+            source_node_uuid=source,
+            target_node_uuid=target,
+        )
+    # 8. wrong nested key
+    with pytest.raises(runner.RunnerError, match='alias'):
+        runner._validate_fact_search_strict(
+            {'facts': [{**base, 'attributes': {'edge_key': 'WRONG'}}]},
+            group_id=group_id,
+            expected_uuid=expected,
+            edge_type=edge_type,
+            edge_key=edge_key,
+            source_node_uuid=source,
+            target_node_uuid=target,
+        )
+    # 9. non-dict attributes
+    with pytest.raises(runner.RunnerError, match='dict'):
+        runner._validate_fact_search_strict(
+            {'facts': [{**base, 'attributes': []}]},
+            group_id=group_id,
+            expected_uuid=expected,
+            edge_type=edge_type,
+            edge_key=edge_key,
+            source_node_uuid=source,
+            target_node_uuid=target,
+        )
+    # 10. foreign group
     with pytest.raises(runner.RunnerError, match='foreign'):
         runner._validate_fact_search_strict(
             {'facts': [{**base, 'group_id': 'foreign'}]},
@@ -853,7 +894,7 @@ def test_gate9_canonical_nested_edge_key_and_regressions() -> None:
             source_node_uuid=source,
             target_node_uuid=target,
         )
-    # 8. duplicate expected UUID
+    # 11. duplicate expected UUID
     with pytest.raises(runner.RunnerError, match='duplicated|absent'):
         runner._validate_fact_search_strict(
             {'facts': [base, {**base}]},
@@ -864,7 +905,7 @@ def test_gate9_canonical_nested_edge_key_and_regressions() -> None:
             source_node_uuid=source,
             target_node_uuid=target,
         )
-    # 9. unrelated-only fails
+    # 12. unrelated-only fails
     with pytest.raises(runner.RunnerError, match='absent|duplicated|alias'):
         runner._validate_fact_search_strict(
             {'facts': [extra]},
@@ -913,6 +954,7 @@ def test_gate9_live_formatter_compatibility(monkeypatch: pytest.MonkeyPatch) -> 
     models = ModuleType('models')
     response_types_mod: Any = ModuleType('models.response_types')
     response_types_mod.EdgeResult = lambda **kwargs: kwargs
+    response_types_mod.FactResult = lambda **kwargs: kwargs
     response_types_mod.NodeResult = lambda **kwargs: kwargs
     edges = edges_mod
     nodes = nodes_mod
@@ -944,8 +986,23 @@ def test_gate9_live_formatter_compatibility(monkeypatch: pytest.MonkeyPatch) -> 
         attributes={'edge_key': edge_key, 'fixture': 'x'},
     )
     fact = formatting.format_fact_result(edge)
-    assert fact['attributes']['edge_key'] == edge_key
-    assert 'edge_key' not in fact or fact.get('edge_key') is None
+    assert set(fact) == {
+        'uuid',
+        'name',
+        'fact',
+        'source_node_uuid',
+        'target_node_uuid',
+        'group_id',
+        'created_at',
+        'valid_at',
+        'invalid_at',
+        'attributes',
+    }
+    assert fact['created_at'] == '2026-07-20T00:00:00+00:00'
+    assert fact['valid_at'] is None
+    assert fact['invalid_at'] is None
+    assert fact['attributes'] == {'edge_key': edge_key, 'fixture': 'x'}
+    assert 'edge_key' not in fact
     runner._validate_fact_search_strict(
         {'facts': [fact]},
         group_id='g',
@@ -1154,131 +1211,50 @@ def test_tool_ledger_validation_rejects_corrupt_ordinals() -> None:
 
 
 def test_execution_boundary_rejects_standalone_and_unapproved() -> None:
-    ok = runner.validate_execution_command(
-        [
-            'docker',
-            'compose',
-            '-f',
-            runner.COMPOSE_BASE_FILE,
-            '-f',
-            runner.COMPOSE_OVERRIDE_FILE,
-            'up',
-            '-d',
-            'neo4j',
-            'graphiti-mcp',
-        ]
-    )
-    assert ok['ok'] is True
-    assert ok['files'] == list(runner.REQUIRED_COMPOSE_FILES)
-    assert ok['services'] == ['neo4j', 'graphiti-mcp']
+    for action in ('up', 'ps', 'logs'):
+        validated = runner.validate_execution_command(runner.compose_argv(action))
+        assert validated['subcommand'] == action
+        assert validated['services'] == ['graphiti-mcp']
+    up = runner.compose_argv('up')
+    assert up[-7:] == ['up', '--no-deps', '--no-build', '--pull', 'never', '-d', 'graphiti-mcp']
+    prefix = up[:6]
     for bad in (
         ['docker', 'run', '--rm', 'neo4j'],
-        ['docker', 'build', '.'],
-        ['docker', 'pull', 'neo4j'],
-        ['docker', 'exec', 'x', 'sha256sum', '/app'],
-        ['docker-compose', '-f', runner.COMPOSE_BASE_FILE, 'up', 'neo4j'],
-        ['docker', 'compose', 'run', 'graphiti-mcp'],
-        ['docker', 'compose', 'build'],
+        ['docker', 'compose', 'exec', 'graphiti-mcp'],
+        [*prefix, 'exec', 'graphiti-mcp'],
+        [*prefix, 'run', 'graphiti-mcp'],
+        [*prefix, 'build', 'graphiti-mcp'],
+        [*prefix, 'pull', 'graphiti-mcp'],
+        [*prefix, 'up', '--no-build', '--pull', 'never', '-d', 'graphiti-mcp'],
+        [*prefix, 'up', '--no-deps', '--pull', 'never', '-d', 'graphiti-mcp'],
+        [*prefix, 'up', '--no-deps', '--no-build', '--pull', 'always', '-d', 'graphiti-mcp'],
+        [*prefix, 'up', '--no-deps', '--no-build', '--pull', 'never', '-d', 'neo4j'],
         [
-            'docker',
-            'compose',
-            '-f',
-            runner.COMPOSE_BASE_FILE,
+            *prefix,
             'up',
-            'neo4j',
+            '--no-deps',
+            '--no-build',
+            '--pull',
+            'never',
+            '-d',
+            'graphiti-mcp',
+            'graphiti-mcp',
         ],
-        [
-            'docker',
-            'compose',
-            '-f',
-            runner.COMPOSE_OVERRIDE_FILE,
-            '-f',
-            runner.COMPOSE_BASE_FILE,
-            'up',
-            'neo4j',
-        ],
-        [
-            'docker',
-            'compose',
-            '-f',
-            runner.COMPOSE_BASE_FILE,
-            '-f',
-            runner.COMPOSE_OVERRIDE_FILE,
-            '-f',
-            runner.COMPOSE_BASE_FILE,
-            'up',
-            'neo4j',
-        ],
-        [
-            'docker',
-            'compose',
-            '-f',
-            'docker-compose.yml',
-            '-f',
-            runner.COMPOSE_OVERRIDE_FILE,
-            'up',
-            'neo4j',
-        ],
-        [
-            'docker',
-            'compose',
-            '-f',
-            runner.COMPOSE_BASE_FILE,
-            '-f',
-            runner.COMPOSE_OVERRIDE_FILE,
-            'up',
-            'mcp',
-        ],
-        [
-            'docker',
-            'compose',
-            '-f',
-            runner.COMPOSE_BASE_FILE,
-            '-f',
-            runner.COMPOSE_OVERRIDE_FILE,
-            'up',
-            'redis',
-        ],
-        [
-            'docker',
-            'compose',
-            '--project-name',
-            'x',
-            '-f',
-            runner.COMPOSE_BASE_FILE,
-            '-f',
-            runner.COMPOSE_OVERRIDE_FILE,
-            'up',
-            'neo4j',
-        ],
-        ['bash', '-c', 'docker compose up'],
+        [*prefix, 'down'],
+        [*prefix, 'down', '--volumes'],
+        [*prefix, 'down', '--remove-orphans'],
+        [*prefix, 'config'],
         'docker compose up',
     ):
         with pytest.raises(runner.RunnerError) as ei:
             runner.validate_execution_command(bad)  # type: ignore[arg-type]
         assert ei.value.code == 'execution_boundary_violation'
-    # Fixed host execution authority map only; no arbitrary-path helper.
-    assert not hasattr(runner, 'host_side_source_digest')
     assert runner.HOST_EXECUTION_AUTHORITY_PATHS == (
         runner.COMPOSE_BASE_FILE,
         runner.COMPOSE_OVERRIDE_FILE,
-        'mcp_server/config/config-docker-neo4j.yaml',
+        runner.COMPOSE_GENERATED_CONFIG,
     )
-    ok = runner.attest_host_compose_argv(
-        [
-            'docker',
-            'compose',
-            '-f',
-            runner.COMPOSE_BASE_FILE,
-            '-f',
-            runner.COMPOSE_OVERRIDE_FILE,
-            'up',
-            '-d',
-            'neo4j',
-            'graphiti-mcp',
-        ]
-    )
-    assert ok['ok'] is True
+    assert runner.attest_host_compose_argv(up)['ok'] is True
 
 
 @pytest.mark.asyncio
@@ -1316,6 +1292,41 @@ async def test_prepare_embedding_failure_never_commits(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_validated_prepare_is_proof_before_post_prepare_failure(tmp_path: Path) -> None:
+    payload_path, manifest_path, payload, manifest = artifact(tmp_path)
+
+    class PostPrepareFail(ContractFake):
+        prepare_seen = False
+
+        async def call(self, name: str, request: dict[str, Any]) -> dict[str, Any]:
+            result = await super().call(name, request)
+            if name == 'prepare_catalog_batch':
+                self.prepare_seen = True
+            elif self.prepare_seen and name == 'get_catalog_ingest_status':
+                raise runner.RunnerError('status_failed', 'post-prepare read failed')
+            return result
+
+    fake = PostPrepareFail(payload, manifest['request_sha256'])
+    output = tmp_path / 'post-prepare-failed'
+    with pytest.raises(runner.RunnerError, match='post-prepare'):
+        await runner.run_live_canary(
+            fake,
+            payload_path,
+            manifest_path,
+            confirm_run_id=manifest['run_id'],
+            confirm_group_id=manifest['group_id'],
+            confirm_control_group_id=manifest['control_group_id'],
+            confirm_batch_id=manifest['batch_id'],
+            output_dir=output,
+            **LIVE_KW,
+        )
+    assert 'commit_prepared_catalog_batch' not in [name for name, _ in fake.calls]
+    report = json.loads((output / 'final-report.json').read_text(encoding='utf-8'))
+    assert report['classification'] == 'FAILED_BEFORE_COMMIT'
+    assert report['prepare_functional_embedding_proof'] is True
+
+
+@pytest.mark.asyncio
 async def test_openai_unknown_waiver_records_observed_state(tmp_path: Path) -> None:
     payload_path, manifest_path, payload, manifest = artifact(tmp_path)
 
@@ -1331,7 +1342,8 @@ async def test_openai_unknown_waiver_records_observed_state(tmp_path: Path) -> N
             return body
 
     fake = OpenAIUnknown(payload, manifest['request_sha256'])
-    # without waiver fails
+    # without waiver fails but retains raw observed provider/readiness in durable report
+    failed_output = tmp_path / 'result-unwaived'
     with pytest.raises(runner.RunnerError, match='unknown|capability'):
         await runner.run_live_canary(
             fake,
@@ -1341,9 +1353,15 @@ async def test_openai_unknown_waiver_records_observed_state(tmp_path: Path) -> N
             confirm_group_id=manifest['group_id'],
             confirm_control_group_id=manifest['control_group_id'],
             confirm_batch_id=manifest['batch_id'],
+            output_dir=failed_output,
             **LIVE_KW,
         )
-    # with waiver succeeds and records observed unknown + waiver_applied
+    failed_report = json.loads((failed_output / 'final-report.json').read_text(encoding='utf-8'))
+    assert failed_report['embedding_provider'] == 'openai'
+    assert failed_report['embedding_readiness'] == 'unknown'
+    assert failed_report['waiver_applied'] is False
+    # Matching immutable waiver succeeds and records observed unknown + waiver_applied.
+    payload_path, manifest_path, payload, manifest = artifact(tmp_path / 'waived', waiver='openai')
     fake2 = OpenAIUnknown(payload, manifest['request_sha256'])
     output = tmp_path / 'result-waived'
     result = await runner.run_live_canary(
@@ -1529,6 +1547,216 @@ async def test_execution_map_mismatch_blocks_before_transport(tmp_path: Path) ->
     assert fake.calls == []
 
 
+@pytest.mark.asyncio
+async def test_real_builder_to_runner_reaches_transport_with_exact_contract(tmp_path: Path) -> None:
+    expected_fields = frozenset(
+        {
+            'artifact_schema_version',
+            'profile',
+            'run_id',
+            'group_id',
+            'control_group_id',
+            'batch_id',
+            'identity_schema_version',
+            'system_key',
+            'fixture',
+            'fixture_sha256',
+            'fixture_lf_sha256',
+            'catalog_sha256',
+            'request_sha256',
+            'artifact_sha256',
+            'payload',
+            'counts',
+            'builder',
+            'builder_sha256',
+            'allow_unknown_embedding_provider',
+            'source_digest_origin',
+            'execution_surface',
+            'canary_executed',
+        }
+    )
+    assert builder.LIVE_MANIFEST_FIELDS is runner.LIVE_MANIFEST_FIELDS
+    assert expected_fields == runner.LIVE_MANIFEST_FIELDS
+
+    payload_path, manifest_path, _, manifest = artifact(tmp_path)
+    assert set(manifest) == expected_fields
+
+    class TransportBoundaryReached(RuntimeError):
+        pass
+
+    class RaisingTransport:
+        async def call(self, _name: str, _request: dict[str, Any]) -> dict[str, Any]:
+            raise TransportBoundaryReached
+
+    with pytest.raises(TransportBoundaryReached):
+        await runner.run_live_canary(
+            RaisingTransport(),
+            payload_path,
+            manifest_path,
+            confirm_run_id=manifest['run_id'],
+            confirm_group_id=manifest['group_id'],
+            confirm_control_group_id=manifest['control_group_id'],
+            confirm_batch_id=manifest['batch_id'],
+            **LIVE_KW,
+        )
+
+
+@pytest.mark.asyncio
+async def test_manifest_waiver_mismatch_blocks_before_transport(tmp_path: Path) -> None:
+    payload_path, manifest_path, payload, manifest = artifact(tmp_path, waiver='openai')
+    fake = ContractFake(payload, manifest['request_sha256'])
+    output = tmp_path / 'must-not-exist'
+    with pytest.raises(runner.RunnerError) as error:
+        await runner.run_live_canary(
+            fake,
+            payload_path,
+            manifest_path,
+            confirm_run_id=manifest['run_id'],
+            confirm_group_id=manifest['group_id'],
+            confirm_control_group_id=manifest['control_group_id'],
+            confirm_batch_id=manifest['batch_id'],
+            allow_unknown_embedding_provider=None,
+            output_dir=output,
+            **LIVE_KW,
+        )
+    assert error.value.code == 'operator_confirmation_mismatch'
+    assert fake.calls == []
+    assert not output.exists()
+
+
+@pytest.mark.asyncio
+async def test_execute_cli_preflights_manifest_before_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload_path, manifest_path, _, manifest = artifact(tmp_path, waiver='openai')
+    entered = False
+
+    def forbidden_transport(_url: str) -> Any:
+        nonlocal entered
+        entered = True
+        raise AssertionError('transport opened')
+
+    monkeypatch.setattr(runner, 'streamable_http_client', forbidden_transport)
+    args = SimpleNamespace(
+        mode='live-canary',
+        manifest=manifest_path,
+        payload=payload_path,
+        run_id=manifest['run_id'],
+        group_id=manifest['group_id'],
+        control_group_id=manifest['control_group_id'],
+        batch_id=manifest['batch_id'],
+        allow_unknown_embedding_provider=None,
+        source_head='1' * 40,
+        source_map_sha256='2' * 64,
+        runner_sha256='3' * 64,
+        execution_map_sha256='4' * 64,
+        image_fingerprint=None,
+        config_fingerprint=None,
+        output_dir=tmp_path / 'must-not-exist',
+        mcp_url='http://forbidden.invalid/mcp',
+    )
+    with pytest.raises(runner.RunnerError) as error:
+        await runner.execute_cli(args)
+    assert error.value.code == 'operator_confirmation_mismatch'
+    assert entered is False
+    assert not args.output_dir.exists()
+
+
+def test_manifest_rejection_matrix(tmp_path: Path) -> None:
+    _, _manifest_path, _, manifest = artifact(tmp_path)
+    cases = (
+        ('missing', lambda value: value.pop('source_digest_origin')),
+        ('unknown', lambda value: value.__setitem__('renamed_field', True)),
+        ('origin', lambda value: value.__setitem__('source_digest_origin', 'container')),
+        ('surface', lambda value: value.__setitem__('execution_surface', 'direct')),
+        ('waiver', lambda value: value.__setitem__('allow_unknown_embedding_provider', 'ollama')),
+    )
+    for name, mutate in cases:
+        changed = dict(manifest)
+        mutate(changed)
+        candidate_dir = tmp_path / name
+        candidate_dir.mkdir()
+        candidate = candidate_dir / runner.LIVE_MANIFEST_NAME
+        candidate.write_bytes(runner.canonical_artifact_bytes(changed))
+        with pytest.raises(runner.RunnerError) as error:
+            runner.preflight_live_manifest(
+                candidate,
+                confirm_run_id=manifest['run_id'],
+                confirm_group_id=manifest['group_id'],
+                confirm_control_group_id=manifest['control_group_id'],
+                confirm_batch_id=manifest['batch_id'],
+                allow_unknown_embedding_provider=None,
+            )
+        assert error.value.code == 'live_manifest_mismatch'
+
+
+def test_atomic_write_retries_permission_error_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / 'result.json'
+    destination.write_bytes(b'old')
+    real_replace = runner.os.replace
+    calls = 0
+
+    def flaky(source: Any, target: Any) -> None:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise PermissionError('busy')
+        real_replace(source, target)
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(runner.os, 'replace', flaky)
+    monkeypatch.setattr(runner.time, 'sleep', sleeps.append)
+    runner.atomic_write_bytes(destination, b'new')
+    assert calls == 3
+    assert sleeps == [0.05, 0.1]
+    assert destination.read_bytes() == b'new'
+    calls = 0
+
+    def blocked(_source: Any, _target: Any) -> None:
+        nonlocal calls
+        calls += 1
+        raise PermissionError('busy')
+
+    sleeps.clear()
+    monkeypatch.setattr(runner.os, 'replace', blocked)
+    with pytest.raises(runner.RunnerError) as error:
+        runner.atomic_write_bytes(destination, b'lost')
+    assert error.value.code == 'atomic_write_failed'
+    assert calls == 8
+    assert sleeps == pytest.approx([0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35])
+    assert destination.read_bytes() == b'new'
+    assert not list(tmp_path.glob('.*.tmp'))
+
+    calls = 0
+    sleeps.clear()
+
+    def other_error(_source: Any, _target: Any) -> None:
+        nonlocal calls
+        calls += 1
+        raise OSError('disk error')
+
+    monkeypatch.setattr(runner.os, 'replace', other_error)
+    with pytest.raises(runner.RunnerError) as other:
+        runner.atomic_write_bytes(destination, b'lost')
+    assert other.value.code == 'atomic_write_failed'
+    assert calls == 1
+    assert sleeps == []
+    assert destination.read_bytes() == b'new'
+    assert not list(tmp_path.glob('.*.tmp'))
+
+
+def test_source_authority_includes_every_runtime_policy_script() -> None:
+    assert runner.SOURCE_AUTHORITY_PATHS[:5] == (
+        'scripts/run_catalog_canary_batch.py',
+        'scripts/build_catalog_canary_requests.py',
+        'scripts/catalog_canary_manifest_contract.py',
+        'scripts/run_catalog_canary_launcher.py',
+        'scripts/materialize_catalog_local_config.py',
+    )
+
+
 def test_host_execution_authority_raw_byte_map(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1537,7 +1765,7 @@ def test_host_execution_authority_raw_byte_map(
     override = (
         tmp_path / 'mcp_server' / 'docker' / 'docker-compose-neo4j.catalog-local.override.yml'
     )
-    config = tmp_path / 'mcp_server' / 'config' / 'config-docker-neo4j.yaml'
+    config = tmp_path / 'mcp_server' / 'config' / 'config-docker-neo4j.catalog-local.yaml'
     base.parent.mkdir(parents=True, exist_ok=True)
     config.parent.mkdir(parents=True, exist_ok=True)
     base.write_bytes(b'base\r\ncontent')
@@ -1547,9 +1775,7 @@ def test_host_execution_authority_raw_byte_map(
     digests = runner.host_side_execution_authority_digests()
     assert digests[runner.COMPOSE_BASE_FILE] == runner.sha256_bytes(b'base\r\ncontent')
     assert digests[runner.COMPOSE_OVERRIDE_FILE] == runner.sha256_bytes(b'override\ncontent')
-    assert digests['mcp_server/config/config-docker-neo4j.yaml'] == runner.sha256_bytes(
-        b'config-bytes'
-    )
+    assert digests[runner.COMPOSE_GENERATED_CONFIG] == runner.sha256_bytes(b'config-bytes')
     expected = runner.canonical_sha256({'files': digests})
     assert runner.compute_execution_map_sha256(digests) == expected
     ok = runner.attest_execution_authority(expected_execution_map_sha256=expected)
@@ -1564,6 +1790,12 @@ def test_host_execution_authority_raw_byte_map(
     with pytest.raises(runner.RunnerError) as ei2:
         runner.host_side_execution_authority_digests()
     assert ei2.value.code == 'execution_attestation_missing'
+    # Missing generated config fails closed too.
+    override.write_bytes(b'override\ncontent')
+    config.unlink()
+    with pytest.raises(runner.RunnerError) as ei3:
+        runner.host_side_execution_authority_digests()
+    assert ei3.value.code == 'execution_attestation_missing'
 
 
 @pytest.mark.asyncio

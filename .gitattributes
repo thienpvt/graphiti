@@ -3,3 +3,8 @@
 # Hardened canary artifacts are digest-bound canonical JSON + single LF.
 # Windows core.autocrlf must not rewrite them to CRLF on checkout.
 catalog/canary-v2-requests-hardened/** text eol=lf
+mcp_server/config/config-docker-neo4j.catalog-local.example.yaml text eol=lf
+mcp_server/config/config-docker-neo4j.catalog-local.yaml text eol=lf
+mcp_server/docker/docker-compose-neo4j.catalog-local.override.yml text eol=lf
+scripts/materialize_catalog_local_config.py text eol=lf
+scripts/run_catalog_canary_launcher.py text eol=lf

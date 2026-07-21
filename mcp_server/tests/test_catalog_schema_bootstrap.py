@@ -153,3 +153,33 @@ def test_config_rejects_non_neo4j_provider() -> None:
     config = SimpleNamespace(database=SimpleNamespace(provider='falkordb'))
     with pytest.raises(ValueError, match='requires Neo4j'):
         bootstrap._neo4j_config(config)
+
+
+def test_cli_and_migration_doc_match_real_contract() -> None:
+    assert bootstrap.parse_args([]) is not None
+    for option in ('--dry-print-statements', '--uri', '--user', '--password', '--database'):
+        with pytest.raises(SystemExit) as error:
+            bootstrap.parse_args([option])
+        assert error.value.code == 2
+    migration = (Path(__file__).resolve().parents[1] / 'docs/CATALOG_V2_MIGRATION.md').read_text(
+        encoding='utf-8'
+    )
+    for forbidden in (
+        'catalog_schema_bootstrap.py',
+        '--dry-print-statements',
+        '--uri',
+        '--user',
+        '--password',
+        '--database',
+    ):
+        assert forbidden not in migration
+    assert (
+        'CONFIG_PATH=mcp_server/config/config-docker-neo4j.catalog-local.yaml '
+        'uv run --project mcp_server --frozen python scripts/bootstrap_catalog_v2_schema.py'
+        in migration
+    )
+    assert (
+        "$env:CONFIG_PATH='mcp_server/config/config-docker-neo4j.catalog-local.yaml'; "
+        'uv run --project mcp_server --frozen python scripts/bootstrap_catalog_v2_schema.py'
+        in migration
+    )

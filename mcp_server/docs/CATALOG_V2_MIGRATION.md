@@ -79,9 +79,7 @@ Probes are mutation-free (no CREATE/DROP/ensure/write/LLM). This readiness work 
 
 ## Schema bootstrap (operator-only, Neo4j 5.26+)
 
-Dedicated offline/operator entry: `scripts/bootstrap_catalog_v2_schema.py`.
-
-Orchestration service: `mcp_server/src/services/catalog_schema_bootstrap.py`.
+Dedicated operator entry: `scripts/bootstrap_catalog_v2_schema.py`.
 
 ### Contract
 
@@ -98,23 +96,27 @@ Orchestration service: `mcp_server/src/services/catalog_schema_bootstrap.py`.
 - **No** retry, repair, DROP, rollback, or data rewrite on failure.
 - Fail closed on partial readiness or ensure error.
 
-### Dry statement print (no network)
+### Statement review (offline)
 
-```bash
-uv run python scripts/bootstrap_catalog_v2_schema.py --dry-print-statements
-```
+Review store-owned statement properties on `CatalogNeo4jStore`:
+`uuid_constraint_statements`, `plan_schema_statements`, and
+`evidence_manifest_schema_statements`. Bootstrap CLI supports only `-h` / `--help`.
 
 ### Live bootstrap (operator-approved only; not part of offline remediation)
 
+From repository root, supply Neo4j connection values through `NEO4J_*`, then run with reviewed
+generated catalog-local config:
+
 ```bash
-uv run python scripts/bootstrap_catalog_v2_schema.py \
-  --uri bolt://localhost:7687 \
-  --user neo4j \
-  --password "$NEO4J_PASSWORD" \
-  --database neo4j
+CONFIG_PATH=mcp_server/config/config-docker-neo4j.catalog-local.yaml uv run --project mcp_server --frozen python scripts/bootstrap_catalog_v2_schema.py
 ```
 
-Do **not** run live bootstrap from offline remediation, Phase 5 gates, or capabilities probes.
+```powershell
+$env:CONFIG_PATH='mcp_server/config/config-docker-neo4j.catalog-local.yaml'; uv run --project mcp_server --frozen python scripts/bootstrap_catalog_v2_schema.py
+```
+
+Do **not** run live bootstrap from canary execution, offline remediation, Phase 5 gates, or
+capabilities probes.
 
 ## Future live path
 

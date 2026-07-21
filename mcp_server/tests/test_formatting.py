@@ -25,6 +25,7 @@ def _load_formatting(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     models = ModuleType('models')
     response_types: Any = ModuleType('models.response_types')
     response_types.EdgeResult = lambda **kwargs: kwargs
+    response_types.FactResult = lambda **kwargs: kwargs
     response_types.NodeResult = lambda **kwargs: kwargs
     for name, module in {
         'graphiti_core': graphiti,

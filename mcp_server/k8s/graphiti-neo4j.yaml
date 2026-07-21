@@ -113,7 +113,7 @@ data:
           password: ${NEO4J_PASSWORD}
           database: ${NEO4J_DATABASE:neo4j}
           use_parallel_runtime: ${USE_PARALLEL_RUNTIME:false}
-    
+
     catalog_upsert:
       enabled: ${CATALOG_UPSERT_ENABLED:false}
       uuid_namespace: ${GRAPHITI_CATALOG_UUID_NAMESPACE}
@@ -129,164 +129,164 @@ data:
       - name: Database
         description: >
           A relational database system or database instance.
-    
+
       - name: Schema
         description: >
           A database schema or owner. Use the exact schema name.
-    
+
       - name: Table
         description: >
           A physical relational database table. Use schema-qualified canonical
           name such as APP.NTF_SCHEME_EVENT.
-    
+
       - name: View
         description: >
           A database view or materialized view. Preserve its schema-qualified name.
-    
+
       - name: Column
         description: >
           A table or view column. Canonical name must include schema, table and
           column, for example APP.NTF_SCHEME_EVENT.SCHEME_ID.
-    
+
       - name: Package
         description: >
           An Oracle PL/SQL package. Use schema-qualified package name.
-    
+
       - name: Procedure
         description: >
           A standalone procedure or a procedure declared inside an Oracle package.
-    
+
       - name: Function
         description: >
           A standalone function or a function declared inside an Oracle package.
-    
+
       - name: Trigger
         description: >
           An Oracle database trigger attached to a table, view or schema.
-    
+
       - name: Constraint
         description: >
           A primary key, foreign key, unique, check or not-null constraint.
-    
+
       - name: Index
         description: >
           A database index including unique and function-based indexes.
-    
+
       - name: DictionaryDocument
         description: >
           A source data-dictionary document containing descriptions and documented
           database relationships.
-    
+
       edge_types:
         - name: Contains
           description: >
             Structural containment such as Schema contains Table, Table contains
             Column, or Package contains Procedure.
-    
+
         - name: PrimaryKeyOf
           description: >
             A constraint or column is the declared primary key of a table.
-    
+
         - name: ForeignKeyTo
           description: >
             A declared database foreign key supported by DDL or constraint metadata.
-    
+
         - name: ReferencesByCode
           description: >
             A logical reference inferred from SQL or PL/SQL without a declared
             database foreign key.
-    
+
         - name: ReadsFrom
           description: >
             A package, procedure, function, trigger or view reads from a table or view.
-    
+
         - name: WritesTo
           description: >
             A package, procedure, function or trigger inserts, updates, deletes or
             merges data in a table.
-    
+
         - name: JoinsWith
           description: >
             Two tables or views are joined in executable SQL using one or more columns.
-    
+
         - name: Calls
           description: >
             A package, procedure, function or trigger calls another executable object.
-    
+
         - name: DependsOn
           description: >
             A database object depends on another database object.
-    
+
         - name: DerivedFrom
           description: >
             A view, materialized view, output column or table value is derived from
             another database object.
-    
+
         - name: DocumentedBy
           description: >
             A database entity is described by a source dictionary document.
-    
+
       edge_type_map:
         - source: Schema
           target: Table
           edge_types: [Contains]
-    
+
         - source: Schema
           target: View
           edge_types: [Contains]
-    
+
         - source: Schema
           target: Package
           edge_types: [Contains]
-    
+
         - source: Table
           target: Column
           edge_types: [Contains]
-    
+
         - source: View
           target: Column
           edge_types: [Contains]
-    
+
         - source: Package
           target: Procedure
           edge_types: [Contains]
-    
+
         - source: Package
           target: Function
           edge_types: [Contains]
-    
+
         - source: Constraint
           target: Table
           edge_types: [PrimaryKeyOf]
-    
+
         - source: Column
           target: Column
           edge_types: [ForeignKeyTo, ReferencesByCode]
-    
+
         - source: Procedure
           target: Table
           edge_types: [ReadsFrom, WritesTo]
-    
+
         - source: Function
           target: Table
           edge_types: [ReadsFrom, WritesTo]
-    
+
         - source: Trigger
           target: Table
           edge_types: [ReadsFrom, WritesTo]
-    
+
         - source: Table
           target: Table
           edge_types: [JoinsWith, DependsOn]
-    
+
         - source: View
           target: Table
           edge_types: [ReadsFrom, DerivedFrom, DependsOn]
-    
+
         - source: Entity
           target: DictionaryDocument
           edge_types: [DocumentedBy]
-    
+
         - source: Entity
           target: Entity
           edge_types: [DependsOn, Calls]
