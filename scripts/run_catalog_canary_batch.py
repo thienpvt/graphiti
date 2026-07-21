@@ -179,9 +179,6 @@ LIVE_MANIFEST_FIELDS = frozenset(
         'counts',
         'builder',
         'builder_sha256',
-        'allow_unknown_embedding_provider',
-        'source_digest_origin',
-        'execution_surface',
         'canary_executed',
     }
 )
@@ -2519,38 +2516,6 @@ def source_authority_map() -> dict[str, str]:
     return result
 
 
-def _run_read_only_git(args: list[str]) -> str:
-    allowed = {
-        ('rev-parse', 'HEAD'),
-        ('status', '--porcelain=v1', '--', *SOURCE_AUTHORITY_PATHS),
-    }
-    if tuple(args) not in allowed:
-        raise RunnerError(
-            'execution_boundary_violation', 'only approved host Git reads are allowed'
-        )
-    try:
-        return subprocess.run(
-            ['git', '-C', str(ROOT), *args],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise RunnerError('source_attestation_failed', 'read-only Git attestation failed') from exc
-
-
-def validate_execution_boundary(
-    *, source_digest_origin: str, execution_surface: str, command: list[str] | None = None
-) -> None:
-    if source_digest_origin != 'host' or execution_surface != 'compose-graphiti-mcp-only':
-        raise RunnerError('execution_boundary_violation', 'execution boundary metadata is invalid')
-    if command is None:
-        return
-    lowered = [part.casefold() for part in command]
-    if any('docker' in part for part in lowered):
-        raise RunnerError('execution_boundary_violation', 'Docker commands are forbidden')
-
-
 def attest_local_source(
     *, expected_head: str, expected_source_map_sha256: str, expected_runner_sha256: str
 ) -> dict[str, Any]:
@@ -2561,8 +2526,21 @@ def attest_local_source(
             raise RunnerError(
                 'source_attestation_invalid', 'source digest must be lowercase SHA-256'
             )
-    head = _run_read_only_git(['rev-parse', 'HEAD'])
-    dirty = _run_read_only_git(['status', '--porcelain=v1', '--', *SOURCE_AUTHORITY_PATHS])
+    try:
+        head = subprocess.run(
+            ['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ['git', '-C', str(ROOT), 'status', '--porcelain=v1', '--', *SOURCE_AUTHORITY_PATHS],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RunnerError('source_attestation_failed', 'read-only Git attestation failed') from exc
     source_map = source_authority_map()
     source_map_sha256 = canonical_sha256({'files': source_map})
     runner_sha256 = source_map['scripts/run_catalog_canary_batch.py']
@@ -2585,8 +2563,6 @@ def attest_local_source(
 
 
 class ToolLedger:
-    ENTRY_FIELDS = {'ordinal', 'tool', 'stage', 'success', 'error_code'}
-
     def __init__(self) -> None:
         self.entries: list[dict[str, Any]] = []
 
@@ -2603,32 +2579,285 @@ class ToolLedger:
             }
         )
 
-    def finalize(self) -> dict[str, Any]:
-        for expected, entry in enumerate(self.entries, start=1):
-            if set(entry) != self.ENTRY_FIELDS or entry.get('ordinal') != expected:
-                raise RunnerError('tool_ledger_invalid', 'tool ledger ordinals are not contiguous')
-            tool = entry.get('tool')
-            if not isinstance(tool, str) or tool not in EXPECTED_MCP_TOOLS | {'list_tools'}:
-                raise RunnerError('tool_ledger_invalid', 'tool ledger contains unknown tool')
-            if tool in PROHIBITED_LEGACY_TOOLS - {'upsert_catalog_batch'}:
-                raise RunnerError('tool_ledger_invalid', 'tool ledger contains prohibited tool')
-            if not isinstance(entry.get('stage'), str) or not entry['stage']:
-                raise RunnerError('tool_ledger_invalid', 'tool ledger stage is invalid')
-            success = entry.get('success')
-            error_code = entry.get('error_code')
-            if (
-                type(success) is not bool
-                or (success and error_code is not None)
-                or (not success and (not isinstance(error_code, str) or not error_code))
-            ):
-                raise RunnerError('tool_ledger_invalid', 'tool ledger outcome is inconsistent')
-        count = len(self.entries)
-        return {
-            'schema_version': 2,
-            'call_count': count,
-            'final_ordinal': count,
-            'entries': list(self.entries),
-        }
+
+_LEDGER_ENTRY_KEYS = frozenset({'ordinal', 'tool', 'stage', 'success', 'error_code'})
+
+
+def validate_tool_ledger(entries: list[dict[str, Any]]) -> dict[str, int]:
+    """Fail closed on shape, ordinals, and success/error_code consistency. tool_count stays 28."""
+    if not isinstance(entries, list):
+        raise RunnerError('tool_ledger_invalid', 'tool ledger entries must be a list')
+    n = len(entries)
+    seen_ordinals: set[int] = set()
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise RunnerError('tool_ledger_invalid', 'tool ledger entry must be an object')
+        if set(entry.keys()) != _LEDGER_ENTRY_KEYS:
+            raise RunnerError(
+                'tool_ledger_invalid',
+                'tool ledger entry keys must be exactly {ordinal,tool,stage,success,error_code}',
+            )
+        ordinal = entry.get('ordinal')
+        if type(ordinal) is not int:
+            raise RunnerError('tool_ledger_invalid', 'tool ledger ordinal must be exact int')
+        expected = index + 1
+        if ordinal != expected:
+            raise RunnerError(
+                'tool_ledger_invalid', 'tool ledger ordinals must be unique contiguous 1..N'
+            )
+        if ordinal in seen_ordinals:
+            raise RunnerError('tool_ledger_invalid', 'tool ledger ordinal is duplicated')
+        seen_ordinals.add(ordinal)
+        if type(entry['success']) is not bool:
+            raise RunnerError('tool_ledger_invalid', 'tool ledger success must be bool')
+        if not isinstance(entry['tool'], str) or not entry['tool']:
+            raise RunnerError('tool_ledger_invalid', 'tool ledger tool must be non-empty string')
+        if not isinstance(entry['stage'], str) or not entry['stage']:
+            raise RunnerError('tool_ledger_invalid', 'tool ledger stage must be non-empty string')
+        error_code = entry['error_code']
+        if entry['success'] is True:
+            if error_code is not None:
+                raise RunnerError(
+                    'tool_ledger_invalid', 'successful ledger entry requires error_code None'
+                )
+        else:
+            if not isinstance(error_code, str) or not error_code:
+                raise RunnerError(
+                    'tool_ledger_invalid',
+                    'failed ledger entry requires non-empty string error_code',
+                )
+    if seen_ordinals != set(range(1, n + 1)):
+        raise RunnerError(
+            'tool_ledger_invalid', 'tool ledger ordinals must be unique contiguous 1..N'
+        )
+    return {
+        'tool_call_count': n,
+        'final_ordinal': n if n else 0,
+        'tool_count': 28,
+    }
+
+
+def validate_report_ledger_metadata(report: dict[str, Any], ledger_meta: dict[str, int]) -> None:
+    """Reject terminal report metadata that disagrees with validated ledger counts."""
+    if not isinstance(report, dict):
+        raise RunnerError('tool_ledger_invalid', 'terminal report must be an object')
+    if report.get('tool_count') != 28 or report.get('tool_count') != ledger_meta['tool_count']:
+        raise RunnerError('tool_ledger_invalid', 'report tool_count must equal registered 28')
+    if report.get('tool_call_count') != ledger_meta['tool_call_count']:
+        raise RunnerError(
+            'tool_ledger_invalid', 'report tool_call_count must match validated ledger'
+        )
+    if report.get('final_ordinal') != ledger_meta['final_ordinal']:
+        raise RunnerError('tool_ledger_invalid', 'report final_ordinal must match validated ledger')
+
+
+# Host-side execution boundary: exact docker compose form, fixed files/services.
+COMPOSE_BASE_FILE = 'mcp_server/docker/docker-compose-neo4j.yml'
+COMPOSE_OVERRIDE_FILE = 'mcp_server/docker/docker-compose-neo4j.catalog-local.override.yml'
+REQUIRED_COMPOSE_FILES = (COMPOSE_BASE_FILE, COMPOSE_OVERRIDE_FILE)
+ALLOWED_COMPOSE_SERVICES = frozenset({'neo4j', 'graphiti-mcp'})
+ALLOWED_COMPOSE_SUBCOMMANDS = frozenset({'up', 'ps', 'logs', 'config', 'down'})
+ALLOWED_COMPOSE_SERVICE_FLAGS = frozenset({'-d', '--detach', '--no-color', '--timestamps'})
+HOST_EXECUTION_AUTHORITY_PATHS = (
+    COMPOSE_BASE_FILE,
+    COMPOSE_OVERRIDE_FILE,
+    'mcp_server/config/config-docker-neo4j.yaml',
+)
+
+
+def validate_execution_command(argv: list[str] | str) -> dict[str, Any]:
+    """Fail-closed pure Docker/Compose policy. Never launches Docker.
+
+    Exact form only: docker compose -f base -f override <subcommand> [services...].
+    Rejects legacy docker-compose, standalone docker, unapproved files/services,
+    global/shell options, and in-container source digesting.
+    """
+    if isinstance(argv, str):
+        raise RunnerError(
+            'execution_boundary_violation', 'shell command strings are forbidden; pass argv list'
+        )
+    if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
+        raise RunnerError(
+            'execution_boundary_violation', 'command argv must be a non-empty str list'
+        )
+    tokens = list(argv)
+    if len(tokens) < 2 or tokens[0] != 'docker' or tokens[1] != 'compose':
+        raise RunnerError(
+            'execution_boundary_violation',
+            'only exact docker compose invocations are permitted',
+        )
+    rest = tokens[2:]
+    files: list[str] = []
+    services: list[str] = []
+    subcommand: str | None = None
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok in {'-f', '--file'}:
+            if i + 1 >= len(rest):
+                raise RunnerError('execution_boundary_violation', 'compose file flag missing value')
+            files.append(rest[i + 1].replace('\\', '/'))
+            i += 2
+            continue
+        if tok.startswith('-'):
+            raise RunnerError(
+                'execution_boundary_violation',
+                f'forbidden compose global option {tok}',
+            )
+        subcommand = tok
+        service_tokens = rest[i + 1 :]
+        break
+    else:
+        service_tokens = []
+    if subcommand is None:
+        raise RunnerError('execution_boundary_violation', 'compose subcommand required')
+    if subcommand not in ALLOWED_COMPOSE_SUBCOMMANDS:
+        raise RunnerError(
+            'execution_boundary_violation',
+            f'compose subcommand {subcommand} is not allowlisted',
+        )
+    if tuple(files) != REQUIRED_COMPOSE_FILES:
+        raise RunnerError(
+            'execution_boundary_violation',
+            'compose files must be exact base then override in order',
+        )
+    for tok in service_tokens:
+        if tok.startswith('-'):
+            if tok not in ALLOWED_COMPOSE_SERVICE_FLAGS:
+                raise RunnerError(
+                    'execution_boundary_violation', f'forbidden compose service flag {tok}'
+                )
+            continue
+        if tok not in ALLOWED_COMPOSE_SERVICES:
+            raise RunnerError(
+                'execution_boundary_violation',
+                f'unapproved compose service {tok}',
+            )
+        services.append(tok)
+    joined = ' '.join(tokens).lower()
+    for needle in ('sha256sum', 'md5sum', 'digest', 'cat /app', 'python -c', 'bash -c', 'sh -c'):
+        if needle in joined:
+            raise RunnerError(
+                'execution_boundary_violation', 'in-container source digesting is forbidden'
+            )
+    return {
+        'ok': True,
+        'subcommand': subcommand,
+        'files': list(files),
+        'services': services,
+    }
+
+
+EXECUTION_DIGEST_METHOD = 'raw-byte-sha256'
+TERMINAL_ACCEPTANCE_SCHEMA_VERSION = 'phase6-terminal-artifacts-manifest-v1'
+
+
+def host_side_execution_authority_digests() -> dict[str, str]:
+    """Raw-byte SHA-256 map for fixed host execution authority paths only. Never runs Docker."""
+    digests: dict[str, str] = {}
+    for relative in HOST_EXECUTION_AUTHORITY_PATHS:
+        path = (ROOT / relative).resolve()
+        try:
+            path.relative_to(ROOT.resolve())
+        except ValueError as exc:
+            raise RunnerError(
+                'execution_boundary_violation', 'execution authority path escapes repository'
+            ) from exc
+        if not path.is_file():
+            raise RunnerError(
+                'execution_attestation_missing',
+                f'execution authority file missing: {relative}',
+            )
+        digests[relative] = sha256_bytes(path.read_bytes())
+    return digests
+
+
+def compute_execution_map_sha256(digests: dict[str, str] | None = None) -> str:
+    """Canonical SHA-256 over {'files': raw-byte digest map} for host execution authority."""
+    files = digests if digests is not None else host_side_execution_authority_digests()
+    if tuple(files.keys()) != HOST_EXECUTION_AUTHORITY_PATHS:
+        # require exact key order/set when precomputed map is supplied
+        if set(files.keys()) != set(HOST_EXECUTION_AUTHORITY_PATHS):
+            raise RunnerError(
+                'execution_attestation_invalid',
+                'execution authority map keys must match fixed host paths',
+            )
+        ordered = {path: files[path] for path in HOST_EXECUTION_AUTHORITY_PATHS}
+        return canonical_sha256({'files': ordered})
+    return canonical_sha256({'files': files})
+
+
+def attest_execution_authority(*, expected_execution_map_sha256: str) -> dict[str, Any]:
+    """Host-side Gate 0 execution authority. Fail closed on missing override/base/config."""
+    if SHA256_RE.fullmatch(expected_execution_map_sha256) is None:
+        raise RunnerError(
+            'execution_attestation_invalid',
+            'expected execution map digest must be lowercase SHA-256',
+        )
+    digests = host_side_execution_authority_digests()
+    computed = compute_execution_map_sha256(digests)
+    if computed != expected_execution_map_sha256:
+        raise RunnerError(
+            'execution_attestation_mismatch',
+            'reviewed execution authority map does not match',
+        )
+    return {
+        'execution_map_sha256': computed,
+        'execution_files': len(digests),
+        'execution_digest_method': EXECUTION_DIGEST_METHOD,
+    }
+
+
+def attest_host_compose_argv(argv: list[str] | str) -> dict[str, Any]:
+    """External Compose argv accepted only via exact validator. Never launches Docker."""
+    return validate_execution_command(argv)
+
+
+def evaluate_embedding_readiness(
+    embeddings: dict[str, Any],
+    *,
+    allow_unknown_embedding_provider: str | None = None,
+) -> dict[str, Any]:
+    """Capability embedding policy. Never rewrites readiness.
+
+    Explicit waiver only for provider=openai + readiness=unknown when
+    allow_unknown_embedding_provider == 'openai'. Other providers' unknown fail.
+    error always fails. ready always passes.
+    """
+    if not isinstance(embeddings, dict):
+        raise RunnerError('capability_preflight_failed', 'embeddings projection is invalid')
+    provider = embeddings.get('provider')
+    readiness = embeddings.get('ready')
+    waiver_requested = allow_unknown_embedding_provider
+    if waiver_requested is not None and waiver_requested != 'openai':
+        raise RunnerError(
+            'capability_preflight_failed',
+            'allow_unknown_embedding_provider only accepts exact value openai',
+        )
+    waiver_applied = False
+    if readiness == 'ready':
+        status = 'pass'
+    elif readiness == 'error':
+        raise RunnerError('capability_preflight_failed', 'embedding readiness is error')
+    elif readiness == 'unknown':
+        if provider == 'openai' and waiver_requested == 'openai':
+            status = 'waived'
+            waiver_applied = True
+        else:
+            raise RunnerError(
+                'capability_preflight_failed',
+                'embedding readiness unknown without exact openai waiver',
+            )
+    else:
+        raise RunnerError('capability_preflight_failed', 'embedding readiness is incomplete')
+    return {
+        'status': status,
+        'provider': provider,
+        'readiness': readiness,
+        'waiver_applied': waiver_applied,
+        'observed_provider': provider,
+        'observed_readiness': readiness,
+    }
 
 
 async def _ledger_call(
@@ -3351,16 +3580,17 @@ def _validate_node_search_strict(
         raise RunnerError('node_search_failed', 'node search returned a typed identity alias')
 
 
-def _fact_search_edge_key(row: dict[str, Any]) -> str:
-    attributes = row.get('attributes')
+def _fact_nested_edge_key(fact: dict[str, Any]) -> Any:
+    """Canonical nested identity only. Top-level edge_key is non-authoritative."""
+    attributes = fact.get('attributes')
     if not isinstance(attributes, dict):
-        raise RunnerError('fact_search_failed', 'fact search attributes are missing or invalid')
+        raise RunnerError('fact_search_failed', 'fact search attributes must be a dict')
     nested = attributes.get('edge_key')
-    if not isinstance(nested, str) or not nested:
-        raise RunnerError('fact_search_failed', 'fact search nested identity is missing')
-    top_level = row.get('edge_key')
-    if top_level is not None and top_level != nested:
-        raise RunnerError('fact_search_failed', 'fact search identities conflict')
+    top = fact.get('edge_key')
+    if top is not None and nested is not None and top != nested:
+        raise RunnerError(
+            'fact_search_failed', 'fact search top-level edge_key conflicts with nested identity'
+        )
     return nested
 
 
@@ -3371,74 +3601,42 @@ def _validate_fact_search_strict(
     expected_uuid: str,
     edge_type: str,
     edge_key: str,
-    expected_source_uuid: str,
-    expected_target_uuid: str,
+    source_node_uuid: str | None = None,
+    target_node_uuid: str | None = None,
 ) -> None:
+    """Gate 9: exact nested attributes.edge_key + UUID/group/type/endpoints once.
+
+    Unrelated same-group extras are allowed. Foreign group, duplicate expected UUID,
+    alias/ambiguous identities, missing/non-dict attributes, and top/nested conflicts fail.
+    Top-level-only edge_key does not satisfy the canonical nested contract.
+    """
     facts = raw.get('facts')
     if isinstance(facts, list) and facts and all(isinstance(row, str) for row in facts):
         raise RunnerError('fact_search_failed', 'fact search lacks structured identity rows')
-    if not isinstance(facts, list) or any(
-        not isinstance(row, dict) or row.get('group_id') != group_id for row in facts
-    ):
+    if not isinstance(facts, list):
         raise RunnerError('fact_search_failed', 'fact search returned foreign or invalid row')
-    identities = [
-        (
-            row.get('uuid'),
-            row.get('name'),
-            _fact_search_edge_key(row),
-            row.get('source_node_uuid'),
-            row.get('target_node_uuid'),
-        )
-        for row in facts
-    ]
-    uuids = [identity[0] for identity in identities]
-    if any(not isinstance(value, str) or not value for value in uuids):
-        raise RunnerError('fact_search_failed', 'fact search UUID is missing or invalid')
+    for row in facts:
+        if not isinstance(row, dict):
+            raise RunnerError('fact_search_failed', 'fact search returned foreign or invalid row')
+        if row.get('group_id') != group_id:
+            raise RunnerError('fact_search_failed', 'fact search returned foreign or invalid row')
+        # Force attributes contract on every row so missing/non-dict fail closed.
+        _fact_nested_edge_key(row)
+    uuids = [row.get('uuid') for row in facts]
     if len(uuids) != len(set(uuids)) or uuids.count(expected_uuid) != 1:
         raise RunnerError('fact_search_failed', 'fact search identity is absent or duplicated')
-    typed_identity = [
-        identity for identity in identities if identity[1] == edge_type and identity[2] == edge_key
-    ]
-    expected = (
-        expected_uuid,
-        edge_type,
-        edge_key,
-        expected_source_uuid,
-        expected_target_uuid,
-    )
-    if typed_identity != [expected]:
+    matches = []
+    for row in facts:
+        nested_key = _fact_nested_edge_key(row)
+        if nested_key != edge_key or row.get('name') != edge_type:
+            continue
+        if source_node_uuid is not None and row.get('source_node_uuid') != source_node_uuid:
+            continue
+        if target_node_uuid is not None and row.get('target_node_uuid') != target_node_uuid:
+            continue
+        matches.append(row)
+    if len(matches) != 1 or matches[0].get('uuid') != expected_uuid:
         raise RunnerError('fact_search_failed', 'fact search returned a typed identity alias')
-
-
-def _embedding_readiness_policy(
-    capabilities_raw: dict[str, Any],
-    *,
-    allow_unknown_embedding_provider: str | None,
-) -> dict[str, Any]:
-    embeddings = capabilities_raw.get('embeddings')
-    if not isinstance(embeddings, dict):
-        raise RunnerError('capability_preflight_failed', 'embedding capability is invalid')
-    provider = embeddings.get('provider')
-    observed = embeddings.get('ready')
-    if observed == 'ready':
-        return {
-            'requested_provider': allow_unknown_embedding_provider,
-            'observed_provider': provider,
-            'observed_ready': observed,
-            'waiver_applied': False,
-        }
-    if (
-        observed == 'unknown'
-        and provider == 'openai'
-        and allow_unknown_embedding_provider == 'openai'
-    ):
-        return {
-            'requested_provider': allow_unknown_embedding_provider,
-            'observed_provider': provider,
-            'observed_ready': observed,
-            'waiver_applied': True,
-        }
-    raise RunnerError('capability_preflight_failed', 'embedding readiness is incomplete')
 
 
 def _terminal_report(
@@ -3458,12 +3656,10 @@ def _terminal_report(
     error_type: str | None,
     flags: dict[str, Any],
     plan_token: str | None,
-    capability_policy: dict[str, Any] | None = None,
-    functional_embedding_proof: bool = False,
-    ledger_sha256: str | None = None,
-    ledger_call_count: int = 0,
-    ledger_final_ordinal: int = 0,
+    ledger_entries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    ledger_meta = validate_tool_ledger(list(ledger_entries or []))
+    embedding_policy = flags.get('embedding_policy') or {}
     report = {
         'schema_version': REPORT_SCHEMA_VERSION,
         'classification': classification,
@@ -3474,23 +3670,26 @@ def _terminal_report(
         'source_head': (attestation or {}).get('source_head'),
         'source_map_sha256': (attestation or {}).get('source_map_sha256'),
         'runner_sha256': (attestation or {}).get('runner_sha256'),
+        'execution_map_sha256': (attestation or {}).get('execution_map_sha256'),
+        'execution_files': (attestation or {}).get('execution_files'),
+        'execution_digest_method': (attestation or {}).get('execution_digest_method'),
         'runtime_capability_sha256': capability_sha256,
-        'embedding_policy': capability_policy,
-        'functional_embedding_proof': functional_embedding_proof,
         'namespace_fingerprint': flags.get('namespace_fingerprint'),
         'artifact_sha256': artifact_sha256,
         'catalog_sha256': manifest.get('catalog_sha256'),
         'request_sha256': request_sha256,
         'manifest_sha256': manifest_sha256,
         'batch_uuid': batch_uuid,
-        'tool_count': 28,
-        'tool_call_count': ledger_call_count,
-        'tool_ledger_final_ordinal': ledger_final_ordinal,
-        'tool_ledger_sha256': ledger_sha256,
+        'tool_count': ledger_meta['tool_count'],
+        'tool_call_count': ledger_meta['tool_call_count'],
+        'final_ordinal': ledger_meta['final_ordinal'],
         'stage': machine.stage.name,
         'stage_ledger': machine.ledger,
         'gates': gates,
         'dry_run_zero_write_proven': flags.get('dry_run_zero_write_proven', False),
+        'prepare_functional_embedding_proof': flags.get(
+            'prepare_functional_embedding_proof', False
+        ),
         'commit_confirmed': flags.get('commit_confirmed', False),
         'manifest_verified': flags.get('manifest_verified', False),
         'entity_resolution_verified': flags.get('entity_resolution_verified', False),
@@ -3498,6 +3697,9 @@ def _terminal_report(
         'evidence_verified': flags.get('evidence_verified', False),
         'search_verified': flags.get('search_verified', False),
         'control_isolation_verified': flags.get('control_isolation_verified', False),
+        'embedding_provider': embedding_policy.get('observed_provider'),
+        'embedding_readiness': embedding_policy.get('observed_readiness'),
+        'waiver_applied': bool(embedding_policy.get('waiver_applied', False)),
         'replay': replay,
         'protected_groups_queried': [],
         'prohibited_tools_called': [],
@@ -3509,10 +3711,43 @@ def _terminal_report(
         'notes': 'sanitized durable report; prepared-plan process-loss resume is unsupported',
         'canary_executed': flags.get('commit_started', False),
     }
+    validate_report_ledger_metadata(report, ledger_meta)
     text = json.dumps(report, sort_keys=True)
     if (plan_token and plan_token in text) or 'token_digest' in text:
         raise RunnerError('token_persistence', 'secret token material reached report')
     return report
+
+
+def _persist_terminal_artifacts(
+    result_dir: Path,
+    *,
+    report: dict[str, Any],
+    ledger_entries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Validate ledger/report, write tool-ledger then final-report, then acceptance manifest last.
+
+    Failure before the final acceptance manifest leaves terminal artifacts unaccepted.
+    """
+    ledger_meta = validate_tool_ledger(list(ledger_entries))
+    validate_report_ledger_metadata(report, ledger_meta)
+    ledger_path = result_dir / 'tool-ledger.json'
+    report_path = result_dir / 'final-report.json'
+    accept_path = result_dir / 'terminal-artifacts-manifest.json'
+    ledger_doc = {'schema_version': 1, 'entries': list(ledger_entries)}
+    atomic_write_json(ledger_path, ledger_doc)
+    atomic_write_json(report_path, report)
+    on_disk_ledger_sha = sha256_bytes(ledger_path.read_bytes())
+    on_disk_report_sha = sha256_bytes(report_path.read_bytes())
+    acceptance = {
+        'schema_version': TERMINAL_ACCEPTANCE_SCHEMA_VERSION,
+        'tool_ledger_sha256': on_disk_ledger_sha,
+        'final_report_sha256': on_disk_report_sha,
+        'tool_call_count': ledger_meta['tool_call_count'],
+        'final_ordinal': ledger_meta['final_ordinal'],
+        'tool_count': ledger_meta['tool_count'],
+    }
+    atomic_write_json(accept_path, acceptance)
+    return acceptance
 
 
 async def run_live_canary(
@@ -3527,10 +3762,12 @@ async def run_live_canary(
     source_head: str,
     source_map_sha256: str,
     runner_sha256: str,
+    execution_map_sha256: str,
     image_fingerprint: str | None = None,
     config_fingerprint: str | None = None,
     output_dir: Path | None = None,
     source_attestor: Any | None = None,
+    execution_attestor: Any | None = None,
     checkpoint_path: Path | None = None,
     allow_unknown_embedding_provider: str | None = None,
 ) -> dict[str, Any]:
@@ -3542,8 +3779,6 @@ async def run_live_canary(
     flags: dict[str, Any] = {}
     attestation = None
     capability_sha = artifact_sha = request_sha = manifest_sha = batch_uuid = None
-    capability_policy: dict[str, Any] | None = None
-    functional_embedding_proof = False
     replay = 'skipped'
     plan_token: str | None = None
     commit_started = False
@@ -3591,22 +3826,6 @@ async def run_live_canary(
         manifest_hint = strict_json_load(manifest_path)
         if not isinstance(manifest_hint, dict):
             raise RunnerError('invalid_live_manifest', 'live manifest must be an object')
-        validate_execution_boundary(
-            source_digest_origin=manifest_hint.get('source_digest_origin', ''),
-            execution_surface=manifest_hint.get('execution_surface', ''),
-        )
-        if (
-            manifest_hint.get('allow_unknown_embedding_provider')
-            != allow_unknown_embedding_provider
-        ):
-            raise RunnerError(
-                'operator_confirmation_mismatch',
-                'embedding readiness policy does not match manifest',
-            )
-        if manifest_hint.get('source_digest_origin') != 'host':
-            raise RunnerError('source_attestation_invalid', 'source digest origin must be host')
-        if manifest_hint.get('execution_surface') != 'compose-graphiti-mcp-only':
-            raise RunnerError('source_attestation_invalid', 'execution surface is invalid')
         if confirm_run_id != manifest_hint.get('run_id'):
             raise RunnerError(
                 'operator_confirmation_mismatch', 'run_id confirmation does not match manifest'
@@ -3630,6 +3849,21 @@ async def run_live_canary(
             raise RunnerError(
                 'source_attestation_failed', 'source attestor returned invalid result'
             )
+        exec_attestor = execution_attestor or attest_execution_authority
+        execution_attestation = exec_attestor(
+            expected_execution_map_sha256=execution_map_sha256,
+        )
+        if not isinstance(execution_attestation, dict):
+            raise RunnerError(
+                'execution_attestation_failed', 'execution attestor returned invalid result'
+            )
+        for key in ('execution_map_sha256', 'execution_files', 'execution_digest_method'):
+            if key not in execution_attestation:
+                raise RunnerError(
+                    'execution_attestation_failed',
+                    f'execution attestor missing field {key}',
+                )
+        attestation = {**attestation, **execution_attestation}
         gates['0'] = 'pass'
 
         tools = await call('PREFLIGHT', 'list_tools', {})
@@ -3642,17 +3876,29 @@ async def run_live_canary(
             raise RunnerError('tool_registry_mismatch', 'MCP registry must match exact 28 tools')
         status = await call('PREFLIGHT', 'get_status', {})
         capabilities_raw = await call('PREFLIGHT', 'get_catalog_capabilities', {})
+        if not isinstance(capabilities_raw, dict):
+            raise RunnerError(
+                'capability_preflight_failed', 'capability response must be an object'
+            )
+        # Hash unmodified raw server response before validation/policy; prove no mutation.
+        raw_snapshot = copy.deepcopy(capabilities_raw)
         capability_sha = canonical_sha256(capabilities_raw)
-        capability_policy = _embedding_readiness_policy(
-            capabilities_raw,
-            allow_unknown_embedding_provider=allow_unknown_embedding_provider,
-        )
         try:
             capabilities = CatalogCapabilitiesResponse.model_validate(capabilities_raw, strict=True)
         except ValidationError as exc:
             raise RunnerError(
                 'capability_preflight_failed', 'capability response is invalid'
             ) from exc
+        if capabilities_raw != raw_snapshot:
+            raise RunnerError(
+                'capability_preflight_failed',
+                'raw capability response mutated during preflight',
+            )
+        if canonical_sha256(capabilities_raw) != capability_sha:
+            raise RunnerError(
+                'capability_preflight_failed',
+                'raw capability SHA changed during preflight',
+            )
         if (
             status.get('status') != 'ok'
             or capabilities.backend not in {'neo4j', 'Neo4j'}
@@ -3674,6 +3920,16 @@ async def run_live_canary(
             raise RunnerError(
                 'capability_preflight_failed', 'runtime catalog capabilities are incomplete'
             )
+        embedding_policy = evaluate_embedding_readiness(
+            dict(capabilities.embeddings or {}),
+            allow_unknown_embedding_provider=allow_unknown_embedding_provider,
+        )
+        if capabilities_raw != raw_snapshot or canonical_sha256(capabilities_raw) != capability_sha:
+            raise RunnerError(
+                'capability_preflight_failed',
+                'raw capability response mutated after policy evaluation',
+            )
+        flags['embedding_policy'] = embedding_policy
         if capabilities.features.get('same_token_replay') is True:
             raise RunnerError(
                 'unsupported_replay_contract', 'advertised replay contract is not harness-validated'
@@ -3743,7 +3999,8 @@ async def run_live_canary(
         )
         if after_prepare_uuid != batch_uuid:
             raise RunnerError('batch_uuid_mismatch', 'post-prepare batch UUID differs')
-        functional_embedding_proof = True
+        # Successful prepare is functional embedding proof; prepare failure never reaches commit.
+        flags['prepare_functional_embedding_proof'] = True
         machine.advance(LiveStage.DRY_RUN_PASSED, LiveStage.PREPARE_PASSED)
         gates['5'] = 'pass'
 
@@ -3916,18 +4173,16 @@ async def run_live_canary(
                     'invalid_at_before': None,
                 },
             )
+            source_uuid = manifest_entities[(item.source_entity_type, item.source_graph_key)]
+            target_uuid = manifest_entities[(item.target_entity_type, item.target_graph_key)]
             _validate_fact_search_strict(
                 raw,
                 group_id=request.group_id,
                 expected_uuid=manifest_edges[(item.edge_type, item.edge_key)],
                 edge_type=item.edge_type,
                 edge_key=item.edge_key,
-                expected_source_uuid=resolved_entities[
-                    (item.source_entity_type, item.source_graph_key)
-                ],
-                expected_target_uuid=resolved_entities[
-                    (item.target_entity_type, item.target_graph_key)
-                ],
+                source_node_uuid=source_uuid,
+                target_node_uuid=target_uuid,
             )
         final_control_uuid = await absence(
             manifest['control_group_id'],
@@ -3956,8 +4211,6 @@ async def run_live_canary(
         gates['10'] = 'pass'
         machine.advance(LiveStage.SEARCH_ISOLATION_VERIFIED, LiveStage.REPLAY_VERIFIED_OR_SKIPPED)
         machine.advance(LiveStage.REPLAY_VERIFIED_OR_SKIPPED, LiveStage.FINALIZED)
-        ledger_payload = ledger.finalize()
-        ledger_sha = canonical_sha256(ledger_payload)
         report = _terminal_report(
             manifest=manifest,
             classification='PASSED',
@@ -3974,15 +4227,10 @@ async def run_live_canary(
             error_type=None,
             flags=flags,
             plan_token=plan_token,
-            capability_policy=capability_policy,
-            functional_embedding_proof=functional_embedding_proof,
-            ledger_sha256=ledger_sha,
-            ledger_call_count=ledger_payload['call_count'],
-            ledger_final_ordinal=ledger_payload['final_ordinal'],
+            ledger_entries=ledger.entries,
         )
         if result_dir is not None:
-            atomic_write_json(result_dir / 'final-report.json', report)
-            atomic_write_json(result_dir / 'tool-ledger.json', ledger_payload)
+            _persist_terminal_artifacts(result_dir, report=report, ledger_entries=ledger.entries)
         return report
     except BaseException as exc:
         if commit_started:
@@ -3995,8 +4243,7 @@ async def run_live_canary(
         if gates.get(current_gate) != 'pass':
             gates[current_gate] = 'fail' if classification != 'BLOCKED' else 'blocked'
         error_code = exc.code if isinstance(exc, RunnerError) else 'internal_runner_error'
-        ledger_payload = ledger.finalize()
-        ledger_sha = canonical_sha256(ledger_payload)
+        # Invalid ledger must reject terminal artifacts; no inconsistent fallback write.
         report = _terminal_report(
             manifest=manifest_hint,
             classification=classification,
@@ -4013,15 +4260,10 @@ async def run_live_canary(
             error_type=type(exc).__name__,
             flags=flags,
             plan_token=plan_token,
-            capability_policy=capability_policy,
-            functional_embedding_proof=functional_embedding_proof,
-            ledger_sha256=ledger_sha,
-            ledger_call_count=ledger_payload['call_count'],
-            ledger_final_ordinal=ledger_payload['final_ordinal'],
+            ledger_entries=ledger.entries,
         )
         if result_dir is not None:
-            atomic_write_json(result_dir / 'final-report.json', report)
-            atomic_write_json(result_dir / 'tool-ledger.json', ledger_payload)
+            _persist_terminal_artifacts(result_dir, report=report, ledger_entries=ledger.entries)
         raise
 
 
@@ -4038,13 +4280,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument('--source-head')
     parser.add_argument('--source-map-sha256')
     parser.add_argument('--runner-sha256')
+    parser.add_argument('--execution-map-sha256')
     parser.add_argument('--image-fingerprint')
     parser.add_argument('--config-fingerprint')
-    parser.add_argument('--allow-unknown-embedding-provider', choices=('openai',))
     parser.add_argument('--mode', default='commit', choices=('commit', 'live-canary'))
     parser.add_argument('--expected-artifact-sha256')
     parser.add_argument('--expected-request-sha256')
     parser.add_argument('--checkpoint', type=Path, default=DEFAULT_CHECKPOINT)
+    parser.add_argument(
+        '--allow-unknown-embedding-provider',
+        choices=('openai',),
+        default=None,
+        help='Explicit waiver for provider=openai readiness=unknown only; never rewrites readiness',
+    )
     args = parser.parse_args(argv)
     if args.mode == 'live-canary':
         missing = [
@@ -4059,6 +4307,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                 'source_head',
                 'source_map_sha256',
                 'runner_sha256',
+                'execution_map_sha256',
             )
             if getattr(args, name) is None
         ]
@@ -4072,6 +4321,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         for name in (
             'source_map_sha256',
             'runner_sha256',
+            'execution_map_sha256',
             'image_fingerprint',
             'config_fingerprint',
         ):
@@ -4080,20 +4330,42 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                 parser.error('--' + name.replace('_', '-') + ' must be lowercase SHA-256')
         if SOURCE_HEAD_RE.fullmatch(args.source_head or '') is None:
             parser.error('--source-head must be lowercase Git SHA-1')
+        if (
+            args.allow_unknown_embedding_provider is not None
+            and args.allow_unknown_embedding_provider != 'openai'
+        ):
+            parser.error('--allow-unknown-embedding-provider only accepts openai')
     return args
 
 
 async def execute_cli(args: argparse.Namespace) -> dict[str, Any]:
     if args.mode != 'live-canary':
         return await execute(args)
+    # Gate 0 before any MCP transport open.
     attestation = attest_local_source(
         expected_head=args.source_head,
         expected_source_map_sha256=args.source_map_sha256,
         expected_runner_sha256=args.runner_sha256,
     )
+    execution_attestation = attest_execution_authority(
+        expected_execution_map_sha256=args.execution_map_sha256,
+    )
+    combined = {**attestation, **execution_attestation}
 
-    def preverified_attestor(**_kwargs: Any) -> dict[str, Any]:
-        return attestation
+    def preverified_source_attestor(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            'source_head': combined['source_head'],
+            'source_map_sha256': combined['source_map_sha256'],
+            'runner_sha256': combined['runner_sha256'],
+            'source_files': combined['source_files'],
+        }
+
+    def preverified_execution_attestor(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            'execution_map_sha256': combined['execution_map_sha256'],
+            'execution_files': combined['execution_files'],
+            'execution_digest_method': combined['execution_digest_method'],
+        }
 
     async with (
         streamable_http_client(args.mcp_url) as (read_stream, write_stream, _),
@@ -4111,10 +4383,12 @@ async def execute_cli(args: argparse.Namespace) -> dict[str, Any]:
             source_head=args.source_head,
             source_map_sha256=args.source_map_sha256,
             runner_sha256=args.runner_sha256,
+            execution_map_sha256=args.execution_map_sha256,
             image_fingerprint=args.image_fingerprint,
             config_fingerprint=args.config_fingerprint,
             output_dir=args.output_dir,
-            source_attestor=preverified_attestor,
+            source_attestor=preverified_source_attestor,
+            execution_attestor=preverified_execution_attestor,
             allow_unknown_embedding_provider=args.allow_unknown_embedding_provider,
         )
 

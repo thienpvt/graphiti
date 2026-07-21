@@ -15,15 +15,16 @@ class Neo4jLikeDateTime:
 
 
 def _load_formatting(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    from typing import Any
+
     graphiti = ModuleType('graphiti_core')
-    edges = ModuleType('graphiti_core.edges')
-    nodes = ModuleType('graphiti_core.nodes')
+    edges: Any = ModuleType('graphiti_core.edges')
+    nodes: Any = ModuleType('graphiti_core.nodes')
     edges.EntityEdge = object
     nodes.EntityNode = object
     models = ModuleType('models')
-    response_types = ModuleType('models.response_types')
+    response_types: Any = ModuleType('models.response_types')
     response_types.EdgeResult = lambda **kwargs: kwargs
-    response_types.FactResult = lambda **kwargs: kwargs
     response_types.NodeResult = lambda **kwargs: kwargs
     for name, module in {
         'graphiti_core': graphiti,
@@ -82,9 +83,9 @@ def test_format_fact_result_serializes_nested_driver_values(
         valid_at=None,
         invalid_at=None,
         attributes={
-            'edge_key': 'contains|TABLE::TEST.ITEM|COLUMN::TEST.ITEM.ID',
             'updated_at': Neo4jLikeDateTime(),
             'fact_embedding': [1.0],
+            'edge_key': 'CONTAINS::TABLE::T->COLUMN::C',
         },
     )
 
@@ -99,7 +100,11 @@ def test_format_fact_result_serializes_nested_driver_values(
         'valid_at': None,
         'invalid_at': None,
         'attributes': {
-            'edge_key': 'contains|TABLE::TEST.ITEM|COLUMN::TEST.ITEM.ID',
             'updated_at': '2026-07-17T12:00:00.000000000+00:00',
+            'edge_key': 'CONTAINS::TABLE::T->COLUMN::C',
         },
     }
+    # Canonical response is nested attributes.edge_key; no top-level edge_key.
+    formatted = formatting.format_fact_result(edge)
+    assert 'edge_key' not in formatted
+    assert formatted['attributes']['edge_key'] == 'CONTAINS::TABLE::T->COLUMN::C'

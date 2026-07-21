@@ -75,9 +75,46 @@ Before any canary retry, call `get_catalog_capabilities` for truthful runtime re
 
 Probes are mutation-free (no CREATE/DROP/ensure/write/LLM). This readiness work **stops before canary** — no Phase 6 / live canary execution is authorized here.
 
-## Catalog-v2 schema bootstrap
+`get_catalog_capabilities` response shape is **unchanged** by schema bootstrap work. Bootstrap is a separate operator path and must not be invoked by capabilities probes.
 
-Missing Catalog-v2 constraints block canary. Run `scripts/bootstrap_catalog_v2_schema.py` only under separate maintenance authorization. Entry point uses raw Neo4j sessions and only application-owned fixed `CREATE CONSTRAINT ... IF NOT EXISTS` statements: five identity, four prepared-plan, five evidence/manifest. It never constructs Graphiti `Neo4jDriver`, runs stock indexes, rewrites data, retries, drops, repairs, or rolls back auto-committed schema. Failure can leave partial schema; stop and review report. `RELATIONSHIP_UNIQUENESS` is valid Neo4j output under application matcher semantics. Never invoke bootstrap from canary harness, and never start canary until one fresh bootstrap verification reports 14/14 ready.
+## Schema bootstrap (operator-only, Neo4j 5.26+)
+
+Dedicated offline/operator entry: `scripts/bootstrap_catalog_v2_schema.py`.
+
+Orchestration service: `mcp_server/src/services/catalog_schema_bootstrap.py`.
+
+### Contract
+
+- Uses the **official raw Neo4j async driver** (`neo4j.AsyncGraphDatabase`) only.
+- **Never** constructs Graphiti `Neo4jDriver`.
+- Exactly **three** `CatalogNeo4jStore` ensure calls, in this order:
+  1. `ensure_uuid_uniqueness_constraints`
+  2. `ensure_plan_schema`
+  3. `ensure_evidence_manifest_schema`
+- Then **exactly one** `inspect_catalog_v2_schema_readiness` (canonical matcher).
+- Requires exact **14/14** uniqueness constraints present with exact shape.
+- Canonical matcher accepts Neo4j `RELATIONSHIP_UNIQUENESS` / `NODE_UNIQUENESS` / `UNIQUENESS`.
+- All statements are store-owned `CREATE CONSTRAINT … IF NOT EXISTS` only.
+- **No** retry, repair, DROP, rollback, or data rewrite on failure.
+- Fail closed on partial readiness or ensure error.
+
+### Dry statement print (no network)
+
+```bash
+uv run python scripts/bootstrap_catalog_v2_schema.py --dry-print-statements
+```
+
+### Live bootstrap (operator-approved only; not part of offline remediation)
+
+```bash
+uv run python scripts/bootstrap_catalog_v2_schema.py \
+  --uri bolt://localhost:7687 \
+  --user neo4j \
+  --password "$NEO4J_PASSWORD" \
+  --database neo4j
+```
+
+Do **not** run live bootstrap from offline remediation, Phase 5 gates, or capabilities probes.
 
 ## Future live path
 

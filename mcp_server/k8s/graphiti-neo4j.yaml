@@ -15,6 +15,18 @@ metadata:
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  name: graphiti-catalog-upsert
+  namespace: graphiti
+data:
+  CATALOG_UPSERT_ENABLED: "true"
+  GRAPHITI_CATALOG_UUID_NAMESPACE: "36238153-0471-4c37-ac23-9f662c413f2c"
+  CATALOG_MAX_ENTITIES_PER_BATCH: "500"
+  CATALOG_MAX_EDGES_PER_BATCH: "2000"
+  CATALOG_MAX_PROVENANCE_LINKS_PER_BATCH: "5000"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
   name: graphiti-mcp-config
   namespace: graphiti
 data:
@@ -101,6 +113,13 @@ data:
           password: ${NEO4J_PASSWORD}
           database: ${NEO4J_DATABASE:neo4j}
           use_parallel_runtime: ${USE_PARALLEL_RUNTIME:false}
+    
+    catalog_upsert:
+      enabled: ${CATALOG_UPSERT_ENABLED:false}
+      uuid_namespace: ${GRAPHITI_CATALOG_UUID_NAMESPACE}
+      max_entities_per_batch: ${CATALOG_MAX_ENTITIES_PER_BATCH:500}
+      max_edges_per_batch: ${CATALOG_MAX_EDGES_PER_BATCH:2000}
+      max_provenance_links_per_batch: ${CATALOG_MAX_PROVENANCE_LINKS_PER_BATCH:5000}
 
     graphiti:
       group_id: ${GRAPHITI_GROUP_ID:oracle-core}
@@ -110,54 +129,54 @@ data:
       - name: Database
         description: >
           A relational database system or database instance.
-  
+    
       - name: Schema
         description: >
           A database schema or owner. Use the exact schema name.
-  
+    
       - name: Table
         description: >
           A physical relational database table. Use schema-qualified canonical
           name such as APP.NTF_SCHEME_EVENT.
-  
+    
       - name: View
         description: >
           A database view or materialized view. Preserve its schema-qualified name.
-  
+    
       - name: Column
         description: >
           A table or view column. Canonical name must include schema, table and
           column, for example APP.NTF_SCHEME_EVENT.SCHEME_ID.
-  
+    
       - name: Package
         description: >
           An Oracle PL/SQL package. Use schema-qualified package name.
-  
+    
       - name: Procedure
         description: >
           A standalone procedure or a procedure declared inside an Oracle package.
-  
+    
       - name: Function
         description: >
           A standalone function or a function declared inside an Oracle package.
-  
+    
       - name: Trigger
         description: >
           An Oracle database trigger attached to a table, view or schema.
-  
+    
       - name: Constraint
         description: >
           A primary key, foreign key, unique, check or not-null constraint.
-  
+    
       - name: Index
         description: >
           A database index including unique and function-based indexes.
-  
+    
       - name: DictionaryDocument
         description: >
           A source data-dictionary document containing descriptions and documented
           database relationships.
-
+    
       edge_types:
         - name: Contains
           description: >
@@ -420,11 +439,14 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: graphiti-mcp
-          image: ghcr.io/thienpvt/graphiti-mcp:sha-5a51fa8528bdcaef79167b3a283ba361161cd592
+          image: ghcr.io/thienpvt/graphiti-mcp:sha-f689d3732dd2264c189a58ee00cd7b9921e3b5a6
           imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: graphiti-catalog-upsert
           env:
             - name: MAX_TOKENS
               value: '100000'
