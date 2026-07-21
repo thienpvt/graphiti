@@ -352,11 +352,16 @@ class CatalogNeo4jStore:
         expected_label: str,
         expected_properties: frozenset[str] | set[str] | None = None,
     ) -> bool:
-        """True only when named constraint has UNIQUENESS shape on exact props."""
+        """True only when named constraint has UNIQUENESS shape on exact props.
+
+        Accepts Neo4j 5 SHOW CONSTRAINTS type tokens including NODE_UNIQUENESS,
+        RELATIONSHIP_UNIQUENESS, and UNIQUENESS (substring match on UNIQUENESS/UNIQUE).
+        """
         name = str(row.get('name') or '')
         if name != expected_name:
             return False
         ctype = str(row.get('type') or '').upper()
+        # RELATIONSHIP_UNIQUENESS / NODE_UNIQUENESS / UNIQUENESS all contain UNIQUENESS.
         if 'UNIQUENESS' not in ctype and 'UNIQUE' not in ctype:
             return False
         etype = str(row.get('entityType') or '').upper()
@@ -436,30 +441,128 @@ class CatalogNeo4jStore:
         )
         return entity_ok and rel_ok and episodic_ok and mentions_ok and batch_ok
 
-    async def inspect_catalog_v2_schema_readiness(self, executor: Any) -> dict[str, bool]:
-        """Read-only Catalog-v2 uniqueness-constraint readiness (14 named constraints).
-
-        Reuses SHOW CONSTRAINTS presence checks for identity (5), prepared-plan (4),
-        and evidence/manifest (5). Never CREATE/DROP/ALTER; never sets process-local
-        ready flags (_schema_ready / _plan_schema_ready / _evidence_manifest_schema_ready).
-
-        Returns:
-            {
-                'identity': bool,            # 5 domain identity constraints
-                'plan': bool,                # 4 prepared-plan constraints
-                'evidence_manifest': bool,   # 5 evidence/manifest constraints
-                'ready': bool,               # all 14 present with exact shape
-            }
-        """
-        identity_ok = await self._identity_uniqueness_present(executor)
-        plan_ok = await self._plan_uniqueness_present(executor)
-        evidence_ok = await self._evidence_manifest_uniqueness_present(executor)
-        return {
-            'identity': identity_ok,
-            'plan': plan_ok,
-            'evidence_manifest': evidence_ok,
-            'ready': identity_ok and plan_ok and evidence_ok,
+    async def inspect_catalog_v2_schema_readiness(
+        self, executor: Any, *, include_counts: bool = False
+    ) -> dict[str, Any]:
+        """Inspect all 14 Catalog-v2 constraints with one read-only SHOW query."""
+        result = await self._run_schema_query(
+            executor,
+            """
+            SHOW CONSTRAINTS
+            YIELD name, type, entityType, labelsOrTypes, properties
+            RETURN name, type, entityType, labelsOrTypes, properties
+            """,
+        )
+        rows = self._all_from_execute_query_result(result)
+        groups = {
+            'identity': (
+                (CATALOG_ENTITY_IDENTITY_CONSTRAINT, 'NODE', 'Entity', {'uuid', 'group_id'}),
+                (
+                    CATALOG_RELATES_TO_IDENTITY_CONSTRAINT,
+                    'RELATIONSHIP',
+                    'RELATES_TO',
+                    {'uuid', 'group_id'},
+                ),
+                (CATALOG_EPISODIC_IDENTITY_CONSTRAINT, 'NODE', 'Episodic', {'uuid', 'group_id'}),
+                (
+                    CATALOG_MENTIONS_IDENTITY_CONSTRAINT,
+                    'RELATIONSHIP',
+                    'MENTIONS',
+                    {'uuid', 'group_id'},
+                ),
+                (
+                    CATALOG_BATCH_IDENTITY_CONSTRAINT,
+                    'NODE',
+                    'CatalogIngestBatch',
+                    {'uuid', 'group_id'},
+                ),
+            ),
+            'plan': (
+                (
+                    CATALOG_PREPARED_PLAN_IDENTITY_CONSTRAINT,
+                    'NODE',
+                    'CatalogPreparedPlan',
+                    {'uuid', 'group_id'},
+                ),
+                (
+                    CATALOG_PREPARED_PLAN_TOKEN_DIGEST_CONSTRAINT,
+                    'NODE',
+                    'CatalogPreparedPlan',
+                    {'token_digest'},
+                ),
+                (
+                    CATALOG_PREPARED_PLAN_CHUNK_IDENTITY_CONSTRAINT,
+                    'NODE',
+                    'CatalogPreparedPlanChunk',
+                    {'uuid', 'group_id'},
+                ),
+                (
+                    CATALOG_PREPARED_PLAN_CHUNK_INDEX_CONSTRAINT,
+                    'NODE',
+                    'CatalogPreparedPlanChunk',
+                    {'plan_uuid', 'group_id', 'chunk_index'},
+                ),
+            ),
+            'evidence_manifest': (
+                (
+                    CATALOG_EVIDENCE_LINK_IDENTITY_CONSTRAINT,
+                    'NODE',
+                    'CatalogEvidenceLink',
+                    {'uuid', 'group_id'},
+                ),
+                (
+                    CATALOG_EVIDENCE_LINK_KEY_CONSTRAINT,
+                    'NODE',
+                    'CatalogEvidenceLink',
+                    {'group_id', 'link_key'},
+                ),
+                (
+                    CATALOG_MANIFEST_IDENTITY_CONSTRAINT,
+                    'NODE',
+                    'CatalogBatchManifest',
+                    {'uuid', 'group_id'},
+                ),
+                (
+                    CATALOG_MANIFEST_CHUNK_IDENTITY_CONSTRAINT,
+                    'NODE',
+                    'CatalogBatchManifestChunk',
+                    {'uuid', 'group_id'},
+                ),
+                (
+                    CATALOG_MANIFEST_CHUNK_INDEX_CONSTRAINT,
+                    'NODE',
+                    'CatalogBatchManifestChunk',
+                    {'manifest_uuid', 'group_id', 'chunk_index'},
+                ),
+            ),
         }
+        missing = [
+            name
+            for specs in groups.values()
+            for name, entity_type, label, properties in specs
+            if not any(
+                self._constraint_row_matches(
+                    row,
+                    expected_name=name,
+                    expected_entity_type=entity_type,
+                    expected_label=label,
+                    expected_properties=properties,
+                )
+                for row in rows
+            )
+        ]
+        readiness = {
+            group: all(name not in missing for name, *_ in specs) for group, specs in groups.items()
+        }
+        expected = sum(len(specs) for specs in groups.values())
+        result: dict[str, Any] = {**readiness, 'ready': not missing}
+        if include_counts:
+            result.update(
+                expected=expected,
+                matched=expected - len(missing),
+                missing=missing,
+            )
+        return result
 
     def resolve_entity_label(self, entity_type: str) -> str:
         """Map allowlisted entity_type to a fixed Neo4j label (re-validate at builder)."""

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time setup script for PR triage labels.
-# Run from repo root: bash .github/scripts/setup-triage-labels.sh
+# Run from repo root: bash .github/script/setup-triage-labels.sh
 #
 # Requires: gh CLI authenticated with repo access
 
