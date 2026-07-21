@@ -583,7 +583,7 @@ def test_prohibited_tools_absent_on_catalog_paths():
     assert getattr_targets == set()
     assert indirect_calls == set()
     capability_calls = _call_names(capabilities)
-    assert 'build_catalog_capabilities' in capability_calls
+    assert 'build_catalog_capabilities_async' in capability_calls
     assert 'get_client' not in capability_calls
     assert not (PROHIBITED_ON_CATALOG_PATH & capability_calls)
 

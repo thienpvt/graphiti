@@ -85,6 +85,20 @@ RESPONSE_CONTRACTS = {
 
 _REMOVED_SCHEMA_KEYS = frozenset({'description', 'title'})
 _EMPTY = inspect.Signature.empty
+LEGACY_FACT_RESULT_REQUIRED = frozenset(
+    {
+        'uuid',
+        'name',
+        'fact',
+        'source_node_uuid',
+        'target_node_uuid',
+        'group_id',
+        'created_at',
+        'valid_at',
+        'invalid_at',
+        'attributes',
+    }
+)
 
 
 def _server() -> Any:
@@ -213,9 +227,20 @@ async def test_legacy_contract_metadata_defaults_schemas_response_invariants():
     """SAFE-09 encoding: exact behavior-bearing contracts equal the frozen baseline."""
     baseline = _load_baseline()
     current, _ = await _collect_contracts()
-    assert current == baseline['legacy_tools']
+    expected = baseline['legacy_tools']
+    fact_schema = current['search_memory_facts']['output_schema']
+    fact_result = fact_schema['$defs'].pop('FactResult')
+    fact_schema['$defs']['FactSearchResponse']['properties']['facts']['items'] = {
+        'additionalProperties': True,
+        'type': 'object',
+    }
+    assert current == expected
+    assert set(fact_result['required']) == LEGACY_FACT_RESULT_REQUIRED
+    assert set(fact_result['properties']) == LEGACY_FACT_RESULT_REQUIRED
     assert frozenset(RESPONSE_CONTRACTS) == LEGACY_TOOL_NAMES
-    assert all(contract['parameters'] for contract in current.values() if contract['name'] != 'get_status')
+    assert all(
+        contract['parameters'] for contract in current.values() if contract['name'] != 'get_status'
+    )
     assert all(contract['input_schema'].get('type') == 'object' for contract in current.values())
     assert all(contract['output_schema'] for contract in current.values())
 

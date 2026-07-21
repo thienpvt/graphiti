@@ -1,0 +1,35 @@
+server:
+  transport: "http"
+  host: "0.0.0.0"
+  port: 8000
+
+llm:
+  provider: "openai"
+  model: ${MODEL_NAME:gpt-4.1-mini}
+  providers:
+    openai:
+      api_key: ${OPENAI_API_KEY}
+      api_url: ${OPENAI_API_URL:https://api.openai.com/v1}
+
+embedder:
+  provider: "openai"
+  model: ${EMBEDDER_MODEL:text-embedding-3-small}
+  dimensions: ${EMBEDDER_DIMENSIONS:1536}
+  providers:
+    openai:
+      api_key: ${OPENAI_EMBEDDER_API_KEY}
+      api_url: ${OPENAI_EMBEDDER_API_URL:https://api.openai.com/v1}
+
+database:
+  provider: "neo4j"
+  providers:
+    neo4j:
+      uri: ${NEO4J_URI:bolt://neo4j:7687}
+      username: ${NEO4J_USER:neo4j}
+      password: ${NEO4J_PASSWORD}
+      database: ${NEO4J_DATABASE:neo4j}
+
+catalog_upsert:
+  enabled: true
+  reads_enabled: true
+  uuid_namespace: ${GRAPHITI_CATALOG_UUID_NAMESPACE}

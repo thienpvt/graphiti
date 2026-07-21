@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from enum import IntEnum
@@ -21,10 +22,18 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
 MCP_SRC = ROOT / 'mcp_server' / 'src'
-if str(MCP_SRC) not in sys.path:
-    sys.path.insert(0, str(MCP_SRC))
+for import_path in (SCRIPT_DIR, MCP_SRC):
+    if str(import_path) not in sys.path:
+        sys.path.insert(0, str(import_path))
 
+from catalog_canary_manifest_contract import (  # pyright: ignore[reportMissingImports]  # noqa: E402
+    EXECUTION_SURFACE_COMPOSE,
+    LIVE_MANIFEST_FIELDS,
+    SOURCE_DIGEST_ORIGIN_HOST,
+    WAIVER_OPENAI,
+)
 from mcp import ClientSession  # noqa: E402
 from mcp.client.streamable_http import streamable_http_client  # noqa: E402
 from models.catalog_batch import NestedProvenancePayload, UpsertCatalogBatchRequest  # noqa: E402
@@ -155,32 +164,12 @@ REPORT_SCHEMA_VERSION = 'phase6-canary-report-v1'
 SOURCE_AUTHORITY_PATHS = (
     'scripts/run_catalog_canary_batch.py',
     'scripts/build_catalog_canary_requests.py',
+    'scripts/catalog_canary_manifest_contract.py',
+    'scripts/run_catalog_canary_launcher.py',
+    'scripts/materialize_catalog_local_config.py',
     'graphiti_mcp_phase6_canary_agent_prompt_en.md',
     'mcp_server/tests/fixtures/accept_tab_sanitized.json',
     '.planning/phases/05-verification-security-compatibility-and-migration-docs/05-PROOF-PACKAGE.json',
-)
-LIVE_MANIFEST_FIELDS = frozenset(
-    {
-        'artifact_schema_version',
-        'profile',
-        'run_id',
-        'group_id',
-        'control_group_id',
-        'batch_id',
-        'identity_schema_version',
-        'system_key',
-        'fixture',
-        'fixture_sha256',
-        'fixture_lf_sha256',
-        'catalog_sha256',
-        'request_sha256',
-        'artifact_sha256',
-        'payload',
-        'counts',
-        'builder',
-        'builder_sha256',
-        'canary_executed',
-    }
 )
 APPROVED_FIXTURE_RAW_SHA256 = 'db498f2997803cb09fff15283a523f66aabaf57d54139804484cffa9033de53c'
 APPROVED_FIXTURE_LF_SHA256 = '145f38edb7245c448badc7598e2e0733b4c72c16f470909284c6e7d955bae922'
@@ -723,7 +712,14 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        for attempt in range(8):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if attempt == 7:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
         temporary = None
         try:
             directory_fd = os.open(path.parent, os.O_RDONLY)
@@ -1076,26 +1072,18 @@ def _validate_fact_search(
     *,
     group_id: str,
     expected_uuid: str,
+    source_node_uuid: str | None = None,
+    target_node_uuid: str | None = None,
 ) -> None:
-    facts = structured.get('facts')
-    if not isinstance(facts, list) or not facts:
-        raise RunnerError('fact_search_failed', 'fact retrieval gate returned no facts')
-    for fact in facts:
-        if not isinstance(fact, dict) or fact.get('group_id') != group_id:
-            continue
-        attributes_raw = fact.get('attributes')
-        attributes: dict[str, Any] = attributes_raw if isinstance(attributes_raw, dict) else {}
-        exact_edge_key = (
-            fact.get('edge_key') == edge.edge_key or attributes.get('edge_key') == edge.edge_key
-        )
-        if (
-            fact.get('uuid') == expected_uuid
-            and exact_edge_key
-            and fact.get('name') == edge.edge_type
-            and fact.get('fact') == edge.fact
-        ):
-            return
-    raise RunnerError('fact_search_failed', 'fact retrieval gate did not return expected edge')
+    _validate_fact_search_strict(
+        structured,
+        group_id=group_id,
+        expected_uuid=expected_uuid,
+        edge_type=edge.edge_type,
+        edge_key=edge.edge_key,
+        source_node_uuid=source_node_uuid,
+        target_node_uuid=target_node_uuid,
+    )
 
 
 def _validate_manifest_inventory(
@@ -1458,6 +1446,12 @@ async def run_post_commit_gates(
         representative_edge,
         group_id=request.group_id,
         expected_uuid=expected_edge_uuid,
+        source_node_uuid=manifest_entities[
+            (representative_edge.source_entity_type, representative_edge.source_graph_key)
+        ],
+        target_node_uuid=manifest_entities[
+            (representative_edge.target_entity_type, representative_edge.target_graph_key)
+        ],
     )
     summaries['search_memory_facts'] = {'found': True, 'uuid': expected_edge_uuid}
     return summaries
@@ -2654,98 +2648,74 @@ def validate_report_ledger_metadata(report: dict[str, Any], ledger_meta: dict[st
 # Host-side execution boundary: exact docker compose form, fixed files/services.
 COMPOSE_BASE_FILE = 'mcp_server/docker/docker-compose-neo4j.yml'
 COMPOSE_OVERRIDE_FILE = 'mcp_server/docker/docker-compose-neo4j.catalog-local.override.yml'
+COMPOSE_PROJECT_NAME = 'graphiti-catalog-local'
 REQUIRED_COMPOSE_FILES = (COMPOSE_BASE_FILE, COMPOSE_OVERRIDE_FILE)
-ALLOWED_COMPOSE_SERVICES = frozenset({'neo4j', 'graphiti-mcp'})
-ALLOWED_COMPOSE_SUBCOMMANDS = frozenset({'up', 'ps', 'logs', 'config', 'down'})
-ALLOWED_COMPOSE_SERVICE_FLAGS = frozenset({'-d', '--detach', '--no-color', '--timestamps'})
+COMPOSE_GENERATED_CONFIG = 'mcp_server/config/config-docker-neo4j.catalog-local.yaml'
+ALLOWED_COMPOSE_SUBCOMMANDS = frozenset({'up', 'ps', 'logs'})
 HOST_EXECUTION_AUTHORITY_PATHS = (
     COMPOSE_BASE_FILE,
     COMPOSE_OVERRIDE_FILE,
-    'mcp_server/config/config-docker-neo4j.yaml',
+    COMPOSE_GENERATED_CONFIG,
 )
 
 
 def validate_execution_command(argv: list[str] | str) -> dict[str, Any]:
-    """Fail-closed pure Docker/Compose policy. Never launches Docker.
-
-    Exact form only: docker compose -f base -f override <subcommand> [services...].
-    Rejects legacy docker-compose, standalone docker, unapproved files/services,
-    global/shell options, and in-container source digesting.
-    """
-    if isinstance(argv, str):
-        raise RunnerError(
-            'execution_boundary_violation', 'shell command strings are forbidden; pass argv list'
-        )
-    if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
-        raise RunnerError(
-            'execution_boundary_violation', 'command argv must be a non-empty str list'
-        )
-    tokens = list(argv)
-    if len(tokens) < 2 or tokens[0] != 'docker' or tokens[1] != 'compose':
-        raise RunnerError(
-            'execution_boundary_violation',
-            'only exact docker compose invocations are permitted',
-        )
-    rest = tokens[2:]
-    files: list[str] = []
-    services: list[str] = []
-    subcommand: str | None = None
-    i = 0
-    while i < len(rest):
-        tok = rest[i]
-        if tok in {'-f', '--file'}:
-            if i + 1 >= len(rest):
-                raise RunnerError('execution_boundary_violation', 'compose file flag missing value')
-            files.append(rest[i + 1].replace('\\', '/'))
-            i += 2
-            continue
-        if tok.startswith('-'):
-            raise RunnerError(
-                'execution_boundary_violation',
-                f'forbidden compose global option {tok}',
-            )
-        subcommand = tok
-        service_tokens = rest[i + 1 :]
-        break
-    else:
-        service_tokens = []
-    if subcommand is None:
-        raise RunnerError('execution_boundary_violation', 'compose subcommand required')
+    """Accept only fixed catalog-local Compose action grammar."""
+    if isinstance(argv, str) or not isinstance(argv, list) or not argv:
+        raise RunnerError('execution_boundary_violation', 'command argv must be a non-empty list')
+    if not all(isinstance(token, str) and token for token in argv):
+        raise RunnerError('execution_boundary_violation', 'command argv contains invalid tokens')
+    prefix = [
+        'docker',
+        'compose',
+        '--project-name',
+        COMPOSE_PROJECT_NAME,
+        '-f',
+        COMPOSE_BASE_FILE,
+        '-f',
+        COMPOSE_OVERRIDE_FILE,
+    ]
+    if argv[: len(prefix)] != prefix or len(argv) == len(prefix):
+        raise RunnerError('execution_boundary_violation', 'compose authority prefix is invalid')
+    subcommand = argv[len(prefix)]
     if subcommand not in ALLOWED_COMPOSE_SUBCOMMANDS:
-        raise RunnerError(
-            'execution_boundary_violation',
-            f'compose subcommand {subcommand} is not allowlisted',
-        )
-    if tuple(files) != REQUIRED_COMPOSE_FILES:
-        raise RunnerError(
-            'execution_boundary_violation',
-            'compose files must be exact base then override in order',
-        )
-    for tok in service_tokens:
-        if tok.startswith('-'):
-            if tok not in ALLOWED_COMPOSE_SERVICE_FLAGS:
-                raise RunnerError(
-                    'execution_boundary_violation', f'forbidden compose service flag {tok}'
-                )
-            continue
-        if tok not in ALLOWED_COMPOSE_SERVICES:
-            raise RunnerError(
-                'execution_boundary_violation',
-                f'unapproved compose service {tok}',
-            )
-        services.append(tok)
-    joined = ' '.join(tokens).lower()
-    for needle in ('sha256sum', 'md5sum', 'digest', 'cat /app', 'python -c', 'bash -c', 'sh -c'):
-        if needle in joined:
-            raise RunnerError(
-                'execution_boundary_violation', 'in-container source digesting is forbidden'
-            )
+        raise RunnerError('execution_boundary_violation', 'compose subcommand is not allowlisted')
+    suffix = argv[len(prefix) + 1 :]
+    expected = {
+        'up': ['--no-deps', '--no-build', '--pull', 'never', '-d', 'graphiti-mcp'],
+        'ps': ['graphiti-mcp'],
+        'logs': ['--no-color', 'graphiti-mcp'],
+    }[subcommand]
+    if suffix != expected:
+        raise RunnerError('execution_boundary_violation', 'compose action arguments are invalid')
     return {
         'ok': True,
         'subcommand': subcommand,
-        'files': list(files),
-        'services': services,
+        'files': list(REQUIRED_COMPOSE_FILES),
+        'services': ['graphiti-mcp'] if 'graphiti-mcp' in suffix else [],
     }
+
+
+def compose_argv(action: str) -> list[str]:
+    suffix = {
+        'up': ['--no-deps', '--no-build', '--pull', 'never', '-d', 'graphiti-mcp'],
+        'ps': ['graphiti-mcp'],
+        'logs': ['--no-color', 'graphiti-mcp'],
+    }.get(action)
+    if suffix is None:
+        raise RunnerError('execution_boundary_violation', 'compose action is not allowlisted')
+    return [
+        'docker',
+        'compose',
+        '--project-name',
+        COMPOSE_PROJECT_NAME,
+        '-f',
+        COMPOSE_BASE_FILE,
+        '-f',
+        COMPOSE_OVERRIDE_FILE,
+        action,
+        *suffix,
+    ]
 
 
 EXECUTION_DIGEST_METHOD = 'raw-byte-sha256'
@@ -2908,6 +2878,45 @@ def validate_live_operator_confirmation(
         raise RunnerError('control_group_mismatch', 'control group must differ from canary group')
 
 
+def preflight_live_manifest(
+    manifest_path: Path,
+    *,
+    confirm_run_id: str,
+    confirm_group_id: str,
+    confirm_control_group_id: str,
+    confirm_batch_id: str,
+    allow_unknown_embedding_provider: str | None,
+) -> dict[str, Any]:
+    """Validate immutable live authority before transport open or local writes."""
+    manifest = strict_json_load(manifest_path)
+    if not isinstance(manifest, dict):
+        raise RunnerError('invalid_live_manifest', 'live manifest must be an object')
+    if set(manifest) != LIVE_MANIFEST_FIELDS:
+        raise RunnerError('live_manifest_mismatch', 'live manifest field set is invalid')
+    if (
+        manifest.get('source_digest_origin') != SOURCE_DIGEST_ORIGIN_HOST
+        or manifest.get('execution_surface') != EXECUTION_SURFACE_COMPOSE
+        or manifest.get('allow_unknown_embedding_provider') not in (None, WAIVER_OPENAI)
+    ):
+        raise RunnerError('live_manifest_mismatch', 'live manifest semantics are invalid')
+    if confirm_run_id != manifest.get('run_id'):
+        raise RunnerError(
+            'operator_confirmation_mismatch', 'run_id confirmation does not match manifest'
+        )
+    if manifest['allow_unknown_embedding_provider'] != allow_unknown_embedding_provider:
+        raise RunnerError(
+            'operator_confirmation_mismatch',
+            'embedding waiver does not match immutable manifest',
+        )
+    validate_live_operator_confirmation(
+        manifest,
+        group_id=confirm_group_id,
+        control_group_id=confirm_control_group_id,
+        batch_id=confirm_batch_id,
+    )
+    return manifest
+
+
 def _protected_roots(payload_path: Path, manifest_path: Path) -> tuple[Path, ...]:
     roots = [
         HARDENED_ARTIFACT_DIR.resolve(),
@@ -2980,6 +2989,9 @@ def validate_live_artifact(
     if (
         fixture_path != approved_fixture
         or manifest['profile'] != 'live-canary'
+        or manifest['source_digest_origin'] != SOURCE_DIGEST_ORIGIN_HOST
+        or manifest['execution_surface'] != EXECUTION_SURFACE_COMPOSE
+        or manifest['allow_unknown_embedding_provider'] not in (None, WAIVER_OPENAI)
         or manifest['artifact_schema_version'] != LIVE_ARTIFACT_SCHEMA_VERSION
         or manifest['payload'] != LIVE_PAYLOAD_NAME
         or manifest['artifact_sha256'] != sha256_bytes(payload_bytes)
@@ -3782,14 +3794,19 @@ async def run_live_canary(
     replay = 'skipped'
     plan_token: str | None = None
     commit_started = False
-    manifest_hint: dict[str, Any] = {}
+    manifest_hint = preflight_live_manifest(
+        manifest_path,
+        confirm_run_id=confirm_run_id,
+        confirm_group_id=confirm_group_id,
+        confirm_control_group_id=confirm_control_group_id,
+        confirm_batch_id=confirm_batch_id,
+        allow_unknown_embedding_provider=allow_unknown_embedding_provider,
+    )
     result_dir = (
         validate_result_directory(output_dir, payload_path, manifest_path) if output_dir else None
     )
-    if result_dir is not None:
-        if result_dir.exists():
-            raise RunnerError('result_directory_used', 'result directory must not exist')
-        result_dir.mkdir(parents=True, exist_ok=False)
+    if result_dir is not None and result_dir.exists():
+        raise RunnerError('result_directory_used', 'result directory must not exist')
 
     async def call(stage: str, name: str, body: dict[str, Any]) -> dict[str, Any]:
         return await _ledger_call(transport, ledger, stage, name, body)
@@ -3823,19 +3840,6 @@ async def run_live_canary(
         return value
 
     try:
-        manifest_hint = strict_json_load(manifest_path)
-        if not isinstance(manifest_hint, dict):
-            raise RunnerError('invalid_live_manifest', 'live manifest must be an object')
-        if confirm_run_id != manifest_hint.get('run_id'):
-            raise RunnerError(
-                'operator_confirmation_mismatch', 'run_id confirmation does not match manifest'
-            )
-        validate_live_operator_confirmation(
-            manifest_hint,
-            group_id=confirm_group_id,
-            control_group_id=confirm_control_group_id,
-            batch_id=confirm_batch_id,
-        )
         for value in (image_fingerprint, config_fingerprint):
             if value is not None and SHA256_RE.fullmatch(value) is None:
                 raise RunnerError('source_attestation_invalid', 'optional fingerprint is invalid')
@@ -3865,6 +3869,8 @@ async def run_live_canary(
                 )
         attestation = {**attestation, **execution_attestation}
         gates['0'] = 'pass'
+        if result_dir is not None:
+            result_dir.mkdir(parents=True, exist_ok=False)
 
         tools = await call('PREFLIGHT', 'list_tools', {})
         names = tools.get('names')
@@ -3920,8 +3926,14 @@ async def run_live_canary(
             raise RunnerError(
                 'capability_preflight_failed', 'runtime catalog capabilities are incomplete'
             )
+        raw_embeddings = dict(capabilities.embeddings or {})
+        flags['embedding_policy'] = {
+            'observed_provider': raw_embeddings.get('provider'),
+            'observed_readiness': raw_embeddings.get('ready'),
+            'waiver_applied': False,
+        }
         embedding_policy = evaluate_embedding_readiness(
-            dict(capabilities.embeddings or {}),
+            raw_embeddings,
             allow_unknown_embedding_provider=allow_unknown_embedding_provider,
         )
         if capabilities_raw != raw_snapshot or canonical_sha256(capabilities_raw) != capability_sha:
@@ -3991,6 +4003,8 @@ async def run_live_canary(
         prepared, plan_token = _validate_live_prepare_overlap(
             prepared_raw, request, request_sha, dry
         )
+        # Validated prepare is functional embedding proof; later isolation failure cannot erase it.
+        flags['prepare_functional_embedding_proof'] = True
         after_prepare_uuid = await absence(
             request.group_id,
             request.batch_id,
@@ -3999,8 +4013,6 @@ async def run_live_canary(
         )
         if after_prepare_uuid != batch_uuid:
             raise RunnerError('batch_uuid_mismatch', 'post-prepare batch UUID differs')
-        # Successful prepare is functional embedding proof; prepare failure never reaches commit.
-        flags['prepare_functional_embedding_proof'] = True
         machine.advance(LiveStage.DRY_RUN_PASSED, LiveStage.PREPARE_PASSED)
         gates['5'] = 'pass'
 
@@ -4341,6 +4353,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 async def execute_cli(args: argparse.Namespace) -> dict[str, Any]:
     if args.mode != 'live-canary':
         return await execute(args)
+    # Immutable operator authority must pass before any MCP transport open or local writes.
+    preflight_live_manifest(
+        args.manifest.resolve(),
+        confirm_run_id=args.run_id,
+        confirm_group_id=args.group_id,
+        confirm_control_group_id=args.control_group_id,
+        confirm_batch_id=args.batch_id,
+        allow_unknown_embedding_provider=args.allow_unknown_embedding_provider,
+    )
     # Gate 0 before any MCP transport open.
     attestation = attest_local_source(
         expected_head=args.source_head,

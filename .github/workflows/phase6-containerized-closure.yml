@@ -1,0 +1,89 @@
+name: Phase 6 Containerized Closure
+
+on:
+  push:
+    branches: [v1.1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase6-containerized-closure-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frozen-offline:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.10'
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          version: '0.8.15'
+          enable-cache: false
+      - name: Install frozen MCP environment
+        run: uv sync --project mcp_server --frozen --all-groups
+      - name: Record tool versions
+        run: |
+          python --version
+          uv --version
+          uv run --project mcp_server --frozen pytest --version
+          uv run --project mcp_server --frozen ruff --version
+          uv run --project mcp_server --frozen pyright --version
+      - name: Compile changed Python
+        run: |
+          uv run --project mcp_server --frozen python -B - <<'PY'
+          from pathlib import Path
+          paths = [
+              'mcp_server/tests/test_catalog_canary_scripts.py',
+              'mcp_server/tests/test_catalog_schema_bootstrap.py',
+              'mcp_server/tests/test_catalog_security_matrix.py',
+              'mcp_server/tests/test_formatting.py',
+              'mcp_server/tests/test_legacy_mcp_contract_compatibility.py',
+              'scripts/build_catalog_canary_requests.py',
+              'scripts/catalog_canary_manifest_contract.py',
+              'scripts/materialize_catalog_local_config.py',
+              'scripts/run_catalog_canary_batch.py',
+              'scripts/run_catalog_canary_launcher.py',
+              'tests/script/run_catalog_canary_batch.py',
+          ]
+          for path in paths:
+              compile(Path(path).read_bytes(), path, 'exec')
+          print(f'compiled {len(paths)} files')
+          PY
+      - name: Focused formatting and bootstrap tests
+        run: uv run --project mcp_server --frozen python -B -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_formatting.py mcp_server/tests/test_catalog_schema_bootstrap.py -q --tb=line -p no:cacheprovider
+      - name: Phase 6 offline regressions
+        run: uv run --project mcp_server --frozen python -B -m pytest -c mcp_server/pytest.ini tests/script/build_catalog_canary_requests.py tests/script/run_catalog_canary_batch.py mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_canary_review_regressions.py -q --tb=line -p no:cacheprovider
+      - name: Phase 5 offline regressions
+        run: uv run --project mcp_server --frozen python -B -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_canary_review_regressions.py mcp_server/tests/test_catalog_service.py mcp_server/tests/test_catalog_capabilities.py mcp_server/tests/test_catalog_gates.py mcp_server/tests/test_catalog_commit_recovery.py mcp_server/tests/test_catalog_concurrency.py mcp_server/tests/test_catalog_store_unit.py mcp_server/tests/test_legacy_mcp_contract_compatibility.py -q --tb=line -p no:cacheprovider
+      - name: Combined remediation selection
+        env:
+          CONFIG_PATH: mcp_server/config/config-falkordb.yaml
+        run: uv run --project mcp_server --frozen python -B -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_configuration.py mcp_server/tests/test_catalog_store_unit.py mcp_server/tests/test_formatting.py mcp_server/tests/test_catalog_schema_bootstrap.py mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_canary_review_regressions.py tests/script/build_catalog_canary_requests.py tests/script/run_catalog_canary_batch.py -q --tb=line -p no:cacheprovider
+      - name: Full offline union
+        run: uv run --project mcp_server --frozen python -B -m pytest -c mcp_server/pytest.ini mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_canary_review_regressions.py mcp_server/tests/test_catalog_service.py mcp_server/tests/test_catalog_capabilities.py mcp_server/tests/test_catalog_gates.py mcp_server/tests/test_catalog_commit_recovery.py mcp_server/tests/test_catalog_concurrency.py mcp_server/tests/test_catalog_store_unit.py mcp_server/tests/test_legacy_mcp_contract_compatibility.py tests/script/build_catalog_canary_requests.py tests/script/run_catalog_canary_batch.py mcp_server/tests/test_catalog_schema_bootstrap.py mcp_server/tests/test_formatting.py -q --tb=line -p no:cacheprovider
+      - name: Golden hashes 5 of 5
+        run: uv run --project mcp_server --frozen python -B -m pytest -c mcp_server/pytest.ini tests/script/build_catalog_canary_requests.py::test_golden_profile_is_byte_identical tests/script/build_catalog_canary_requests.py::test_five_golden_pins_and_default_never_overwrites mcp_server/tests/test_catalog_canary_scripts.py::test_hardened_manifest_schema_strict -q --tb=line -p no:cacheprovider
+      - name: Ruff
+        run: |
+          uv run --project mcp_server --frozen ruff check mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_schema_bootstrap.py mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_formatting.py mcp_server/tests/test_legacy_mcp_contract_compatibility.py scripts/build_catalog_canary_requests.py scripts/catalog_canary_manifest_contract.py scripts/materialize_catalog_local_config.py scripts/run_catalog_canary_batch.py scripts/run_catalog_canary_launcher.py tests/script/run_catalog_canary_batch.py
+          uv run --project mcp_server --frozen ruff format --check mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_schema_bootstrap.py mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_formatting.py mcp_server/tests/test_legacy_mcp_contract_compatibility.py scripts/build_catalog_canary_requests.py scripts/catalog_canary_manifest_contract.py scripts/materialize_catalog_local_config.py scripts/run_catalog_canary_batch.py scripts/run_catalog_canary_launcher.py tests/script/run_catalog_canary_batch.py
+      - name: Pyright
+        run: uv run --project mcp_server --frozen pyright --project mcp_server/pyproject.toml mcp_server/tests/test_catalog_canary_scripts.py mcp_server/tests/test_catalog_schema_bootstrap.py mcp_server/tests/test_catalog_security_matrix.py mcp_server/tests/test_formatting.py mcp_server/tests/test_legacy_mcp_contract_compatibility.py scripts/build_catalog_canary_requests.py scripts/catalog_canary_manifest_contract.py scripts/materialize_catalog_local_config.py scripts/run_catalog_canary_batch.py scripts/run_catalog_canary_launcher.py tests/script/run_catalog_canary_batch.py
+      - name: Whitespace and exclusion proof
+        run: |
+          git diff --check HEAD^
+          test ! -e mcp_server/config/config-docker-neo4j.catalog-local.yaml
+          test ! -e mcp_server/.runtime-evidence
+          test ! -e .env
+          test ! -e mcp_server/.env
