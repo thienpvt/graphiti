@@ -20,6 +20,15 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.catalog_authority_hashing import (  # noqa: E402  # pyright: ignore[reportMissingImports]
+    canonical_text_bytes_lf,
+    sha256_file_canonical_text,
+)
+
 SCHEMA_VERSION = 'phase2-gate-results.v1'
 PHASE_DIR_REL = Path(
     '.planning/phases/02-topology-authority-evidence-contract-hashes-and-capabilities'
@@ -182,8 +191,8 @@ def sha256_file(path: Path) -> str:
 
 
 def sha256_file_lf(path: Path) -> str:
-    data = path.read_bytes().replace(b'\r\n', b'\n').replace(b'\r', b'\n')
-    return hashlib.sha256(data).hexdigest()
+    """Compatibility name for strict UTF-8 canonical LF text authority."""
+    return sha256_file_canonical_text(path)
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -191,12 +200,8 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def normalize_newlines_lf(data: bytes) -> bytes:
-    """Normalize CRLF and lone CR to LF for cross-platform digest stability.
-
-    Windows autocrlf / checkout-dependent line endings must not change the
-    semantic identity of the raw edge probe. Mirrors Phase 1 sha256_file_lf.
-    """
-    return data.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+    """Compatibility name for strict UTF-8 canonical LF text bytes."""
+    return canonical_text_bytes_lf(data)
 
 
 def sha256_bytes_lf(data: bytes) -> str:
@@ -383,16 +388,19 @@ def check_safety_no_probe(root: Path) -> None:
         if not path.is_file():
             raise AssertionError(f'missing {rel}')
         src = path.read_text(encoding='utf-8')
-        if FORBIDDEN_GROUP in src and 'FORBIDDEN_GROUP' not in src and 'forbidden' not in src.lower():
+        if (
+            FORBIDDEN_GROUP in src
+            and 'FORBIDDEN_GROUP' not in src
+            and 'forbidden' not in src.lower()
+        ):
             # Allow constant documentation of forbidden group.
             pass
-        if (
-            ALLOWED_TEST_GROUP not in src
-            and rel.endswith('catalog_phase2_gate_runner.py')
-        ):
+        if ALLOWED_TEST_GROUP not in src and rel.endswith('catalog_phase2_gate_runner.py'):
             raise AssertionError('allowed test group constant missing from runner')
 
-    runner_src = (root / 'mcp_server/tests/catalog_phase2_gate_runner.py').read_text(encoding='utf-8')
+    runner_src = (root / 'mcp_server/tests/catalog_phase2_gate_runner.py').read_text(
+        encoding='utf-8'
+    )
     for line in runner_src.splitlines():
         if (line.startswith('import ') or line.startswith('from ')) and (
             'test_catalog_neo4j_int' in line
@@ -973,13 +981,13 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
         for s in specs:
             r = by_id.get(s['id'])
             if r is None:
-                errors.append(f"missing result for {s['id']}")
+                errors.append(f'missing result for {s["id"]}')
                 continue
             for key in ('status', 'exit_code', 'expected_exit', 'argv'):
                 if key not in r:
-                    errors.append(f"{s['id']} missing {key}")
+                    errors.append(f'{s["id"]} missing {key}')
             if r.get('status') not in ('pass', 'fail', 'skip'):
-                errors.append(f"{s['id']} bad status")
+                errors.append(f'{s["id"]} bad status')
 
     sentinel = raw.get('sentinel') or {}
     if not sentinel.get('pass') or sentinel.get('exit_code', 0) == 0:
@@ -1004,7 +1012,7 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
     )
     if raw.get('local_gate_pass') != recomputed:
         errors.append(
-            f"local_gate_pass mismatch ledger={raw.get('local_gate_pass')} recomputed={recomputed}"
+            f'local_gate_pass mismatch ledger={raw.get("local_gate_pass")} recomputed={recomputed}'
         )
 
     safety = derive_safety_ledger(results if isinstance(results, list) else [])
@@ -1013,17 +1021,18 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
     ready = derive_ready_for_phase_3a(recomputed, safety)
     if raw.get('ready_for_phase_3a') != ready:
         errors.append(
-            f"ready_for_phase_3a mismatch ledger={raw.get('ready_for_phase_3a')} recomputed={ready}"
+            f'ready_for_phase_3a mismatch ledger={raw.get("ready_for_phase_3a")} recomputed={ready}'
         )
-    if raw.get('no_new_store_or_control_plane_write_path') != safety[
-        'no_new_store_or_control_plane_write_path'
-    ]:
+    if (
+        raw.get('no_new_store_or_control_plane_write_path')
+        != safety['no_new_store_or_control_plane_write_path']
+    ):
         errors.append('no_new_store_or_control_plane_write_path mismatch')
 
     if isinstance(results, list):
         for r in results:
             if r.get('mandatory', True) and r.get('status') == 'pending':
-                errors.append(f"mandatory pending: {r.get('id')}")
+                errors.append(f'mandatory pending: {r.get("id")}')
 
     return {
         'ok': not errors,
@@ -1037,7 +1046,7 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
 
 def _set_frontmatter_bool(text: str, key: str, value: bool) -> str:
     pat = re.compile(rf'(?m)^{re.escape(key)}:\s*(true|false)\s*$')
-    repl = f"{key}: {'true' if value else 'false'}"
+    repl = f'{key}: {"true" if value else "false"}'
     if pat.search(text):
         return pat.sub(repl, text, count=1)
     return text
@@ -1069,7 +1078,7 @@ def apply_gate(
     root = root.resolve()
     verification = verify_ledger(root, ledger_path)
     if not verification['ok']:
-        raise RuntimeError(f"ledger verification failed: {verification['errors']}")
+        raise RuntimeError(f'ledger verification failed: {verification["errors"]}')
 
     ledger = verification['ledger']
     local_pass = bool(ledger.get('local_gate_pass')) and verification['recomputed_local_gate_pass']
@@ -1083,9 +1092,7 @@ def apply_gate(
         val_text = val_path.read_text(encoding='utf-8')
         val_text = _set_frontmatter_bool(val_text, 'nyquist_compliant', nyquist)
         val_text = _set_frontmatter_bool(val_text, 'wave_0_complete', nyquist)
-        val_text = _set_frontmatter_value(
-            val_text, 'status', 'validated' if nyquist else 'draft'
-        )
+        val_text = _set_frontmatter_value(val_text, 'status', 'validated' if nyquist else 'draft')
         # Mark task rows from pending → green/fail based on local pass.
         status_token = 'green' if local_pass else 'fail'
         val_text = re.sub(
@@ -1095,9 +1102,18 @@ def apply_gate(
         )
         val_text = val_text.replace('❌ W0', '✅' if local_pass else '❌')
         if local_pass:
-            val_text = val_text.replace('- [ ] `mcp_server/tests/test_catalog_topology.py`', '- [x] `mcp_server/tests/test_catalog_topology.py`')
-            val_text = val_text.replace('- [ ] `mcp_server/tests/test_catalog_evidence.py`', '- [x] `mcp_server/tests/test_catalog_evidence.py`')
-            val_text = val_text.replace('- [ ] `mcp_server/tests/test_catalog_hash.py`', '- [x] `mcp_server/tests/test_catalog_hash.py`')
+            val_text = val_text.replace(
+                '- [ ] `mcp_server/tests/test_catalog_topology.py`',
+                '- [x] `mcp_server/tests/test_catalog_topology.py`',
+            )
+            val_text = val_text.replace(
+                '- [ ] `mcp_server/tests/test_catalog_evidence.py`',
+                '- [x] `mcp_server/tests/test_catalog_evidence.py`',
+            )
+            val_text = val_text.replace(
+                '- [ ] `mcp_server/tests/test_catalog_hash.py`',
+                '- [x] `mcp_server/tests/test_catalog_hash.py`',
+            )
             val_text = val_text.replace(
                 '- [ ] `mcp_server/tests/test_catalog_capabilities.py`',
                 '- [x] `mcp_server/tests/test_catalog_capabilities.py`',
@@ -1119,7 +1135,9 @@ def apply_gate(
                 '- [ ] `nyquist_compliant: true` set only after evidence exists.',
             ):
                 val_text = val_text.replace(line, line.replace('- [ ]', '- [x]', 1))
-            val_text = val_text.replace('**Approval:** pending', '**Approval:** local gate green via 02-GATE-RESULTS.json')
+            val_text = val_text.replace(
+                '**Approval:** pending', '**Approval:** local gate green via 02-GATE-RESULTS.json'
+            )
         write_text_lf(val_path, val_text)
 
     gate_path = root / PHASE_DIR_REL / '02-PHASE2-GATE.md'

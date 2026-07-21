@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import hashlib
 import importlib.util
 import json
 import socket
@@ -39,41 +38,41 @@ PHASE_DIR = (
     ROOT / '.planning' / 'phases' / '05-verification-security-compatibility-and-migration-docs'
 )
 
-# Frozen pre-Phase-5 historical digests (D-05, D-11). Scripts/tests may change;
-# historical artifacts must not.
+# Canonical LF text authority from committed Git blobs (D-05, D-11).
+# Raw checkout bytes are not authority and may differ under core.autocrlf.
 HISTORICAL_DIGESTS: dict[str, str] = {
     'catalog/CANARY_V2_SUMMARY.md': (
-        '03e8c4bc31e6cbeeb32e4aa2d9cc74dd07c840206b81ea4055ea53e0f3855686'
+        '4221f04488eeb77810e545b62aa49d7271ec6b5ac0bf4ad6dafb1397659ba0d8'
     ),
     'catalog/catalog.json.graphiti-canary-v2-state.json': (
-        'b367e7f395782d13e72671e1b66d36b24432cb2c1b48c7fa45974d232039ace4'
+        '2b1af22938104c3af84b1a9eefc602b7e7149e52de177dc1fffccee426f24b9d'
     ),
     'catalog/canary-v2-requests/accept-tab.commit.response.json': (
-        '83ac93da85957c5576c745a4db2e64d6e6ee8e99a2ac6c517e17b3f3e1ccc4f4'
+        '8c3debd9c2a735094ea3a559fd0f4233cd405e872931216411c326a4f59c5e4a'
     ),
     'catalog/canary-v2-requests/accept-tab.dry-run.response.json': (
-        '4767473f3ace434ae23bb69687261da8041f430e5ba1908f0ca62cd496fab139'
+        '5d4f17ac588ae782b942d780e374f15be98943775673f23d759ef9c6e0ff1f60'
     ),
     'catalog/canary-v2-requests/accept-tab.payload.json': (
-        '629decce0f7927d4de542b0cf2b11b12f45872c1d5e4771fd00c900091f3ba48'
+        'a89e3427a3b1ceec10f36d361fcdbe9e7e30243db4ff51ca59848dfb33968a33'
     ),
     'catalog/canary-v2-requests/documented-foreign-keys.payload.json': (
-        '2da07e6a9f9a89d5cc6d5352007a3de3401e492ec66175cf480a501fc9741035'
+        '6a02bc60ab29b88633e7614d3687c95678375a941e59c8bbcc4e536df13d801e'
     ),
     'catalog/canary-v2-requests/form-cfg.payload.json': (
-        '25ca477a8f4180baa00d0b4e60b772b1663552ea3d92decac3d276cdcc2ea11b'
+        '5ccc52d84909cf436ade1cffae626e2d667834dc8b96fb4efa73d8f658315b53'
     ),
     'catalog/canary-v2-requests/manifest.json': (
-        '039063d7adfe774564b8a8009af0868f96bb570fc1d74b4236e891d89506763d'
+        'b4cfa609cd436e9ae7b181f985fe1c85cdac2a4f1f957076e3fffd1aff68c4d4'
     ),
     'catalog/canary-v2-requests/pre-auth-txn-type.payload.json': (
-        '96150b1e1f10d5b5183f36aecb846f357af6aecd066e7d2d29f84c9872d1bb0b'
+        '731cf0db7319ae963f31325b66eace8469424977f6120d4260f398a3524b9750'
     ),
     'catalog/canary-v2-requests/trans-type-class.payload.json': (
-        '4337527970d5f010ae842a06b47dd3fc2ef46d8594e3336eb9b17a02b34a3e25'
+        '003ae7f6a5f06811ae6f74fdc7f964c481cfdb4215e2a79e0779aab4affcac60'
     ),
     'catalog/canary-v2-requests/trans-type.payload.json': (
-        '97d1b81d4a11434020da0b9bb0c6dd3cb5a099c93ac9ce925c92c5f59e704024'
+        'ee5f73669d5cba175d21967e7502d292009fed67520b6a0d582478730a327944'
     ),
 }
 HISTORICAL_CHECKPOINT_ATTEMPTS = 2
@@ -122,7 +121,7 @@ PREFERRED_HARDENED_SEQUENCE = [
 
 
 def _sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return runner.sha256_canonical_text_bytes(path.read_bytes())
 
 
 def _walk_strings(value: Any) -> list[str]:
@@ -370,7 +369,7 @@ def test_historical_inventory_and_digests_preserved() -> None:
         'manifest.json',
     }
     actual = {path.name for path in HISTORICAL_ARTIFACT_DIR.iterdir() if path.is_file()}
-    assert expected_files <= actual
+    assert expected_files == actual
 
     for rel, digest in HISTORICAL_DIGESTS.items():
         path = ROOT / rel
@@ -498,7 +497,7 @@ def test_hardened_manifest_schema_strict() -> None:
     assert digests['offline_checkpoint'] == _sha256_file(
         HARDENED_ARTIFACT_DIR / 'offline-checkpoint.json'
     )
-    assert digests['sanitized_fixture'] == _sha256_file(SANITIZED_FIXTURE)
+    assert digests['sanitized_fixture'] == builder.LEGACY_GOLDEN_FIXTURE_RAW_SHA256
 
     batch = manifest['batches'][0]
     assert batch['batch_id'] == 'accept-tab-batch-001'

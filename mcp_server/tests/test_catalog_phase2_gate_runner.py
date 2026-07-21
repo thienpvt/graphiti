@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -183,6 +184,10 @@ def test_injected_mandatory_failure_and_tamper_refusal(
 
     monkeypatch.setattr(gate, 'run_argv', fake_run_argv)
     monkeypatch.setenv('CATALOG_PHASE2_GATE_SKIP_SELF', '1')
+    if shutil.which('git') is None:
+        monkeypatch.setattr(gate, 'git_head', lambda _root: '1' * 40)
+        monkeypatch.setattr(gate, 'git_parent', lambda _root: '')
+        monkeypatch.setattr(gate, 'git_show_files', lambda _root, _commit='HEAD': [])
 
     ledger = gate.run_gate(
         root,
@@ -291,12 +296,18 @@ def test_injected_mandatory_failure():
         }
     ]
     assert gate.derive_local_gate_pass(results, sentinel, 'skip', False) is False
-    assert gate.derive_ready_for_phase_3a(False, {
-        'canary_executed': False,
-        'oracle_catalog_v2_queried': False,
-        'no_new_store_or_control_plane_write_path': True,
-        'safety_checks_pass': True,
-    }) is False
+    assert (
+        gate.derive_ready_for_phase_3a(
+            False,
+            {
+                'canary_executed': False,
+                'oracle_catalog_v2_queried': False,
+                'no_new_store_or_control_plane_write_path': True,
+                'safety_checks_pass': True,
+            },
+        )
+        is False
+    )
 
 
 def test_no_integration_import_in_runner_source():
@@ -324,16 +335,23 @@ def test_edge_probe_raw_structure():
 
 
 # LF-normalized SHA-256 of 02-EDGE-PROBE.json (CRLF/CR → LF before hash).
-EXPECTED_RAW_PROBE_LF_SHA256 = (
-    '16144e5ebc2ae9a46cda9b45ce0206e1290b954988c227ce97ec0a05f6149ce0'
+EXPECTED_RAW_PROBE_LF_SHA256 = '16144e5ebc2ae9a46cda9b45ce0206e1290b954988c227ce97ec0a05f6149ce0'
+
+
+@pytest.mark.parametrize(
+    ('raw', 'canonical'),
+    [
+        (b'a\nb\n', b'a\nb\n'),
+        (b'a\r\nb\r\n', b'a\nb\n'),
+        (b'a\rb\r', b'a\nb\n'),
+        (b'a\r\nb\rc\n', b'a\nb\nc\n'),
+        (b'', b''),
+        (b'no-final-newline', b'no-final-newline'),
+        ('café\r\n'.encode(), 'café\n'.encode()),
+    ],
 )
-
-
-def test_normalize_newlines_lf_crlf_and_lone_cr():
-    assert gate.normalize_newlines_lf(b'a\r\nb\rc\n') == b'a\nb\nc\n'
-    assert gate.normalize_newlines_lf(b'plain') == b'plain'
-    assert gate.normalize_newlines_lf(b'\r\n\r\n') == b'\n\n'
-    assert gate.normalize_newlines_lf(b'\r\r') == b'\n\n'
+def test_normalize_newlines_lf_text_matrix(raw: bytes, canonical: bytes):
+    assert gate.normalize_newlines_lf(raw) == canonical
 
 
 def test_sha256_bytes_lf_stable_across_newline_forms():
@@ -341,15 +359,84 @@ def test_sha256_bytes_lf_stable_across_newline_forms():
     crlf = b'{"items":[]}\r\n'
     lone_cr = b'{"items":[]}\r'
     mixed = b'{"items":[]}\r\nline2\rline3\n'
-    d_lf = gate.sha256_bytes_lf(lf)
-    d_crlf = gate.sha256_bytes_lf(crlf)
-    d_cr = gate.sha256_bytes_lf(lone_cr)
-    assert d_lf == d_crlf == d_cr
-    # Un-normalized digests differ when raw form differs.
+    assert gate.sha256_bytes_lf(lf) == gate.sha256_bytes_lf(crlf)
+    assert gate.sha256_bytes_lf(lf) == gate.sha256_bytes_lf(lone_cr)
     assert gate.sha256_bytes(lf) != gate.sha256_bytes(crlf)
-    assert gate.sha256_bytes_lf(mixed) == gate.sha256_bytes(
-        b'{"items":[]}\nline2\nline3\n'
-    )
+    assert gate.sha256_bytes_lf(mixed) == gate.sha256_bytes(b'{"items":[]}\nline2\nline3\n')
+    assert gate.sha256_bytes_lf(b'x\n') != gate.sha256_bytes_lf(b'x')
+
+
+@pytest.mark.parametrize(
+    'raw',
+    [
+        b'\xef\xbb\xbftext\n',
+        b'\xff\xfetext',
+        b'\xff\n',
+        b'text\x00binary\n',
+        b'text\x1fbinary\n',
+    ],
+)
+def test_canonical_text_authority_rejects_bom_invalid_utf8_and_binary(raw: bytes):
+    with pytest.raises(ValueError, match='BOM|UTF-8|binary'):
+        gate.normalize_newlines_lf(raw)
+
+
+def test_windows_checkout_simulation_preserves_canonical_authority(tmp_path: Path):
+    lf = tmp_path / 'lf.txt'
+    crlf = tmp_path / 'crlf.txt'
+    lf.write_bytes('café\nline\n'.encode())
+    crlf.write_bytes('café\r\nline\r\n'.encode())
+    assert gate.sha256_file_lf(lf) == gate.sha256_file_lf(crlf)
+    assert gate.sha256_file(lf) != gate.sha256_file(crlf)
+
+
+def _committed_or_archive_bytes(root: Path, relative: str) -> bytes:
+    if (root / '.git').exists() and shutil.which('git') is not None:
+        return gate.subprocess.run(
+            ['git', 'cat-file', 'blob', f'HEAD:{relative}'],
+            cwd=root,
+            capture_output=True,
+            check=True,
+        ).stdout
+    return (root / relative).read_bytes()
+
+
+def test_raw_git_lf_is_committed_authority():
+    root = _root()
+    relative = 'mcp_server/tests/fixtures/accept_tab_sanitized.json'
+    committed = _committed_or_archive_bytes(root, relative)
+    worktree = (root / relative).read_bytes()
+    assert b'\r' not in committed
+    assert gate.sha256_bytes(committed) == EXPECTED_FIXTURE_GIT_RAW_SHA256
+    assert gate.sha256_bytes_lf(committed) == EXPECTED_FIXTURE_GIT_RAW_SHA256
+    assert gate.sha256_bytes_lf(worktree) == EXPECTED_FIXTURE_GIT_RAW_SHA256
+    if b'\r\n' in worktree:
+        assert gate.sha256_bytes(worktree) != EXPECTED_FIXTURE_GIT_RAW_SHA256
+
+
+EXPECTED_FIXTURE_GIT_RAW_SHA256 = '145f38edb7245c448badc7598e2e0733b4c72c16f470909284c6e7d955bae922'
+
+
+@pytest.mark.parametrize(
+    ('relative', 'expected'),
+    [
+        (
+            'catalog/CANARY_V2_SUMMARY.md',
+            '4221f04488eeb77810e545b62aa49d7271ec6b5ac0bf4ad6dafb1397659ba0d8',
+        ),
+        (
+            'catalog/catalog.json.graphiti-canary-v2-state.json',
+            '2b1af22938104c3af84b1a9eefc602b7e7149e52de177dc1fffccee426f24b9d',
+        ),
+    ],
+)
+def test_raw_git_authority_values_are_lf_committed(relative: str, expected: str):
+    root = _root()
+    committed = _committed_or_archive_bytes(root, relative)
+    assert b'\r' not in committed
+    assert gate.sha256_bytes(committed) == expected
+    assert gate.sha256_bytes_lf(committed) == expected
+    assert gate.sha256_file_lf(root / relative) == expected
 
 
 def test_load_raw_probe_digest_is_lf_normalized_and_matches_fixture(tmp_path: Path):

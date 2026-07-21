@@ -28,6 +28,12 @@ for import_path in (SCRIPT_DIR, MCP_SRC):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
 
+from catalog_authority_hashing import (  # pyright: ignore[reportMissingImports]  # noqa: E402
+    authority_bytes,
+    authority_digest,
+    sha256_canonical_text_bytes,
+    sha256_raw_bytes,
+)
 from catalog_canary_manifest_contract import (  # pyright: ignore[reportMissingImports]  # noqa: E402
     EXECUTION_SURFACE_COMPOSE,
     LIVE_MANIFEST_FIELDS,
@@ -164,6 +170,7 @@ REPORT_SCHEMA_VERSION = 'phase6-canary-report-v1'
 SOURCE_AUTHORITY_PATHS = (
     'scripts/run_catalog_canary_batch.py',
     'scripts/build_catalog_canary_requests.py',
+    'scripts/catalog_authority_hashing.py',
     'scripts/catalog_canary_manifest_contract.py',
     'scripts/run_catalog_canary_launcher.py',
     'scripts/materialize_catalog_local_config.py',
@@ -171,8 +178,8 @@ SOURCE_AUTHORITY_PATHS = (
     'mcp_server/tests/fixtures/accept_tab_sanitized.json',
     '.planning/phases/05-verification-security-compatibility-and-migration-docs/05-PROOF-PACKAGE.json',
 )
-APPROVED_FIXTURE_RAW_SHA256 = 'db498f2997803cb09fff15283a523f66aabaf57d54139804484cffa9033de53c'
-APPROVED_FIXTURE_LF_SHA256 = '145f38edb7245c448badc7598e2e0733b4c72c16f470909284c6e7d955bae922'
+APPROVED_FIXTURE_RAW_SHA256 = '145f38edb7245c448badc7598e2e0733b4c72c16f470909284c6e7d955bae922'
+APPROVED_FIXTURE_LF_SHA256 = APPROVED_FIXTURE_RAW_SHA256
 
 
 class LiveStage(IntEnum):
@@ -2492,26 +2499,26 @@ def _reject_live_group(group_id: str) -> None:
         raise RunnerError('protected_group', 'protected group is forbidden')
 
 
-def _lf_bytes(raw: bytes) -> bytes:
-    return raw.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
-
-
-def _lf_sha256(path: Path) -> str:
-    return sha256_bytes(_lf_bytes(path.read_bytes()))
-
-
-def source_authority_map() -> dict[str, str]:
-    result: dict[str, str] = {}
+def source_authority_map(*, mode: str = 'git', revision: str = 'HEAD') -> dict[str, dict[str, str]]:
+    """Exact and canonical text digests from Git blobs or a bound archive tree."""
+    result: dict[str, dict[str, str]] = {}
     for relative in SOURCE_AUTHORITY_PATHS:
-        path = ROOT / relative
-        if not path.is_file():
-            raise RunnerError('source_attestation_missing', 'source authority file is missing')
-        result[relative] = _lf_sha256(path)
+        try:
+            raw = authority_bytes(ROOT, relative, mode=mode, revision=revision)
+            result[relative] = authority_digest(raw)
+        except ValueError as exc:
+            raise RunnerError(
+                'source_attestation_missing', 'source authority bytes are unavailable'
+            ) from exc
     return result
 
 
 def attest_local_source(
-    *, expected_head: str, expected_source_map_sha256: str, expected_runner_sha256: str
+    *,
+    expected_head: str,
+    expected_source_map_sha256: str,
+    expected_runner_sha256: str,
+    authority_mode: str = 'git',
 ) -> dict[str, Any]:
     if SOURCE_HEAD_RE.fullmatch(expected_head) is None:
         raise RunnerError('source_attestation_invalid', 'expected HEAD must be lowercase Git SHA-1')
@@ -2520,26 +2527,36 @@ def attest_local_source(
             raise RunnerError(
                 'source_attestation_invalid', 'source digest must be lowercase SHA-256'
             )
-    try:
-        head = subprocess.run(
-            ['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        dirty = subprocess.run(
-            ['git', '-C', str(ROOT), 'status', '--porcelain=v1', '--', *SOURCE_AUTHORITY_PATHS],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise RunnerError('source_attestation_failed', 'read-only Git attestation failed') from exc
-    source_map = source_authority_map()
+    if authority_mode not in {'git', 'archive'}:
+        raise RunnerError('source_attestation_invalid', 'authority mode must be git or archive')
+    head = expected_head
+    if authority_mode == 'git':
+        try:
+            head = subprocess.run(
+                ['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise RunnerError(
+                'source_attestation_failed', 'read-only Git attestation failed'
+            ) from exc
+    source_map = source_authority_map(mode=authority_mode, revision=expected_head)
+    if authority_mode == 'git':
+        for relative in SOURCE_AUTHORITY_PATHS:
+            try:
+                worktree = authority_bytes(ROOT, relative, mode='archive')
+            except ValueError as exc:
+                raise RunnerError(
+                    'source_attestation_missing', 'source authority worktree file is unavailable'
+                ) from exc
+            if sha256_canonical_text_bytes(worktree) != source_map[relative]['lf_sha256']:
+                raise RunnerError(
+                    'source_attestation_dirty', 'harness authority path differs semantically'
+                )
     source_map_sha256 = canonical_sha256({'files': source_map})
-    runner_sha256 = source_map['scripts/run_catalog_canary_batch.py']
-    if dirty:
-        raise RunnerError('source_attestation_dirty', 'harness authority paths are dirty')
+    runner_sha256 = source_map['scripts/run_catalog_canary_batch.py']['lf_sha256']
     if (
         head != expected_head
         or source_map_sha256 != expected_source_map_sha256
@@ -2738,7 +2755,7 @@ def host_side_execution_authority_digests() -> dict[str, str]:
                 'execution_attestation_missing',
                 f'execution authority file missing: {relative}',
             )
-        digests[relative] = sha256_bytes(path.read_bytes())
+        digests[relative] = sha256_raw_bytes(path.read_bytes())
     return digests
 
 
@@ -2984,8 +3001,23 @@ def validate_live_artifact(
         raise RunnerError('non_canonical_artifact', 'live artifact bytes must be canonical')
     fixture_path = (ROOT / str(manifest['fixture'])).resolve()
     approved_fixture = (ROOT / 'mcp_server/tests/fixtures/accept_tab_sanitized.json').resolve()
-    builder_path = (ROOT / 'scripts/build_catalog_canary_requests.py').resolve()
     fixture_raw = approved_fixture.read_bytes()
+    authority_mode = 'git' if (ROOT / '.git').exists() else 'archive'
+    try:
+        committed_fixture_raw = authority_bytes(
+            ROOT,
+            'mcp_server/tests/fixtures/accept_tab_sanitized.json',
+            mode=authority_mode,
+        )
+        committed_builder_raw = authority_bytes(
+            ROOT,
+            'scripts/build_catalog_canary_requests.py',
+            mode=authority_mode,
+        )
+    except ValueError as exc:
+        raise RunnerError(
+            'live_manifest_mismatch', 'bound source authority is unavailable'
+        ) from exc
     if (
         fixture_path != approved_fixture
         or manifest['profile'] != 'live-canary'
@@ -2996,11 +3028,12 @@ def validate_live_artifact(
         or manifest['payload'] != LIVE_PAYLOAD_NAME
         or manifest['artifact_sha256'] != sha256_bytes(payload_bytes)
         or manifest['builder'] != 'scripts/build_catalog_canary_requests.py'
-        or manifest['builder_sha256'] != _lf_sha256(builder_path)
+        or manifest['builder_sha256'] != sha256_canonical_text_bytes(committed_builder_raw)
         or manifest['fixture_sha256'] != APPROVED_FIXTURE_RAW_SHA256
         or manifest['fixture_lf_sha256'] != APPROVED_FIXTURE_LF_SHA256
-        or sha256_bytes(fixture_raw) != APPROVED_FIXTURE_RAW_SHA256
-        or sha256_bytes(_lf_bytes(fixture_raw)) != APPROVED_FIXTURE_LF_SHA256
+        or sha256_raw_bytes(committed_fixture_raw) != APPROVED_FIXTURE_RAW_SHA256
+        or sha256_canonical_text_bytes(committed_fixture_raw) != APPROVED_FIXTURE_LF_SHA256
+        or sha256_canonical_text_bytes(fixture_raw) != APPROVED_FIXTURE_LF_SHA256
         or manifest['canary_executed'] is not False
     ):
         raise RunnerError('live_manifest_mismatch', 'live manifest authority binding is invalid')
@@ -3775,6 +3808,7 @@ async def run_live_canary(
     source_map_sha256: str,
     runner_sha256: str,
     execution_map_sha256: str,
+    authority_mode: str = 'git',
     image_fingerprint: str | None = None,
     config_fingerprint: str | None = None,
     output_dir: Path | None = None,
@@ -3848,6 +3882,7 @@ async def run_live_canary(
             expected_head=source_head,
             expected_source_map_sha256=source_map_sha256,
             expected_runner_sha256=runner_sha256,
+            authority_mode=authority_mode,
         )
         if not isinstance(attestation, dict):
             raise RunnerError(
@@ -4293,6 +4328,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument('--source-map-sha256')
     parser.add_argument('--runner-sha256')
     parser.add_argument('--execution-map-sha256')
+    parser.add_argument('--authority-mode', choices=('git', 'archive'), default='git')
     parser.add_argument('--image-fingerprint')
     parser.add_argument('--config-fingerprint')
     parser.add_argument('--mode', default='commit', choices=('commit', 'live-canary'))
@@ -4367,6 +4403,7 @@ async def execute_cli(args: argparse.Namespace) -> dict[str, Any]:
         expected_head=args.source_head,
         expected_source_map_sha256=args.source_map_sha256,
         expected_runner_sha256=args.runner_sha256,
+        authority_mode=args.authority_mode,
     )
     execution_attestation = attest_execution_authority(
         expected_execution_map_sha256=args.execution_map_sha256,
@@ -4405,6 +4442,7 @@ async def execute_cli(args: argparse.Namespace) -> dict[str, Any]:
             source_map_sha256=args.source_map_sha256,
             runner_sha256=args.runner_sha256,
             execution_map_sha256=args.execution_map_sha256,
+            authority_mode=args.authority_mode,
             image_fingerprint=args.image_fingerprint,
             config_fingerprint=args.config_fingerprint,
             output_dir=args.output_dir,

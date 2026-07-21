@@ -13,8 +13,8 @@ from config.schema import GraphitiConfig
 from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
 
 
-def test_config_loading():
-    """Test loading configuration from YAML and environment variables."""
+def load_test_config(monkeypatch=None):
+    """Load configuration for pytest and the script-style smoke runner."""
     print('Testing configuration loading...')
 
     # Test with default config.yaml
@@ -28,24 +28,31 @@ def test_config_loading():
     print(f'  - Database provider: {config.database.provider}')
     print(f'  - Group ID: {config.graphiti.group_id}')
 
-    # Test environment variable override
-    os.environ['LLM__PROVIDER'] = 'anthropic'
-    os.environ['LLM__MODEL'] = 'claude-3-opus'
+    # Test environment variable override without leaking process state.
+    if monkeypatch is None:
+        os.environ['LLM__PROVIDER'] = 'anthropic'
+        os.environ['LLM__MODEL'] = 'claude-3-opus'
+    else:
+        monkeypatch.setenv('LLM__PROVIDER', 'anthropic')
+        monkeypatch.setenv('LLM__MODEL', 'claude-3-opus')
     config2 = GraphitiConfig()
 
     print('\n✓ Environment variable overrides work')
     print(f'  - LLM provider (overridden): {config2.llm.provider}')
     print(f'  - LLM model (overridden): {config2.llm.model}')
 
-    # Clean up env vars
-    del os.environ['LLM__PROVIDER']
-    del os.environ['LLM__MODEL']
+    if monkeypatch is None:
+        del os.environ['LLM__PROVIDER']
+        del os.environ['LLM__MODEL']
 
     assert config is not None
-    assert config2 is not None
-
-    # Return the first config for subsequent tests
+    assert config2.llm.provider == 'anthropic'
+    assert config2.llm.model == 'claude-3-opus'
     return config
+
+
+def test_config_loading(monkeypatch) -> None:
+    load_test_config(monkeypatch)
 
 
 def test_llm_factory(config: GraphitiConfig):
@@ -134,9 +141,10 @@ async def test_database_factory(config: GraphitiConfig):
                     user=db_config['user'],
                     password=db_config['password'],
                 )
-                await graphiti.driver.client.verify_connectivity()
+                client = graphiti.driver.client  # pyright: ignore[reportAttributeAccessIssue]
+                await client.verify_connectivity()
                 print('  ✓ Successfully connected to Neo4j')
-                await graphiti.driver.client.close()
+                await client.close()
             except Exception as e:
                 print(f'  ⚠ Could not connect to Neo4j (is it running?): {type(e).__name__}')
         except Exception as e:
@@ -228,7 +236,7 @@ async def main():
 
     try:
         # Test configuration loading
-        config = test_config_loading()
+        config = load_test_config()
 
         # Test factories
         test_llm_factory(config)

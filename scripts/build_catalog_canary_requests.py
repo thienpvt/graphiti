@@ -6,7 +6,6 @@ from __future__ import annotations
 # ruff: noqa: E402  # Script bootstraps mcp_server/src before server imports.
 import argparse
 import contextlib
-import hashlib
 import json
 import os
 import re
@@ -19,11 +18,18 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = Path(__file__).resolve().parent
+AUTHORITY_MODE = 'git' if (REPO_ROOT / '.git').exists() else 'archive'
 MCP_SRC = REPO_ROOT / 'mcp_server' / 'src'
 for import_path in (SCRIPT_DIR, MCP_SRC):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
 
+from catalog_authority_hashing import (  # pyright: ignore[reportMissingImports]
+    authority_bytes,
+    canonical_text_bytes_lf,
+    sha256_canonical_text_bytes,
+    sha256_raw_bytes,
+)
 from catalog_canary_manifest_contract import (  # pyright: ignore[reportMissingImports]
     EXECUTION_SURFACE_COMPOSE,
     LIVE_MANIFEST_FIELDS,
@@ -139,8 +145,12 @@ LIVE_ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 PROTECTED_GROUP_IDS = frozenset(
     {'oracle-core', 'oracle-catalog-v2', 'oracle-catalog-tool-test', 'main'}
 )
-APPROVED_FIXTURE_RAW_SHA256 = 'db498f2997803cb09fff15283a523f66aabaf57d54139804484cffa9033de53c'
-APPROVED_FIXTURE_LF_SHA256 = '145f38edb7245c448badc7598e2e0733b4c72c16f470909284c6e7d955bae922'
+APPROVED_FIXTURE_RAW_SHA256 = '145f38edb7245c448badc7598e2e0733b4c72c16f470909284c6e7d955bae922'
+APPROVED_FIXTURE_LF_SHA256 = APPROVED_FIXTURE_RAW_SHA256
+# Frozen inside the five Phase 5 golden files. Not current source authority.
+LEGACY_GOLDEN_FIXTURE_RAW_SHA256 = (
+    'db498f2997803cb09fff15283a523f66aabaf57d54139804484cffa9033de53c'
+)
 GOLDEN_SHA256 = {
     'accept-tab.payload.json': '9df952774c2ec7f33e110ef8956d7611851ea3e92d68ed108dae5eeedc21359f',
     'manifest.json': 'ba7d5c6c893f59a89ac3533749bfa0e70a4726abcaa7a09c339d754d62706eb9',
@@ -148,27 +158,37 @@ GOLDEN_SHA256 = {
     'offline-commit.receipt.json': '6fce1543fd5042768f879b978dbd682b460fa05c01cff5bc03bc059fa6397832',
     'offline-prepare.receipt.json': '0452ebd9fe9ee220900061e7af9e7fdc7520bb894e48c81e1406406ec5713111',
 }
-HISTORICAL_SHA256 = {
+HISTORICAL_GIT_BLOB_SHA256 = {
     'accept-tab.commit.response.json': (
-        '83ac93da85957c5576c745a4db2e64d6e6ee8e99a2ac6c517e17b3f3e1ccc4f4'
+        '8c3debd9c2a735094ea3a559fd0f4233cd405e872931216411c326a4f59c5e4a'
     ),
     'accept-tab.dry-run.response.json': (
-        '4767473f3ace434ae23bb69687261da8041f430e5ba1908f0ca62cd496fab139'
+        '5d4f17ac588ae782b942d780e374f15be98943775673f23d759ef9c6e0ff1f60'
     ),
-    'accept-tab.payload.json': '629decce0f7927d4de542b0cf2b11b12f45872c1d5e4771fd00c900091f3ba48',
+    'accept-tab.payload.json': 'a89e3427a3b1ceec10f36d361fcdbe9e7e30243db4ff51ca59848dfb33968a33',
     'documented-foreign-keys.payload.json': (
-        '2da07e6a9f9a89d5cc6d5352007a3de3401e492ec66175cf480a501fc9741035'
+        '6a02bc60ab29b88633e7614d3687c95678375a941e59c8bbcc4e536df13d801e'
     ),
-    'form-cfg.payload.json': '25ca477a8f4180baa00d0b4e60b772b1663552ea3d92decac3d276cdcc2ea11b',
-    'manifest.json': '039063d7adfe774564b8a8009af0868f96bb570fc1d74b4236e891d89506763d',
+    'form-cfg.payload.json': '5ccc52d84909cf436ade1cffae626e2d667834dc8b96fb4efa73d8f658315b53',
+    'manifest.json': 'b4cfa609cd436e9ae7b181f985fe1c85cdac2a4f1f957076e3fffd1aff68c4d4',
     'pre-auth-txn-type.payload.json': (
-        '96150b1e1f10d5b5183f36aecb846f357af6aecd066e7d2d29f84c9872d1bb0b'
+        '731cf0db7319ae963f31325b66eace8469424977f6120d4260f398a3524b9750'
     ),
     'trans-type-class.payload.json': (
-        '4337527970d5f010ae842a06b47dd3fc2ef46d8594e3336eb9b17a02b34a3e25'
+        '003ae7f6a5f06811ae6f74fdc7f964c481cfdb4215e2a79e0779aab4affcac60'
     ),
-    'trans-type.payload.json': '97d1b81d4a11434020da0b9bb0c6dd3cb5a099c93ac9ce925c92c5f59e704024',
+    'trans-type.payload.json': 'ee5f73669d5cba175d21967e7502d292009fed67520b6a0d582478730a327944',
 }
+HISTORICAL_PAYLOAD_NAMES = frozenset(
+    {
+        'accept-tab.payload.json',
+        'documented-foreign-keys.payload.json',
+        'form-cfg.payload.json',
+        'pre-auth-txn-type.payload.json',
+        'trans-type-class.payload.json',
+        'trans-type.payload.json',
+    }
+)
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -216,15 +236,15 @@ def canonical_bytes(value: Any) -> bytes:
 
 
 def sha256_bytes(raw: bytes) -> str:
-    return hashlib.sha256(raw).hexdigest()
+    return sha256_raw_bytes(raw)
 
 
 def lf_normalized_bytes(raw: bytes) -> bytes:
-    return raw.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+    return canonical_text_bytes_lf(raw)
 
 
 def lf_sha256(raw: bytes) -> str:
-    return sha256_bytes(lf_normalized_bytes(raw))
+    return sha256_canonical_text_bytes(raw)
 
 
 def _validate_fixture_authority(fixture_path: Path, *, exact_path: bool) -> bytes:
@@ -232,8 +252,17 @@ def _validate_fixture_authority(fixture_path: Path, *, exact_path: bool) -> byte
     if exact_path and fixture_path.resolve() != approved:
         raise ValueError('live fixture path must be the exact approved sanitized fixture path')
     raw = fixture_path.read_bytes()
-    if lf_sha256(raw) != APPROVED_FIXTURE_LF_SHA256:
-        raise ValueError('sanitized fixture LF-normalized SHA-256 mismatch')
+    source = authority_bytes(
+        REPO_ROOT,
+        SANITIZED_FIXTURE_REL.as_posix(),
+        mode=AUTHORITY_MODE,
+    )
+    if (
+        sha256_bytes(source) != APPROVED_FIXTURE_RAW_SHA256
+        or lf_sha256(source) != APPROVED_FIXTURE_LF_SHA256
+        or lf_sha256(raw) != APPROVED_FIXTURE_LF_SHA256
+    ):
+        raise ValueError('sanitized fixture Git/LF authority SHA-256 mismatch')
     return raw
 
 
@@ -1059,27 +1088,41 @@ def _atomic_replace_set(destinations: dict[Path, bytes]) -> None:
 
 
 def verify_historical(output_dir: Path) -> dict[str, Any]:
-    """Verify frozen historical bytes without generating or overwriting them."""
+    """Verify frozen historical text without generating or overwriting it."""
     resolved = output_dir.resolve()
-    authority = (REPO_ROOT / 'catalog' / 'canary-v2-requests').resolve()
+    historical_rel = Path('catalog') / 'canary-v2-requests'
+    authority = (REPO_ROOT / historical_rel).resolve()
     if resolved != authority:
         raise ValueError('historical mode verifies only the tracked historical directory')
-    actual = {
-        item.name: sha256_bytes(item.read_bytes()) for item in resolved.iterdir() if item.is_file()
-    }
-    if actual != HISTORICAL_SHA256:
-        raise ValueError('historical artifact inventory or SHA-256 differs from frozen authority')
+    actual_names = {item.name for item in resolved.iterdir() if item.is_file()}
+    if actual_names != set(HISTORICAL_GIT_BLOB_SHA256):
+        raise ValueError('historical artifact inventory differs from frozen authority')
+    for name, expected in HISTORICAL_GIT_BLOB_SHA256.items():
+        relative = (historical_rel / name).as_posix()
+        source = authority_bytes(REPO_ROOT, relative, mode=AUTHORITY_MODE)
+        if (
+            sha256_bytes(source) != expected
+            or lf_sha256((resolved / name).read_bytes()) != expected
+        ):
+            raise ValueError('historical artifact Git/LF SHA-256 differs from frozen authority')
     manifest = strict_load(resolved / 'manifest.json')
     if not isinstance(manifest, dict):
         raise ValueError('historical manifest root must be an object')
-    for batch in manifest.get('batches', []):
+    batches = manifest.get('batches')
+    if not isinstance(batches, list):
+        raise ValueError('historical manifest batches must be a list')
+    paths: set[str] = set()
+    for batch in batches:
         if not isinstance(batch, dict):
             raise ValueError('historical manifest batch is invalid')
         path = (REPO_ROOT / str(batch.get('path'))).resolve()
-        if path.parent != authority or not path.is_file():
-            raise ValueError('historical manifest path escapes frozen authority')
+        if path.parent != authority or not path.is_file() or path.name in paths:
+            raise ValueError('historical manifest path escapes or duplicates frozen authority')
+        paths.add(path.name)
         if lf_sha256(path.read_bytes()) != batch.get('artifact_sha256'):
             raise ValueError('historical manifest LF-normalized artifact SHA-256 differs')
+    if paths != HISTORICAL_PAYLOAD_NAMES:
+        raise ValueError('historical manifest payload inventory differs from frozen authority')
     return manifest
 
 
@@ -1488,7 +1531,12 @@ def _offline_checkpoint() -> dict[str, Any]:
     }
 
 
-def build_hardened(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
+def build_hardened(
+    fixture_path: Path,
+    output_dir: Path,
+    *,
+    fixture_raw_sha256: str = APPROVED_FIXTURE_RAW_SHA256,
+) -> dict[str, Any]:
     """Emit versioned hardened payload/manifest/receipts/checkpoint offline only."""
     fixture_raw = _validate_fixture_authority(fixture_path, exact_path=False)
     fixture = strict_json_bytes(fixture_raw, str(fixture_path))
@@ -1542,7 +1590,7 @@ def build_hardened(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
         'offline_prepare_receipt': sha256_bytes(prepare_bytes),
         'offline_commit_receipt': sha256_bytes(commit_bytes),
         'offline_checkpoint': sha256_bytes(checkpoint_bytes),
-        'sanitized_fixture': APPROVED_FIXTURE_RAW_SHA256,
+        'sanitized_fixture': fixture_raw_sha256,
     }
     manifest = {
         'artifact_schema_version': HARDENED_ARTIFACT_SCHEMA_VERSION,
@@ -1635,7 +1683,11 @@ def build_golden(fixture_path: Path, output_dir: Path) -> dict[str, Any]:
             generated / 'manifest.json',
             canonical_bytes({'generated_at': tracked_manifest['generated_at']}),
         )
-        manifest = build_hardened(fixture_path, generated)
+        manifest = build_hardened(
+            fixture_path,
+            generated,
+            fixture_raw_sha256=LEGACY_GOLDEN_FIXTURE_RAW_SHA256,
+        )
         generated_map = _golden_map(generated)
         if generated_map != GOLDEN_SHA256:
             raise ValueError('generated Phase 5 golden bytes differ from reviewed pins')
@@ -1716,7 +1768,12 @@ def build_live_canary(
     payload_bytes = canonical_bytes(payload)
     artifact_sha256 = sha256_bytes(payload_bytes)
     builder_source = Path(__file__).read_bytes()
-    builder_sha256 = lf_sha256(builder_source)
+    builder_authority = authority_bytes(
+        REPO_ROOT,
+        'scripts/build_catalog_canary_requests.py',
+        mode=AUTHORITY_MODE,
+    )
+    builder_sha256 = lf_sha256(builder_authority)
     assert model.provenance is not None
     manifest = {
         'artifact_schema_version': LIVE_ARTIFACT_SCHEMA_VERSION,

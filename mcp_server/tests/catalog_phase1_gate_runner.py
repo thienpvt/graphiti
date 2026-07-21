@@ -20,6 +20,14 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.catalog_authority_hashing import (  # noqa: E402  # pyright: ignore[reportMissingImports]
+    sha256_file_canonical_text,
+)
+
 SCHEMA_VERSION = 'phase1-gate-results.v1'
 PHASE_DIR_REL = Path('.planning/phases/01-strict-contracts-and-catalog-v2-identity')
 DEFAULT_LEDGER_REL = PHASE_DIR_REL / '01-GATE-RESULTS.json'
@@ -44,9 +52,7 @@ SHELL_EXECUTABLES = frozenset(
         'tcsh',
     }
 )
-SHELL_META_TOKENS = frozenset(
-    {'|', '||', '&', '&&', ';', '>', '>>', '<', '<<', '`', '$(', ')'}
-)
+SHELL_META_TOKENS = frozenset({'|', '||', '&', '&&', ';', '>', '>>', '<', '<<', '`', '$(', ')'})
 
 GATE_INPUT_RELS = (
     PHASE_DIR_REL / '01-VALIDATION.md',
@@ -140,19 +146,12 @@ def bound_output(text: str | None, limit: int = OUTPUT_BOUND) -> str:
     return text[: limit - 20] + '\n...[truncated]...'
 
 
-
 def check_validation_rows(root: Path) -> None:
     phase = root / PHASE_DIR_REL
     text = (phase / '01-VALIDATION.md').read_text(encoding='utf-8')
     tick = chr(96)
     pattern = (
-        r'^\| (01-(?:0[1-9]|1[0-1])-T\d+) \|.*?\| '
-        + tick
-        + r'([^'
-        + tick
-        + r']+)'
-        + tick
-        + r' \|'
+        r'^\| (01-(?:0[1-9]|1[0-1])-T\d+) \|.*?\| ' + tick + r'([^' + tick + r']+)' + tick + r' \|'
     )
     rows = re.findall(pattern, text, re.M)
     if len(rows) < 17 or len({i for i, _ in rows}) != len(rows):
@@ -163,7 +162,11 @@ def check_validation_rows(root: Path) -> None:
         if set(spec) != {'argv', 'expected_exit'} or spec['expected_exit'] != 0:
             raise AssertionError(f'bad validation spec keys: {spec!r}')
         argv = spec['argv']
-        if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
+        if (
+            not isinstance(argv, list)
+            or not argv
+            or not all(isinstance(a, str) and a for a in argv)
+        ):
             raise AssertionError(f'bad validation argv: {argv!r}')
         if argv[0].lower() in SHELL_EXECUTABLES:
             raise AssertionError(f'shell executable in validation row: {argv[0]}')
@@ -342,7 +345,9 @@ def canonical_specs(root: Path) -> list[dict[str, Any]]:
     specs: list[dict[str, Any]] = [
         {
             'id': 'runner_self_tests',
-            'argv': _uv_pytest(['mcp_server/tests/test_catalog_phase1_gate_runner.py'], ['--tb=short']),
+            'argv': _uv_pytest(
+                ['mcp_server/tests/test_catalog_phase1_gate_runner.py'], ['--tb=short']
+            ),
             'expected_exit': 0,
             'mandatory': True,
             'kind': 'pytest',
@@ -524,13 +529,8 @@ def sha256_file(path: Path) -> str:
 
 
 def sha256_file_lf(path: Path) -> str:
-    """SHA-256 of file bytes with newlines normalized to LF.
-
-    Windows autocrlf / text-mode writers can flip CRLF between run and apply;
-    digest identity must track semantic content, not platform newline bytes.
-    """
-    data = path.read_bytes().replace(b'\r\n', b'\n').replace(b'\r', b'\n')
-    return hashlib.sha256(data).hexdigest()
+    """Compatibility name for strict UTF-8 canonical LF text authority."""
+    return sha256_file_canonical_text(path)
 
 
 def content_digest_map(root: Path) -> dict[str, str]:
@@ -738,11 +738,7 @@ def run_gate(
             continue
         try:
             outcome = run_argv(spec['argv'], root)
-            status = (
-                'pass'
-                if outcome['exit_code'] == spec['expected_exit']
-                else 'fail'
-            )
+            status = 'pass' if outcome['exit_code'] == spec['expected_exit'] else 'fail'
             results.append(
                 {
                     'id': spec['id'],
@@ -778,9 +774,7 @@ def run_gate(
             if r['id'] in injected_overrides:
                 override = injected_overrides[r['id']]
                 r.update(override)
-                if 'status' not in override and r.get('exit_code', 0) != r.get(
-                    'expected_exit', 0
-                ):
+                if 'status' not in override and r.get('exit_code', 0) != r.get('expected_exit', 0):
                     r['status'] = 'fail'
 
     sentinel = run_sentinel(root)
@@ -836,8 +830,7 @@ def _head_compatible(root: Path, evaluated_head: str) -> tuple[bool, str]:
         # also allow Windows path form
         norm = {f.replace('\\', '/') for f in files}
         if norm and all(
-            f == DEFAULT_LEDGER_REL.as_posix() or f.endswith('01-GATE-RESULTS.json')
-            for f in norm
+            f == DEFAULT_LEDGER_REL.as_posix() or f.endswith('01-GATE-RESULTS.json') for f in norm
         ):
             return True, 'ledger-only-child'
         return False, f'parent-match-but-extra-files:{sorted(norm)}'
@@ -883,13 +876,13 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
         for s in specs:
             r = by_id.get(s['id'])
             if r is None:
-                errors.append(f"missing result for {s['id']}")
+                errors.append(f'missing result for {s["id"]}')
                 continue
             for key in ('status', 'exit_code', 'expected_exit', 'argv'):
                 if key not in r:
-                    errors.append(f"{s['id']} missing {key}")
+                    errors.append(f'{s["id"]} missing {key}')
             if r.get('status') not in ('pass', 'fail', 'skip'):
-                errors.append(f"{s['id']} bad status")
+                errors.append(f'{s["id"]} bad status')
 
     sentinel = raw.get('sentinel') or {}
     if not sentinel.get('pass') or sentinel.get('exit_code', 0) == 0:
@@ -926,9 +919,12 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
                 errors.append(f'{field} is {val!r}; mixed/fail audit set not final-ready')
         if any(v == 'fail' for v in audit_vals) and raw.get('ready_for_phase_2') is not False:
             errors.append('ready_for_phase_2 must be false when any independent audit fails')
-        if any(v == 'pending' for v in audit_vals) and any(v == 'pass' for v in audit_vals):
-            if raw.get('ready_for_phase_2') is not False:
-                errors.append('ready_for_phase_2 must be false while any independent audit pending')
+        if (
+            any(v == 'pending' for v in audit_vals)
+            and any(v == 'pass' for v in audit_vals)
+            and raw.get('ready_for_phase_2') is not False
+        ):
+            errors.append('ready_for_phase_2 must be false while any independent audit pending')
 
     # Recompute local_gate_pass
     recomputed = derive_local_gate_pass(
@@ -939,14 +935,14 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
     )
     if raw.get('local_gate_pass') != recomputed:
         errors.append(
-            f"local_gate_pass mismatch ledger={raw.get('local_gate_pass')} recomputed={recomputed}"
+            f'local_gate_pass mismatch ledger={raw.get("local_gate_pass")} recomputed={recomputed}'
         )
 
     # Incomplete: pending mandatory
     if isinstance(results, list):
         for r in results:
             if r.get('mandatory', True) and r.get('status') == 'pending':
-                errors.append(f"mandatory pending: {r.get('id')}")
+                errors.append(f'mandatory pending: {r.get("id")}')
 
     return {
         'ok': not errors,
@@ -959,7 +955,7 @@ def verify_ledger(root: Path, ledger_path: Path) -> dict[str, Any]:
 
 def _set_frontmatter_bool(text: str, key: str, value: bool) -> str:
     pat = re.compile(rf'(?m)^{re.escape(key)}:\s*(true|false)\s*$')
-    repl = f"{key}: {'true' if value else 'false'}"
+    repl = f'{key}: {"true" if value else "false"}'
     if pat.search(text):
         return pat.sub(repl, text, count=1)
     return text
@@ -985,7 +981,7 @@ def apply_gate(
     root = root.resolve()
     verification = verify_ledger(root, ledger_path)
     if not verification['ok']:
-        raise RuntimeError(f"ledger verification failed: {verification['errors']}")
+        raise RuntimeError(f'ledger verification failed: {verification["errors"]}')
 
     ledger = verification['ledger']
     local_pass = bool(ledger.get('local_gate_pass')) and verification['recomputed_local_gate_pass']

@@ -1748,13 +1748,66 @@ def test_atomic_write_retries_permission_error_only(
 
 
 def test_source_authority_includes_every_runtime_policy_script() -> None:
-    assert runner.SOURCE_AUTHORITY_PATHS[:5] == (
+    assert runner.SOURCE_AUTHORITY_PATHS[:6] == (
         'scripts/run_catalog_canary_batch.py',
         'scripts/build_catalog_canary_requests.py',
+        'scripts/catalog_authority_hashing.py',
         'scripts/catalog_canary_manifest_contract.py',
         'scripts/run_catalog_canary_launcher.py',
         'scripts/materialize_catalog_local_config.py',
     )
+
+
+def test_source_authority_uses_committed_git_blobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    relative = 'authority.txt'
+    committed = b'committed\n'
+    worktree = tmp_path / relative
+    worktree.write_bytes(b'changed\r\n')
+    monkeypatch.setattr(runner, 'ROOT', tmp_path)
+    monkeypatch.setattr(runner, 'SOURCE_AUTHORITY_PATHS', (relative,))
+    monkeypatch.setattr(runner, 'authority_bytes', lambda *_args, **_kwargs: committed)
+    assert runner.source_authority_map() == {
+        relative: {
+            'raw_sha256': runner.sha256_raw_bytes(committed),
+            'lf_sha256': runner.sha256_canonical_text_bytes(committed),
+        }
+    }
+    assert runner.source_authority_map()[relative]['lf_sha256'] != (
+        runner.sha256_canonical_text_bytes(worktree.read_bytes())
+    )
+
+
+def test_archive_source_attestation_uses_dual_external_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    relative = 'scripts/run_catalog_canary_batch.py'
+    raw = b'bound\n'
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True)
+    path.write_bytes(raw)
+    monkeypatch.setattr(runner, 'ROOT', tmp_path)
+    monkeypatch.setattr(runner, 'SOURCE_AUTHORITY_PATHS', (relative,))
+    source_map = {relative: runner.authority_digest(raw)}
+    source_map_sha256 = runner.canonical_sha256({'files': source_map})
+    result = runner.attest_local_source(
+        expected_head='1' * 40,
+        expected_source_map_sha256=source_map_sha256,
+        expected_runner_sha256=source_map[relative]['lf_sha256'],
+        authority_mode='archive',
+    )
+    assert result['source_head'] == '1' * 40
+    assert result['source_map_sha256'] == source_map_sha256
+    path.write_bytes(b'bound\r\n')
+    with pytest.raises(runner.RunnerError) as error:
+        runner.attest_local_source(
+            expected_head='1' * 40,
+            expected_source_map_sha256=source_map_sha256,
+            expected_runner_sha256=source_map[relative]['lf_sha256'],
+            authority_mode='archive',
+        )
+    assert error.value.code == 'source_attestation_mismatch'
 
 
 def test_host_execution_authority_raw_byte_map(

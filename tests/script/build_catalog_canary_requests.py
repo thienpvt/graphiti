@@ -169,7 +169,7 @@ def test_fixture_authority_is_lf_normalized_and_pinned(tmp_path: Path) -> None:
     assert builder.lf_sha256(crlf.read_bytes()) == builder.APPROVED_FIXTURE_LF_SHA256
     mutated = tmp_path / 'mutated.json'
     mutated.write_bytes(raw + b' ')
-    with pytest.raises(ValueError, match='LF-normalized'):
+    with pytest.raises(ValueError, match='Git/LF authority'):
         builder.build_golden(mutated, tmp_path / 'golden')
 
 
@@ -216,6 +216,7 @@ def test_protected_matrix_for_canary_and_control(
 def test_historical_mode_is_read_only_verifier(tmp_path: Path) -> None:
     historical = ROOT / 'catalog' / 'canary-v2-requests'
     before = _files(historical)
+    assert builder.verify_historical(historical)['unique_totals'] == {'entities': 38, 'edges': 85}
     result = subprocess.run(
         [sys.executable, str(SCRIPT), '--mode', 'historical'],
         cwd=ROOT,

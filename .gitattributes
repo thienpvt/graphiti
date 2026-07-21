@@ -8,3 +8,20 @@ mcp_server/config/config-docker-neo4j.catalog-local.yaml text eol=lf
 mcp_server/docker/docker-compose-neo4j.catalog-local.override.yml text eol=lf
 scripts/materialize_catalog_local_config.py text eol=lf
 scripts/run_catalog_canary_launcher.py text eol=lf
+
+# Catalog source/text authority is committed as LF; hashes still derive from Git blobs.
+scripts/catalog_authority_hashing.py text eol=lf
+scripts/run_catalog_canary_batch.py text eol=lf
+scripts/build_catalog_canary_requests.py text eol=lf
+scripts/catalog_canary_manifest_contract.py text eol=lf
+graphiti_mcp_phase6_canary_agent_prompt_en.md text eol=lf
+mcp_server/tests/catalog_phase1_gate_runner.py text eol=lf
+mcp_server/tests/catalog_phase2_gate_runner.py text eol=lf
+mcp_server/tests/catalog_phase3a_gate_runner.py text eol=lf
+mcp_server/tests/catalog_phase3b_gate_runner.py text eol=lf
+mcp_server/tests/catalog_phase4_gate_runner.py text eol=lf
+mcp_server/tests/catalog_phase5_gate_runner.py text eol=lf
+mcp_server/tests/fixtures/accept_tab_sanitized.json text eol=lf
+catalog/CANARY_V2_SUMMARY.md text eol=lf
+catalog/catalog.json.graphiti-canary-v2-state.json text eol=lf
+catalog/canary-v2-requests/*.json text eol=lf

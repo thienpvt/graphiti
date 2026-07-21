@@ -22,6 +22,14 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.catalog_authority_hashing import (  # noqa: E402  # pyright: ignore[reportMissingImports]
+    sha256_file_canonical_text,
+)
+
 SCHEMA_VERSION = 'phase3a-gate-results.v1'
 PHASE_DIR_REL = Path('.planning/phases/03A-immutable-prepare-commit-control-plane')
 DEFAULT_LEDGER_REL = PHASE_DIR_REL / '03A-GATE-RESULTS.json'
@@ -165,8 +173,8 @@ def sha256_text(text: str) -> str:
 
 
 def sha256_file_lf(path: Path) -> str:
-    data = path.read_bytes().replace(b'\r\n', b'\n').replace(b'\r', b'\n')
-    return hashlib.sha256(data).hexdigest()
+    """Compatibility name for strict UTF-8 canonical LF text authority."""
+    return sha256_file_canonical_text(path)
 
 
 def write_text_lf(path: Path, text: str) -> None:

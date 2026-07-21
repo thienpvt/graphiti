@@ -25,6 +25,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.catalog_authority_hashing import (  # noqa: E402  # pyright: ignore[reportMissingImports]
+    sha256_file_canonical_text,
+)
+
 SCHEMA_VERSION = 'phase5-gate-results.v1'
 PHASE_DIR_REL = Path('.planning/phases/05-verification-security-compatibility-and-migration-docs')
 DEFAULT_LEDGER_REL = PHASE_DIR_REL / '05-GATE-RESULTS.json'
@@ -197,9 +205,7 @@ CANONICAL_CHECK_IDS = (
     'live_neo4j_test11',
     'ollama_e2e',
 )
-OPTIONAL_AVAILABILITY_CHECK_IDS = frozenset(
-    {'ruff', 'pyright', 'live_neo4j_test11', 'ollama_e2e'}
-)
+OPTIONAL_AVAILABILITY_CHECK_IDS = frozenset({'ruff', 'pyright', 'live_neo4j_test11', 'ollama_e2e'})
 AUDIT_NAMES = ('review', 'validation', 'security', 'verification')
 AUDIT_PATH_BY_NAME = dict(zip(AUDIT_NAMES, AUDIT_RELS, strict=True))
 # Finalization reruns every canonical check. This costs one bounded local Neo4j/Ollama
@@ -207,9 +213,7 @@ AUDIT_PATH_BY_NAME = dict(zip(AUDIT_NAMES, AUDIT_RELS, strict=True))
 FINAL_RERUN_CHECK_IDS = CANONICAL_CHECK_IDS
 PRESERVED_EXTERNAL_CHECK_IDS: tuple[str, ...] = ()
 
-HISTORICAL_CHECKPOINT_SHA256 = (
-    'b367e7f395782d13e72671e1b66d36b24432cb2c1b48c7fa45974d232039ace4'
-)
+HISTORICAL_CHECKPOINT_SHA256 = '2b1af22938104c3af84b1a9eefc602b7e7149e52de177dc1fffccee426f24b9d'
 HISTORICAL_CHECKPOINT_ATTEMPT_COUNT = 2
 HARDENED_CHECKPOINT_ATTEMPT_COUNT = 0
 HARDENED_ARTIFACT_DIR_REL = Path('catalog/canary-v2-requests-hardened')
@@ -452,8 +456,8 @@ def sha256_text(text: str) -> str:
 
 
 def sha256_file_lf(path: Path) -> str:
-    data = path.read_bytes().replace(b'\r\n', b'\n').replace(b'\r', b'\n')
-    return hashlib.sha256(data).hexdigest()
+    """Compatibility name for strict UTF-8 canonical LF text authority."""
+    return sha256_file_canonical_text(path)
 
 
 def sha256_file_raw(path: Path) -> str:
@@ -591,7 +595,7 @@ def check_canary_not_executed(root: Path) -> None:
 
 def check_historical_artifacts_unchanged(root: Path) -> None:
     checkpoint = root / 'catalog/catalog.json.graphiti-canary-v2-state.json'
-    if sha256_file_raw(checkpoint) != HISTORICAL_CHECKPOINT_SHA256:
+    if sha256_file_lf(checkpoint) != HISTORICAL_CHECKPOINT_SHA256:
         raise AssertionError('historical checkpoint digest changed')
     payload = json.loads(checkpoint.read_text(encoding='utf-8'))
     attempts = payload.get('attempts')
@@ -793,15 +797,11 @@ def _markdown_section(text: str, heading: str) -> str:
 
 
 def _tool_inventory_names(section: str) -> frozenset[str]:
-    return frozenset(
-        re.findall(r'^\s*(?:-\s+|\d+\.\s+)`([a-z][a-z0-9_]*)`', section, re.MULTILINE)
-    )
+    return frozenset(re.findall(r'^\s*(?:-\s+|\d+\.\s+)`([a-z][a-z0-9_]*)`', section, re.MULTILINE))
 
 
 def _error_code_names(section: str) -> frozenset[str]:
-    return frozenset(
-        re.findall(r'^\|\s*`([a-z][a-z0-9_]*)`\s*\|', section, re.MULTILINE)
-    )
+    return frozenset(re.findall(r'^\|\s*`([a-z][a-z0-9_]*)`\s*\|', section, re.MULTILINE))
 
 
 def _assert_exact_set(label: str, actual: frozenset[str], expected: frozenset[str]) -> None:
@@ -918,8 +918,7 @@ def _authoritative_endpoint_map(root: Path) -> dict[str, frozenset[tuple[str, st
         for node in tree.body
         if not isinstance(node, (ast.Import, ast.ImportFrom, ast.ClassDef))
         and (
-            not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            or node.name == '_product'
+            not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.name == '_product'
         )
     ]
     scope: dict[str, Any] = {
@@ -1055,9 +1054,7 @@ def check_docs_operator_sections(root: Path) -> None:
     legacy_section = _markdown_section(text, 'Legacy tool inventory (14)')
     catalog_section = _markdown_section(text, 'Catalog tool inventory (14)')
     error_section = _markdown_section(text, 'Catalog error codes')
-    _assert_exact_set(
-        'legacy tool inventory', _tool_inventory_names(legacy_section), legacy_tools
-    )
+    _assert_exact_set('legacy tool inventory', _tool_inventory_names(legacy_section), legacy_tools)
     _assert_exact_set(
         'catalog tool inventory', _tool_inventory_names(catalog_section), catalog_tools
     )
@@ -1159,7 +1156,11 @@ def check_docs_migration_phrases(root: Path) -> None:
         raise AssertionError('migration guide contains a positive automatic-migration claim')
     for line in text.splitlines():
         lowered_line = line.lower()
-        if 'reuse' not in lowered_line or 'accept_tab' not in lowered_line or 'sha' not in lowered_line:
+        if (
+            'reuse' not in lowered_line
+            or 'accept_tab' not in lowered_line
+            or 'sha' not in lowered_line
+        ):
             continue
         if not any(negation in lowered_line for negation in ('no ', 'not ', 'never', "mustn't")):
             raise AssertionError('migration guide contains ACCEPT_TAB SHA reuse guidance')
@@ -1232,9 +1233,9 @@ def _expr_may_resolve_forbidden(node: ast.AST, tainted_names: set[str]) -> bool:
         try:
             value = ast.literal_eval(node)
         except (ValueError, TypeError):
-            return _expr_may_resolve_forbidden(node.left, tainted_names) or _expr_may_resolve_forbidden(
-                node.right, tainted_names
-            )
+            return _expr_may_resolve_forbidden(
+                node.left, tainted_names
+            ) or _expr_may_resolve_forbidden(node.right, tainted_names)
         return value == FORBIDDEN_GROUP
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         return any(_expr_may_resolve_forbidden(item, tainted_names) for item in node.elts)
@@ -1311,9 +1312,7 @@ def scan_current_source_v2_param_query(root: Path) -> dict[str, Any]:
                 } and _expr_may_resolve_forbidden(keyword.value, tainted_names):
                     hits.append(f'{rel}:{getattr(node, "lineno", 0)}:{keyword.arg}')
             if any(
-                _positional_dict_uses_forbidden_group(
-                    argument, tainted_names, request_dict_names
-                )
+                _positional_dict_uses_forbidden_group(argument, tainted_names, request_dict_names)
                 for argument in node.args
             ):
                 hits.append(f'{rel}:{getattr(node, "lineno", 0)}:positional_request')
@@ -1367,8 +1366,6 @@ def check_safety_no_probe(root: Path) -> None:
             'neo4j' in line.lower() and 'driver' in line.lower()
         ):
             raise AssertionError('runner must not import neo4j driver')
-
-
 
 
 CHECK_FUNCS = {
@@ -1430,8 +1427,7 @@ def validate_spec(spec: object, root: Path | None = None) -> None:
         if a in SHELL_META_TOKENS:
             raise ValueError(f'{sid}: shell metacharacter token forbidden: {a}')
         if not (
-            a.endswith('run_catalog_canary_batch.py')
-            or a == 'scripts/run_catalog_canary_batch.py'
+            a.endswith('run_catalog_canary_batch.py') or a == 'scripts/run_catalog_canary_batch.py'
         ):
             continue
         if sid not in {'ruff', 'pyright'}:
@@ -1459,15 +1455,19 @@ def canonical_specs(root: Path, *, include_live: bool = True) -> list[dict[str, 
             'argv': _runner_check_argv(check_id),
             'expected_exit': 0,
             'mandatory': True,
-            'kind': 'safety' if check_id in {
+            'kind': 'safety'
+            if check_id
+            in {
                 'safety_no_v2_current',
                 'historical_axis_preserved',
                 'historical_artifacts_unchanged',
                 'canary_not_executed',
-            } else 'structural',
+            }
+            else 'structural',
         }
         for check_id in CANONICAL_CHECK_IDS
-        if check_id not in {
+        if check_id
+        not in {
             'runner_self_tests',
             'focused_pytest',
             'security_matrix',
@@ -1583,9 +1583,7 @@ def canonical_specs_json(specs: list[dict[str, Any]]) -> str:
     return json.dumps(slim, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
 
 
-def content_digest_map(
-    root: Path, rels: tuple[Path, ...] = GATE_INPUT_RELS
-) -> dict[str, str]:
+def content_digest_map(root: Path, rels: tuple[Path, ...] = GATE_INPUT_RELS) -> dict[str, str]:
     out: dict[str, str] = {}
     for rel in rels:
         path = root / rel
@@ -1806,9 +1804,7 @@ def _availability_reason(check_id: str, outcome: dict[str, Any]) -> str | None:
     return f'{check_id} infrastructure unavailable: {"; ".join(reasons)}'
 
 
-def classify_check_outcome(
-    spec: dict[str, Any], outcome: dict[str, Any]
-) -> tuple[str, str | None]:
+def classify_check_outcome(spec: dict[str, Any], outcome: dict[str, Any]) -> tuple[str, str | None]:
     if not bool(spec.get('enabled', True)):
         if not bool(spec.get('availability_optional', False)):
             return 'fail', None
@@ -2206,9 +2202,7 @@ def _build_report_model(ledger: dict[str, Any]) -> dict[str, Any]:
         'migration_status': 'offline_hardened_artifacts_only',
         'two_axis_safety': {
             'historical': dict(ledger.get('historical_audit') or {}),
-            'current_oracle_catalog_v2_queried': ledger.get(
-                'current_oracle_catalog_v2_queried'
-            ),
+            'current_oracle_catalog_v2_queried': ledger.get('current_oracle_catalog_v2_queried'),
             'current_oracle_catalog_v2_mutated': False,
         },
         'audits': dict(ledger.get('audits') or {}),
@@ -2232,10 +2226,10 @@ def render_report_markdown(report: dict[str, Any]) -> str:
     lines = [
         '# Phase 5 Final Readiness Report',
         '',
-        f"- Implementation status: `{report['implementation_status']}`",
-        f"- Evaluated HEAD: `{report['evaluated_head']}`",
-        f"- Ready to regenerate canary: `{str(report['ready_to_regenerate_canary']).lower()}`",
-        f"- Phase 5 complete: `{str(report['phase_5_complete']).lower()}`",
+        f'- Implementation status: `{report["implementation_status"]}`',
+        f'- Evaluated HEAD: `{report["evaluated_head"]}`',
+        f'- Ready to regenerate canary: `{str(report["ready_to_regenerate_canary"]).lower()}`',
+        f'- Phase 5 complete: `{str(report["phase_5_complete"]).lower()}`',
         '- Canary executed: `false`',
         '',
         '## Test Classifications',
@@ -2246,8 +2240,8 @@ def render_report_markdown(report: dict[str, Any]) -> str:
     for command in report['commands']:
         reason = command.get('availability_reason') or ''
         lines.append(
-            f"| `{command['check_id']}` | {command['status']} "
-            f"({command.get('evidence_source', 'initial')}) | {reason} |"
+            f'| `{command["check_id"]}` | {command["status"]} '
+            f'({command.get("evidence_source", "initial")}) | {reason} |'
         )
     lines.extend(
         [
@@ -2407,9 +2401,7 @@ def atomic_write_package(
     backups = {path: path.read_bytes() if path.exists() else None for path in targets}
     replaced: list[Path] = []
     try:
-        staged = [
-            _stage_file(path, data) for path, data in zip(targets, all_payloads, strict=True)
-        ]
+        staged = [_stage_file(path, data) for path, data in zip(targets, all_payloads, strict=True)]
         # Marker is the commit point: publish it only after every data file is durable.
         for tmp_path, target in zip(staged, targets, strict=True):
             os.replace(tmp_path, target)
@@ -2445,9 +2437,10 @@ def validate_initial_package(ledger: dict[str, Any], report: dict[str, Any]) -> 
         row.get('status') != 'pending' for row in audits.values()
     ):
         raise ValueError('initial audit slots mismatch')
-    if report.get('phase_5_complete') is not False or report.get(
-        'ready_to_regenerate_canary'
-    ) is not False:
+    if (
+        report.get('phase_5_complete') is not False
+        or report.get('ready_to_regenerate_canary') is not False
+    ):
         raise ValueError('initial report cannot claim closure')
     if report != _build_report_model(ledger) or not _report_integrity_ok(report):
         raise ValueError('initial report model mismatch')
@@ -2531,7 +2524,9 @@ def run_gate(
         'reviewed_worktree_sha256_map': worktree_map,
         'reviewed_worktree_digest': content_digest(worktree_map),
         'requirement_ids': list(REQUIREMENT_IDS),
-        'requirement_dispositions': {requirement: 'pending-audits' for requirement in REQUIREMENT_IDS},
+        'requirement_dispositions': {
+            requirement: 'pending-audits' for requirement in REQUIREMENT_IDS
+        },
         'raw_edge_probe_count': EXPECTED_PROBE_COUNT,
         'expected_requirement_count': EXPECTED_REQUIREMENT_COUNT,
         'edge_probe_dispositions': {probe: 'pending-audits' for probe in EDGE_PROBE_IDS},
@@ -2623,7 +2618,10 @@ def parse_frontmatter(path: Path) -> dict[str, Any]:
             node: Any,
             deep: bool = False,
         ) -> dict[Any, Any]:
-            if any(getattr(key_node, 'tag', '') == 'tag:yaml.org,2002:merge' for key_node, _ in node.value):
+            if any(
+                getattr(key_node, 'tag', '') == 'tag:yaml.org,2002:merge'
+                for key_node, _ in node.value
+            ):
                 raise yaml.constructor.ConstructorError(
                     'while constructing a mapping',
                     node.start_mark,
@@ -2679,9 +2677,7 @@ AUDIT_COMMON_KEYS = AUDIT_BINDING_KEYS
 AUDIT_FRONTMATTER_KEYS = {
     'review': AUDIT_COMMON_KEYS | frozenset({'status', 'findings', 'review_scope'}),
     'validation': AUDIT_COMMON_KEYS
-    | frozenset(
-        {'phase', 'slug', 'status', 'nyquist_compliant', 'wave_0_complete', 'created'}
-    ),
+    | frozenset({'phase', 'slug', 'status', 'nyquist_compliant', 'wave_0_complete', 'created'}),
     'security': AUDIT_COMMON_KEYS | frozenset({'status', 'threats_open', 'accepted_risks'}),
     'verification': AUDIT_COMMON_KEYS
     | frozenset({'status', 'score', 'behavior_unverified', 'requirements_verified', 'gaps'}),
@@ -2761,9 +2757,7 @@ def _review_is_clean(data: dict[str, Any]) -> bool:
     ):
         raise ValueError('review audit findings total mismatch')
     return bool(
-        data.get('status') == 'clean'
-        and findings['critical'] == 0
-        and findings['warning'] == 0
+        data.get('status') == 'clean' and findings['critical'] == 0 and findings['warning'] == 0
     )
 
 
@@ -2828,8 +2822,7 @@ def _validate_probe_ledger(root: Path) -> None:
     if tuple(ids) != EDGE_PROBE_IDS:
         raise ValueError('probe ledger ids mismatch')
     if any(
-        item.get('status') != 'resolved' or item.get('verification') != 'explicit'
-        for item in items
+        item.get('status') != 'resolved' or item.get('verification') != 'explicit' for item in items
     ):
         raise ValueError('probe ledger unresolved')
     coverage = data.get('coverage') or {}
@@ -2942,9 +2935,10 @@ def _assert_initial_ledger_for_finalization(
     ):
         raise ValueError('initial ledger stage/integrity invalid')
     validate_initial_package(ledger, _build_report_model(ledger))
-    if ledger.get('phase_5_complete') is not False or ledger.get(
-        'ready_to_regenerate_canary'
-    ) is not False:
+    if (
+        ledger.get('phase_5_complete') is not False
+        or ledger.get('ready_to_regenerate_canary') is not False
+    ):
         raise ValueError('initial ledger already claims closure')
     current_specs = canonical_specs(root)
     current_specs_json = canonical_specs_json(current_specs)
@@ -3028,9 +3022,7 @@ def _assert_initial_ledger_for_finalization(
     return current_specs
 
 
-def run_final_closure_checks(
-    root: Path, specs: list[dict[str, Any]]
-) -> dict[str, Any]:
+def run_final_closure_checks(root: Path, specs: list[dict[str, Any]]) -> dict[str, Any]:
     by_id = {spec['id']: spec for spec in specs}
     if set(FINAL_RERUN_CHECK_IDS) - by_id.keys():
         raise ValueError('final closure check inventory mismatch')
@@ -3090,9 +3082,11 @@ def _validate_final_closure_checks(value: object) -> dict[str, Any]:
     if tuple(row.get('id') for row in rows if isinstance(row, dict)) != FINAL_RERUN_CHECK_IDS:
         raise ValueError('final closure check inventory mismatch')
     for row in rows:
-        if not isinstance(row, dict) or row.get('status') != 'pass' or row.get(
-            'exit_code'
-        ) != row.get('expected_exit', 0):
+        if (
+            not isinstance(row, dict)
+            or row.get('status') != 'pass'
+            or row.get('exit_code') != row.get('expected_exit', 0)
+        ):
             raise ValueError('final closure check result mismatch')
         for digest_key in ('stdout_sha256', 'stderr_sha256'):
             digest = row.get(digest_key)
@@ -3256,13 +3250,15 @@ def verify_final_package(
         'reviewed_worktree_digest'
     ) != content_digest(worktree_map):
         raise ValueError('final reviewed worktree drift detected')
-    if expected_requirements != EXPECTED_REQUIREMENT_COUNT or len(
-        ledger.get('requirement_dispositions') or {}
-    ) != expected_requirements:
+    if (
+        expected_requirements != EXPECTED_REQUIREMENT_COUNT
+        or len(ledger.get('requirement_dispositions') or {}) != expected_requirements
+    ):
         raise ValueError('final requirement count mismatch')
-    if expected_edge_probes != EXPECTED_PROBE_COUNT or len(
-        ledger.get('edge_probe_dispositions') or {}
-    ) != expected_edge_probes:
+    if (
+        expected_edge_probes != EXPECTED_PROBE_COUNT
+        or len(ledger.get('edge_probe_dispositions') or {}) != expected_edge_probes
+    ):
         raise ValueError('final probe count mismatch')
     if set(ledger['requirement_dispositions']) != set(REQUIREMENT_IDS):
         raise ValueError('final requirement ids mismatch')
@@ -3313,9 +3309,7 @@ def verify_final_package(
         raise ValueError('final effective result mismatch')
     if ledger.get('result_sources') != {
         check_id: (
-            'initial_external'
-            if check_id in PRESERVED_EXTERNAL_CHECK_IDS
-            else 'final_rerun'
+            'initial_external' if check_id in PRESERVED_EXTERNAL_CHECK_IDS else 'final_rerun'
         )
         for check_id in CANONICAL_CHECK_IDS
     }:
@@ -3337,9 +3331,7 @@ def verify_final_package(
         raise ValueError('final requirement disposition mismatch')
     if any(value != 'resolved' for value in ledger['edge_probe_dispositions'].values()):
         raise ValueError('final probe disposition mismatch')
-    if report.get('canary_executed') is not False or ledger.get(
-        'canary_executed'
-    ) is not False:
+    if report.get('canary_executed') is not False or ledger.get('canary_executed') is not False:
         raise ValueError('final canary invariant mismatch')
     expected_report = _build_report_model(ledger)
     if report != expected_report:
@@ -3500,7 +3492,6 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({'check': args.check_id, 'status': 'pass'}))
         return 0
 
-
     if args.command == 'check-docs':
         try:
             check_docs_operator_sections(root)
@@ -3521,9 +3512,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == 'finalize':
         try:
-            _require_canonical_package_paths(
-                root, ledger_path, report_json_path, report_md_path
-            )
+            _require_canonical_package_paths(root, ledger_path, report_json_path, report_md_path)
             ledger = finalize_package(
                 root,
                 ledger_path,
@@ -3553,9 +3542,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == 'verify-final':
         try:
-            _require_canonical_package_paths(
-                root, ledger_path, report_json_path, report_md_path
-            )
+            _require_canonical_package_paths(root, ledger_path, report_json_path, report_md_path)
             ledger = verify_final_package(
                 root,
                 ledger_path,

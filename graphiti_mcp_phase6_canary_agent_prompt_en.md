@@ -12,13 +12,13 @@ Canonical full payload persistence is allowed only as the builder-generated `acc
 
 Before opening MCP transport, require:
 
-- operator-confirmed committed HEAD;
-- reviewed canonical LF-normalized source-map digest over runner, builder, shared manifest contract, launcher, materializer, this prompt, approved fixture, Phase 5 proof marker;
-- reviewed LF-normalized runner digest;
+- operator-confirmed source HEAD plus explicit `git` or raw-archive authority mode;
+- reviewed dual source-map digest over each committed HEAD Git blob: exact raw-byte SHA-256 plus canonical LF text SHA-256 for runner, builder, shared hasher, shared manifest contract, launcher, materializer, this prompt, approved fixture, Phase 5 proof marker; archive mode requires the same externally reviewed map and performs no Git lookup;
+- reviewed canonical LF text runner digest from its committed HEAD Git blob; never call it raw SHA-256 or derive authority from checkout bytes;
 - reviewed host execution-map digest (`--execution-map-sha256`) over raw-byte SHA-256 of exact fixed paths: base Compose `mcp_server/docker/docker-compose-neo4j.yml`, catalog-local override `mcp_server/docker/docker-compose-neo4j.catalog-local.override.yml`, and ignored generated `mcp_server/config/config-docker-neo4j.catalog-local.yaml` (missing override/base/config fails closed);
 - no relevant-path dirtiness;
 - optional image/config fingerprints only when supplied, each lowercase SHA-256;
-- exact approved fixture path and pinned LF-normalized digest;
+- exact approved fixture path, pinned raw committed-Git-blob SHA-256, and pinned canonical LF text digest;
 - new immutable result directory outside artifact, golden, historical, blocked-run, and evidence roots.
 
 Any mismatch is `BLOCKED` with zero transport calls. CLI and direct programmatic `run_live_canary` both verify execution authority (injectable attestor cannot be omitted). A changed/uncommitted harness requires review plus authorized commit; never bypass Gate 0.
