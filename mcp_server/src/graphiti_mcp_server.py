@@ -11,7 +11,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -963,7 +963,7 @@ async def get_entity_edge(uuid: str) -> dict[str, Any] | ErrorResponse:
 
         # Use the format_fact_result function to serialize the edge
         # Return the Python dict directly - MCP will handle serialization
-        return format_fact_result(entity_edge)
+        return cast(dict[str, Any], format_fact_result(entity_edge))
     except Exception as e:
         error_msg = str(e)
         logger.error(f'Error getting entity edge: {error_msg}')
