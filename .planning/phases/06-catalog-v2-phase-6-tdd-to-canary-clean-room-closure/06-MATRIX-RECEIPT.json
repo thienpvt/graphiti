@@ -2,14 +2,17 @@
   "schema_version": "phase6-frozen-matrix-v1",
   "recorded_date": "2026-07-22",
   "classification": "READY_FOR_IMAGE_BINDING",
-  "commit": "6faa068782df8a3b73e908cdee08935afc08cc12",
-  "tree": "ffa729649e5042e8c352f0c4e91035174e8d6271",
+  "commit": "5efa69f4ae6a9ec78efbf29193a57c0679a5019e",
+  "tree": "d781773fac20a52a82c767117c6d39971b8f613e",
   "source_authority": "exact_raw_git_archive",
-  "raw_git_context_sha256": "b0794538fc3feac985ee68171520d670bb48fbf0ff75f1034f358af5ed323d31",
-  "archive_context_sha256": "b0794538fc3feac985ee68171520d670bb48fbf0ff75f1034f358af5ed323d31",
-  "archive_member_count": 762,
-  "failed_candidate_commit": "d54abe9d3d224367cb3a4eb989683a2860a9add2",
-  "failed_candidate_preserved": true,
+  "raw_git_context_sha256": "623845ad65ce738c96964ae3e292fa700d15a063d8864d58e11691f5a811aa85",
+  "archive_context_sha256": "623845ad65ce738c96964ae3e292fa700d15a063d8864d58e11691f5a811aa85",
+  "archive_member_count": 763,
+  "invalidated_candidate_commits": [
+    "d54abe9d3d224367cb3a4eb989683a2860a9add2",
+    "6faa068782df8a3b73e908cdee08935afc08cc12"
+  ],
+  "failed_candidates_preserved": true,
   "scanner_authority_path": "scripts/catalog_image_secret_scanner.py",
   "scanner_authority_symbol": "scan_tree",
   "scanner_authority_file_sha256": "ba1ed46d1b468375db85974262a47e5c7c7adf9c3dc146c821929686d0e11f2c",
@@ -23,49 +26,62 @@
   "canary_ids_allocated": false,
   "canary_executed": false,
   "protected_config_status": "modified_unstaged",
+  "projection_root": "phase6-u86-projection-5efa69f",
+  "projection_member_count": 204,
+  "build_context_sha256": "e302595c1cacaf770dede590617599b450d4c3ab991c42ca76ba5ba7624e626f",
+  "projection_source_commit": "5efa69f4ae6a9ec78efbf29193a57c0679a5019e",
+  "projection_archive_context_sha256": "623845ad65ce738c96964ae3e292fa700d15a063d8864d58e11691f5a811aa85",
+  "projection_scan_scope": "docker_standalone_copy_set",
+  "projection_secret_pattern_hits": 0,
+  "projection_path_classes": [],
+  "protected_config_in_projection": false,
+  "committed_baseline_config_present_in_archive": true,
+  "excluded_paths": [
+    ".planning/**",
+    "mcp_server/config/config-docker-neo4j.yaml",
+    "**/.env",
+    "**/.env.*",
+    "**/*secret*",
+    "**/*credential*",
+    "**/*namespace-authority*",
+    "**/*runtime-evidence*",
+    "**/*canary-ledger*",
+    "**/*catalog-v2-local-config*"
+  ],
+  "preserved_image_ids": [
+    "sha256:94d50fcab6cb6e9accb137687e74d8a4ef79bebcb627b955e6f9ad70769a7673",
+    "sha256:994e1d1307dfd64ba0955a5e2469324721318a81514093b901fd853ad341d099"
+  ],
   "checks": [
     {
       "name": "archive_exact_bind",
-      "files": 762,
+      "files": 763,
       "missing": 0,
       "extra": 0,
       "mismatches": 0,
       "exit_code": 0
     },
     {
-      "name": "focused_harness_and_scanner",
-      "passed": 152,
+      "name": "focused_frozen_non_archive_suite",
+      "passed": 130,
       "exit_code": 0,
       "warnings": 0,
       "skips": 0
     },
     {
       "name": "phase5_compatibility",
-      "passed": 80,
+      "passed": 76,
+      "exit_code": 0,
+      "warnings": 0,
+      "skips": 0
+    },
+    {
+      "name": "complete_catalog_union_excluding_separately_verified_archive_suite",
+      "passed": 1548,
       "exit_code": 0,
       "warnings": 0,
       "skips": 0,
-      "execution": "serial_retry_after_concurrent_workspace_race"
-    },
-    {
-      "name": "catalog_union_warning_strict",
-      "passed": 475,
-      "exit_code": 0,
-      "warnings": 0,
-      "skips": 0
-    },
-    {
-      "name": "complete_catalog_union",
-      "passed": 1556,
-      "exit_code": 0,
-      "skips": 0
-    },
-    {
-      "name": "direct_runner_builder_launcher_and_scanner",
-      "passed": 102,
-      "exit_code": 0,
-      "warnings": 0,
-      "skips": 0
+      "environment_isolation": "explicit_empty_catalog_namespace"
     },
     {
       "name": "raw_git_archive_suite",
@@ -75,35 +91,50 @@
       "skips": 0
     },
     {
+      "name": "effective_complete_catalog_union",
+      "passed": 1556,
+      "exit_code": 0,
+      "warnings": 0,
+      "skips": 0,
+      "composition": "1548 catalog tests plus 8 separately isolated raw-Git archive tests"
+    },
+    {
       "name": "ruff_check",
-      "files": 20,
+      "files": 9,
       "exit_code": 0
     },
     {
       "name": "ruff_format_check",
-      "files": 20,
+      "files": 9,
       "exit_code": 0
     },
     {
-      "name": "script_pyright",
+      "name": "targeted_pyright_mcp_environment",
       "errors": 0,
       "warnings": 0,
       "exit_code": 0
     },
     {
-      "name": "mcp_pyright",
-      "errors": 0,
-      "warnings": 0,
+      "name": "python_compileall",
+      "roots": [
+        "scripts",
+        "mcp_server/src",
+        "mcp_server/tests",
+        "tests/script"
+      ],
       "exit_code": 0
     },
     {
-      "name": "changed_python_compile",
-      "files": 20,
+      "name": "archive_derived_docker_projection_preflight",
+      "members": 204,
+      "secret_pattern_hits": 0,
+      "path_classes": [],
+      "protected_config_in_projection": false,
       "exit_code": 0
     },
     {
-      "name": "manifest_contract",
-      "fields": 22,
+      "name": "preserved_image_identity_inspection",
+      "images": 2,
       "exit_code": 0
     },
     {
@@ -111,25 +142,6 @@
       "commit": "35227e0a2c697e643871b5c2052556988c404df6",
       "files": 731,
       "source_context_sha256": "dcf73073443be37b777fc7feef124133be3d9ee305696e84042d5631125ed92f",
-      "exit_code": 0
-    },
-    {
-      "name": "base03_blockers_closed",
-      "public_actions": [
-        "render",
-        "neo4j",
-        "bootstrap",
-        "mcp",
-        "status",
-        "inspect"
-      ],
-      "project_override_present": true,
-      "graphiti_mcp_image_present": true,
-      "exit_code": 0
-    },
-    {
-      "name": "catalog_error_code_unchanged",
-      "embedding_transport_auth_member_count": 0,
       "exit_code": 0
     },
     {
@@ -144,12 +156,12 @@
   "harn_checklist": {
     "P6-HARN-01": {
       "status": "green",
-      "evidence": "frozen test_catalog_canary_scripts.py project-name validation",
+      "evidence": "frozen project-name validation",
       "class": "offline"
     },
     "P6-HARN-02": {
       "status": "green",
-      "evidence": "frozen legacy default-project contract tests",
+      "evidence": "frozen legacy default-project contracts",
       "class": "offline"
     },
     "P6-HARN-03": {
@@ -164,79 +176,79 @@
     },
     "P6-HARN-05": {
       "status": "green",
-      "evidence": "frozen test_catalog_schema_bootstrap.py exact 0/14-to-14/14 contract",
+      "evidence": "frozen exact 0/14-to-14/14 bootstrap contract",
       "class": "offline"
     },
     "P6-HARN-06": {
       "status": "green",
-      "evidence": "frozen MCP-only no-deps launcher action tests",
+      "evidence": "frozen MCP-only no-deps launcher tests",
       "class": "offline"
     },
     "P6-HARN-07": {
       "status": "green",
-      "evidence": "frozen GRAPHITI_MCP_IMAGE compose compatibility tests",
+      "evidence": "frozen GRAPHITI_MCP_IMAGE compatibility tests",
       "class": "offline"
     },
     "P6-HARN-08": {
       "status": "green",
-      "evidence": "frozen exact image-ID inspection tests; live observation deferred to 06-R3-RECEIPT.json",
+      "evidence": "frozen exact image-ID inspection contracts; live R3 proof deferred",
       "class": "offline"
     },
     "P6-HARN-09": {
       "status": "green",
-      "evidence": "frozen project-scoped disjoint data/log-volume tests",
+      "evidence": "frozen project-scoped resource tests",
       "class": "offline"
     },
     "P6-HARN-10": {
       "status": "deferred_runtime",
-      "evidence": "absent-before-creation live proof deferred to Plan 06-05 06-R0-RECEIPT.json",
+      "evidence": "absent-before-creation live proof deferred to 06-R0-RECEIPT.json",
       "class": "deferred_runtime"
     },
     "P6-HARN-11": {
       "status": "green",
-      "evidence": "frozen UUIDv4 exclusive-create/no-regeneration materializer tests",
+      "evidence": "frozen UUIDv4 exclusive-create tests",
       "class": "offline"
     },
     "P6-HARN-12": {
       "status": "green",
-      "evidence": "frozen namespace-fingerprint project/data-volume binding tests",
+      "evidence": "frozen namespace-fingerprint binding tests",
       "class": "offline"
     },
     "P6-HARN-13": {
       "status": "green",
-      "evidence": "frozen raw-namespace exclusion and sanitized-output tests",
+      "evidence": "frozen raw-namespace exclusion tests",
       "class": "offline"
     },
     "P6-HARN-14": {
       "status": "green",
-      "evidence": "frozen allowlisted structured-subprocess and destructive-operation rejection tests",
+      "evidence": "frozen structured-subprocess and destructive-operation rejection tests",
       "class": "offline"
     },
     "P6-HARN-15": {
       "status": "green",
-      "evidence": "frozen runner terminal-ledger schema/ordinal/hash tests; live ledger deferred to Plan 06-05",
+      "evidence": "frozen terminal-ledger schema and hash tests",
       "class": "offline"
     },
     "P6-HARN-16": {
       "status": "green",
-      "evidence": "frozen LIVE_MANIFEST_FIELDS exact 22-field assertion",
+      "evidence": "frozen exact 22-field manifest assertion",
       "class": "offline"
     },
     "P6-HARN-17": {
       "status": "green",
-      "evidence": "frozen capability/registration contract tests; live exact registry deferred to 06-R3-RECEIPT.json",
+      "evidence": "frozen capability and registration contracts",
       "class": "offline"
     },
     "P6-HARN-18": {
       "status": "green",
-      "evidence": "exact archive: 152 focused+scanner, 80 Phase5, 475 warning-strict union, 1556 complete catalog, 102 direct+scanner, 8 archive; Ruff/format/Pyright/compile green",
+      "evidence": "130 focused, 76 Phase5, effective 1556 complete catalog; Ruff, format, Pyright, compile and zero-hit projection green",
       "class": "offline"
     },
     "P6-HARN-19": {
       "status": "green",
-      "evidence": "frozen CatalogErrorCode has no embedding_transport_auth member; exact 22-field manifest and tool contracts unchanged",
+      "evidence": "Catalog error/manifest/tool identity contracts unchanged; scanner remediation only",
       "class": "offline"
     }
   },
-  "notes": "Complete frozen matrix executed from candidate archive bytes with disposable archive-local Git metadata. One concurrent duplicate Phase5 invocation observed shared test-workspace drift; the authoritative serial retry passed all 80 tests, while the complete 1556-test union also passed. No Docker build, runtime, MCP transport, provider, namespace, identity, or canary action occurred."
+  "notes": "Frozen matrix executed from exact candidate archive bytes. Raw-Git archive tests ran separately with disposable Git metadata to avoid contaminating synthetic fixture repositories; 1548 plus 8 equals the effective 1556-test catalog union. Fresh archive-derived Docker COPY projection contains 204 files, excludes the protected config and planning/secret/runtime denylist, and scans zero-hit. No Docker build, runtime, MCP transport, provider, namespace, identity, or canary action occurred."
 }
