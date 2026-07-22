@@ -524,6 +524,32 @@ def test_posthog_api_key_literal_hits_env_style_non_hit() -> None:
     _result_public_fields(clean)
 
 
+def test_telemetry_key_is_env_only_and_optional(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing/empty key disables telemetry; configured key comes only from environment."""
+    import sys
+    from types import SimpleNamespace
+
+    path = ROOT / 'graphiti_core' / 'telemetry' / 'telemetry.py'
+    name = 'catalog_test_telemetry'
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    telemetry = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(telemetry)
+
+    fake_posthog = SimpleNamespace(api_key=None, host=None)
+    monkeypatch.setitem(sys.modules, 'posthog', fake_posthog)
+    monkeypatch.delenv('POSTHOG_API_KEY', raising=False)
+    assert telemetry.initialize_posthog() is None
+
+    monkeypatch.setenv('POSTHOG_API_KEY', '')
+    assert telemetry.initialize_posthog() is None
+
+    configured = 'test-placeholder'
+    monkeypatch.setenv('POSTHOG_API_KEY', configured)
+    assert telemetry.initialize_posthog() is fake_posthog
+    assert fake_posthog.api_key == configured
+
+
 def test_readme_password_placeholder_vs_opaque() -> None:
     """README-like password literals: opaque hits; allowlist placeholders do not."""
     opaque = 'password="falkor_password"\n'
