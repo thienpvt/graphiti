@@ -1,0 +1,43 @@
+{
+  "schema_version": "h8-archive-binding-failure-v1",
+  "classification": "BLOCKED_POST_COMMIT_SOURCE_BINDING",
+  "reason_code": "archive_blob_bytes_mismatch",
+  "commit": "1031b7921fc1f6ca2b7f5aa20e7a02a0a2959ff8",
+  "parent": "35227e0a2c697e643871b5c2052556988c404df6",
+  "tree": "e0786f42bdce592c5b3631bd00a4e8194e14860f",
+  "commit_count": 1,
+  "archive_sha256": "2e237b6f8f32aa9ff1bf8d211b00d0f8b4194e3cf95f46b53a05a8fcbb218d3e",
+  "archive_size": 29880320,
+  "git_blob_count": 733,
+  "archive_member_count": 733,
+  "missing_count": 0,
+  "extra_count": 0,
+  "blob_mismatch_count": 634,
+  "raw_git_context_sha256": "051c07953ad5d52d425de05ea4acb85829045626335569bc05e427c5d00fc412",
+  "archive_context_sha256": "156ba0ce6decd8d84b04113ac4791c5ed429f1251cdcb52b3514d93f01c9b97b",
+  "changed_path_count": 12,
+  "changed_mismatch_count": 7,
+  "changed_mismatch_paths": [
+    "mcp_server/config/.gitignore",
+    "mcp_server/docker/docker-compose-neo4j.yml",
+    "mcp_server/src/services/catalog_schema_bootstrap.py",
+    "mcp_server/tests/test_catalog_canary_scripts.py",
+    "mcp_server/tests/test_catalog_schema_bootstrap.py",
+    "scripts/bootstrap_catalog_v2_schema.py",
+    "tests/script/run_catalog_canary_batch.py"
+  ],
+  "changed_exact_paths": [
+    "graphiti_mcp_phase6_canary_agent_prompt_en.md",
+    "mcp_server/docker/docker-compose-neo4j.catalog-local.override.yml",
+    "scripts/materialize_catalog_local_config.py",
+    "scripts/run_catalog_canary_batch.py",
+    "scripts/run_catalog_canary_launcher.py"
+  ],
+  "image_build_count": 0,
+  "runtime_start_count": 0,
+  "namespace_generated": false,
+  "schema_calls": 0,
+  "mcp_calls": 0,
+  "canary_executed": false,
+  "resources_created": false
+}

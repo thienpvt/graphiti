@@ -1,0 +1,23 @@
+{
+  "schema_version": "catalog-clean-room-h7-receipt-v1",
+  "recorded_date": "2026-07-22",
+  "classification": "READY_FOR_COMMIT_BINDING",
+  "sanitized": true,
+  "no_runtime_activity": true,
+  "checks": [
+    {"name": "changed_python_compile", "exit_code": 0},
+    {"name": "focused_harness", "passed": 50, "exit_code": 0, "warnings": 0, "skips": 0},
+    {"name": "phase5_compatibility", "passed": 80, "exit_code": 0, "warnings": 0, "skips": 0},
+    {"name": "catalog_union", "passed": 413, "exit_code": 0, "warnings": 0, "skips": 0},
+    {"name": "direct_runner_builder", "passed": 65, "exit_code": 0, "warnings": 0, "skips": 0},
+    {"name": "combined_harness_direct", "passed": 115, "exit_code": 0, "warnings": 0, "skips": 0},
+    {"name": "ruff_check", "exit_code": 0},
+    {"name": "ruff_format_check", "files": 9, "exit_code": 0},
+    {"name": "targeted_pyright", "errors": 0, "warnings": 0, "exit_code": 0},
+    {"name": "manifest_contract", "fields": 22, "exit_code": 0},
+    {"name": "git_diff_check", "exit_code": 0},
+    {"name": "staged_paths", "count": 0},
+    {"name": "head", "value": "35227e0a2c697e643871b5c2052556988c404df6"},
+    {"name": "protected_config_git_blob", "value": "815d00fe64c5e459ea50eec44e2c847a6b485bd4"}
+  ]
+}

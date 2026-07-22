@@ -1,0 +1,26 @@
+{
+  "schema_version": "catalog-clean-room-h1-red-receipt-v1",
+  "recorded_at": "2026-07-22T01:00:05Z",
+  "commands": [
+    {
+      "collected": 52,
+      "exit_code": 1,
+      "infrastructure_error": false,
+      "selector": "canary-clean-room-contract",
+      "failures": 6,
+      "selected": 6,
+      "outcome": "expected-red"
+    },
+    {
+      "selected": 10,
+      "exit_code": 1,
+      "selector": "schema-bootstrap-contract",
+      "passes": 4,
+      "failures": 6,
+      "infrastructure_error": false,
+      "outcome": "expected-red",
+      "collected": 10
+    }
+  ],
+  "sanitized": true
+}
