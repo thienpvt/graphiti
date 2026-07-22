@@ -2,33 +2,39 @@
   "schema_version": "phase6-frozen-matrix-v1",
   "recorded_date": "2026-07-22",
   "classification": "READY_FOR_IMAGE_BINDING",
-  "commit": "d54abe9d3d224367cb3a4eb989683a2860a9add2",
-  "tree": "4f87cf0c5ece8351ea83307c5078044e613139b3",
+  "commit": "6faa068782df8a3b73e908cdee08935afc08cc12",
+  "tree": "ffa729649e5042e8c352f0c4e91035174e8d6271",
   "source_authority": "exact_raw_git_archive",
-  "raw_git_context_sha256": "46a870f81158e1862cfcfb7662b4776c40733a344881ccf6192b643fe61222e8",
-  "archive_context_sha256": "46a870f81158e1862cfcfb7662b4776c40733a344881ccf6192b643fe61222e8",
-  "archive_member_count": 756,
+  "raw_git_context_sha256": "b0794538fc3feac985ee68171520d670bb48fbf0ff75f1034f358af5ed323d31",
+  "archive_context_sha256": "b0794538fc3feac985ee68171520d670bb48fbf0ff75f1034f358af5ed323d31",
+  "archive_member_count": 762,
+  "failed_candidate_commit": "d54abe9d3d224367cb3a4eb989683a2860a9add2",
+  "failed_candidate_preserved": true,
+  "scanner_authority_path": "scripts/catalog_image_secret_scanner.py",
+  "scanner_authority_symbol": "scan_tree",
+  "scanner_authority_file_sha256": "ba1ed46d1b468375db85974262a47e5c7c7adf9c3dc146c821929686d0e11f2c",
   "sanitized": true,
   "unexplained_skip_count": 0,
   "deselection_count": 0,
   "warning_count": 0,
   "image_build_count": 0,
   "runtime_start_count": 0,
+  "namespace_generated": false,
   "canary_ids_allocated": false,
   "canary_executed": false,
   "protected_config_status": "modified_unstaged",
   "checks": [
     {
       "name": "archive_exact_bind",
-      "files": 756,
+      "files": 762,
       "missing": 0,
       "extra": 0,
       "mismatches": 0,
       "exit_code": 0
     },
     {
-      "name": "focused_harness",
-      "passed": 134,
+      "name": "focused_harness_and_scanner",
+      "passed": 152,
       "exit_code": 0,
       "warnings": 0,
       "skips": 0
@@ -38,10 +44,11 @@
       "passed": 80,
       "exit_code": 0,
       "warnings": 0,
-      "skips": 0
+      "skips": 0,
+      "execution": "serial_retry_after_concurrent_workspace_race"
     },
     {
-      "name": "catalog_union",
+      "name": "catalog_union_warning_strict",
       "passed": 475,
       "exit_code": 0,
       "warnings": 0,
@@ -54,8 +61,8 @@
       "skips": 0
     },
     {
-      "name": "direct_runner_builder_launcher",
-      "passed": 84,
+      "name": "direct_runner_builder_launcher_and_scanner",
+      "passed": 102,
       "exit_code": 0,
       "warnings": 0,
       "skips": 0
@@ -69,11 +76,12 @@
     },
     {
       "name": "ruff_check",
+      "files": 20,
       "exit_code": 0
     },
     {
       "name": "ruff_format_check",
-      "files": 18,
+      "files": 20,
       "exit_code": 0
     },
     {
@@ -90,7 +98,7 @@
     },
     {
       "name": "changed_python_compile",
-      "files": 18,
+      "files": 20,
       "exit_code": 0
     },
     {
@@ -125,9 +133,11 @@
       "exit_code": 0
     },
     {
-      "name": "candidate_receipts_excluded",
-      "bind_receipt": false,
-      "matrix_receipt": false,
+      "name": "candidate_commit_receipts_excluded",
+      "bind_receipt_introduced": false,
+      "matrix_receipt_introduced": false,
+      "historical_receipts_in_parent_tree": true,
+      "image_projection_excludes_planning": true,
       "exit_code": 0
     }
   ],
@@ -179,7 +189,7 @@
     },
     "P6-HARN-10": {
       "status": "deferred_runtime",
-      "evidence": "absent-before-creation live proof in Plan 06-05 06-R0-RECEIPT.json",
+      "evidence": "absent-before-creation live proof deferred to Plan 06-05 06-R0-RECEIPT.json",
       "class": "deferred_runtime"
     },
     "P6-HARN-11": {
@@ -204,7 +214,7 @@
     },
     "P6-HARN-15": {
       "status": "green",
-      "evidence": "frozen runner terminal ledger schema/ordinal/hash tests; live ledger deferred to Plan 06-05",
+      "evidence": "frozen runner terminal-ledger schema/ordinal/hash tests; live ledger deferred to Plan 06-05",
       "class": "offline"
     },
     "P6-HARN-16": {
@@ -219,7 +229,7 @@
     },
     "P6-HARN-18": {
       "status": "green",
-      "evidence": "exact archive: 134 focused, 80 Phase5, 475 warning-strict union, 1556 complete catalog, 84 direct, 8 archive; Ruff/format/Pyright/compile green",
+      "evidence": "exact archive: 152 focused+scanner, 80 Phase5, 475 warning-strict union, 1556 complete catalog, 102 direct+scanner, 8 archive; Ruff/format/Pyright/compile green",
       "class": "offline"
     },
     "P6-HARN-19": {
@@ -228,5 +238,5 @@
       "class": "offline"
     }
   },
-  "notes": "Complete frozen matrix executed from candidate archive bytes. Archive-local disposable Git metadata under CLAUDE_JOB_DIR/tmp supplied candidate Git authority to Git-aware tests without altering source bytes. No Docker, image, runtime, MCP transport, provider, namespace, identity, or canary action occurred."
+  "notes": "Complete frozen matrix executed from candidate archive bytes with disposable archive-local Git metadata. One concurrent duplicate Phase5 invocation observed shared test-workspace drift; the authoritative serial retry passed all 80 tests, while the complete 1556-test union also passed. No Docker build, runtime, MCP transport, provider, namespace, identity, or canary action occurred."
 }
