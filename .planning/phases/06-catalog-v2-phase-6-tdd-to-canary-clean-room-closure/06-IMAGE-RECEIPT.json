@@ -1,7 +1,7 @@
 {
   "schema_version": "phase6-image-receipt-v1",
   "recorded_date": "2026-07-22",
-  "classification": "IMAGE_BOUND_GREEN",
+  "classification": "IMAGE_BOUND_SCAN_BLOCKED",
   "tag": "graphiti-mcp:phase6-cleanroom-5efa69f4ae6-bound",
   "image_id": "sha256:33d22dbf6aac6e95458e4192c3772605c8ae19030d02af17b9390ff7a8a08e5f",
   "commit": "5efa69f4ae6a9ec78efbf29193a57c0679a5019e",
@@ -40,7 +40,14 @@
   "supplemental_scanner_authority_symbol": "_assert_no_sensitive_values",
   "supplemental_scanner_authority_blob_sha1": "0c7bfcf62b59f61345199dbc9e1c3dcb5064be5f",
   "supplemental_scanner_authority_file_sha256": "874a21e8bff34880c84d1f42ef29b675a838e3a32132d104457ae7eca1acbc7f",
-  "secret_pattern_hits": 0,
+  "strict_plan04_complete_image_scan_satisfied": false,
+  "strict_plan04_gate_failure": "DEPENDENCY_PAYLOAD_FALSE_POSITIVES_PREVENTED_COMPLETE_IMAGE_ZERO_HIT_PROOF",
+  "secret_pattern_hits": null,
+  "strict_scanner_raw_match_count": 405,
+  "strict_scanner_raw_match_classes": [
+    "application_or_os",
+    "dependency"
+  ],
   "matched_path_classes": [],
   "final_rootfs_scan": {
     "application_paths": [
@@ -70,5 +77,5 @@
   "canary_ids_allocated": false,
   "canary_executed": false,
   "protected_config_status": "modified_unstaged",
-  "notes": "One image was built from the exact archive-derived denylisted projection. The initial Docker invocation failed before loading a Dockerfile because the projection omitted the archive Dockerfile; adding that archive byte changed the projection from 204 to 205 members and no image was produced by the failed invocation. Final application filesystem scanning used the deterministic scanner over all shipped Graphiti/MCP application paths; image config/history and complete layer path metadata were also inspected. No runtime, MCP transport, provider, namespace, identity, or canary action occurred."
+  "notes": "One image was built from the exact archive-derived denylisted projection. The initial Docker invocation failed before loading a Dockerfile because the projection omitted the archive Dockerfile; adding that archive byte changed the projection from 204 to 205 members and no image was produced by the failed invocation. Final Graphiti/MCP application paths scan zero-hit, but the Plan 06-04 strict complete-image authority cannot certify zero hits: applying _assert_no_sensitive_values across all 5,137 text payloads yields 405 raw matches across application/OS/dependency files, dominated by code identifiers and examples. No scanner/path/dependency waiver is authorized, so IMAGE remains scan-blocked and Plan 06-05 runtime must not start. No runtime, MCP transport, provider, namespace, identity, or canary action occurred."
 }
