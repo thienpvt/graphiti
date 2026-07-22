@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-07-22T10:10:04.692Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-07-22T11:23:35Z"
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 49
-  completed_plans: 45
-  percent: 88
+  completed_plans: 46
+  percent: 90
 current_phase: 06
 current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
 last_activity: 2026-07-22
-last_activity_desc: Phase 6 Plan 06-01 complete; raw-Git archive TDD green; 1/5 executed; next Plan 06-02
+last_activity_desc: Phase 6 Plan 06-02 complete; terminal/auth/replay launcher TDD green; 2/5 executed; next Plan 06-03
 ---
 
 # Project State
@@ -28,15 +28,16 @@ See: `.planning/PROJECT.md`
 
 ## Current Position
 
-Phase 5 complete (historical). Phase 6 execution is active; Plan 06-01 complete.
+Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 and 06-02 complete.
 
-### Phase 6 (1/5 complete → execute 06-02)
+### Phase 6 (2/5 complete → execute 06-03)
 
 - Authority: `e52c1b5:spec/new-phase.md`
 - Requirements ingested: **64/64** P6-* IDs
-- Plans on disk: **5** sequential waves (`06-01`…`06-05`) — **1/5 executed**
-- Plan 06-01: raw-Git exact archive RED/GREEN complete; baseline `dcf730…` golden exact; 8 focused + 30 adjacent tests passed
-- Next: Plan 06-02 terminal/auth/replay TDD only
+- Plans on disk: **5** sequential waves (`06-01`…`06-05`) — **2/5 executed**
+- Plan 06-01: raw-Git exact archive RED/GREEN complete; baseline `dcf730…` golden exact
+- Plan 06-02: post-ID terminal/auth/replay/final-launcher RED/GREEN complete; 57 harness + 309 catalog tests passed
+- Next: Plan 06-03 source-complete PREBIND matrix, exact archive bind, frozen matrix
 - `canary_ids_allocated=false`; no source-bound image; no clean-room runtime; `canary_executed=false`; no canary approval
 - Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains unstaged
 
@@ -72,12 +73,13 @@ Phase 5 complete (historical). Phase 6 execution is active; Plan 06-01 complete.
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
-| Phase 6 | 1/5 | In progress; Plan 06-01 raw-Git archive TDD complete; next 06-02 |
+| Phase 6 | 2/5 | In progress; Plans 06-01/02 TDD complete; next 06-03 |
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 06 P01 | 31min | 2 tasks | 3 files |
+| Phase 06 P02 | 56min | 2 tasks | 15 task-owned files |
 
 ## Accumulated Context
 
@@ -85,7 +87,7 @@ Phase 5 complete (historical). Phase 6 execution is active; Plan 06-01 complete.
 
 - Active v1.1 spine Phase 0 / 1 / 2 / 3A / 3B / 4 / 5 is complete.
 - Phase 6 authorized by `e52c1b5`; 64 P6-* requirements ingested; five-wave plans written (06-01 archive TDD → 06-02 classification/auth/replay TDD → 06-03 bind/matrix → 06-04 image → 06-05 R0–R3/freeze/handoff).
-- Phase 6 Plan 06-01 complete (1/5); raw-Git archive TDD green; next Plan 06-02; no image/runtime/IDs/canary.
+- Phase 6 Plans 06-01/02 complete (2/5); raw-Git archive plus terminal/auth/replay/final-launcher TDD green; next Plan 06-03; no image/runtime/IDs/canary.
 - No automatic catalog-v1 migration, deployment, push, merge, tag, graph clear, or existing-data deletion.
 - Development/live tests use only `oracle-catalog-tool-test`.
 - Never query or mutate `oracle-catalog-v2`.
@@ -100,7 +102,7 @@ Phase 5 complete (historical). Phase 6 execution is active; Plan 06-01 complete.
 
 ### Pending Todos
 
-1. Execute Plan 06-02 (wave 2 terminal/auth/replay TDD). No canary approval.
+1. Execute Plan 06-03 (wave 3 PREBIND, exact archive bind, frozen matrix). No image/runtime/canary.
 2. Do not allocate canary IDs, build image, or start runtime until plans 03–05 execute in order.
 3. Require explicit confirmation before any cleanup/deletion.
 
@@ -134,8 +136,8 @@ Phase 5 complete (historical). Phase 6 execution is active; Plan 06-01 complete.
 
 ## Session Continuity
 
-**Last session:** 2026-07-22T10:10:04.684Z
-**Resume file:** .planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-02-PLAN.md
+**Last session:** 2026-07-22T11:23:35Z
+**Resume file:** .planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-03-PLAN.md
 
-Stopped at: Completed 06-01-PLAN.md
-Next: execute Plan 06-02; still no image/runtime/IDs/canary.
+Stopped at: Completed 06-02-PLAN.md
+Next: execute Plan 06-03; still no image/runtime/IDs/canary.

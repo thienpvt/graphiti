@@ -309,7 +309,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 1/5 | In progress; raw-Git archive TDD green; no image/runtime/IDs/canary | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 2/5 | In progress; archive + terminal/auth/replay launcher TDD green; no image/runtime/IDs/canary | — |
 
 ## Coverage
 
@@ -359,7 +359,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
 - Historical Docker resources and prior canary data/evidence remain unchanged
 
-**Plans**: 1/5 plans executed
+**Plans**: 2/5 plans executed
 
 Plans:
 **Wave 1**
@@ -368,7 +368,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 06-02-PLAN.md — TDD post-ID three-class + auth sentinel (no CatalogErrorCode expand) + committed harness replay gate (one primary commit) + prompt
+- [x] 06-02-PLAN.md — TDD post-ID three-class + auth sentinel (no CatalogErrorCode expand) + committed harness replay gate (one primary commit) + final-canary launcher
 
 **Wave 3** *(blocked on Wave 2)*
 

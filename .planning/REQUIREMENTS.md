@@ -219,7 +219,7 @@ Phase 6 is authorized by fetched fork commit `e52c1b5` under `ITERATIVE_TDD_IMPL
 - [ ] **P6-HARN-16**: The exact existing 22-field live-manifest contract remains unchanged.
 - [ ] **P6-HARN-17**: The exact existing 28-tool MCP registry remains unchanged.
 - [ ] **P6-HARN-18**: Phase 5, Phase 6, combined remediation, golden contract/hash, Ruff, format, Pyright, and relevant union regressions remain compatible.
-- [ ] **P6-HARN-19**: No Catalog-v2 identity, evidence, manifest, request, or MCP tool contract changes are used to solve orchestration.
+- [x] **P6-HARN-19**: No Catalog-v2 identity, evidence, manifest, request, or MCP tool contract changes are used to solve orchestration.
 
 ### TDD and Exact Source Binding
 
@@ -335,7 +335,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | P6-HARN-16 | Phase 6 | Pending |
 | P6-HARN-17 | Phase 6 | Pending |
 | P6-HARN-18 | Phase 6 | Pending |
-| P6-HARN-19 | Phase 6 | Pending |
+| P6-HARN-19 | Phase 6 | Complete |
 | P6-TDD-01 | Phase 6 | Complete |
 | P6-TDD-02 | Phase 6 | Complete |
 | P6-TDD-03 | Phase 6 | Complete |
