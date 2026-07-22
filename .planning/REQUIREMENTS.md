@@ -6,7 +6,7 @@
 
 ## v1.1 Requirements
 
-Requirements for pre-canary hardening. Every requirement maps to exactly one roadmap phase.
+Requirements for pre-canary hardening plus the separately authorized Phase 6 clean-room closure. Every requirement maps to exactly one roadmap phase.
 
 ### Baseline and Safety
 
@@ -179,6 +179,98 @@ Requirements for pre-canary hardening. Every requirement maps to exactly one roa
 - [x] **DOCS-06**: The cherry-picked builder, token-aware runner, sanitized fixtures, receipts, checkpoint, and offline tests are migrated to hardened catalog-v2 prepare/commit; generated artifacts are validated offline without executing the real canary or embedding production catalog content into logs/docs.
 - [x] **REPT-01**: The final implementation report follows the requested structured JSON shape, reports baseline/tool/test/change/migration/risk facts, sets `canary_executed=false`, and sets `ready_to_regenerate_canary=true` only after every stated gate passes.
 
+## Phase 6 Requirements
+
+Phase 6 is authorized by fetched fork commit `e52c1b5` under `ITERATIVE_TDD_IMPLEMENTATION_AND_ONE_FINAL_CLEANROOM_CANARY`. These requirements derive from `spec/new-phase.md`; stale Phase 0–5 canary prohibitions remain historical truth for those phases but do not override this explicitly authorized clean-room operation.
+
+### Authority and Baseline
+
+- [ ] **P6-AUTH-01**: Execution follows the fetched Phase 6 authorization and acceptance contract without widening it to deployment, production migration, historical groups, or a second canary.
+- [ ] **P6-BASE-01**: Source authority starts from commit `35227e0a2c697e643871b5c2052556988c404df6`, tree `fed171af3c49dc96701da26b53fd391511a00735`, and source-context SHA-256 `dcf73073443be37b777fc7feef124133be3d9ee305696e84042d5631125ed92f`.
+- [ ] **P6-BASE-02**: The previously approved image and image ID remain historical evidence only and are never retagged as the final source-bound image.
+- [ ] **P6-BASE-03**: The original forced-project, Neo4j-staging, and hardcoded-image blockers are verified closed by current committed source before runtime activation.
+
+### Preservation and Provider Policy
+
+- [ ] **P6-PRES-01**: User-owned `mcp_server/config/config-docker-neo4j.yaml` remains untouched, unstaged, uncommitted, and excluded from image context/evidence.
+- [ ] **P6-PRES-02**: No reset, checkout, restore, stash, broad replacement, push, merge, rebase, amend, or tag occurs; task commits contain task-owned paths only.
+- [ ] **P6-PRES-03**: Historical Docker containers, networks, volumes, canary data, and evidence remain unchanged.
+- [ ] **P6-PROV-01**: Phase 6 invokes no generative LLM operation, public OpenAI endpoint/probe, credential mutation, or provider substitution.
+- [ ] **P6-PROV-02**: Provider-dependent work is limited to prepare/search embeddings; successful `prepare_catalog_batch` is the first functional embedding proof.
+- [ ] **P6-PROV-03**: Actual embedding authentication failures classify exactly as `FAILED_BEFORE_COMMIT` or `FAILED_AFTER_COMMIT` with cause `embedding_transport_auth`, without bypass or retry.
+
+### Harness Acceptance
+
+- [ ] **P6-HARN-01**: Clean-room Compose project names are explicit and validated; empty, path-like, whitespace, shell-fragment, and option-injection values fail closed.
+- [ ] **P6-HARN-02**: Omitted project authority preserves the legacy default `graphiti-catalog-local`.
+- [ ] **P6-HARN-03**: The launcher provides one canonical effective-Compose render action.
+- [ ] **P6-HARN-04**: The launcher starts Neo4j only when requested.
+- [ ] **P6-HARN-05**: The launcher invokes one canonical application-owned Catalog-v2 schema bootstrap from exact 0/14 to exact 14/14 with no retry, repair, drop, alternate Cypher, or Graphiti driver construction.
+- [ ] **P6-HARN-06**: The launcher starts graphiti-mcp only without recreating Neo4j or dependencies.
+- [ ] **P6-HARN-07**: Compose accepts explicit `GRAPHITI_MCP_IMAGE` selection while preserving the legacy image default.
+- [ ] **P6-HARN-08**: Post-start inspection requires the exact expected running MCP image ID and rejects absent, ambiguous, or mismatched containers.
+- [ ] **P6-HARN-09**: Neo4j data and log volumes are project-scoped and disjoint across projects.
+- [ ] **P6-HARN-10**: Clean-room project containers, network, data volume, and log volume are proven absent before creation.
+- [ ] **P6-HARN-11**: The canonical materializer creates exactly one cryptographically random UUIDv4 namespace per clean-room data-volume authority using exclusive creation and no silent regeneration.
+- [ ] **P6-HARN-12**: Namespace fingerprint authority binds to exact project and data-volume identity.
+- [ ] **P6-HARN-13**: Raw namespace bytes never appear in output, exceptions, argv, evidence, Git, image layers, or reports.
+- [ ] **P6-HARN-14**: Compose operations are fixed and allow-listed, use structured subprocess argv, and reject arbitrary services/actions/files/profiles/fragments, shell execution, build, pull, prune, and historical mutation.
+- [ ] **P6-HARN-15**: Launcher and MCP ledgers are contiguous, complete, bounded, and sanitized.
+- [ ] **P6-HARN-16**: The exact existing 22-field live-manifest contract remains unchanged.
+- [ ] **P6-HARN-17**: The exact existing 28-tool MCP registry remains unchanged.
+- [ ] **P6-HARN-18**: Phase 5, Phase 6, combined remediation, golden contract/hash, Ruff, format, Pyright, and relevant union regressions remain compatible.
+- [ ] **P6-HARN-19**: No Catalog-v2 identity, evidence, manifest, request, or MCP tool contract changes are used to solve orchestration.
+
+### TDD and Exact Source Binding
+
+- [ ] **P6-TDD-01**: Missing behavior begins with intentional RED acceptance tests mapped to requirements, not fixture/import/infrastructure failures.
+- [ ] **P6-TDD-02**: Production changes are the minimum required for GREEN behavior.
+- [ ] **P6-TDD-03**: Every defect follows focused RED/GREEN, adjacent regression, and refactor-with-green iteration without weakening, skipping, deselecting, or broadly mocking tests.
+- [ ] **P6-TDD-04**: The complete frozen verification matrix passes with no unexplained failures, skips, deselections, warnings, or stale evidence before source binding.
+- [ ] **P6-BIND-01**: Only task-owned source/tests/docs are staged into local candidate commits.
+- [ ] **P6-BIND-02**: A raw-Git LF-exact archive is materialized without checkout, export, or EOL transformation.
+- [ ] **P6-BIND-03**: Archive membership, paths, modes, symlinks, duplicates, collisions, and every blob hash exactly match the candidate Git tree.
+- [ ] **P6-BIND-04**: The canonical source-context SHA-256 is computed from exact Git authority and matches the archive authority.
+- [ ] **P6-BIND-05**: The complete frozen matrix passes from the exact candidate archive.
+- [ ] **P6-BIND-06**: A failed candidate is preserved as evidence and corrected only through a new fix-forward commit; no amend or evidence rewrite.
+
+### Source-Bound Image
+
+- [ ] **P6-IMG-01**: The final runtime image is built only from the exact passing Git archive.
+- [ ] **P6-IMG-02**: The image uses a commit-derived `graphiti-mcp:phase6-cleanroom-<short-commit>-bound` tag and is never pushed or retagged.
+- [ ] **P6-IMG-03**: The production Dockerfile builds with no pull; OCI revision equals the final commit and OCI source-context label equals the canonical context hash.
+- [ ] **P6-IMG-04**: Image context/layers contain no namespace, local Catalog-v2 config, `.env`, proxy token, credential, runtime evidence, or secret-pattern hit.
+- [ ] **P6-IMG-05**: Sanitized evidence records image tag/ID plus Dockerfile, build-log, inspect, archive, and context hashes.
+
+### Clean-Room Runtime
+
+- [ ] **P6-RT-00**: Runtime activation occurs only after focused tests, full regressions, exact archive verification, archive matrix, and image binding pass.
+- [ ] **P6-RT-R0**: One unique Compose authority proves all expected resources absent and renders only the selected source-bound image, new project resources, no build, and pull-never behavior.
+- [ ] **P6-RT-R1**: Exactly one namespace is materialized; only Neo4j starts; this operation creates the exact data/log volumes; Neo4j is healthy; MCP remains absent.
+- [ ] **P6-RT-R2**: Exactly one application-owned pre-inspection observes 0/14, one bootstrap runs, and one first post-inspection observes 14/14; failure stops without retry or repair.
+- [ ] **P6-RT-R3**: MCP starts alone using the exact image ID and passes only the 28-tool registry, `get_status`, and zero-argument `get_catalog_capabilities` readiness calls with matching namespace/schema/provider truth and supported OpenAI unknown-readiness waiver.
+- [ ] **P6-RT-DISP**: A pre-canary runtime candidate is removed only after separate confirmation and proof it is operation-owned, pre-identity, pre-prepare, data-empty, non-external, non-shared, and exactly targeted; otherwise it is preserved.
+
+### One Final Canary
+
+- [ ] **P6-CAN-01**: Allocation of any canary run, canary group, control group, or batch ID irreversibly freezes source, commits, image, and runtime authority.
+- [ ] **P6-CAN-02**: Exactly one final canary runs from committed `graphiti_mcp_phase6_canary_agent_prompt_en.md` using entirely new identities and never historical groups.
+- [ ] **P6-CAN-03**: Exactly one dry run reports 3 entities, 2 edges, 1 source artifact, and 5 evidence links with zero persistent writes.
+- [ ] **P6-CAN-04**: Exactly one prepare succeeds as embedding proof and exactly one token-only commit occurs with no commit retry and no persisted raw token.
+- [ ] **P6-CAN-05**: Manifest, entities, edges, batch, five evidence targets, three entity searches, two `attributes.edge_key` fact searches, empty control group, controlled replay, and contiguous sanitized ledger all reconcile.
+- [ ] **P6-CAN-06**: Ambiguous commit transport triggers bounded committed read-only reconciliation only and never a second commit.
+
+### Safety, Terminal State, and Report
+
+- [ ] **P6-SAFE-01**: No global/system/container/volume prune, arbitrary removal, historical `down -v`, historical mount, graph clear/delete, or Kubernetes action occurs.
+- [ ] **P6-SAFE-02**: The final clean-room stack and volumes remain intact after canary success or failure.
+- [ ] **P6-TERM-01**: Successful completion terminates as `PASSED`.
+- [ ] **P6-TERM-02**: Pre-canary hard stops use only `HARD_BLOCKED_BASELINE_AUTHORITY`, `HARD_BLOCKED_TOOLCHAIN`, `HARD_BLOCKED_REQUIREMENT_CONFLICT`, or `HARD_BLOCKED_LOCAL_RUNTIME_AUTHORITY`.
+- [ ] **P6-TERM-03**: After identity allocation, terminal classification is only `FAILED_BEFORE_COMMIT`, `FAILED_AFTER_COMMIT`, or `PASSED` as applicable to committed canary state.
+- [ ] **P6-TERM-04**: Missing public `OPENAI_API_KEY` is never classified as a blocker.
+- [ ] **P6-REPT-01**: Final sanitized report includes every field required by specification §20 and excludes raw namespace, credentials, tokens, full environment, and sensitive endpoint parameters.
+- [ ] **P6-CONT-01**: Passing H1–H7 evidence is reused; work resumes from `BLOCKED_POST_COMMIT_SOURCE_BINDING` and completed work is rerun only when a fix or authoritative gate requires it.
+
 ## Future Requirements
 
 Deferred until the deterministic substrate is implemented and verified.
@@ -205,9 +297,9 @@ Deferred until the deterministic substrate is implemented and verified.
 | Catalog delta or retirement | Lifecycle semantics deferred |
 | Business transaction entities or runtime correlation | No business-level types in v1.1 |
 | Automatic catalog-v1 to catalog-v2 migration | Silent identity reinterpretation is forbidden |
-| Production migration or live-group writes | Requires separate operational approval |
-| Real canary execution | This milestone prepares artifacts only |
-| Graph cleanup or existing-data deletion | No destructive operations |
+| Production migration or historical/live-group writes | Phase 6 authorizes only new isolated canary groups |
+| More than one final canary | Phase 6 authorizes exactly one after the identity-allocation boundary |
+| Graph cleanup or existing-data deletion | Historical/final resources remain intact; only separately confirmed, proven disposable pre-boundary candidates may be scoped-cleaned |
 | FalkorDB, Kuzu, or Neptune catalog portability | Neo4j semantics are the verified target |
 | Deployment or Kubernetes rollout | Configuration may be documented; deployment is separate |
 
@@ -215,6 +307,70 @@ Deferred until the deterministic substrate is implemented and verified.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| P6-AUTH-01 | Phase 6 | Pending |
+| P6-BASE-01 | Phase 6 | Pending |
+| P6-BASE-02 | Phase 6 | Pending |
+| P6-BASE-03 | Phase 6 | Pending |
+| P6-PRES-01 | Phase 6 | Pending |
+| P6-PRES-02 | Phase 6 | Pending |
+| P6-PRES-03 | Phase 6 | Pending |
+| P6-PROV-01 | Phase 6 | Pending |
+| P6-PROV-02 | Phase 6 | Pending |
+| P6-PROV-03 | Phase 6 | Pending |
+| P6-HARN-01 | Phase 6 | Pending |
+| P6-HARN-02 | Phase 6 | Pending |
+| P6-HARN-03 | Phase 6 | Pending |
+| P6-HARN-04 | Phase 6 | Pending |
+| P6-HARN-05 | Phase 6 | Pending |
+| P6-HARN-06 | Phase 6 | Pending |
+| P6-HARN-07 | Phase 6 | Pending |
+| P6-HARN-08 | Phase 6 | Pending |
+| P6-HARN-09 | Phase 6 | Pending |
+| P6-HARN-10 | Phase 6 | Pending |
+| P6-HARN-11 | Phase 6 | Pending |
+| P6-HARN-12 | Phase 6 | Pending |
+| P6-HARN-13 | Phase 6 | Pending |
+| P6-HARN-14 | Phase 6 | Pending |
+| P6-HARN-15 | Phase 6 | Pending |
+| P6-HARN-16 | Phase 6 | Pending |
+| P6-HARN-17 | Phase 6 | Pending |
+| P6-HARN-18 | Phase 6 | Pending |
+| P6-HARN-19 | Phase 6 | Pending |
+| P6-TDD-01 | Phase 6 | Pending |
+| P6-TDD-02 | Phase 6 | Pending |
+| P6-TDD-03 | Phase 6 | Pending |
+| P6-TDD-04 | Phase 6 | Pending |
+| P6-BIND-01 | Phase 6 | Pending |
+| P6-BIND-02 | Phase 6 | Pending |
+| P6-BIND-03 | Phase 6 | Pending |
+| P6-BIND-04 | Phase 6 | Pending |
+| P6-BIND-05 | Phase 6 | Pending |
+| P6-BIND-06 | Phase 6 | Pending |
+| P6-IMG-01 | Phase 6 | Pending |
+| P6-IMG-02 | Phase 6 | Pending |
+| P6-IMG-03 | Phase 6 | Pending |
+| P6-IMG-04 | Phase 6 | Pending |
+| P6-IMG-05 | Phase 6 | Pending |
+| P6-RT-00 | Phase 6 | Pending |
+| P6-RT-R0 | Phase 6 | Pending |
+| P6-RT-R1 | Phase 6 | Pending |
+| P6-RT-R2 | Phase 6 | Pending |
+| P6-RT-R3 | Phase 6 | Pending |
+| P6-RT-DISP | Phase 6 | Pending |
+| P6-CAN-01 | Phase 6 | Pending |
+| P6-CAN-02 | Phase 6 | Pending |
+| P6-CAN-03 | Phase 6 | Pending |
+| P6-CAN-04 | Phase 6 | Pending |
+| P6-CAN-05 | Phase 6 | Pending |
+| P6-CAN-06 | Phase 6 | Pending |
+| P6-SAFE-01 | Phase 6 | Pending |
+| P6-SAFE-02 | Phase 6 | Pending |
+| P6-TERM-01 | Phase 6 | Pending |
+| P6-TERM-02 | Phase 6 | Pending |
+| P6-TERM-03 | Phase 6 | Pending |
+| P6-TERM-04 | Phase 6 | Pending |
+| P6-REPT-01 | Phase 6 | Pending |
+| P6-CONT-01 | Phase 6 | Pending |
 | BASE-01 | Phase 0 | Pending |
 | BASE-02 | Phase 0 | Pending |
 | BASE-03 | Phase 0 | Pending |

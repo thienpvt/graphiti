@@ -2,7 +2,7 @@
 
 ## Overview
 
-v1.1 hardens the shipped deterministic catalog MCP surface before any regenerated canary. v1.0 shipped typed catalog primitives and provenance/atomic batch (Phases 1–2). Active pre-canary work uses the canonical spine Phase 0 / 1 / 2 / 3A / 3B / 4 / 5 from `graphiti_mcp_pre_canary_roadmap_en.md`: baseline and compatibility policy; fail-closed catalog-v2 contracts and identity; topology authority, evidence contract, hashes, and capabilities; immutable prepare/commit control plane; atomic catalog + exact evidence + durable manifest co-commit; manifest-backed verification and read-only diagnostics; then final security, compatibility, observability, migration docs, and readiness report. Phase 6 canary is a separate out-of-scope task. A cherry-picked pre-hardening canary workflow records an ACCEPT_TAB dry-run and commit in `oracle-catalog-v2`; v1.1 treats those repository artifacts as historical evidence only and never queries, mutates, retries, or reuses that live group/hash. No canary execution, automatic v1→v2 migration, deployment, or multi-backend claims.
+v1.1 first hardens the shipped deterministic catalog MCP surface through Phase 5, then closes Phase 6 through test-first clean-room orchestration and exactly one final isolated canary. v1.0 shipped typed catalog primitives and provenance/atomic batch (Phases 1–2). Phases 0 / 1 / 2 / 3A / 3B / 4 / 5 follow `graphiti_mcp_pre_canary_roadmap_en.md`; Phase 6 is authorized by fetched fork commit `e52c1b5` (`spec/new-phase.md`). Historical ACCEPT_TAB and Docker evidence remain immutable and are never queried, mutated, retried, reused, or cleaned. No automatic v1→v2 migration, deployment, historical/live-group write, additional canary, or multi-backend claim.
 
 ## Shipped Milestones
 
@@ -20,8 +20,8 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 
 **Phase Numbering:**
 
-- Active v1.1 spine: Phase 0, 1, 2, 3A, 3B, 4, 5 (seven work units)
-- Phase 6 canary is separate / out of scope and carries no requirement IDs
+- Completed hardening spine: Phase 0, 1, 2, 3A, 3B, 4, 5 (seven work units)
+- Phase 6 clean-room closure is authorized by fork commit `e52c1b5`; requirement IDs derive from `spec/new-phase.md` during requirements ingestion
 - Shipped history is labeled `v1.0 Phase 1` / `v1.0 Phase 2` to avoid collision with active Phase 1
 
 - [x] **v1.0 Phase 1: Typed Catalog Primitives** - Config, identity, entity/edge upsert, resolve, verify (shipped)
@@ -33,7 +33,7 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 - [x] **Phase 3B: Atomic Catalog, Exact Evidence, Durable Manifest Writes** - Domain+evidence+manifest co-commit, rollback, search interop
 - [x] **Phase 4: Manifest-Backed Verification and Read-Only Diagnostics** - Manifest reads, verify, edge resolve, split gates (completed 2026-07-18)
 - [x] **Phase 5: Verification, Security, Compatibility, and Migration Docs** - Exhaustive tests, isolation, docs, final report without canary (completed 2026-07-19)
-- Phase 6 canary: separate approval only — not in this milestone requirement set
+- [ ] **Phase 6: Catalog-v2 TDD-to-Canary Clean-Room Closure** - Test-first harness closure, exact source/image binding, isolated runtime staging, exactly one final canary
 
 ## Hard Gates
 
@@ -337,6 +337,31 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - FalkorDB/Kuzu/Neptune catalog portability claims
 - Deployment, push/merge/tag, graph clear/delete, full 14k ingest
 - Multi-backend catalog claims beyond Neo4j 5.26+
+
+### Phase 6: Catalog-v2 TDD-to-Canary Clean-Room Closure
+
+**Goal**: Maintainers can prove a source-bound Catalog-v2 runtime in a fresh, isolated Compose authority and execute exactly one final canary without exposing secrets or changing historical resources
+**Depends on**: Phase 5
+**Requirements**: P6-AUTH-01, P6-BASE-01, P6-BASE-02, P6-BASE-03, P6-PRES-01, P6-PRES-02, P6-PRES-03, P6-PROV-01, P6-PROV-02, P6-PROV-03, P6-HARN-01, P6-HARN-02, P6-HARN-03, P6-HARN-04, P6-HARN-05, P6-HARN-06, P6-HARN-07, P6-HARN-08, P6-HARN-09, P6-HARN-10, P6-HARN-11, P6-HARN-12, P6-HARN-13, P6-HARN-14, P6-HARN-15, P6-HARN-16, P6-HARN-17, P6-HARN-18, P6-HARN-19, P6-TDD-01, P6-TDD-02, P6-TDD-03, P6-TDD-04, P6-BIND-01, P6-BIND-02, P6-BIND-03, P6-BIND-04, P6-BIND-05, P6-BIND-06, P6-IMG-01, P6-IMG-02, P6-IMG-03, P6-IMG-04, P6-IMG-05, P6-RT-00, P6-RT-R0, P6-RT-R1, P6-RT-R2, P6-RT-R3, P6-RT-DISP, P6-CAN-01, P6-CAN-02, P6-CAN-03, P6-CAN-04, P6-CAN-05, P6-CAN-06, P6-SAFE-01, P6-SAFE-02, P6-TERM-01, P6-TERM-02, P6-TERM-03, P6-TERM-04, P6-REPT-01, P6-CONT-01
+**Success Criteria** (what must be TRUE):
+
+  1. RED-first acceptance coverage proves validated project authority, fixed allow-listed service staging, explicit source-bound image selection and ID verification, isolated project resources, safe UUIDv4 namespace authority, canonical schema bootstrap, and destructive-operation rejection
+  2. Focused, Phase 5, Phase 6, combined remediation, golden contract/hash, exact 22-field manifest, exact 28-tool registry, Ruff, format, and Pyright gates pass against the exact committed archive
+  3. A production image built only from that passing archive contains the exact revision/context labels and no namespace, local config, token, credential, `.env`, runtime evidence, or secret-pattern hit
+  4. One fresh Compose project proves absent-before-creation project-scoped data/log volumes, Neo4j-only bootstrap from 0/14 to 14/14, MCP-only activation, exact running image ID, healthy 28-tool readiness, matching namespace fingerprint, and no generative LLM call
+  5. After canary identity allocation, source/image/runtime authority freezes; exactly one final canary yields `PASSED`, `FAILED_BEFORE_COMMIT`, or `FAILED_AFTER_COMMIT`, preserving the final stack and sanitized evidence without retry or cleanup
+
+**Safety Boundaries**:
+
+- Preserve `mcp_server/config/config-docker-neo4j.yaml` untouched and unstaged
+- No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
+- Historical Docker resources and prior canary data/evidence remain unchanged
+
+**Plans**: 0 plans
+
+Plans:
+
+- [ ] TBD (ingest `spec/new-phase.md`, discuss Phase 6, then run `/gsd-plan-phase 6`)
 
 ---
 *Roadmap created: 2026-07-17 for milestone v1.1*
