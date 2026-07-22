@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -47,6 +48,7 @@ def _freeze(tmp_path: Path, **overrides: Any) -> Path:
 
 
 def _invocation(tmp_path: Path, **overrides: Any) -> Path:
+    phase_dir = ROOT / '.planning' / 'phases' / '06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure'
     raw = {
         'schema_version': 1,
         'after_human_approval': True,
@@ -73,7 +75,7 @@ def _invocation(tmp_path: Path, **overrides: Any) -> Path:
             '--result-parent',
             '{CLAUDE_JOB_TMP}/phase6-final-canary',
             '--phase-dir',
-            str(tmp_path),
+            str(phase_dir),
         ],
         'argv_expansion': {
             'env_required': ['CLAUDE_JOB_DIR'],
@@ -123,9 +125,7 @@ def test_final_canary_argv_expand_rejects_leftovers_and_boundary(tmp_path: Path)
         with pytest.raises(launcher.FinalCanaryError):
             launcher.expand_argv(['--artifact-parent', bad], job_tmp=job_tmp)
     with pytest.raises(launcher.FinalCanaryError):
-        launcher.expand_argv(
-            ['--result-parent', '{CLAUDE_JOB_TMP}/../../outside'], job_tmp=job_tmp
-        )
+        launcher.expand_argv(['--result-parent', '{CLAUDE_JOB_TMP}/../../outside'], job_tmp=job_tmp)
 
 
 def test_final_canary_invalid_freeze_fails_before_identity_allocation(
@@ -158,8 +158,11 @@ def test_final_canary_calls_builder_and_runner_once_shell_false(
     freeze = _freeze(tmp_path)
     invocation = _invocation(tmp_path)
     _image(tmp_path)
-    monkeypatch.setattr(launcher, '_git_value', lambda argv: '1' * 40 if 'rev-parse' in argv else '42')
+    monkeypatch.setattr(
+        launcher, '_git_value', lambda argv: '1' * 40 if 'rev-parse' in argv else '42'
+    )
     monkeypatch.setattr(launcher, '_allocate_run_id', lambda: '20260722t120000z-a')
+
     def gate0_digests(head: str) -> dict[str, str]:
         assert head == '1' * 40
         return {
@@ -169,6 +172,44 @@ def test_final_canary_calls_builder_and_runner_once_shell_false(
         }
 
     monkeypatch.setattr(launcher, '_gate0_digests', gate0_digests)
+    def fake_claim_allocation(job_tmp: Path, frozen_head: str) -> tuple[Path, str]:
+        assert frozen_head == '1' * 40
+        return job_tmp / launcher.ALLOCATION_CLAIM, '20260722t120000z-a'
+
+    monkeypatch.setattr(launcher, '_claim_allocation', fake_claim_allocation)
+    phase_dir = tmp_path / 'phase'
+    phase_dir.mkdir()
+    final_report = phase_dir / '06-FINAL-REPORT.md'
+    final_report.write_text(
+        '# Phase 6 Final Report\n\n'
+        + launcher.LIVE_FIELDS_START
+        + '\n- Classification: ``\n'
+        + launcher.LIVE_FIELDS_END
+        + '\n',
+        encoding='utf-8',
+    )
+    def fake_phase_directory(expanded: list[str]) -> Path:
+        assert '--phase-dir' in expanded
+        return phase_dir
+
+    monkeypatch.setattr(launcher, '_phase_directory', fake_phase_directory)
+    phase_writes: list[tuple[Path, Any]] = []
+
+    def fake_write_json(path: Path, value: dict[str, Any]) -> None:
+        phase_writes.append((path, value))
+
+    def fake_write_bytes(path: Path, value: bytes) -> None:
+        phase_writes.append((path, value))
+        path.write_bytes(value)
+
+    monkeypatch.setattr(
+        launcher,
+        '_runner_module',
+        lambda: SimpleNamespace(
+            atomic_write_json=fake_write_json,
+            atomic_write_bytes=fake_write_bytes,
+        ),
+    )
     calls: list[tuple[list[str], dict[str, Any]]] = []
 
     def fake_run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
@@ -181,25 +222,57 @@ def test_final_canary_calls_builder_and_runner_once_shell_false(
             return SimpleNamespace(returncode=0, stdout='', stderr='')
         result_dir = Path(argv[argv.index('--output-dir') + 1])
         result_dir.mkdir(parents=True)
+        entries = [
+            {
+                'ordinal': 1,
+                'tool': 'prepare_catalog_batch',
+                'stage': 'PREPARE',
+                'success': True,
+                'error_code': None,
+            },
+            {
+                'ordinal': 2,
+                'tool': 'commit_prepared_catalog_batch',
+                'stage': 'COMMIT',
+                'success': True,
+                'error_code': None,
+            },
+        ]
+        run_id = argv[argv.index('--run-id') + 1]
+        group_id = argv[argv.index('--group-id') + 1]
         report = {
+            'schema_version': launcher.REPORT_SCHEMA_VERSION,
             'classification': 'PASSED',
+            'run_id': run_id,
+            'group_id': group_id,
+            'control_group_id': argv[argv.index('--control-group-id') + 1],
+            'batch_id': argv[argv.index('--batch-id') + 1],
             'counts': {'entities': 3, 'edges': 2, 'sources': 1, 'evidence_links': 5},
             'dry_run_zero_write_proven': True,
             'replay': 'skipped',
+            'tool_count': 28,
+            'tool_call_count': 2,
+            'final_ordinal': 2,
         }
-        (result_dir / 'final-report.json').write_text(json.dumps(report), encoding='utf-8')
-        (result_dir / 'tool-ledger.json').write_text(
+        report_path = result_dir / 'final-report.json'
+        ledger_path = result_dir / 'tool-ledger.json'
+        report_path.write_text(json.dumps(report), encoding='utf-8')
+        ledger_path.write_text(
+            json.dumps({'schema_version': 1, 'entries': entries}), encoding='utf-8'
+        )
+        (result_dir / 'terminal-artifacts-manifest.json').write_text(
             json.dumps(
                 {
-                    'entries': [
-                        {'tool': 'prepare_catalog_batch'},
-                        {'tool': 'commit_prepared_catalog_batch'},
-                    ]
+                    'schema_version': launcher.TERMINAL_ACCEPTANCE_SCHEMA_VERSION,
+                    'tool_ledger_sha256': hashlib.sha256(ledger_path.read_bytes()).hexdigest(),
+                    'final_report_sha256': hashlib.sha256(report_path.read_bytes()).hexdigest(),
+                    'tool_call_count': 2,
+                    'final_ordinal': 2,
+                    'tool_count': 28,
                 }
             ),
             encoding='utf-8',
         )
-        (result_dir / 'terminal-artifacts-manifest.json').write_text('{}', encoding='utf-8')
         return SimpleNamespace(returncode=0, stdout=json.dumps(report), stderr='')
 
     monkeypatch.setattr(launcher.subprocess, 'run', fake_run)
@@ -217,6 +290,160 @@ def test_final_canary_calls_builder_and_runner_once_shell_false(
     assert all('git commit' not in ' '.join(argv) for argv, _ in calls)
     assert all('gsd' not in ' '.join(argv).lower() for argv, _ in calls)
     assert all(str(job / 'tmp') in ' '.join(argv) for argv, _ in calls)
+    assert len(phase_writes) == 2
+    assert {path.name for path, _ in phase_writes} == {
+        '06-CANARY-LEDGER.json',
+        '06-FINAL-REPORT.md',
+    }
+    assert 'Classification: `PASSED`' in final_report.read_text(encoding='utf-8')
+    assert not (
+        ROOT
+        / '.planning'
+        / 'phases'
+        / '06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure'
+        / '06-CANARY-LEDGER.json'
+    ).exists()
+
+
+def test_final_canary_allocation_claim_is_exclusive(tmp_path: Path) -> None:
+    job_tmp = tmp_path / 'job' / 'tmp'
+    job_tmp.mkdir(parents=True)
+    first, run_id = launcher._claim_allocation(job_tmp, '1' * 40)
+    assert json.loads(first.read_text(encoding='utf-8'))['run_id'] == run_id
+    with pytest.raises(launcher.FinalCanaryError):
+        launcher._claim_allocation(job_tmp, '1' * 40)
+
+
+def test_final_canary_maps_builder_failure_after_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job, environment = _job(tmp_path)
+    freeze = _freeze(tmp_path)
+    invocation = _invocation(tmp_path)
+    _image(tmp_path)
+    monkeypatch.setattr(
+        launcher, '_git_value', lambda argv: '1' * 40 if 'rev-parse' in argv else '42'
+    )
+    def fake_claim(job_tmp: Path, frozen_head: str) -> tuple[Path, str]:
+        assert frozen_head == '1' * 40
+        return job_tmp / launcher.ALLOCATION_CLAIM, '20260722t120000z-failed'
+
+    monkeypatch.setattr(launcher, '_claim_allocation', fake_claim)
+    phase_dir = tmp_path / 'phase'
+    phase_dir.mkdir()
+    (phase_dir / '06-FINAL-REPORT.md').write_text(
+        '# Phase 6 Final Report\n\n'
+        + launcher.LIVE_FIELDS_START
+        + '\n- Classification: ``\n'
+        + launcher.LIVE_FIELDS_END
+        + '\n',
+        encoding='utf-8',
+    )
+    def fake_phase_dir(expanded: list[str]) -> Path:
+        assert '--phase-dir' in expanded
+        return phase_dir
+
+    monkeypatch.setattr(launcher, '_phase_directory', fake_phase_dir)
+
+    class PhaseWriter:
+        @staticmethod
+        def atomic_write_bytes(path: Path, value: bytes) -> None:
+            path.write_bytes(value)
+
+        @staticmethod
+        def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+            path.write_text(json.dumps(value), encoding='utf-8')
+
+    monkeypatch.setattr(launcher, '_runner_module', PhaseWriter)
+    def fake_failed_run(argv: list[str], environment: dict[str, str]) -> SimpleNamespace:
+        assert argv
+        assert 'CLAUDE_JOB_DIR' in environment
+        return SimpleNamespace(returncode=1, stdout='', stderr='secret')
+
+    monkeypatch.setattr(launcher, '_run', fake_failed_run)
+
+    with pytest.raises(launcher.FinalCanaryError, match='builder failed'):
+        launcher.run_final_canary(
+            freeze_receipt=freeze,
+            invocation=invocation,
+            environment={**environment, 'GRAPHITI_PHASE6_MCP_URL': 'http://127.0.0.1:8000/mcp'},
+        )
+
+    ledger = json.loads((phase_dir / '06-CANARY-LEDGER.json').read_text(encoding='utf-8'))
+    assert ledger['classification'] == 'FAILED_BEFORE_COMMIT'
+    assert ledger['run_id'] == '20260722t120000z-failed'
+    assert 'secret' not in json.dumps(ledger)
+    assert str(job / 'tmp') not in json.dumps(ledger)
+
+
+def test_final_canary_rejects_actual_argv_drift_before_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, environment = _job(tmp_path)
+    freeze = _freeze(tmp_path)
+    invocation = _invocation(tmp_path)
+    allocated = False
+
+    def forbidden_allocate() -> str:
+        nonlocal allocated
+        allocated = True
+        return 'forbidden'
+
+    monkeypatch.setattr(launcher, '_allocate_run_id', forbidden_allocate)
+    with pytest.raises(launcher.FinalCanaryError, match='actual argv differs'):
+        launcher.run_final_canary(
+            freeze_receipt=freeze,
+            invocation=invocation,
+            environment=environment,
+            actual_argv=['--freeze-receipt', str(freeze), '--unexpected', 'value'],
+        )
+    assert allocated is False
+
+
+def test_final_canary_terminal_schema_versions_fail_closed(tmp_path: Path) -> None:
+    result_dir = tmp_path / 'result'
+    result_dir.mkdir()
+    entries: list[dict[str, Any]] = []
+    report = {
+        'schema_version': 'wrong',
+        'classification': 'FAILED_BEFORE_COMMIT',
+        'run_id': 'run-a',
+        'group_id': 'group-a',
+        'control_group_id': 'control-a',
+        'batch_id': 'batch-a',
+        'replay': 'skipped',
+        'tool_count': 28,
+        'tool_call_count': 0,
+        'final_ordinal': 0,
+    }
+    ledger_path = result_dir / 'tool-ledger.json'
+    report_path = result_dir / 'final-report.json'
+    ledger_path.write_text(
+        json.dumps({'schema_version': 1, 'entries': entries}), encoding='utf-8'
+    )
+    report_path.write_text(json.dumps(report), encoding='utf-8')
+    (result_dir / 'terminal-artifacts-manifest.json').write_text(
+        json.dumps(
+            {
+                'schema_version': launcher.TERMINAL_ACCEPTANCE_SCHEMA_VERSION,
+                'tool_ledger_sha256': hashlib.sha256(ledger_path.read_bytes()).hexdigest(),
+                'final_report_sha256': hashlib.sha256(report_path.read_bytes()).hexdigest(),
+                'tool_call_count': 0,
+                'final_ordinal': 0,
+                'tool_count': 28,
+            }
+        ),
+        encoding='utf-8',
+    )
+    with pytest.raises(launcher.FinalCanaryError):
+        launcher._validate_terminal(
+            result_dir,
+            1,
+            run_id='run-a',
+            group_id='group-a',
+            control_group_id='control-a',
+            batch_id='batch-a',
+        )
 
 
 @pytest.mark.parametrize(

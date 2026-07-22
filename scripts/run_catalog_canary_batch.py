@@ -173,6 +173,7 @@ SOURCE_AUTHORITY_PATHS = (
     'scripts/catalog_authority_hashing.py',
     'scripts/catalog_canary_manifest_contract.py',
     'scripts/run_catalog_canary_launcher.py',
+    'scripts/run_catalog_phase6_final_canary.py',
     'scripts/materialize_catalog_local_config.py',
     'scripts/bootstrap_catalog_v2_schema.py',
     'mcp_server/src/services/catalog_schema_bootstrap.py',
@@ -786,6 +787,8 @@ def _unwrap_structured_result(structured: Any, tool_name: str) -> dict[str, Any]
     payload = structured.get('result', structured)
     if not isinstance(payload, dict):
         raise RunnerError('invalid_structured_content', f'{tool_name} returned invalid content')
+    if payload.get('error') == 'embedding_transport_auth':
+        raise RunnerError('embedding_transport_auth', 'embedding transport authentication failed')
     if 'error' in payload:
         raise RunnerError('graphiti_error_response', f'{tool_name} returned Graphiti ErrorResponse')
     return payload
@@ -816,14 +819,18 @@ def _validate_prepare_response(
     request: UpsertCatalogBatchRequest,
     server_request_sha256: str,
 ) -> tuple[PrepareCatalogBatchResponse, str]:
+    error_code = structured.get('error_code')
+    error_message = structured.get('error_message')
+    if error_code == 'embedding_failed' and error_message == 'embedding_transport_auth':
+        raise RunnerError('embedding_transport_auth', 'embedding transport authentication failed')
+    if error_code is not None or error_message is not None:
+        raise RunnerError('prepare_failed', 'prepare response contains structured error')
     try:
         response = PrepareCatalogBatchResponse.model_validate(structured, strict=True)
     except ValidationError as exc:
         raise RunnerError(
             'invalid_prepare_response', 'prepare response has invalid structure'
         ) from exc
-    if response.error_code is not None or response.error_message is not None:
-        raise RunnerError('prepare_failed', 'prepare response contains structured error')
     if not response.plan_token:
         raise RunnerError('prepare_failed', 'prepare response omitted plan token')
     try:
@@ -3885,6 +3892,16 @@ def _terminal_report(
         'notes': 'sanitized durable report; prepared-plan process-loss resume is unsupported',
         'canary_executed': flags.get('commit_started', False),
     }
+    counts = flags.get('counts')
+    if counts is not None:
+        expected_count_keys = {'entities', 'edges', 'sources', 'evidence_links'}
+        if (
+            not isinstance(counts, dict)
+            or set(counts) != expected_count_keys
+            or any(type(value) is not int or value < 0 for value in counts.values())
+        ):
+            raise RunnerError('report_counts_invalid', 'terminal report counts are invalid')
+        report['counts'] = dict(counts)
     validate_report_ledger_metadata(report, ledger_meta)
     text = json.dumps(report, sort_keys=True)
     if (plan_token and plan_token in text) or 'token_digest' in text:
@@ -3924,6 +3941,55 @@ def _persist_terminal_artifacts(
     return acceptance
 
 
+def _confirmed_manifest_hint(
+    *,
+    run_id: str,
+    group_id: str,
+    control_group_id: str,
+    batch_id: str,
+) -> dict[str, Any]:
+    return {
+        'run_id': run_id,
+        'group_id': group_id,
+        'control_group_id': control_group_id,
+        'batch_id': batch_id,
+    }
+
+
+def _persist_pretransport_terminal_failure(
+    result_dir: Path,
+    *,
+    manifest_hint: dict[str, Any],
+    exc: BaseException,
+    attestation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a sanitized zero-transport post-ID terminal without fabricated counts."""
+    result_dir.mkdir(parents=True, exist_ok=False)
+    machine = LiveStageMachine()
+    gates = {str(index): 'blocked' for index in range(11)}
+    gates['0'] = 'fail'
+    report = _terminal_report(
+        manifest=manifest_hint,
+        classification='FAILED_BEFORE_COMMIT',
+        machine=machine,
+        gates=gates,
+        attestation=attestation,
+        capability_sha256=None,
+        artifact_sha256=None,
+        request_sha256=None,
+        manifest_sha256=None,
+        batch_uuid=None,
+        replay='skipped',
+        error_code=exc.code if isinstance(exc, RunnerError) else 'internal_runner_error',
+        error_type=type(exc).__name__,
+        flags={},
+        plan_token=None,
+        ledger_entries=[],
+    )
+    _persist_terminal_artifacts(result_dir, report=report, ledger_entries=[])
+    return report
+
+
 async def run_live_canary(
     transport: Any,
     payload_path: Path,
@@ -3958,13 +4024,11 @@ async def run_live_canary(
     replay = 'skipped'
     plan_token: str | None = None
     commit_started = False
-    manifest_hint = preflight_live_manifest(
-        manifest_path,
-        confirm_run_id=confirm_run_id,
-        confirm_group_id=confirm_group_id,
-        confirm_control_group_id=confirm_control_group_id,
-        confirm_batch_id=confirm_batch_id,
-        allow_unknown_embedding_provider=allow_unknown_embedding_provider,
+    manifest_hint = _confirmed_manifest_hint(
+        run_id=confirm_run_id,
+        group_id=confirm_group_id,
+        control_group_id=confirm_control_group_id,
+        batch_id=confirm_batch_id,
     )
     result_dir = (
         validate_result_directory(output_dir, payload_path, manifest_path) if output_dir else None
@@ -4004,6 +4068,14 @@ async def run_live_canary(
         return value
 
     try:
+        manifest_hint = preflight_live_manifest(
+            manifest_path,
+            confirm_run_id=confirm_run_id,
+            confirm_group_id=confirm_group_id,
+            confirm_control_group_id=confirm_control_group_id,
+            confirm_batch_id=confirm_batch_id,
+            allow_unknown_embedding_provider=allow_unknown_embedding_provider,
+        )
         for value in (image_fingerprint, config_fingerprint):
             if value is not None and SHA256_RE.fullmatch(value) is None:
                 raise RunnerError('source_attestation_invalid', 'optional fingerprint is invalid')
@@ -4140,6 +4212,7 @@ async def run_live_canary(
         _, payload, manifest, request, artifact_sha, request_sha = validate_live_artifact(
             payload_path, manifest_path
         )
+        flags['counts'] = _expected_domain_counts(request)
         validate_live_operator_confirmation(
             manifest,
             group_id=confirm_group_id,
@@ -4421,17 +4494,20 @@ async def run_live_canary(
             _persist_terminal_artifacts(result_dir, report=report, ledger_entries=ledger.entries)
         return report
     except BaseException as exc:
-        if commit_started:
-            classification = 'FAILED_AFTER_COMMIT'
-        elif machine.stage < LiveStage.ARTIFACT_VALIDATED:
-            classification = 'BLOCKED'
-        else:
-            classification = 'FAILED_BEFORE_COMMIT'
+        classification = 'FAILED_AFTER_COMMIT' if commit_started else 'FAILED_BEFORE_COMMIT'
+        if result_dir is not None and not result_dir.exists():
+            _persist_pretransport_terminal_failure(
+                result_dir,
+                manifest_hint=manifest_hint,
+                exc=exc,
+                attestation=attestation,
+            )
+            raise
         current_gate = str(active_gate)
         for gate in gates:
             if gate != current_gate and gates[gate] != 'pass':
                 gates[gate] = 'blocked'
-        gates[current_gate] = 'fail' if classification != 'BLOCKED' else 'blocked'
+        gates[current_gate] = 'fail'
         error_code = exc.code if isinstance(exc, RunnerError) else 'internal_runner_error'
         # Invalid ledger must reject terminal artifacts; no inconsistent fallback write.
         report = _terminal_report(
@@ -4532,26 +4608,43 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 async def execute_cli(args: argparse.Namespace) -> dict[str, Any]:
     if args.mode != 'live-canary':
         return await execute(args)
-    # Immutable operator authority must pass before any MCP transport open or local writes.
-    preflight_live_manifest(
-        args.manifest.resolve(),
-        confirm_run_id=args.run_id,
-        confirm_group_id=args.group_id,
-        confirm_control_group_id=args.control_group_id,
-        confirm_batch_id=args.batch_id,
-        allow_unknown_embedding_provider=args.allow_unknown_embedding_provider,
+    payload_path = args.payload.resolve()
+    manifest_path = args.manifest.resolve()
+    result_dir = validate_result_directory(args.output_dir, payload_path, manifest_path)
+    if result_dir.exists():
+        raise RunnerError('result_directory_used', 'result directory must not exist')
+    manifest_hint = _confirmed_manifest_hint(
+        run_id=args.run_id,
+        group_id=args.group_id,
+        control_group_id=args.control_group_id,
+        batch_id=args.batch_id,
     )
-    # Gate 0 before any MCP transport open.
-    attestation = attest_local_source(
-        expected_head=args.source_head,
-        expected_source_map_sha256=args.source_map_sha256,
-        expected_runner_sha256=args.runner_sha256,
-        authority_mode=args.authority_mode,
-    )
-    execution_attestation = attest_execution_authority(
-        expected_execution_map_sha256=args.execution_map_sha256,
-    )
-    combined = {**attestation, **execution_attestation}
+    try:
+        manifest_hint = preflight_live_manifest(
+            manifest_path,
+            confirm_run_id=args.run_id,
+            confirm_group_id=args.group_id,
+            confirm_control_group_id=args.control_group_id,
+            confirm_batch_id=args.batch_id,
+            allow_unknown_embedding_provider=args.allow_unknown_embedding_provider,
+        )
+        attestation = attest_local_source(
+            expected_head=args.source_head,
+            expected_source_map_sha256=args.source_map_sha256,
+            expected_runner_sha256=args.runner_sha256,
+            authority_mode=args.authority_mode,
+        )
+        execution_attestation = attest_execution_authority(
+            expected_execution_map_sha256=args.execution_map_sha256,
+        )
+        combined = {**attestation, **execution_attestation}
+    except BaseException as exc:
+        _persist_pretransport_terminal_failure(
+            result_dir,
+            manifest_hint=manifest_hint,
+            exc=exc,
+        )
+        raise
 
     def preverified_source_attestor(**_kwargs: Any) -> dict[str, Any]:
         return {
@@ -4575,8 +4668,8 @@ async def execute_cli(args: argparse.Namespace) -> dict[str, Any]:
         await session.initialize()
         return await run_live_canary(
             SessionLiveTransport(session),
-            args.payload.resolve(),
-            args.manifest.resolve(),
+            payload_path,
+            manifest_path,
             confirm_run_id=args.run_id,
             confirm_group_id=args.group_id,
             confirm_control_group_id=args.control_group_id,

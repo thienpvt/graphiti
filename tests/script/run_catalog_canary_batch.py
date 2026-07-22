@@ -1408,7 +1408,7 @@ async def test_execute_cli_success_leaves_result_dir_for_live_runner(
         def __init__(self, *_args: Any):
             pass
 
-        async def __aenter__(self) -> 'FakeSession':
+        async def __aenter__(self) -> FakeSession:
             return self
 
         async def __aexit__(self, *_args: Any) -> None:
@@ -1453,8 +1453,8 @@ async def test_execute_cli_success_leaves_result_dir_for_live_runner(
     assert handoff_seen is True
 
 
-def test_embedding_transport_auth_pair_is_exact() -> None:
-    _, _, payload, _ = artifact(Path(__file__).resolve().parent / 'unused')
+def test_embedding_transport_auth_pair_is_exact(tmp_path: Path) -> None:
+    _, _, payload, _ = artifact(tmp_path)
     request = runner.UpsertCatalogBatchRequest.model_validate({**payload, 'dry_run': True})
     server_hash = runner.CatalogService.batch_request_sha256(request)
     base = {
@@ -1468,9 +1468,7 @@ def test_embedding_transport_auth_pair_is_exact() -> None:
         'entity_count': len(request.entities),
         'edge_count': len(request.edges),
         'source_count': len(request.provenance.sources if request.provenance else []),
-        'evidence_link_count': len(
-            request.provenance.evidence_links if request.provenance else []
-        ),
+        'evidence_link_count': len(request.provenance.evidence_links if request.provenance else []),
         'projected_created': 0,
         'projected_updated': 0,
         'projected_unchanged': 0,
@@ -1531,7 +1529,6 @@ async def test_prepare_embedding_transport_auth_never_commits(tmp_path: Path) ->
     class PrepareAuth(ContractFake):
         async def call(self, name: str, request: dict[str, Any]) -> dict[str, Any]:
             if name == 'prepare_catalog_batch':
-                self.calls.append((name, request))
                 prepared_raw = await super().call(name, request)
                 return {
                     **dict(prepared_raw),
@@ -1925,7 +1922,9 @@ async def test_manifest_waiver_mismatch_blocks_before_transport(tmp_path: Path) 
         )
     assert error.value.code == 'operator_confirmation_mismatch'
     assert fake.calls == []
-    assert not output.exists()
+    report = json.loads((output / 'final-report.json').read_text(encoding='utf-8'))
+    assert report['classification'] == 'FAILED_BEFORE_COMMIT'
+    assert (output / 'terminal-artifacts-manifest.json').is_file()
 
 
 @pytest.mark.asyncio
@@ -1963,7 +1962,9 @@ async def test_execute_cli_preflights_manifest_before_transport(
         await runner.execute_cli(args)
     assert error.value.code == 'operator_confirmation_mismatch'
     assert entered is False
-    assert not args.output_dir.exists()
+    report = json.loads((args.output_dir / 'final-report.json').read_text(encoding='utf-8'))
+    assert report['classification'] == 'FAILED_BEFORE_COMMIT'
+    assert (args.output_dir / 'terminal-artifacts-manifest.json').is_file()
 
 
 def test_manifest_rejection_matrix(tmp_path: Path) -> None:
@@ -2052,12 +2053,13 @@ def test_atomic_write_retries_permission_error_only(
 
 
 def test_source_authority_includes_every_runtime_policy_script() -> None:
-    assert runner.SOURCE_AUTHORITY_PATHS[:12] == (
+    assert runner.SOURCE_AUTHORITY_PATHS[:13] == (
         'scripts/run_catalog_canary_batch.py',
         'scripts/build_catalog_canary_requests.py',
         'scripts/catalog_authority_hashing.py',
         'scripts/catalog_canary_manifest_contract.py',
         'scripts/run_catalog_canary_launcher.py',
+        'scripts/run_catalog_phase6_final_canary.py',
         'scripts/materialize_catalog_local_config.py',
         'scripts/bootstrap_catalog_v2_schema.py',
         'mcp_server/src/services/catalog_schema_bootstrap.py',

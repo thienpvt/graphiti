@@ -4980,7 +4980,7 @@ async def test_search_embedding_transport_auth_is_sanitized(
     ):
         result = await getattr(server, search_name)(query='test', group_ids=[GROUP])
 
-    assert result.error == 'embedding_transport_auth'
+    assert result['error'] == 'embedding_transport_auth'
     joined = ' '.join(record.getMessage() for record in caplog.records)
     assert secret not in joined
     assert 'AuthFailure' in joined

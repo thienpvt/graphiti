@@ -45,7 +45,7 @@ plans: 5
 | 06-01-01 | 01 | 1 | P6-TDD-01..03, P6-BIND-02..04, P6-AUTH-01 | RED archive suite; no git-archive authority; no deploy/K8s/second-canary/historical groups | unit | `uv run --project mcp_server --frozen pytest mcp_server/tests/test_catalog_raw_git_archive.py -q` (8 collected failures; pytest exit exactly 1) | present | GREEN |
 | 06-01-02 | 01 | 1 | P6-BASE-01, P6-BIND-02..04, P6-PRES-01/02, P6-CONT-01, P6-AUTH-01 | GREEN plumbing materializer; baseline dcf730…; dirty config unstaged; P6-AUTH-01 criteria recorded | unit | same archive suite: 8 passed; baseline golden exact | present | GREEN |
 | 06-02-01 | 02 | 2 | P6-TERM-01..04, P6-REPT-01, P6-CAN-03..06, P6-PROV-02/03, P6-HARN-19, P6-CAN-01..06 | RED: execute_cli pretransport + run_live_canary post-ID never BLOCKED; durable trio; zero streamable_http_client on Gate0 fail; success no result_directory_used; auth sentinel; one-commit replay; sanitized counts 3/2/1/5 + dry_run_zero_write_proven; final-canary importable stub + env/boundary/token fail tests; AUTH-01 kubernetes_applied=false (missing/true fail closed) | unit | `uv run pytest tests/script/run_catalog_canary_batch.py tests/script/test_run_catalog_phase6_final_canary.py mcp_server/tests/test_catalog_prepare_service.py -q -k 'post_id or execute_cli or pretransport or embedding_transport or same_token or replay or counts or dry_run or final_canary or CLAUDE_JOB or argv_expand or leftover or boundary or kubernetes_applied or AUTH_01'` (collects; pytest exit exactly 1; reject 0/2+) | present | RED |
-| 06-02-02 | 02 | 2 | same + P6-PRES-01/02, P6-CONT-01, P6-CAN-01..06 | GREEN early-terminal helper; classifier; prepare/search sentinel; prompt Gate 0/10/Terminal; counts from validated manifest only; final-canary launcher job-tmp env expansion + unit tests GREEN (pre-BIND) | unit | full `tests/script/run_catalog_canary_batch.py` + `tests/script/test_run_catalog_phase6_final_canary.py` + prepare/service/security/review/capabilities GREEN | planned | planned |
+| 06-02-02 | 02 | 2 | same + P6-PRES-01/02, P6-CONT-01, P6-CAN-01..06 | GREEN early-terminal helper; classifier; prepare/search sentinel; prompt Gate 0/10/Terminal; counts from validated manifest only; final-canary launcher job-tmp env expansion + unit tests GREEN (pre-BIND) | unit | harness 57 passed; catalog matrix 309 passed; Ruff + compile green; no live MCP/Docker/canary | present | GREEN |
 | 06-03-01 | 03 | 3 | P6-BASE-01/03, P6-HARN-01..19, P6-TDD-04, P6-PRES-01/02, P6-CONT-01 | Source-complete PREBIND matrix incl. final-canary launcher suite; HARN-01..19 harn_checklist offline/live/deferred; job-tmp workspaces; no unsupported skip | offline matrix | H7-equivalent + archive + plan-02 suite incl. `test_run_catalog_phase6_final_canary.py`; write `06-PREBIND-MATRIX-RECEIPT.json` with `harn_checklist` | planned | planned |
 | 06-03-02 | 03 | 3 | P6-BIND-01..06, P6-HARN-01..19, P6-TDD-04 | Freeze HEAD; exact archive bind under `$CLAUDE_JOB_DIR/tmp/phase6-bind-archive-*`; frozen matrix from archive (launcher in candidate); HARN checklist complete for pre-canary offline IDs | offline matrix + bind | `06-BIND-RECEIPT.json` + `06-MATRIX-RECEIPT.json` with `harn_checklist` proving applicable pre-canary HARN | planned | planned |
 | 06-04-01 | 04 | 4 | P6-IMG-01..05, P6-BASE-02, P6-RT-00, P6-PRES-01/02 | Gate precheck; OCI labels via `docker build --label` only; **no Dockerfile/source edits**; no Plan 03 re-run; no runtime | Docker inspect strategy | plan-04 task verify; Dockerfile porcelain clean | planned | planned |
@@ -62,15 +62,15 @@ plans: 5
 ## Wave 0 / plan-01–02 RED scaffolding
 
 - [x] Archive materializer tests (plan 01 Task 1 RED → Task 2 GREEN; 8 passed)
-- [ ] execute_cli pretransport durable FAILED_BEFORE_COMMIT + zero streamable_http_client (plan 02)
-- [ ] run_live_canary post-ID never BLOCKED; create-on-failure result_dir ownership
-- [ ] Auth sentinel path without CatalogErrorCode expansion
-- [ ] One primary commit; committed harness replay (no second commit)
-- [ ] Sanitized final-report `counts` {entities,edges,sources,evidence_links} + `dry_run_zero_write_proven`
-- [ ] Final-canary launcher RED stub+tests in plan 02 Task 1; GREEN in Task 2 (pre-BIND); env unset/relative/outside-boundary/leftover-token fail closed
+- [x] execute_cli pretransport durable FAILED_BEFORE_COMMIT + zero streamable_http_client (plan 02)
+- [x] run_live_canary post-ID never BLOCKED; create-on-failure result_dir ownership
+- [x] Auth sentinel path without CatalogErrorCode expansion
+- [x] One primary commit; committed harness replay (no second commit)
+- [x] Sanitized final-report `counts` {entities,edges,sources,evidence_links} + `dry_run_zero_write_proven`
+- [x] Final-canary launcher RED stub+tests in plan 02 Task 1; GREEN in Task 2 (pre-BIND); env unset/relative/outside-boundary/leftover-token fail closed
 - [ ] Plan 04: no Dockerfile/source edits; labels via `--label` only
 - [ ] Plan 05: `06-POST-APPROVAL-INVOCATION.json` with `{CLAUDE_JOB_TMP}` + argv_expansion (no `$CLAUDE_JOB_DIR` in argv_template) + Task 4 checkpoint_contract
-- [ ] Prompt Gate 0 / Terminal / Gate 10 contracts
+- [x] Prompt Gate 0 / Terminal / Gate 10 contracts
 
 Existing H1–H7 tests remain offline authority for already-closed launcher/materializer/bootstrap/registry contracts.
 

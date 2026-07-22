@@ -77,6 +77,10 @@ from models.response_types import (
     TripletResponse,
 )
 from services.catalog_capabilities import build_catalog_capabilities_async
+from services.catalog_embedding_errors import (
+    EMBEDDING_TRANSPORT_AUTH,
+    is_embedding_transport_auth,
+)
 from services.catalog_service import CatalogService
 from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
 from services.queue_service import QueueService
@@ -686,6 +690,9 @@ async def search_nodes(
 
         return NodeSearchResponse(message='Nodes retrieved successfully', nodes=node_results)
     except Exception as e:
+        if is_embedding_transport_auth(e):
+            logger.error('Error searching nodes: %s', type(e).__name__)
+            return ErrorResponse(error=EMBEDDING_TRANSPORT_AUTH)
         error_msg = str(e)
         logger.error(f'Error searching nodes: {error_msg}')
         return ErrorResponse(error=f'Error searching nodes: {error_msg}')
@@ -766,6 +773,9 @@ async def search_memory_facts(
         facts = [format_fact_result(edge) for edge in relevant_edges]
         return FactSearchResponse(message='Facts retrieved successfully', facts=facts)
     except Exception as e:
+        if is_embedding_transport_auth(e):
+            logger.error('Error searching facts: %s', type(e).__name__)
+            return ErrorResponse(error=EMBEDDING_TRANSPORT_AUTH)
         error_msg = str(e)
         logger.error(f'Error searching facts: {error_msg}')
         return ErrorResponse(error=f'Error searching facts: {error_msg}')

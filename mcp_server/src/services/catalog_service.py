@@ -72,6 +72,7 @@ from models.catalog_responses import (
 )
 from models.catalog_topology import is_edge_endpoint_pair_allowed, validate_edge_endpoint_pair
 from services.catalog_capabilities import HARD_MAX_PAGE_SIZE
+from services.catalog_embedding_errors import embedding_error_message
 from services.catalog_identity import (
     CANONICALIZATION_VERSION,
     CATALOG_SCHEMA_VERSION,
@@ -622,7 +623,7 @@ class CatalogService:
                             graph_key=item.graph_key,
                             entity_type=item.entity_type,
                             error_code=CatalogErrorCode.embedding_failed,
-                            error_message='embedding generation failed',
+                            error_message=embedding_error_message(exc),
                             details={'reason': type(exc).__name__},
                         )
                     )
@@ -3299,7 +3300,7 @@ class CatalogService:
                             edge_key=item.edge_key,
                             edge_type=item.edge_type,
                             error_code=CatalogErrorCode.embedding_failed,
-                            error_message='embedding generation failed',
+                            error_message=embedding_error_message(exc),
                             details={'reason': type(exc).__name__},
                         )
                     )
@@ -7201,7 +7202,7 @@ class CatalogService:
                 status='failed',
                 failed=max(len(request.entities) + len(request.edges), 1),
                 error_code=CatalogErrorCode.embedding_failed,
-                error_message='embedding generation failed',
+                error_message=embedding_error_message(exc),
                 **hash_echo,
             )
 
@@ -7535,7 +7536,7 @@ class CatalogService:
             )
             return _fail(
                 CatalogErrorCode.embedding_failed,
-                'embedding generation failed',
+                embedding_error_message(exc),
                 projected_created=projected_created,
                 projected_updated=projected_updated,
                 projected_unchanged=projected_unchanged,
