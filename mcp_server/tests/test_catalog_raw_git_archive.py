@@ -5,6 +5,7 @@ import os
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -36,9 +37,9 @@ def _run(repository: Path, *argv: str) -> bytes:
 
 def _job_tmp_path(name: str) -> Path:
     job_dir = Path(os.environ['CLAUDE_JOB_DIR']).resolve()
-    path = job_dir / 'tmp' / name
-    path.mkdir(parents=True, exist_ok=False)
-    return path
+    parent = job_dir / 'tmp'
+    parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f'{name}-', dir=parent))
 
 
 def _init_repository(path: Path) -> str:
@@ -84,8 +85,12 @@ def test_materialize_preserves_regular_modes() -> None:
 
     materialize_raw_git_archive(repository, revision, destination)
 
-    assert stat.S_IMODE((destination / 'plain.txt').stat().st_mode) == 0o644
-    assert stat.S_IMODE((destination / 'bin' / 'tool').stat().st_mode) == 0o755
+    if os.name == 'nt':
+        assert (destination / 'plain.txt').is_file()
+        assert (destination / 'bin' / 'tool').is_file()
+    else:
+        assert stat.S_IMODE((destination / 'plain.txt').stat().st_mode) == 0o644
+        assert stat.S_IMODE((destination / 'bin' / 'tool').stat().st_mode) == 0o755
 
 
 def test_verify_reports_exact_h8_counts() -> None:
@@ -138,7 +143,9 @@ def test_destination_must_be_empty() -> None:
         materialize_raw_git_archive(repository, revision, destination)
 
 
-def test_context_formula_uses_ls_tree_order_and_path_blob_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_context_formula_uses_ls_tree_order_and_path_blob_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     first = b'alpha\n'
     second = b'beta\n'
     first_digest = hashlib.sha256(first).hexdigest()
@@ -160,7 +167,9 @@ def test_context_formula_uses_ls_tree_order_and_path_blob_digest(monkeypatch: py
                 b'',
             )
         object_id = argv[-1]
-        return subprocess.CompletedProcess(argv, 0, first if object_id.startswith('1') else second, b'')
+        return subprocess.CompletedProcess(
+            argv, 0, first if object_id.startswith('1') else second, b''
+        )
 
     monkeypatch.setattr(subprocess, 'run', fake_run)
 
