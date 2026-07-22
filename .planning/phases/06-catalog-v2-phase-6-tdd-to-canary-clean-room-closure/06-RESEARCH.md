@@ -66,7 +66,7 @@ Atomic requirement IDs decomposed from `e52c1b5:spec/new-phase.md` (§5–§20) 
 | P6-PRES-03 | Preserve historical Docker resources (`docker-neo4j-1`, `docker_neo4j_*`, prior canary data/evidence) | Spec §18 |
 | P6-PROV-01 | No generative LLM ops; no public OpenAI probe; no credential mutation | Spec §4 |
 | P6-PROV-02 | Provider ops limited to embeddings via prepare/search; successful prepare is first embedding proof | Spec §4, §17; canary Gate 5 |
-| P6-PROV-03 | Auth failure → exact `FAILED_BEFORE_COMMIT` / `FAILED_AFTER_COMMIT` with `embedding_transport_auth` | Spec §4, §17 |
+| P6-PROV-03 | Auth failure → exact `FAILED_BEFORE_COMMIT` / `FAILED_AFTER_COMMIT` with `embedding_transport_auth` via **contract-safe sentinel path** (no CatalogErrorCode expansion; P6-HARN-19) | Spec §4, §17; plan 02 |
 | P6-HARN-01 | Explicit validated clean-room Compose project names; reject empty/path/whitespace/shell/option injection | Implemented in `1031b79` + tests; keep |
 | P6-HARN-02 | Backward-compatible default project `graphiti-catalog-local` | Implemented |
 | P6-HARN-03 | Canonical effective-Compose render action | Launcher `render` |
@@ -110,14 +110,14 @@ Atomic requirement IDs decomposed from `e52c1b5:spec/new-phase.md` (§5–§20) 
 | P6-CAN-01 | Freeze after any canary run/group/control/batch ID allocation | Spec §17 |
 | P6-CAN-02 | Exactly one final canary via `graphiti_mcp_phase6_canary_agent_prompt_en.md` with new identities | Spec §17 **REMAINING** |
 | P6-CAN-03 | Dry-run counts 3e/2edge/1src/5ev; zero writes after dry-run | Spec §17 items 4–6 |
-| P6-CAN-04 | Exactly one prepare (embedding proof) + one token-only commit; no commit retry | Spec §17 items 7–11 |
-| P6-CAN-05 | Manifest/entity/edge/batch verify; 5 evidence reconciles; 3 entity + 2 fact searches; empty control; controlled-replay gate; contiguous sanitized ledger | Spec §17 + prompt Gates 8–10 |
+| P6-CAN-04 | Exactly one prepare (embedding proof) + one primary token-only commit; no commit retry; no second commit | Spec §17 items 7–11 + item 20 |
+| P6-CAN-05 | Manifest/entity/edge/batch verify; 5 evidence reconciles; 3 entity + 2 fact searches; empty control; **committed harness controlled-replay gate** (not a second commit — see reconciliation below); contiguous sanitized ledger | Spec §17 items 10–11 reconciled with item 20 / P6-CAN-04; prompt Gates 8–10 |
 | P6-CAN-06 | Ambiguous commit → bounded read-only reconciliation only | Spec §17; prompt Gate 7 |
 | P6-SAFE-01 | Never docker system/container/volume prune; never historical down -v; never K8s; never mount historical volumes | Spec §18 |
 | P6-SAFE-02 | Leave final clean-room stack+volumes intact after success or failure | Spec §18 |
 | P6-TERM-01 | Success terminal: `PASSED` | Spec §19 |
 | P6-TERM-02 | Pre-canary hard-stops only: `HARD_BLOCKED_BASELINE_AUTHORITY`, `HARD_BLOCKED_TOOLCHAIN`, `HARD_BLOCKED_REQUIREMENT_CONFLICT`, `HARD_BLOCKED_LOCAL_RUNTIME_AUTHORITY` | Spec §19 |
-| P6-TERM-03 | Post-allocation canary classes: `FAILED_BEFORE_COMMIT`, `FAILED_AFTER_COMMIT`, `PASSED` (plus prompt `BLOCKED` pre-dry-run) | Spec §19 + prompt |
+| P6-TERM-03 | Post-allocation canary classes only: `FAILED_BEFORE_COMMIT`, `FAILED_AFTER_COMMIT`, `PASSED` (never post-ID `BLOCKED`; pre-ID `HARD_BLOCKED_*` is top-level/harness only) | Spec §19 + plan 02 runner/prompt fix |
 | P6-TERM-04 | Missing public OPENAI_API_KEY is not a blocker | Spec §4, §19 |
 | P6-REPT-01 | Final report fields per Spec §20; never include secrets/raw namespace/tokens/full env | Spec §20 |
 | P6-CONT-01 | Do not re-execute completed H1–H7 without cause; resume from `BLOCKED_POST_COMMIT_SOURCE_BINDING` | CONTEXT + 9s8 evidence |
@@ -293,7 +293,15 @@ graphiti_mcp_phase6_canary_agent_prompt_en.md
 # 2) for blob: git cat-file blob <objectname> -> write path with exact bytes
 # 3) for symlink: cat-file blob target bytes as link text
 # 4) refuse export-ignore/export-subst surprises by comparing path sets to tree
-# 5) context hash = versioned canonical digest over (path, mode, raw_sha256) rows
+# 5) context hash recipe (VERIFIED prior exact tooling at
+#    .planning/quick/260721-tun-.../_exact_verify.py:71-85 and _candidate_verify.py:146-153):
+#    - enumerate with: git ls-tree -rz --full-tree <TREE>  (that order is authoritative)
+#    - for each supported blob/regular-file entry: sha256 = SHA-256(raw cat-file blob bytes)
+#    - modes + object_ids are verified/recorded but NOT included in the aggregate
+#    - aggregate_bytes = b''.join(f"{sha256}  {path}\n".encode() for row in rows)
+#    - context_sha256 = SHA-256(aggregate_bytes)
+#    - baseline 35227e0: 731 regular files, no symlinks in that set; golden
+#      dcf73073443be37b777fc7feef124133be3d9ee305696e84042d5631125ed92f
 ```
 
 ### Pattern 2: Typed staged launcher
@@ -306,11 +314,35 @@ graphiti_mcp_phase6_canary_agent_prompt_en.md
 
 **What:** Before run/group/control/batch IDs: fix-forward OK. After any allocation: freeze source/image/runtime; one canary; no retry/cleanup. [CITED: e52c1b5 §17]
 
+### Pattern 4: Spec §17 controlled-replay reconciliation (P6-CAN-04 + P6-CAN-05)
+
+**What:** Spec §17 items 10–11 name a "committed controlled-replay gate." Item 20 / P6-CAN-04 require **exactly one primary token-only commit** and **no commit retry**. These are reconciled as follows (locked for plan 02/05):
+
+1. Success path invokes `commit_prepared_catalog_batch` **exactly once**.
+2. Ambiguity after commit-start → read-only reconciliation only (P6-CAN-06); never a second commit.
+3. **Controlled-replay gate = committed harness capability gate**, not a second commit call: when `features.same_token_replay` is absent/false, runner records validated `replay='skipped'` (or accepted skipped family), proves deterministic gate behavior, and ledger proves commit count==1.
+4. When `features.same_token_replay` is `true` unexpectedly → fail closed **before** commit (`unsupported_replay_contract`); do **not** advertise the feature true this phase; do **not** implement second-commit replay.
+
+Service-level same-token replay may already exist in Neo4j integration tests (`test_live_identical_replay`); Phase 6 harness **must not** require a second canary commit to satisfy P6-CAN-05.
+
+### Pattern 5: Contract-safe auth classification (P6-PROV-03 + P6-HARN-19)
+
+**What:** Prefer **no CatalogErrorCode enum expansion**. Shared pure classifier detects known OpenAI `AuthenticationError` types and/or numeric HTTP status attrs `401`/`403` only — never inspects/persists credential-bearing exception text.
+
+1. `prepare_catalog_batch` keeps `CatalogErrorCode.embedding_failed`.
+2. Auth-only: sanitized `error_message` sentinel exactly `embedding_transport_auth`; generic stays `embedding generation failed` (or existing fixed generic).
+3. Runner maps **only** exact pair `(error_code=embedding_failed, error_message=embedding_transport_auth)` → RunnerError `embedding_transport_auth` → `FAILED_BEFORE_COMMIT`.
+4. Search tools may emit exact sanitized `error='embedding_transport_auth'`; runner maps sentinel before generic `graphiti_error_response`; after `commit_started` → `FAILED_AFTER_COMMIT`.
+5. No Catalog-v2 identity/evidence/manifest/request/tool schema contract change.
+
 ### Anti-Patterns to Avoid
 - **`git archive` as byte authority:** H8 proved EOL transform. Use plumbing.
 - **Amending `1031b79` or rewriting 9s8 evidence:** Forbidden; fix-forward only.
 - **Retagging old bound image:** Spec forbids workaround.
-- **Changing Catalog-v2 domain contracts to fix orchestration:** Spec §5.
+- **Changing Catalog-v2 domain contracts to fix orchestration:** Spec §5 / P6-HARN-19.
+- **Appending CatalogErrorCode members for auth:** Prefer sentinel `error_message` path (Pattern 5).
+- **Second commit / advertising `same_token_replay=true` for P6-CAN-05:** Violates P6-CAN-04; use committed harness gate (Pattern 4).
+- **Post-ID `BLOCKED` class:** After IDs allocated, only PASSED | FAILED_BEFORE_COMMIT | FAILED_AFTER_COMMIT (P6-TERM-03).
 - **Proactive embedding probe at readiness:** Spec §16; prepare is first proof.
 - **Global Docker prune / historical down -v:** Spec §18.
 - **Second canary or graph cleanup after fail:** Spec §17–18.
@@ -416,24 +448,30 @@ image: ${GRAPHITI_MCP_IMAGE:-thienpvt/mem0:graphiti-mcp}
 |---|-------|---------|---------------|
 | A1 | No new PyPI packages required | Standard Stack | Low — can add only if archive tooling needs stdlib-insufficient deps |
 | A2 | `Dockerfile.standalone` is the production Dockerfile intended by Spec §11 | Image | Medium — if operators expected combined FalkorDB image, label/build path differs |
-| A3 | Source-context hash algorithm matches prior phase6 tooling (canonical path/mode/blob digest) | BIND | Medium — must match prior bound images’ formula when recomputed; verify against `dcf73073…` on baseline |
+| A3 | Source-context hash = SHA-256 of `f"{blob_sha256}  {path}\n"` rows in `git ls-tree -rz --full-tree` order over supported blob entries; modes/object_ids verified but excluded from aggregate (verified `_exact_verify.py:71-85`) | BIND | Low — formula + golden dcf730… on 35227e0 are pinned; regression if order or path encoding drifts |
 | A4 | Local OpenAI-compatible proxy remains available for prepare embeddings | Canary | Medium — maps to FAILED_* not hard-block if auth fails |
 | A5 | Protected config content drift (`815d00fe`→`bf258b96`) is user-owned and must stay unstaged | PRES | Low if preserved; high if staged |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Exact source-context hash recipe for new commits**
-   - What we know: baseline context `dcf73073…`; H8 raw-git context `051c0795…` for `1031b79`.
-   - What's unclear: single shared function vs ad-hoc script used in 9s8 operation.
-   - Recommendation: locate prior context hasher in quick evidence/scripts; pin one implementation in fix-forward; golden against baseline.
+1. **Exact source-context hash recipe for new commits — RESOLVED (verified prior source)**
+   - Prior exact recipe at `.planning/quick/260721-tun-execute-operation-catalog-v2-phase6-lf-a/_exact_verify.py:71-85` and `_candidate_verify.py:146-153`.
+   - Enumerate: `git ls-tree -rz --full-tree <TREE>` order is authoritative.
+   - Per supported blob/regular-file entry: `sha256 = SHA-256(raw git cat-file blob bytes)`.
+   - Modes and object IDs are verified and may be recorded, but are NOT part of the aggregate.
+   - Aggregate: `aggregate_bytes = b''.join(f"{sha256}  {path}\n".encode() for row in rows)` then `context_sha256 = SHA-256(aggregate_bytes)`.
+   - Golden: `compute_source_context_sha256(35227e0)` MUST equal `dcf73073443be37b777fc7feef124133be3d9ee305696e84042d5631125ed92f` (731 regular files; no symlinks in that baseline set).
+   - Materialization still preserves modes/symlinks; context rows cover supported blob entries only with the path/blob-digest formula above. No “discover until golden” improvisation.
 
-2. **Whether archive materializer lives in-repo or operator-only**
-   - Discretion allows either; tests should pin byte-equality behavior.
-   - Recommendation: small pure helper under `scripts/` + unit tests (TDD), used by bind step.
+2. **Archive materializer location — RESOLVED**
+   - In-repo helper: `scripts/catalog_raw_git_archive.py` + `mcp_server/tests/test_catalog_raw_git_archive.py` (TDD).
+   - Public surface: `materialize_raw_git_archive`, `verify_archive_against_git`, `compute_source_context_sha256`.
+   - Plumbing only: `ls-tree` + `cat-file blob`; never `git archive` / checkout / EOL transform.
 
-3. **OCI custom source-context label name**
-   - Dockerfile has `org.opencontainers.image.revision`; Spec also wants source-context label.
-   - Recommendation: add explicit label key consistent with prior bound images if already used; else document chosen key in report.
+3. **OCI custom source-context label name — RESOLVED**
+   - Canonical key: `org.graphiti.source-context-sha256`.
+   - Also set `org.opencontainers.image.revision` = full candidate commit.
+   - Label value must equal `archive_context_sha256` of the candidate exact archive.
 
 ## Environment Availability
 

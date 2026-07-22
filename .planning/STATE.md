@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-status: complete
-stopped_at: Phase 5 complete; Phase 6 not entered
-last_updated: "2026-07-19T10:11:08.435355Z"
+status: planning_complete
+stopped_at: Phase 6 planning verified; next execute Plan 06-01
+last_updated: "2026-07-22T12:00:00Z"
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 7
-  total_plans: 44
+  total_plans: 49
   completed_plans: 44
-  percent: 100
-current_phase: 05
-current_phase_name: Verification, Security, Compatibility, and Migration Docs
-last_activity: 2026-07-19
-last_activity_desc: Catalog activation halted after safety violation; cleanup/rotation decision required
+  percent: 88
+current_phase: 06
+current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
+last_activity: 2026-07-22
+last_activity_desc: Phase 6 plans checker-passed (VERIFICATION PASSED 5/5, 64/64); 0/5 executed; next Plan 06-01
 ---
 
 # Project State
@@ -24,12 +24,21 @@ last_activity_desc: Catalog activation halted after safety violation; cleanup/ro
 See: `.planning/PROJECT.md`
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Milestone v1.1 complete through Phase 5; stopped before Phase 6.
+**Current focus:** Phase 6 planning verified / checker passed; execution ready at Plan 06-01 (0/5 executed); no image/runtime/IDs/canary yet; no canary approval.
 
 ## Current Position
 
-Phase 5 complete. Phase 6 not entered.
+Phase 5 complete (historical). Phase 6 **planning verified**, execution **ready / not started**.
 
+### Phase 6 (planning verified → execute 06-01)
+- Authority: `e52c1b5:spec/new-phase.md`
+- Requirements ingested: **64/64** P6-* IDs
+- Plans on disk: **5** sequential waves (`06-01`…`06-05`) — **0/5 executed**
+- Status: planning verified; independent checker returned `## VERIFICATION PASSED` (5/5 plans, 64/64, zero blockers/warnings); execution ready — next `/gsd-execute-phase 06` starts Plan 06-01 only
+- `canary_ids_allocated=false`; no source-bound image; no clean-room runtime; `canary_executed=false`; no canary approval pending
+- Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains unstaged
+
+### Phase 5 (preserved historical facts)
 - Phase 5 plans: 7/7 complete across 6 waves
 - Final marker-bound proof: verified
 - Evaluated implementation HEAD: `27c4e2e4e5000d84d18cde24a99b010831771fe7`
@@ -46,7 +55,6 @@ Phase 5 complete. Phase 6 not entered.
 - `phase_5_complete=true`; `ready_to_regenerate_canary=true`
 - `canary_executed=false`; current `oracle-catalog-v2` queried/mutated=false; `clear_graph_called=false`
 - Historical `a67789a` retained as separate `test_policy` / `local_neo4j_no_corresponding_data` axis
-- Phase 6 canary remains separate and requires explicit authorization
 
 ## Performance Metrics
 
@@ -61,31 +69,38 @@ Phase 5 complete. Phase 6 not entered.
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
+| Phase 6 | 0/5 | Planning verified; checker passed; execution ready (not started); next 06-01 |
 
 ## Accumulated Context
 
 ### Decisions
 
 - Active v1.1 spine Phase 0 / 1 / 2 / 3A / 3B / 4 / 5 is complete.
-- Phase 6 canary remains separate and requires explicit approval.
+- Phase 6 authorized by `e52c1b5`; 64 P6-* requirements ingested; five-wave plans written (06-01 archive TDD → 06-02 classification/auth/replay TDD → 06-03 bind/matrix → 06-04 image → 06-05 R0–R3/freeze/handoff).
+- Phase 6 planning verified; checker passed; execution ready at Plan 06-01 (0/5 executed; no image/runtime/IDs/canary).
 - No automatic catalog-v1 migration, deployment, push, merge, tag, graph clear, or existing-data deletion.
 - Development/live tests use only `oracle-catalog-tool-test`.
 - Never query or mutate `oracle-catalog-v2`.
 - Phase 3B uses two-axis safety: permanent historical audit for `a67789a`; independent current safety. Historical event class `test_policy`, scope `local_neo4j_no_corresponding_data`.
 - `features.manifests=true`; `manifest_verification=true`.
-- `canary_executed=false` remains hard truth through Phase 5 completion.
+- `canary_executed=false` remains hard truth until Phase 6 top-level handoff.
+- Post-ID canary classes only: PASSED | FAILED_BEFORE_COMMIT | FAILED_AFTER_COMMIT (never post-ID BLOCKED).
+- P6-CAN-04/05: one primary token-only commit; committed harness replay gate (no second commit).
+- P6-PROV-03: contract-safe auth sentinel path; no CatalogErrorCode expansion (P6-HARN-19).
 
 ### Pending Todos
 
-1. Stop. Do not enter Phase 6 without separate explicit authorization.
-2. Require explicit confirmation before any cleanup/deletion.
+1. `/gsd-execute-phase 06` starting at Plan 06-01 (wave 1 archive TDD). No canary approval.
+2. Do not allocate canary IDs, build image, or start runtime until plans 03–05 execute in order.
+3. Require explicit confirmation before any cleanup/deletion.
 
 ### Blockers/Concerns
 
 - Preserve unrelated working-tree changes: `.planning/config.json`, prior phase artifacts, Docker/Kubernetes configs, `.codegraph/`, `catalog/`, `mcp_server/sample_catalog.json`.
-- Unrelated `mcp_server/config/config-docker-neo4j.yaml` defaults `qwen3-embedding:0.6b` to 1536 dimensions although official maximum is 1024; intentionally untouched.
+- Unrelated `mcp_server/config/config-docker-neo4j.yaml` defaults `qwen3-embedding:0.6b` to 1536 dimensions although official maximum is 1024; intentionally untouched (P6-PRES-01).
 - Never weaken a real product, transaction, validation, security, test, or hard gate.
 - No remote-state mutation without separate approval.
+- Phase 6 plan artifacts may remain uncommitted by standing order until orchestrator commits.
 
 ## Quick Tasks Completed
 
@@ -109,8 +124,8 @@ Phase 5 complete. Phase 6 not entered.
 
 ## Session Continuity
 
-**Last session:** 2026-07-19T10:11:08.435355Z
-**Resume file:** `.planning/phases/05-verification-security-compatibility-and-migration-docs/05-07-SUMMARY.md`
+**Last session:** 2026-07-22T12:00:00Z
+**Resume file:** `.planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-01-PLAN.md`
 
-Stopped at: Phase 5 complete; final proof verified; Phase 6 not entered.
-Next: none without new explicit Phase 6 authorization.
+Stopped at: Phase 6 planning verified / checker passed (5 plans, 0/5 executed); 64/64 requirements; no canary IDs/image/runtime; no canary approval.
+Next: execute Plan 06-01 (`/gsd-execute-phase 06`); still no image/runtime/IDs/canary.

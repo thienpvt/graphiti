@@ -309,6 +309,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 0/5 | Planning verified; execution not started | — |
 
 ## Coverage
 
@@ -358,12 +359,30 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
 - Historical Docker resources and prior canary data/evidence remain unchanged
 
-**Plans**: 0 plans
+**Plans**: 5 plans
 
 Plans:
+**Wave 1**
 
-- [ ] TBD (ingest `spec/new-phase.md`, discuss Phase 6, then run `/gsd-plan-phase 6`)
+- [ ] 06-01-PLAN.md — TDD raw-Git exact archive materializer + baseline context golden (resume H8)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 06-02-PLAN.md — TDD post-ID three-class + auth sentinel (no CatalogErrorCode expand) + committed harness replay gate (one primary commit) + prompt
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 06-03-PLAN.md — Source-complete PREBIND matrix, freeze HEAD candidate, exact archive bind, frozen matrix
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 06-04-PLAN.md — Source-bound image from exact archive; OCI labels; deny-list scan; no runtime
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 06-05-PLAN.md — R0–R3 staging, blocking freeze gate, one final canary, no post-allocation commit
 
 ---
 *Roadmap created: 2026-07-17 for milestone v1.1*
 *Reconciled: 2026-07-17 to graphiti_mcp_pre_canary_roadmap_en.md (Phase 0/1/2/3A/3B/4/5)*
+*Phase 6 planned: 2026-07-22 — 5 sequential plans from e52c1b5 authority (classification TDD inserted as 06-02)*
