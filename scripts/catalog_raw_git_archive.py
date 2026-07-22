@@ -172,8 +172,14 @@ def verify_archive_against_git(
             continue
         archived = path.read_bytes()
         archive_rows.append((entry.path, archived))
-        mode_mismatch = entry.mode in {'100644', '100755'} and _mode_is_executable(path) != (
-            entry.mode == '100755'
+        mode_mismatch = (
+            os.name != 'nt'
+            and entry.mode
+            in {
+                '100644',
+                '100755',
+            }
+            and _mode_is_executable(path) != (entry.mode == '100755')
         )
         if archived != raw or mode_mismatch:
             mismatched += 1
