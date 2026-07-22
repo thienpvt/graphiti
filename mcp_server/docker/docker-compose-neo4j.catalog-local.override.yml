@@ -1,6 +1,32 @@
+x-catalog-runtime: &catalog-runtime
+  image: ${GRAPHITI_MCP_IMAGE:-thienpvt/mem0:graphiti-mcp}
+  env_file: []
+  environment:
+    - CONFIG_PATH=/app/mcp/config/config.yaml
+    - NEO4J_URI=bolt://neo4j:7687
+    - NEO4J_USER=${NEO4J_USER:-neo4j}
+    - NEO4J_PASSWORD=${NEO4J_PASSWORD:-demodemo}
+    - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+  volumes:
+    - ../config/config-docker-neo4j.catalog-local.yaml:/app/mcp/config/config.yaml:ro
+
 services:
   graphiti-mcp:
+    <<: *catalog-runtime
+
+  catalog-bootstrap:
+    <<: *catalog-runtime
+    profiles: ["catalog-bootstrap"]
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    working_dir: /app/mcp/src
     environment:
+      - PYTHONPATH=/app/mcp/src
       - CONFIG_PATH=/app/mcp/config/config.yaml
-    volumes:
-      - ../config/config-docker-neo4j.catalog-local.yaml:/app/mcp/config/config.yaml:ro
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-demodemo}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+    command: ["uv", "run", "--no-sync", "python", "-m", "services.catalog_schema_bootstrap"]
+    restart: "no"

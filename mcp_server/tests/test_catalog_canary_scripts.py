@@ -1558,8 +1558,8 @@ def test_catalog_local_authority_files_are_secret_free_lf() -> None:
         assert raw and b'\r' not in raw
     override = paths[0].read_text(encoding='utf-8')
     assert override.count('graphiti-mcp:') == 1
-    assert 'neo4j:' not in override
-    assert 'env_file' not in override  # Base service retains existing environment file.
+    assert 'image: neo4j:' not in override
+    assert 'env_file: []' in override
     mount = next(
         line.strip()[2:]
         for line in override.splitlines()
@@ -1621,13 +1621,14 @@ def test_launcher_attests_exact_argv_before_shell_false_subprocess(
         events.append(('authority',))
         return {'authority': 'ok'}
 
-    def attest(argv: list[str]) -> dict[str, Any]:
-        result = real_attest(argv)
+    def attest(argv: list[str], options: Any | None = None) -> dict[str, Any]:
+        result = real_attest(argv, options)
         events.append(('attest', argv, result))
         return result
 
-    def run(argv: list[str], **kwargs: Any) -> None:
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         events.append(('run', argv, kwargs))
+        return SimpleNamespace(stdout='[]', returncode=0)
 
     monkeypatch.setattr(launcher.runner, 'attest_host_compose_argv', attest)
     monkeypatch.setattr(launcher.runner, 'host_side_execution_authority_digests', authority)
@@ -1635,7 +1636,7 @@ def test_launcher_attests_exact_argv_before_shell_false_subprocess(
     monkeypatch.setenv('COMPOSE_PROJECT_NAME', 'foreign')
     monkeypatch.setenv('COMPOSE_REMOVE_ORPHANS', '1')
     monkeypatch.setenv('COMPOSE_FILE', 'evil.yml')
-    for action in ('up', 'ps', 'logs'):
+    for action in ('render', 'status', 'inspect'):
         launcher.run_compose(action)
         expected = launcher.runner.compose_argv(action)
         assert events[-3] == ('attest', expected, real_attest(expected))
@@ -1657,15 +1658,158 @@ def test_launcher_attests_exact_argv_before_shell_false_subprocess(
         ),
     )
     with pytest.raises(launcher.runner.RunnerError):
-        launcher.run_compose('up')
+        launcher.run_compose('neo4j')
     assert not events or events[-1][0] != 'run'
     with pytest.raises(SystemExit):
         launcher.parse_args(['down'])
-    with pytest.raises(launcher.runner.RunnerError):
-        launcher.main(['up', 'extra'])
+    with pytest.raises(SystemExit):
+        launcher.main(['neo4j', 'extra'])
     source = LAUNCHER_PATH.read_text(encoding='utf-8')
     assert 'shell=True' not in source
     assert subprocess.run is not None
+
+
+def test_clean_room_project_contract_and_launcher_options() -> None:
+    assert runner.resolve_compose_project(None, clean_room=False) == 'graphiti-catalog-local'
+    for project in ('a', 'clean-room-01', 'catalog_local'):
+        assert runner.resolve_compose_project(project, clean_room=True) == project
+    for invalid in (None, '', '-bad', 'bad/name', 'Bad', 'bad.name', 'a' * 64):
+        with pytest.raises(runner.RunnerError):
+            runner.resolve_compose_project(invalid, clean_room=True)
+    with pytest.raises(runner.RunnerError, match='duplicate'):
+        launcher = _load_script('catalog_launcher_duplicate_test', LAUNCHER_PATH)
+        launcher.parse_args(['status', '--project', 'a', '--project=b'])
+
+
+def test_launcher_clean_room_state_order_and_no_docker_before_prerequisite(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sys.modules['run_catalog_canary_batch'] = runner
+    launcher = _load_script('catalog_launcher_state_test', LAUNCHER_PATH)
+    options = runner.ComposeOptions(
+        project='clean-one',
+        clean_room=True,
+        image='graphiti-mcp:phase6-test',
+        expected_image_id='sha256:' + 'a' * 64,
+    )
+    calls: list[Any] = []
+    monkeypatch.setattr(
+        launcher.subprocess,
+        'run',
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    with pytest.raises(runner.RunnerError, match='render state'):
+        launcher.run_compose('mcp', options, state_dir=tmp_path / 'state', run_id='run-1')
+    assert calls == []
+
+
+def test_launcher_sanitizes_ambient_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+    sys.modules['run_catalog_canary_batch'] = runner
+    launcher = _load_script('catalog_launcher_env_test', LAUNCHER_PATH)
+    options = runner.ComposeOptions()
+    for key in (
+        'DOCKER_HOST',
+        'DOCKER_CONTEXT',
+        'DOCKER_CONFIG',
+        'GRAPHITI_CATALOG_UUID_NAMESPACE',
+        'CATALOG_UPSERT__UUID_NAMESPACE',
+    ):
+        monkeypatch.setenv(key, 'foreign')
+    env = launcher.compose_env(options)
+    assert all(key not in env for key in ('DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG'))
+    assert 'GRAPHITI_CATALOG_UUID_NAMESPACE' not in env
+    assert 'CATALOG_UPSERT__UUID_NAMESPACE' not in env
+    assert env['NEO4J_URI'] == 'bolt://neo4j:7687'
+
+
+def test_launcher_public_actions_and_fixed_compose_argv() -> None:
+    options = runner.ComposeOptions(
+        project='clean-one',
+        clean_room=True,
+        neo4j_http_port=17474,
+        neo4j_bolt_port=17687,
+        mcp_port=18000,
+        image='graphiti-mcp:phase6-test',
+        expected_image_id='sha256:' + 'a' * 64,
+    )
+    expected_suffixes = {
+        'render': ['config', '--quiet'],
+        'neo4j': ['up', '--no-build', '--pull', 'never', '-d', 'neo4j'],
+        'bootstrap': [
+            '--profile',
+            'catalog-bootstrap',
+            'run',
+            '--no-deps',
+            '--no-build',
+            '--pull',
+            'never',
+            '--rm',
+            'catalog-bootstrap',
+        ],
+        'mcp': ['up', '--no-deps', '--no-build', '--pull', 'never', '-d', 'graphiti-mcp'],
+        'status': ['ps', '--format', 'json', 'neo4j', 'graphiti-mcp'],
+        'inspect': ['images', '--format', 'json', 'neo4j', 'graphiti-mcp'],
+    }
+    for action, suffix in expected_suffixes.items():
+        command = runner.compose_argv(action, options)
+        assert command[-len(suffix) :] == suffix
+        assert runner.attest_host_compose_argv(command, options)['action'] == action
+
+
+def test_compose_override_isolated_and_bootstrap_uses_project_environment() -> None:
+    base = (ROOT / runner.COMPOSE_BASE_FILE).read_text(encoding='utf-8')
+    override = (ROOT / runner.COMPOSE_OVERRIDE_FILE).read_text(encoding='utf-8')
+    assert not base.startswith('name:')
+    assert 'env_file: []' in override
+    assert 'NEO4J_URI=bolt://neo4j:7687' in override
+    assert 'working_dir: /app/mcp/src' in override
+    assert 'PYTHONPATH=/app/mcp/src' in override
+    assert (
+        '["uv", "run", "--no-sync", "python", "-m", "services.catalog_schema_bootstrap"]'
+        in override
+    )
+
+
+def test_materializer_clean_room_project_syntax_and_single_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    materializer = _load_script('catalog_materializer_clean_room_test', MATERIALIZER_PATH)
+    source = ROOT / 'mcp_server/config/config-docker-neo4j.catalog-local.example.yaml'
+    generated = __import__('uuid').UUID('12345678-1234-4678-9234-567812345678')
+    calls = 0
+
+    def uuid4() -> Any:
+        nonlocal calls
+        calls += 1
+        return generated
+
+    monkeypatch.setattr(materializer.uuid, 'uuid4', uuid4)
+    with pytest.raises(ValueError):
+        materializer.materialize_clean_room(
+            source,
+            tmp_path / 'bad.yml',
+            tmp_path / 'bad.authority',
+            project='bad.name',
+            data_volume='bad.name_neo4j_data',
+        )
+    fingerprint = materializer.materialize_clean_room(
+        source,
+        tmp_path / 'config.yml',
+        tmp_path / 'authority',
+        project='clean-one',
+        data_volume='clean-one_neo4j_data',
+    )
+    assert calls == 1
+    assert fingerprint == materializer.namespace_fingerprint(generated)
+    with pytest.raises(FileExistsError):
+        materializer.materialize_clean_room(
+            source,
+            tmp_path / 'config.yml',
+            tmp_path / 'authority',
+            project='clean-one',
+            data_volume='clean-one_neo4j_data',
+        )
+    assert calls == 1
 
 
 def test_hardened_checkpoint_attempt_count_zero_after_validation() -> None:

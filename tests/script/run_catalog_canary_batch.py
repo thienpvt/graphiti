@@ -1211,13 +1211,21 @@ def test_tool_ledger_validation_rejects_corrupt_ordinals() -> None:
 
 
 def test_execution_boundary_rejects_standalone_and_unapproved() -> None:
-    for action in ('up', 'ps', 'logs'):
+    for action in runner.PUBLIC_COMPOSE_ACTIONS:
         validated = runner.validate_execution_command(runner.compose_argv(action))
-        assert validated['subcommand'] == action
-        assert validated['services'] == ['graphiti-mcp']
-    up = runner.compose_argv('up')
-    assert up[-7:] == ['up', '--no-deps', '--no-build', '--pull', 'never', '-d', 'graphiti-mcp']
-    prefix = up[:6]
+        assert validated['action'] == action
+        assert validated['project'] == runner.COMPOSE_PROJECT_NAME
+    mcp = runner.compose_argv('mcp')
+    assert mcp[-7:] == [
+        'up',
+        '--no-deps',
+        '--no-build',
+        '--pull',
+        'never',
+        '-d',
+        'graphiti-mcp',
+    ]
+    prefix = mcp[:-7]
     for bad in (
         ['docker', 'run', '--rm', 'neo4j'],
         ['docker', 'compose', 'exec', 'graphiti-mcp'],
@@ -1228,7 +1236,6 @@ def test_execution_boundary_rejects_standalone_and_unapproved() -> None:
         [*prefix, 'up', '--no-build', '--pull', 'never', '-d', 'graphiti-mcp'],
         [*prefix, 'up', '--no-deps', '--pull', 'never', '-d', 'graphiti-mcp'],
         [*prefix, 'up', '--no-deps', '--no-build', '--pull', 'always', '-d', 'graphiti-mcp'],
-        [*prefix, 'up', '--no-deps', '--no-build', '--pull', 'never', '-d', 'neo4j'],
         [
             *prefix,
             'up',
@@ -1243,7 +1250,7 @@ def test_execution_boundary_rejects_standalone_and_unapproved() -> None:
         [*prefix, 'down'],
         [*prefix, 'down', '--volumes'],
         [*prefix, 'down', '--remove-orphans'],
-        [*prefix, 'config'],
+        [*prefix, 'logs'],
         'docker compose up',
     ):
         with pytest.raises(runner.RunnerError) as ei:
@@ -1252,9 +1259,10 @@ def test_execution_boundary_rejects_standalone_and_unapproved() -> None:
     assert runner.HOST_EXECUTION_AUTHORITY_PATHS == (
         runner.COMPOSE_BASE_FILE,
         runner.COMPOSE_OVERRIDE_FILE,
+        'mcp_server/src/services/catalog_schema_bootstrap.py',
         runner.COMPOSE_GENERATED_CONFIG,
     )
-    assert runner.attest_host_compose_argv(up)['ok'] is True
+    assert runner.attest_host_compose_argv(mcp)['ok'] is True
 
 
 @pytest.mark.asyncio
@@ -1748,13 +1756,19 @@ def test_atomic_write_retries_permission_error_only(
 
 
 def test_source_authority_includes_every_runtime_policy_script() -> None:
-    assert runner.SOURCE_AUTHORITY_PATHS[:6] == (
+    assert runner.SOURCE_AUTHORITY_PATHS[:12] == (
         'scripts/run_catalog_canary_batch.py',
         'scripts/build_catalog_canary_requests.py',
         'scripts/catalog_authority_hashing.py',
         'scripts/catalog_canary_manifest_contract.py',
         'scripts/run_catalog_canary_launcher.py',
         'scripts/materialize_catalog_local_config.py',
+        'scripts/bootstrap_catalog_v2_schema.py',
+        'mcp_server/src/services/catalog_schema_bootstrap.py',
+        'mcp_server/docker/docker-compose-neo4j.yml',
+        'mcp_server/docker/docker-compose-neo4j.catalog-local.override.yml',
+        'mcp_server/config/config-docker-neo4j.catalog-local.example.yaml',
+        'graphiti_mcp_phase6_canary_agent_prompt_en.md',
     )
 
 
@@ -1818,22 +1832,28 @@ def test_host_execution_authority_raw_byte_map(
     override = (
         tmp_path / 'mcp_server' / 'docker' / 'docker-compose-neo4j.catalog-local.override.yml'
     )
+    module = tmp_path / 'mcp_server' / 'src' / 'services' / 'catalog_schema_bootstrap.py'
     config = tmp_path / 'mcp_server' / 'config' / 'config-docker-neo4j.catalog-local.yaml'
     base.parent.mkdir(parents=True, exist_ok=True)
+    module.parent.mkdir(parents=True, exist_ok=True)
     config.parent.mkdir(parents=True, exist_ok=True)
     base.write_bytes(b'base\r\ncontent')
     override.write_bytes(b'override\ncontent')
+    module.write_bytes(b'module\ncontent')
     config.write_bytes(b'config-bytes')
     monkeypatch.setattr(runner, 'ROOT', tmp_path)
     digests = runner.host_side_execution_authority_digests()
     assert digests[runner.COMPOSE_BASE_FILE] == runner.sha256_bytes(b'base\r\ncontent')
     assert digests[runner.COMPOSE_OVERRIDE_FILE] == runner.sha256_bytes(b'override\ncontent')
+    assert digests['mcp_server/src/services/catalog_schema_bootstrap.py'] == runner.sha256_bytes(
+        b'module\ncontent'
+    )
     assert digests[runner.COMPOSE_GENERATED_CONFIG] == runner.sha256_bytes(b'config-bytes')
     expected = runner.canonical_sha256({'files': digests})
     assert runner.compute_execution_map_sha256(digests) == expected
     ok = runner.attest_execution_authority(expected_execution_map_sha256=expected)
     assert ok['execution_map_sha256'] == expected
-    assert ok['execution_files'] == 3
+    assert ok['execution_files'] == 4
     assert ok['execution_digest_method'] == 'raw-byte-sha256'
     with pytest.raises(runner.RunnerError) as ei:
         runner.attest_execution_authority(expected_execution_map_sha256='a' * 64)

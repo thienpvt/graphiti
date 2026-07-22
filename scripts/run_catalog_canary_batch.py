@@ -174,6 +174,11 @@ SOURCE_AUTHORITY_PATHS = (
     'scripts/catalog_canary_manifest_contract.py',
     'scripts/run_catalog_canary_launcher.py',
     'scripts/materialize_catalog_local_config.py',
+    'scripts/bootstrap_catalog_v2_schema.py',
+    'mcp_server/src/services/catalog_schema_bootstrap.py',
+    'mcp_server/docker/docker-compose-neo4j.yml',
+    'mcp_server/docker/docker-compose-neo4j.catalog-local.override.yml',
+    'mcp_server/config/config-docker-neo4j.catalog-local.example.yaml',
     'graphiti_mcp_phase6_canary_agent_prompt_en.md',
     'mcp_server/tests/fixtures/accept_tab_sanitized.json',
     '.planning/phases/05-verification-security-compatibility-and-migration-docs/05-PROOF-PACKAGE.json',
@@ -2662,77 +2667,199 @@ def validate_report_ledger_metadata(report: dict[str, Any], ledger_meta: dict[st
         raise RunnerError('tool_ledger_invalid', 'report final_ordinal must match validated ledger')
 
 
-# Host-side execution boundary: exact docker compose form, fixed files/services.
+# Host-side execution boundary: exact Docker Compose form, fixed files/services.
 COMPOSE_BASE_FILE = 'mcp_server/docker/docker-compose-neo4j.yml'
 COMPOSE_OVERRIDE_FILE = 'mcp_server/docker/docker-compose-neo4j.catalog-local.override.yml'
 COMPOSE_PROJECT_NAME = 'graphiti-catalog-local'
+DEFAULT_MCP_IMAGE = 'thienpvt/mem0:graphiti-mcp'
 REQUIRED_COMPOSE_FILES = (COMPOSE_BASE_FILE, COMPOSE_OVERRIDE_FILE)
 COMPOSE_GENERATED_CONFIG = 'mcp_server/config/config-docker-neo4j.catalog-local.yaml'
-ALLOWED_COMPOSE_SUBCOMMANDS = frozenset({'up', 'ps', 'logs'})
+COMPOSE_PROJECT_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,62}$')
+LOCAL_IMAGE_RE = re.compile(r'^[a-z0-9][a-z0-9_.-]*(?:/[a-z0-9][a-z0-9_.-]*)*:[A-Za-z0-9_.-]+$')
+IMAGE_ID_RE = re.compile(r'^sha256:[0-9a-f]{64}$')
+PUBLIC_COMPOSE_ACTIONS = ('render', 'neo4j', 'bootstrap', 'mcp', 'status', 'inspect')
 HOST_EXECUTION_AUTHORITY_PATHS = (
     COMPOSE_BASE_FILE,
     COMPOSE_OVERRIDE_FILE,
+    'mcp_server/src/services/catalog_schema_bootstrap.py',
     COMPOSE_GENERATED_CONFIG,
 )
 
 
-def validate_execution_command(argv: list[str] | str) -> dict[str, Any]:
-    """Accept only fixed catalog-local Compose action grammar."""
-    if isinstance(argv, str) or not isinstance(argv, list) or not argv:
-        raise RunnerError('execution_boundary_violation', 'command argv must be a non-empty list')
-    if not all(isinstance(token, str) and token for token in argv):
-        raise RunnerError('execution_boundary_violation', 'command argv contains invalid tokens')
-    prefix = [
-        'docker',
-        'compose',
-        '--project-name',
-        COMPOSE_PROJECT_NAME,
-        '-f',
-        COMPOSE_BASE_FILE,
-        '-f',
-        COMPOSE_OVERRIDE_FILE,
-    ]
-    if argv[: len(prefix)] != prefix or len(argv) == len(prefix):
-        raise RunnerError('execution_boundary_violation', 'compose authority prefix is invalid')
-    subcommand = argv[len(prefix)]
-    if subcommand not in ALLOWED_COMPOSE_SUBCOMMANDS:
-        raise RunnerError('execution_boundary_violation', 'compose subcommand is not allowlisted')
-    suffix = argv[len(prefix) + 1 :]
-    expected = {
-        'up': ['--no-deps', '--no-build', '--pull', 'never', '-d', 'graphiti-mcp'],
-        'ps': ['graphiti-mcp'],
-        'logs': ['--no-color', 'graphiti-mcp'],
-    }[subcommand]
-    if suffix != expected:
-        raise RunnerError('execution_boundary_violation', 'compose action arguments are invalid')
+class ComposeOptions:
+    def __init__(
+        self,
+        project: str = COMPOSE_PROJECT_NAME,
+        clean_room: bool = False,
+        neo4j_http_port: int = 7474,
+        neo4j_bolt_port: int = 7687,
+        mcp_port: int = 8000,
+        image: str = DEFAULT_MCP_IMAGE,
+        expected_image_id: str | None = None,
+    ) -> None:
+        self.project = project
+        self.clean_room = clean_room
+        self.neo4j_http_port = neo4j_http_port
+        self.neo4j_bolt_port = neo4j_bolt_port
+        self.mcp_port = mcp_port
+        self.image = image
+        self.expected_image_id = expected_image_id
+        resolve_compose_project(project, clean_room=clean_room)
+        _validate_compose_ports(neo4j_http_port, neo4j_bolt_port, mcp_port)
+        _validate_image(image, expected_image_id, clean_room=clean_room)
+
+
+def resolve_compose_project(project: str | None, *, clean_room: bool) -> str:
+    if not clean_room and project is None:
+        return COMPOSE_PROJECT_NAME
+    if not isinstance(project, str) or COMPOSE_PROJECT_RE.fullmatch(project) is None:
+        raise RunnerError(
+            'execution_boundary_violation', 'project must use Docker Compose project syntax'
+        )
+    return project
+
+
+def compose_resource_identities(project: str) -> dict[str, str]:
+    validated = resolve_compose_project(project, clean_room=True)
     return {
-        'ok': True,
-        'subcommand': subcommand,
-        'files': list(REQUIRED_COMPOSE_FILES),
-        'services': ['graphiti-mcp'] if 'graphiti-mcp' in suffix else [],
+        'data_volume': f'{validated}_neo4j_data',
+        'logs_volume': f'{validated}_neo4j_logs',
+        'network': f'{validated}_default',
+        'neo4j_container': f'{validated}-neo4j-1',
+        'mcp_container': f'{validated}-graphiti-mcp-1',
+        'bootstrap_container': f'{validated}-catalog-bootstrap-1',
     }
 
 
-def compose_argv(action: str) -> list[str]:
-    suffix = {
-        'up': ['--no-deps', '--no-build', '--pull', 'never', '-d', 'graphiti-mcp'],
-        'ps': ['graphiti-mcp'],
-        'logs': ['--no-color', 'graphiti-mcp'],
-    }.get(action)
-    if suffix is None:
-        raise RunnerError('execution_boundary_violation', 'compose action is not allowlisted')
+def _validate_compose_ports(*ports: int) -> None:
+    if any(type(port) is not int or not 1 <= port <= 65535 for port in ports):
+        raise RunnerError('execution_boundary_violation', 'ports must be integers in 1..65535')
+    if len(set(ports)) != len(ports):
+        raise RunnerError('execution_boundary_violation', 'selected host ports must be distinct')
+
+
+def _validate_image(image: str, expected_image_id: str | None, *, clean_room: bool) -> None:
+    if not isinstance(image, str) or LOCAL_IMAGE_RE.fullmatch(image) is None:
+        raise RunnerError('execution_boundary_violation', 'image must be an explicit local tag')
+    if clean_room and (
+        not isinstance(expected_image_id, str) or IMAGE_ID_RE.fullmatch(expected_image_id) is None
+    ):
+        raise RunnerError(
+            'execution_boundary_violation', 'clean-room expected image ID must be sha256-prefixed'
+        )
+
+
+def validate_compose_runtime_contract(
+    *,
+    clean_room: bool,
+    project: str | None,
+    neo4j_http_port: int,
+    neo4j_bolt_port: int,
+    mcp_port: int,
+    image: str,
+    expected_image_id: str | None,
+    existing_resources: set[str],
+) -> dict[str, Any]:
+    selected = resolve_compose_project(project, clean_room=clean_room)
+    options = ComposeOptions(
+        project=selected,
+        clean_room=clean_room,
+        neo4j_http_port=neo4j_http_port,
+        neo4j_bolt_port=neo4j_bolt_port,
+        mcp_port=mcp_port,
+        image=image,
+        expected_image_id=expected_image_id,
+    )
+    resources = compose_resource_identities(selected)
+    if set(resources.values()) & set(existing_resources):
+        raise RunnerError(
+            'execution_boundary_violation', 'selected clean-room resource already exists'
+        )
+    return {
+        'project': options.project,
+        'clean_room': options.clean_room,
+        'resources': resources,
+        'volumes_absent': all(
+            resources[name] not in existing_resources for name in ('data_volume', 'logs_volume')
+        ),
+    }
+
+
+def _compose_prefix(options: ComposeOptions) -> list[str]:
     return [
         'docker',
         'compose',
         '--project-name',
-        COMPOSE_PROJECT_NAME,
+        options.project,
         '-f',
         COMPOSE_BASE_FILE,
         '-f',
         COMPOSE_OVERRIDE_FILE,
-        action,
-        *suffix,
     ]
+
+
+def _compose_suffix(action: str) -> list[str]:
+    suffixes = {
+        'render': ['config', '--quiet'],
+        'neo4j': ['up', '--no-build', '--pull', 'never', '-d', 'neo4j'],
+        'bootstrap': [
+            '--profile',
+            'catalog-bootstrap',
+            'run',
+            '--no-deps',
+            '--no-build',
+            '--pull',
+            'never',
+            '--rm',
+            'catalog-bootstrap',
+        ],
+        'mcp': [
+            'up',
+            '--no-deps',
+            '--no-build',
+            '--pull',
+            'never',
+            '-d',
+            'graphiti-mcp',
+        ],
+        'status': ['ps', '--format', 'json', 'neo4j', 'graphiti-mcp'],
+        'inspect': ['images', '--format', 'json', 'neo4j', 'graphiti-mcp'],
+    }
+    try:
+        return suffixes[action]
+    except KeyError as exc:
+        raise RunnerError(
+            'execution_boundary_violation', 'compose action is not allowlisted'
+        ) from exc
+
+
+def compose_argv(action: str, options: ComposeOptions | None = None) -> list[str]:
+    selected = options or ComposeOptions()
+    return [*_compose_prefix(selected), *_compose_suffix(action)]
+
+
+def validate_execution_command(
+    argv: list[str] | str, options: ComposeOptions | None = None
+) -> dict[str, Any]:
+    """Accept only fixed staged Compose argv; no string or token passthrough."""
+    selected = options or ComposeOptions()
+    if isinstance(argv, str) or not isinstance(argv, list) or not argv:
+        raise RunnerError('execution_boundary_violation', 'command argv must be a non-empty list')
+    if not all(isinstance(token, str) and token for token in argv):
+        raise RunnerError('execution_boundary_violation', 'command argv contains invalid tokens')
+    matches = [
+        action for action in PUBLIC_COMPOSE_ACTIONS if argv == compose_argv(action, selected)
+    ]
+    if len(matches) != 1:
+        raise RunnerError(
+            'execution_boundary_violation', 'compose argv is not one fixed staged action'
+        )
+    return {
+        'ok': True,
+        'action': matches[0],
+        'project': selected.project,
+        'files': list(REQUIRED_COMPOSE_FILES),
+    }
 
 
 EXECUTION_DIGEST_METHOD = 'raw-byte-sha256'
@@ -2795,9 +2922,11 @@ def attest_execution_authority(*, expected_execution_map_sha256: str) -> dict[st
     }
 
 
-def attest_host_compose_argv(argv: list[str] | str) -> dict[str, Any]:
+def attest_host_compose_argv(
+    argv: list[str] | str, options: ComposeOptions | None = None
+) -> dict[str, Any]:
     """External Compose argv accepted only via exact validator. Never launches Docker."""
-    return validate_execution_command(argv)
+    return validate_execution_command(argv, options)
 
 
 def evaluate_embedding_readiness(
@@ -3822,6 +3951,7 @@ async def run_live_canary(
     machine = LiveStageMachine()
     ledger = ToolLedger()
     gates = {str(index): 'blocked' for index in range(11)}
+    active_gate = 0
     flags: dict[str, Any] = {}
     attestation = None
     capability_sha = artifact_sha = request_sha = manifest_sha = batch_uuid = None
@@ -3904,6 +4034,7 @@ async def run_live_canary(
                 )
         attestation = {**attestation, **execution_attestation}
         gates['0'] = 'pass'
+        active_gate = 1
         if result_dir is not None:
             result_dir.mkdir(parents=True, exist_ok=False)
 
@@ -3985,6 +4116,7 @@ async def run_live_canary(
         flags['namespace_fingerprint'] = capabilities.namespace_fingerprint
         machine.advance(LiveStage.START, LiveStage.PREFLIGHT_PASSED)
         gates['1'] = 'pass'
+        active_gate = 2
 
         batch_uuid = await absence(confirm_group_id, confirm_batch_id, page_size=page_size)
         control_uuid = await absence(
@@ -4003,6 +4135,7 @@ async def run_live_canary(
                 raise RunnerError('isolation_failed', 'fresh group is not empty')
         machine.advance(LiveStage.PREFLIGHT_PASSED, LiveStage.ISOLATION_PASSED)
         gates['2'] = 'pass'
+        active_gate = 3
 
         _, payload, manifest, request, artifact_sha, request_sha = validate_live_artifact(
             payload_path, manifest_path
@@ -4015,6 +4148,7 @@ async def run_live_canary(
         )
         machine.advance(LiveStage.ISOLATION_PASSED, LiveStage.ARTIFACT_VALIDATED)
         gates['3'] = 'pass'
+        active_gate = 4
 
         dry_raw = await call('DRY_RUN', 'upsert_catalog_batch', build_live_dry_run_request(payload))
         dry = _validate_live_dry_run_response(
@@ -4031,6 +4165,7 @@ async def run_live_canary(
         flags['dry_run_zero_write_proven'] = True
         machine.advance(LiveStage.ARTIFACT_VALIDATED, LiveStage.DRY_RUN_PASSED)
         gates['4'] = 'pass'
+        active_gate = 5
 
         prepared_raw = await call(
             'PREPARE', 'prepare_catalog_batch', build_prepare_transport_request(payload)
@@ -4050,7 +4185,11 @@ async def run_live_canary(
             raise RunnerError('batch_uuid_mismatch', 'post-prepare batch UUID differs')
         machine.advance(LiveStage.DRY_RUN_PASSED, LiveStage.PREPARE_PASSED)
         gates['5'] = 'pass'
+        active_gate = 6
 
+        commit_body = build_commit_transport_request(
+            plan_token, expected_request_sha256=request_sha
+        )
         if result_dir is not None:
             atomic_write_json(
                 result_dir / 'commit-started.json',
@@ -4066,13 +4205,11 @@ async def run_live_canary(
                     'batch_uuid': batch_uuid,
                 },
             )
-        commit_started = True
-        flags['commit_started'] = True
-        commit_body = build_commit_transport_request(
-            plan_token, expected_request_sha256=request_sha
-        )
         ambiguity: BaseException | None = None
         try:
+            commit_started = True
+            flags['commit_started'] = True
+            active_gate = 6
             commit_raw = await call('COMMIT', 'commit_prepared_catalog_batch', commit_body)
             committed_response = _validate_commit_response(
                 commit_raw,
@@ -4150,9 +4287,11 @@ async def run_live_canary(
         flags['commit_confirmed'] = True
         machine.advance(LiveStage.PREPARE_PASSED, LiveStage.COMMIT_CONFIRMED)
         gates['6'] = 'pass'
+        active_gate = 7
         flags['manifest_verified'] = True
         machine.advance(LiveStage.COMMIT_CONFIRMED, LiveStage.MANIFEST_VERIFIED)
         gates['7'] = 'pass'
+        active_gate = 8
 
         resolved_raw = await call(
             'RESOLVE', 'resolve_typed_entities', build_resolve_entities_request(request)
@@ -4184,6 +4323,7 @@ async def run_live_canary(
             raise RunnerError('evidence_failed', 'evidence total differs')
         flags['evidence_verified'] = True
         gates['8'] = 'pass'
+        active_gate = 9
 
         for item in request.entities:
             raw = await call(
@@ -4255,6 +4395,7 @@ async def run_live_canary(
         flags['control_isolation_verified'] = True
         machine.advance(LiveStage.MANIFEST_VERIFIED, LiveStage.SEARCH_ISOLATION_VERIFIED)
         gates['9'] = 'pass'
+        active_gate = 10
         gates['10'] = 'pass'
         machine.advance(LiveStage.SEARCH_ISOLATION_VERIFIED, LiveStage.REPLAY_VERIFIED_OR_SKIPPED)
         machine.advance(LiveStage.REPLAY_VERIFIED_OR_SKIPPED, LiveStage.FINALIZED)
@@ -4286,9 +4427,11 @@ async def run_live_canary(
             classification = 'BLOCKED'
         else:
             classification = 'FAILED_BEFORE_COMMIT'
-        current_gate = str(min(machine.stage.value, 10))
-        if gates.get(current_gate) != 'pass':
-            gates[current_gate] = 'fail' if classification != 'BLOCKED' else 'blocked'
+        current_gate = str(active_gate)
+        for gate in gates:
+            if gate != current_gate and gates[gate] != 'pass':
+                gates[gate] = 'blocked'
+        gates[current_gate] = 'fail' if classification != 'BLOCKED' else 'blocked'
         error_code = exc.code if isinstance(exc, RunnerError) else 'internal_runner_error'
         # Invalid ledger must reject terminal artifacts; no inconsistent fallback write.
         report = _terminal_report(

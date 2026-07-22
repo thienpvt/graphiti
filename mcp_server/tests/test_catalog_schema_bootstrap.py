@@ -26,6 +26,7 @@ class StoreSpy:
         self.fail = fail
         self.ready = ready
         self.calls: list[str] = []
+        self.inspections = 0
 
     async def _call(self, name: str) -> None:
         self.calls.append(name)
@@ -41,40 +42,52 @@ class StoreSpy:
     async def ensure_evidence_manifest_schema(self, _executor: Any) -> None:
         await self._call('ensure_evidence_manifest_schema')
 
-    async def inspect_catalog_v2_schema_readiness(self, _executor: Any) -> dict[str, bool]:
+    async def inspect_catalog_v2_schema_readiness(
+        self, _executor: Any, *, include_counts: bool = False
+    ) -> dict[str, Any]:
+        assert include_counts is True
         self.calls.append('inspect_catalog_v2_schema_readiness')
-        return {
-            'identity': self.ready,
-            'plan': self.ready,
-            'evidence_manifest': self.ready,
-            'ready': self.ready,
+        self.inspections += 1
+        post = self.ready and self.inspections > 1
+        inspection: dict[str, Any] = {
+            'identity': post,
+            'plan': post,
+            'evidence_manifest': post,
+            'ready': post,
+            'expected': 14,
+            'matched': 14 if post else 0,
+            'missing': [] if post else [f'constraint-{index}' for index in range(14)],
         }
+        return inspection
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_calls_exact_methods_and_one_inspection() -> None:
+async def test_bootstrap_calls_exact_methods_and_two_inspections() -> None:
     store = StoreSpy()
     code, report = await bootstrap.bootstrap(object(), store)
     assert code == 0
     assert store.calls == [
+        'inspect_catalog_v2_schema_readiness',
         'ensure_uuid_uniqueness_constraints',
         'ensure_plan_schema',
         'ensure_evidence_manifest_schema',
         'inspect_catalog_v2_schema_readiness',
     ]
+    assert report['pre_inspection']['matched'] == 0
+    assert report['post_inspection']['matched'] == 14
     assert report['classification'] == 'PASSED_SCHEMA_BOOTSTRAP'
     assert report['graphiti_driver_constructed'] is False
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_fails_fast_without_retry_then_inspects_once() -> None:
+async def test_bootstrap_fails_fast_without_retry_after_exact_preflight() -> None:
     store = StoreSpy(fail='ensure_plan_schema')
     code, report = await bootstrap.bootstrap(object(), store)
     assert code == 1
     assert store.calls == [
+        'inspect_catalog_v2_schema_readiness',
         'ensure_uuid_uniqueness_constraints',
         'ensure_plan_schema',
-        'inspect_catalog_v2_schema_readiness',
     ]
     assert report['classification'] == 'FAILED_SCHEMA_BOOTSTRAP'
     assert report['retry_count'] == 0
@@ -84,12 +97,14 @@ async def test_bootstrap_fails_fast_without_retry_then_inspects_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_first_nonready_inspection_is_terminal() -> None:
-    store = StoreSpy(ready=False)
+async def test_nonempty_preflight_is_terminal() -> None:
+    store = StoreSpy(ready=True)
+    store.inspections = 1
     code, report = await bootstrap.bootstrap(object(), store)
     assert code == 1
-    assert store.calls.count('inspect_catalog_v2_schema_readiness') == 1
-    assert report['post_inspection']['ready'] is False
+    assert store.calls == ['inspect_catalog_v2_schema_readiness']
+    assert report['classification'] == 'FAILED_SCHEMA_PRECONDITION'
+    assert report['post_inspection']['status'] == 'failed'
 
 
 @pytest.mark.asyncio

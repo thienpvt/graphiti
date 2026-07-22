@@ -1,0 +1,3 @@
+config-docker-neo4j.catalog-local.yaml
+.catalog-local-authority
+.catalog-clean-room-bootstrap-receipt*.json
