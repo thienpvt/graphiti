@@ -596,6 +596,14 @@ async def test_full_success_contract_validating_fake(tmp_path: Path) -> None:
     assert names.index('resolve_typed_entities') < names.index('verify_catalog_batch')
     assert result['classification'] == 'PASSED'
     assert result['replay'] == 'skipped'
+    assert result['counts'] == {
+        'entities': 3,
+        'edges': 2,
+        'sources': 1,
+        'evidence_links': 5,
+    }
+    assert set(result['counts']) == {'entities', 'edges', 'sources', 'evidence_links'}
+    assert result['dry_run_zero_write_proven'] is True
     assert result['namespace_fingerprint'] == '0123456789abcdef'
     assert result['execution_map_sha256'] == '4' * 64
     assert result['execution_files'] == 3
@@ -1263,6 +1271,294 @@ def test_execution_boundary_rejects_standalone_and_unapproved() -> None:
         runner.COMPOSE_GENERATED_CONFIG,
     )
     assert runner.attest_host_compose_argv(mcp)['ok'] is True
+
+
+@pytest.mark.asyncio
+async def test_post_id_programmatic_gate0_failure_is_durable(
+    tmp_path: Path,
+) -> None:
+    payload_path, manifest_path, payload, manifest = artifact(tmp_path)
+    fake = ContractFake(payload, manifest['request_sha256'])
+    output = tmp_path / 'post-id-gate0-failure'
+
+    def blocked(**_kwargs: Any) -> dict[str, Any]:
+        raise runner.RunnerError('source_attestation_mismatch', 'blocked')
+
+    with pytest.raises(runner.RunnerError):
+        await runner.run_live_canary(
+            fake,
+            payload_path,
+            manifest_path,
+            confirm_run_id=manifest['run_id'],
+            confirm_group_id=manifest['group_id'],
+            confirm_control_group_id=manifest['control_group_id'],
+            confirm_batch_id=manifest['batch_id'],
+            output_dir=output,
+            source_head='1' * 40,
+            source_map_sha256='2' * 64,
+            runner_sha256='3' * 64,
+            execution_map_sha256='4' * 64,
+            source_attestor=blocked,
+            execution_attestor=execution_attestor,
+        )
+
+    report = json.loads((output / 'final-report.json').read_text(encoding='utf-8'))
+    ledger = json.loads((output / 'tool-ledger.json').read_text(encoding='utf-8'))
+    assert report['classification'] == 'FAILED_BEFORE_COMMIT'
+    assert report['classification'] != 'BLOCKED'
+    assert report.get('counts') is None
+    assert ledger['entries'] == []
+    assert (output / 'terminal-artifacts-manifest.json').is_file()
+    assert fake.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'failure_site',
+    ['manifest', 'source', 'execution'],
+)
+async def test_execute_cli_pretransport_failure_is_durable_zero_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_site: str,
+) -> None:
+    payload_path, manifest_path, _, manifest = artifact(tmp_path)
+    output = tmp_path / f'execute-cli-{failure_site}'
+    entered = False
+
+    def forbidden_transport(_url: str) -> Any:
+        nonlocal entered
+        entered = True
+        raise AssertionError('transport opened')
+
+    monkeypatch.setattr(runner, 'streamable_http_client', forbidden_transport)
+    if failure_site == 'manifest':
+        monkeypatch.setattr(
+            runner,
+            'preflight_live_manifest',
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                runner.RunnerError('live_manifest_mismatch', 'blocked')
+            ),
+        )
+    elif failure_site == 'source':
+        monkeypatch.setattr(
+            runner,
+            'attest_local_source',
+            lambda **_kwargs: (_ for _ in ()).throw(
+                runner.RunnerError('source_attestation_mismatch', 'blocked')
+            ),
+        )
+    else:
+        monkeypatch.setattr(
+            runner,
+            'attest_execution_authority',
+            lambda **_kwargs: (_ for _ in ()).throw(
+                runner.RunnerError('execution_attestation_mismatch', 'blocked')
+            ),
+        )
+
+    args = SimpleNamespace(
+        mode='live-canary',
+        manifest=manifest_path,
+        payload=payload_path,
+        run_id=manifest['run_id'],
+        group_id=manifest['group_id'],
+        control_group_id=manifest['control_group_id'],
+        batch_id=manifest['batch_id'],
+        allow_unknown_embedding_provider=None,
+        source_head='1' * 40,
+        source_map_sha256='2' * 64,
+        runner_sha256='3' * 64,
+        execution_map_sha256='4' * 64,
+        authority_mode='git',
+        image_fingerprint=None,
+        config_fingerprint=None,
+        output_dir=output,
+        mcp_url='http://forbidden.invalid/mcp',
+    )
+    with pytest.raises(runner.RunnerError):
+        await runner.execute_cli(args)
+
+    report = json.loads((output / 'final-report.json').read_text(encoding='utf-8'))
+    ledger = json.loads((output / 'tool-ledger.json').read_text(encoding='utf-8'))
+    assert report['classification'] == 'FAILED_BEFORE_COMMIT'
+    assert report['classification'] != 'BLOCKED'
+    assert report.get('counts') is None
+    assert ledger['entries'] == []
+    assert (output / 'terminal-artifacts-manifest.json').is_file()
+    assert entered is False
+
+
+@pytest.mark.asyncio
+async def test_execute_cli_success_leaves_result_dir_for_live_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from contextlib import asynccontextmanager
+
+    payload_path, manifest_path, _, manifest = artifact(tmp_path)
+    output = tmp_path / 'execute-cli-success'
+    handoff_seen = False
+
+    @asynccontextmanager
+    async def fake_transport(_url: str):
+        assert not output.exists()
+        yield object(), object(), None
+
+    class FakeSession:
+        def __init__(self, *_args: Any):
+            pass
+
+        async def __aenter__(self) -> 'FakeSession':
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+    async def fake_live(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal handoff_seen
+        handoff_seen = True
+        assert kwargs['output_dir'] == output
+        assert not output.exists()
+        return {'classification': 'PASSED'}
+
+    monkeypatch.setattr(runner, 'streamable_http_client', fake_transport)
+    monkeypatch.setattr(runner, 'ClientSession', FakeSession)
+    monkeypatch.setattr(runner, 'attest_local_source', attestor)
+    monkeypatch.setattr(runner, 'attest_execution_authority', execution_attestor)
+    monkeypatch.setattr(runner, 'run_live_canary', fake_live)
+    args = SimpleNamespace(
+        mode='live-canary',
+        manifest=manifest_path,
+        payload=payload_path,
+        run_id=manifest['run_id'],
+        group_id=manifest['group_id'],
+        control_group_id=manifest['control_group_id'],
+        batch_id=manifest['batch_id'],
+        allow_unknown_embedding_provider=None,
+        source_head='1' * 40,
+        source_map_sha256='2' * 64,
+        runner_sha256='3' * 64,
+        execution_map_sha256='4' * 64,
+        authority_mode='git',
+        image_fingerprint=None,
+        config_fingerprint=None,
+        output_dir=output,
+        mcp_url='http://127.0.0.1:8000/mcp',
+    )
+    result = await runner.execute_cli(args)
+    assert result['classification'] == 'PASSED'
+    assert handoff_seen is True
+
+
+def test_embedding_transport_auth_pair_is_exact() -> None:
+    _, _, payload, _ = artifact(Path(__file__).resolve().parent / 'unused')
+    request = runner.UpsertCatalogBatchRequest.model_validate({**payload, 'dry_run': True})
+    server_hash = runner.CatalogService.batch_request_sha256(request)
+    base = {
+        'plan_token': '',
+        'plan_uuid': '',
+        'request_sha256': server_hash,
+        'catalog_sha256': request.catalog_sha256,
+        'artifact_sha256': '',
+        'identity_schema_version': request.identity_schema_version,
+        'expires_at': '',
+        'entity_count': len(request.entities),
+        'edge_count': len(request.edges),
+        'source_count': len(request.provenance.sources if request.provenance else []),
+        'evidence_link_count': len(
+            request.provenance.evidence_links if request.provenance else []
+        ),
+        'projected_created': 0,
+        'projected_updated': 0,
+        'projected_unchanged': 0,
+        'error_code': 'embedding_failed',
+    }
+    with pytest.raises(runner.RunnerError) as auth:
+        runner._validate_prepare_response(
+            {**base, 'error_message': 'embedding_transport_auth'}, request, server_hash
+        )
+    assert auth.value.code == 'embedding_transport_auth'
+    with pytest.raises(runner.RunnerError) as generic:
+        runner._validate_prepare_response(
+            {**base, 'error_message': 'embedding generation failed'}, request, server_hash
+        )
+    assert generic.value.code == 'prepare_failed'
+    with pytest.raises(runner.RunnerError) as search:
+        runner._unwrap_structured_result({'error': 'embedding_transport_auth'}, 'search_nodes')
+    assert search.value.code == 'embedding_transport_auth'
+
+
+@pytest.mark.asyncio
+async def test_same_token_replay_true_fails_before_commit(tmp_path: Path) -> None:
+    payload_path, manifest_path, payload, manifest = artifact(tmp_path)
+
+    class ReplayAdvertised(ContractFake):
+        async def call(self, name: str, request: dict[str, Any]) -> dict[str, Any]:
+            body: dict[str, Any] = dict(await super().call(name, request))
+            if name == 'get_catalog_capabilities':
+                features = body.get('features')
+                assert isinstance(features, dict)
+                body['features'] = {**features, 'same_token_replay': True}
+            return body
+
+    fake = ReplayAdvertised(payload, manifest['request_sha256'])
+    output = tmp_path / 'same-token-replay'
+    with pytest.raises(runner.RunnerError) as error:
+        await runner.run_live_canary(
+            fake,
+            payload_path,
+            manifest_path,
+            confirm_run_id=manifest['run_id'],
+            confirm_group_id=manifest['group_id'],
+            confirm_control_group_id=manifest['control_group_id'],
+            confirm_batch_id=manifest['batch_id'],
+            output_dir=output,
+            **LIVE_KW,
+        )
+    assert error.value.code == 'unsupported_replay_contract'
+    assert fake.commit_calls == 0
+    report = json.loads((output / 'final-report.json').read_text(encoding='utf-8'))
+    assert report['classification'] == 'FAILED_BEFORE_COMMIT'
+
+
+@pytest.mark.asyncio
+async def test_prepare_embedding_transport_auth_never_commits(tmp_path: Path) -> None:
+    payload_path, manifest_path, payload, manifest = artifact(tmp_path)
+
+    class PrepareAuth(ContractFake):
+        async def call(self, name: str, request: dict[str, Any]) -> dict[str, Any]:
+            if name == 'prepare_catalog_batch':
+                self.calls.append((name, request))
+                prepared_raw = await super().call(name, request)
+                return {
+                    **dict(prepared_raw),
+                    'plan_token': '',
+                    'error_code': 'embedding_failed',
+                    'error_message': 'embedding_transport_auth',
+                }
+            return await super().call(name, request)
+
+    fake = PrepareAuth(payload, manifest['request_sha256'])
+    output = tmp_path / 'prepare-auth'
+    with pytest.raises(runner.RunnerError) as error:
+        await runner.run_live_canary(
+            fake,
+            payload_path,
+            manifest_path,
+            confirm_run_id=manifest['run_id'],
+            confirm_group_id=manifest['group_id'],
+            confirm_control_group_id=manifest['control_group_id'],
+            confirm_batch_id=manifest['batch_id'],
+            output_dir=output,
+            **LIVE_KW,
+        )
+    assert error.value.code == 'embedding_transport_auth'
+    assert fake.commit_calls == 0
+    report = json.loads((output / 'final-report.json').read_text(encoding='utf-8'))
+    assert report['classification'] == 'FAILED_BEFORE_COMMIT'
 
 
 @pytest.mark.asyncio

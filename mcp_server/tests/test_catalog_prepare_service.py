@@ -265,6 +265,51 @@ async def test_prepare_happy_path_receipt_and_full_artifact():
     _assert_zero_domain(service)
 
 
+class _StatusError(RuntimeError):
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+        super().__init__('credential-bearing-detail-must-not-leak')
+
+
+@pytest.mark.parametrize(
+    ('exception', 'expected'),
+    [
+        (_StatusError(401), True),
+        (_StatusError(403), True),
+        (_StatusError(500), False),
+        (RuntimeError('401 in text only'), False),
+    ],
+)
+def test_embedding_transport_auth_classifier_uses_type_or_numeric_status_only(
+    exception: BaseException, expected: bool
+):
+    from services.catalog_embedding_errors import is_embedding_transport_auth
+
+    assert is_embedding_transport_auth(exception) is expected
+
+
+@pytest.mark.asyncio
+async def test_prepare_embedding_transport_auth_sentinel_zero_plan_and_domain_writes(
+    caplog: pytest.LogCaptureFixture,
+):
+    secret = 'credential-bearing-detail-must-not-leak'
+    client = _make_client(embed_side_effect=_StatusError(401))
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_prepare(service)
+
+    resp = await service.prepare_catalog_batch(client=client, request=_prepare_request())
+
+    assert resp.error_code == CatalogErrorCode.embedding_failed
+    assert resp.error_message == 'embedding_transport_auth'
+    assert resp.plan_token == ''
+    assert secret not in ' '.join(record.getMessage() for record in caplog.records)
+    cast(AsyncMock, service._store.create_prepared_plan_with_chunks).assert_not_awaited()
+    cast(AsyncMock, service._store.ensure_plan_schema).assert_not_awaited()
+    assert 'transaction' not in client.call_order
+    _assert_zero_domain(service)
+    assert not hasattr(CatalogErrorCode, 'embedding_transport_auth')
+
+
 @pytest.mark.asyncio
 async def test_prepare_embedding_failure_zero_plan_and_domain_writes():
     client = _make_client(embed_side_effect=RuntimeError('embed down'))

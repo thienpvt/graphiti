@@ -10,6 +10,8 @@ Canonical full payload persistence is allowed only as the builder-generated `acc
 
 ## Gate 0: reviewed source + execution authority before transport
 
+After canary IDs exist, any Gate 0 or authority failure is `FAILED_BEFORE_COMMIT`. `HARD_BLOCKED_*` is reserved for top-level pre-ID stops only. No post-ID path may return `BLOCKED` or `HARD_BLOCKED_*`.
+
 Before opening MCP transport, require:
 
 - operator-confirmed source HEAD plus explicit `git` or raw-archive authority mode;
@@ -21,7 +23,7 @@ Before opening MCP transport, require:
 - exact approved fixture path, pinned raw committed-Git-blob SHA-256, and pinned canonical LF text digest;
 - new immutable result directory outside artifact, golden, historical, blocked-run, and evidence roots.
 
-Any mismatch is `BLOCKED` with zero transport calls. CLI and direct programmatic `run_live_canary` both verify execution authority (injectable attestor cannot be omitted). A changed/uncommitted harness requires review plus authorized commit; never bypass Gate 0.
+Any mismatch before identity allocation is `HARD_BLOCKED_*` with zero transport calls. Any mismatch after identity allocation is `FAILED_BEFORE_COMMIT` with zero transport calls. CLI and direct programmatic `run_live_canary` both verify execution authority (injectable attestor cannot be omitted). A changed/uncommitted harness requires review plus authorized commit; never bypass Gate 0.
 
 ## Gates 1-10
 
@@ -34,7 +36,7 @@ Any mismatch is `BLOCKED` with zero transport calls. CLI and direct programmatic
 7. **Ambiguity:** timeout, cancellation, transport error, malformed, or contradictory commit response triggers exactly one read-only reconciliation: one committed-status read, then complete bounded paginated manifest only when status is exactly committed. Never retry prepare/commit or mint replacement identity. Unproven outcome is durable `FAILED_AFTER_COMMIT`.
 8. **Manifest/resolution/verification/evidence:** reconstruct every manifest page with advertised page size capped at 500; recompute manifest SHA. Resolve all entities then all edges. Require exact order, labels/types, UUIDs, endpoints, hashes, embeddings, no duplicate UUID/identity/anomaly/error. Build strict verify shell with identity schema, system, group, batch, and resolved endpoint UUIDs. Retrieve paginated evidence for every entity and edge, including zero-link targets; reconcile source/target/link identity/hash/metadata; excerpts disabled and null.
 9. **Search/control:** search every entity/type and edge/type under only canary group. Gate 9 fact identity is canonical nested `facts[].attributes.edge_key` (dict attributes required). Require exact expected UUID once, exact group/type/key/source/target; unrelated same-group extras allowed; foreign group, duplicate UUID, alias/ambiguous identity, missing/non-dict attributes, and top/nested conflicts fail. Top-level-only `edge_key` does not satisfy the nested contract. Re-run control status, manifest, node search, fact search absence after commit.
-10. **Replay/finalization:** runtime currently does not advertise `same_token_replay`; record `skipped`. If advertised unexpectedly, fail closed. Validate tool ledger before terminal artifacts: each entry exact keys `{ordinal,tool,stage,success,error_code}`; ordinals exact unique contiguous ints `1..N`; success requires `error_code=null`; failure requires non-empty string `error_code`. Report `tool_call_count` and `final_ordinal` must match validated ledger; `tool_count` remains registered MCP count 28. Invalid ledger rejects terminal artifacts (no inconsistent fallback write). Persist order: validated `tool-ledger.json`, then sanitized `final-report.json`, then `terminal-artifacts-manifest.json` last binding exact on-disk SHA-256 of both files plus counts/schema. Failure before the acceptance manifest leaves terminal artifacts unaccepted. Never clean up.
+10. **Replay/finalization:** committed harness replay gate performs no second commit. Runtime absent/false `same_token_replay` records validated `skipped`; unexpected true fails closed before commit. Exactly one primary token-only `commit_prepared_catalog_batch`; no commit retry or second commit. Validate tool ledger before terminal artifacts: each entry exact keys `{ordinal,tool,stage,success,error_code}`; ordinals exact unique contiguous ints `1..N`; success requires `error_code=null`; failure requires non-empty string `error_code`. Report `tool_call_count` and `final_ordinal` must match validated ledger; `tool_count` remains registered MCP count 28. Invalid ledger rejects terminal artifacts (no inconsistent fallback write). Persist order: validated `tool-ledger.json`, then sanitized `final-report.json`, then `terminal-artifacts-manifest.json` last binding exact on-disk SHA-256 of both files plus counts/schema. Failure before the acceptance manifest leaves terminal artifacts unaccepted. Never clean up.
 
 ## Schema bootstrap (separate operator-only maintenance, never during canary)
 
@@ -48,9 +50,12 @@ Strict catalog tools use exactly one FastMCP `{"request": body}` shell. Search/s
 
 ## Terminal classifications
 
+After identity allocation, the complete allowlist is:
+
 - `PASSED`: all gates and durable committed state proven.
-- `BLOCKED`: prerequisite/authorization/source/capability/isolation/artifact failure before dry-run transport.
-- `FAILED_BEFORE_COMMIT`: dry-run or prepare path failed before commit transport began.
+- `FAILED_BEFORE_COMMIT`: any failure before commit transport began, including Gate 0, capability, isolation, artifact, dry-run, or prepare.
 - `FAILED_AFTER_COMMIT`: commit transport began; durable exact outcome not fully proven.
+
+`BLOCKED` is never a post-ID class. Top-level pre-ID stops use `HARD_BLOCKED_*` only.
 
 Reports use `schema_version="phase6-canary-report-v1"`, Gates 0-10, sanitized identities/hashes/counts/flags, replay state, error code/type only. Never report secrets, payloads, responses, transport URL, or exception text.

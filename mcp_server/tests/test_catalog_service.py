@@ -432,6 +432,24 @@ async def test_entity_service_enforces_configured_limit_below_hard_max():
 
 
 @pytest.mark.asyncio
+async def test_entity_embedding_transport_auth_uses_sanitized_sentinel():
+    class AuthFailure(RuntimeError):
+        status_code = 403
+
+    client = _make_client()
+    client.embedder.create = AsyncMock(side_effect=AuthFailure('secret-provider-response'))
+    service = CatalogService(catalog_config=_enabled_config())
+    service._store.get_entity_by_uuid = AsyncMock(return_value=None)
+
+    resp = await service.upsert_typed_entities(client=client, request=_request())
+
+    assert resp.results[0].error_code == CatalogErrorCode.embedding_failed
+    assert resp.results[0].error_message == 'embedding_transport_auth'
+    assert resp.results[0].details == {'reason': 'AuthFailure'}
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
 async def test_entity_embed_before_transaction_order():
     client = _make_client()
     service = CatalogService(catalog_config=_enabled_config())
@@ -1976,6 +1994,25 @@ async def test_edge_service_enforces_configured_limit_below_hard_max():
     resp = await service.upsert_typed_edges(client=client, request=request)
     assert all(r.error_code == CatalogErrorCode.batch_limit_exceeded for r in resp.results)
     assert 'embed' not in client.call_order
+    assert 'transaction' not in client.call_order
+
+
+@pytest.mark.asyncio
+async def test_edge_embedding_transport_auth_uses_sanitized_sentinel():
+    class AuthFailure(RuntimeError):
+        status = 401
+
+    client = _make_client()
+    client.embedder.create = AsyncMock(side_effect=AuthFailure('secret-provider-response'))
+    service = CatalogService(catalog_config=_enabled_config())
+    _wire_ok_endpoints(service)
+    service._store.get_edge_by_uuid = AsyncMock(return_value=None)
+
+    resp = await service.upsert_typed_edges(client=client, request=_edge_request())
+
+    assert resp.results[0].error_code == CatalogErrorCode.embedding_failed
+    assert resp.results[0].error_message == 'embedding_transport_auth'
+    assert resp.results[0].details == {'reason': 'AuthFailure'}
     assert 'transaction' not in client.call_order
 
 
@@ -4919,6 +4956,34 @@ def _v2_request_payload(tool_name: str, **overrides):
         raise AssertionError(f'unknown tool {tool_name}')
     payload.update(overrides)
     return payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('search_name', ['search_nodes', 'search_memory_facts'])
+async def test_search_embedding_transport_auth_is_sanitized(
+    search_name: str,
+    caplog: pytest.LogCaptureFixture,
+):
+    class AuthFailure(RuntimeError):
+        status_code = 401
+
+    secret = 'search-auth-secret-must-not-leak'
+    server = _mcp_server()
+    client = MagicMock()
+    client.search_ = AsyncMock(side_effect=AuthFailure(secret))
+    client.search = AsyncMock(side_effect=AuthFailure(secret))
+    graphiti_svc = SimpleNamespace(get_client=AsyncMock(return_value=client))
+
+    with (
+        patch.object(server, 'graphiti_service', graphiti_svc),
+        caplog.at_level(logging.ERROR),
+    ):
+        result = await getattr(server, search_name)(query='test', group_ids=[GROUP])
+
+    assert result.error == 'embedding_transport_auth'
+    joined = ' '.join(record.getMessage() for record in caplog.records)
+    assert secret not in joined
+    assert 'AuthFailure' in joined
 
 
 def _side_effect_spies(server):
