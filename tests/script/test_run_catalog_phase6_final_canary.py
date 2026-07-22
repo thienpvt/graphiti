@@ -48,7 +48,9 @@ def _freeze(tmp_path: Path, **overrides: Any) -> Path:
 
 
 def _invocation(tmp_path: Path, **overrides: Any) -> Path:
-    phase_dir = ROOT / '.planning' / 'phases' / '06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure'
+    phase_dir = (
+        ROOT / '.planning' / 'phases' / '06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure'
+    )
     raw = {
         'schema_version': 1,
         'after_human_approval': True,
@@ -172,6 +174,7 @@ def test_final_canary_calls_builder_and_runner_once_shell_false(
         }
 
     monkeypatch.setattr(launcher, '_gate0_digests', gate0_digests)
+
     def fake_claim_allocation(job_tmp: Path, frozen_head: str) -> tuple[Path, str]:
         assert frozen_head == '1' * 40
         return job_tmp / launcher.ALLOCATION_CLAIM, '20260722t120000z-a'
@@ -188,6 +191,7 @@ def test_final_canary_calls_builder_and_runner_once_shell_false(
         + '\n',
         encoding='utf-8',
     )
+
     def fake_phase_directory(expanded: list[str]) -> Path:
         assert '--phase-dir' in expanded
         return phase_dir
@@ -324,6 +328,7 @@ def test_final_canary_maps_builder_failure_after_allocation(
     monkeypatch.setattr(
         launcher, '_git_value', lambda argv: '1' * 40 if 'rev-parse' in argv else '42'
     )
+
     def fake_claim(job_tmp: Path, frozen_head: str) -> tuple[Path, str]:
         assert frozen_head == '1' * 40
         return job_tmp / launcher.ALLOCATION_CLAIM, '20260722t120000z-failed'
@@ -339,6 +344,7 @@ def test_final_canary_maps_builder_failure_after_allocation(
         + '\n',
         encoding='utf-8',
     )
+
     def fake_phase_dir(expanded: list[str]) -> Path:
         assert '--phase-dir' in expanded
         return phase_dir
@@ -355,6 +361,7 @@ def test_final_canary_maps_builder_failure_after_allocation(
             path.write_text(json.dumps(value), encoding='utf-8')
 
     monkeypatch.setattr(launcher, '_runner_module', PhaseWriter)
+
     def fake_failed_run(argv: list[str], environment: dict[str, str]) -> SimpleNamespace:
         assert argv
         assert 'CLAUDE_JOB_DIR' in environment
@@ -418,9 +425,7 @@ def test_final_canary_terminal_schema_versions_fail_closed(tmp_path: Path) -> No
     }
     ledger_path = result_dir / 'tool-ledger.json'
     report_path = result_dir / 'final-report.json'
-    ledger_path.write_text(
-        json.dumps({'schema_version': 1, 'entries': entries}), encoding='utf-8'
-    )
+    ledger_path.write_text(json.dumps({'schema_version': 1, 'entries': entries}), encoding='utf-8')
     report_path.write_text(json.dumps(report), encoding='utf-8')
     (result_dir / 'terminal-artifacts-manifest.json').write_text(
         json.dumps(
