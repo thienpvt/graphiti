@@ -309,7 +309,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 2/5 | In progress; archive + terminal/auth/replay launcher TDD green; no image/runtime/IDs/canary | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 3/5 | In progress; exact candidate archive bound; frozen matrix green; image/runtime/IDs/canary still absent | — |
 
 ## Coverage
 
@@ -359,7 +359,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
 - Historical Docker resources and prior canary data/evidence remain unchanged
 
-**Plans**: 2/5 plans executed
+**Plans**: 3/5 plans executed
 
 Plans:
 **Wave 1**
@@ -372,7 +372,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 06-03-PLAN.md — Source-complete PREBIND matrix, freeze HEAD candidate, exact archive bind, frozen matrix
+- [x] 06-03-PLAN.md — Source-complete PREBIND matrix, freeze HEAD candidate, exact archive bind, frozen matrix
 
 **Wave 4** *(blocked on Wave 3)*
 

@@ -188,7 +188,7 @@ Phase 6 is authorized by fetched fork commit `e52c1b5` under `ITERATIVE_TDD_IMPL
 - [x] **P6-AUTH-01**: Execution follows the fetched Phase 6 authorization and acceptance contract without widening it to deployment, production migration, historical groups, or a second canary.
 - [x] **P6-BASE-01**: Source authority starts from commit `35227e0a2c697e643871b5c2052556988c404df6`, tree `fed171af3c49dc96701da26b53fd391511a00735`, and source-context SHA-256 `dcf73073443be37b777fc7feef124133be3d9ee305696e84042d5631125ed92f`.
 - [ ] **P6-BASE-02**: The previously approved image and image ID remain historical evidence only and are never retagged as the final source-bound image.
-- [ ] **P6-BASE-03**: The original forced-project, Neo4j-staging, and hardcoded-image blockers are verified closed by current committed source before runtime activation.
+- [x] **P6-BASE-03**: The original forced-project, Neo4j-staging, and hardcoded-image blockers are verified closed by current committed source before runtime activation.
 
 ### Preservation and Provider Policy
 
@@ -226,13 +226,13 @@ Phase 6 is authorized by fetched fork commit `e52c1b5` under `ITERATIVE_TDD_IMPL
 - [x] **P6-TDD-01**: Missing behavior begins with intentional RED acceptance tests mapped to requirements, not fixture/import/infrastructure failures.
 - [x] **P6-TDD-02**: Production changes are the minimum required for GREEN behavior.
 - [x] **P6-TDD-03**: Every defect follows focused RED/GREEN, adjacent regression, and refactor-with-green iteration without weakening, skipping, deselecting, or broadly mocking tests.
-- [ ] **P6-TDD-04**: The complete frozen verification matrix passes with no unexplained failures, skips, deselections, warnings, or stale evidence before source binding.
-- [ ] **P6-BIND-01**: Only task-owned source/tests/docs are staged into local candidate commits.
+- [x] **P6-TDD-04**: The complete frozen verification matrix passes with no unexplained failures, skips, deselections, warnings, or stale evidence before source binding.
+- [x] **P6-BIND-01**: Only task-owned source/tests/docs are staged into local candidate commits.
 - [x] **P6-BIND-02**: A raw-Git LF-exact archive is materialized without checkout, export, or EOL transformation.
 - [x] **P6-BIND-03**: Archive membership, paths, modes, symlinks, duplicates, collisions, and every blob hash exactly match the candidate Git tree.
 - [x] **P6-BIND-04**: The canonical source-context SHA-256 is computed from exact Git authority and matches the archive authority.
-- [ ] **P6-BIND-05**: The complete frozen matrix passes from the exact candidate archive.
-- [ ] **P6-BIND-06**: A failed candidate is preserved as evidence and corrected only through a new fix-forward commit; no amend or evidence rewrite.
+- [x] **P6-BIND-05**: The complete frozen matrix passes from the exact candidate archive.
+- [x] **P6-BIND-06**: A failed candidate is preserved as evidence and corrected only through a new fix-forward commit; no amend or evidence rewrite.
 
 ### Source-Bound Image
 
@@ -310,7 +310,7 @@ Deferred until the deterministic substrate is implemented and verified.
 | P6-AUTH-01 | Phase 6 | Complete |
 | P6-BASE-01 | Phase 6 | Complete |
 | P6-BASE-02 | Phase 6 | Pending |
-| P6-BASE-03 | Phase 6 | Pending |
+| P6-BASE-03 | Phase 6 | Complete |
 | P6-PRES-01 | Phase 6 | Complete |
 | P6-PRES-02 | Phase 6 | Complete |
 | P6-PRES-03 | Phase 6 | Pending |
@@ -339,13 +339,13 @@ Deferred until the deterministic substrate is implemented and verified.
 | P6-TDD-01 | Phase 6 | Complete |
 | P6-TDD-02 | Phase 6 | Complete |
 | P6-TDD-03 | Phase 6 | Complete |
-| P6-TDD-04 | Phase 6 | Pending |
-| P6-BIND-01 | Phase 6 | Pending |
+| P6-TDD-04 | Phase 6 | Complete |
+| P6-BIND-01 | Phase 6 | Complete |
 | P6-BIND-02 | Phase 6 | Complete |
 | P6-BIND-03 | Phase 6 | Complete |
 | P6-BIND-04 | Phase 6 | Complete |
-| P6-BIND-05 | Phase 6 | Pending |
-| P6-BIND-06 | Phase 6 | Pending |
+| P6-BIND-05 | Phase 6 | Complete |
+| P6-BIND-06 | Phase 6 | Complete |
 | P6-IMG-01 | Phase 6 | Pending |
 | P6-IMG-02 | Phase 6 | Pending |
 | P6-IMG-03 | Phase 6 | Pending |
