@@ -512,8 +512,8 @@ Deferred until the deterministic substrate is implemented and verified.
 
 **Coverage:**
 
-- v1.1 requirements: 138 total
-- Mapped: 138/138
+- v1.1 requirements: 202 total
+- Mapped: 202/202
 - Orphans: 0
 - Duplicates: 0
 
@@ -526,8 +526,9 @@ Deferred until the deterministic substrate is implemented and verified.
 | Phase 3B | 17 |
 | Phase 4 | 21 |
 | Phase 5 | 17 |
-| **Total** | **138** |
+| Phase 6 | 64 |
+| **Total** | **202** |
 
 ---
 *Requirements defined: 2026-07-17*
-*Last updated: 2026-07-19 Phase 5 complete — all 17 Phase 5 requirements verified; v1.1 pre-canary milestone complete*
+*Last updated: 2026-07-22 Phase 6 requirements ingested from fork commit `e52c1b5`; execution pending*

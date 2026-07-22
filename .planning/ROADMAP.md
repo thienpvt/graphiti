@@ -321,10 +321,11 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B | 17 | PLAN domain-tx (13–16), EVID persist (07–11), MANI write, TEST-06/07 |
 | Phase 4 | 21 | IDEN-08, MANI-05, VERI, RESE, GATE, EVID-12/13, TEST-08/09 |
 | Phase 5 | 17 | IDEN-13, SAFE (security/compat), TEST-10/11/12, DOCS, REPT |
-| **v1.1 total** | **138** | All v1.1 |
+| Phase 6 | 64 | AUTH, BASE, PRES, PROV, HARN, TDD, BIND, IMG, RT, CAN, SAFE, TERM, REPT, CONT |
+| **v1.1 total** | **202** | All v1.1 |
 
-- v1.1 requirements: 138
-- Mapped: 138/138
+- v1.1 requirements: 202
+- Mapped: 202/202
 - Orphans: 0
 - Duplicates: 0
 
