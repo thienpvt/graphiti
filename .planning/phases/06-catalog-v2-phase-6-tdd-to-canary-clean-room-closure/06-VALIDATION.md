@@ -42,8 +42,8 @@ plans: 5
 
 | Task ID | Plan | Wave | Requirements | Secure Behavior | Test Type | Automated Command / Proof | File Exists | Status |
 |---------|------|------|--------------|-----------------|-----------|---------------------------|-------------|--------|
-| 06-01-01 | 01 | 1 | P6-TDD-01..03, P6-BIND-02..04, P6-AUTH-01 | RED archive suite; no git-archive authority; no deploy/K8s/second-canary/historical groups | unit | `uv run --project mcp_server --frozen pytest mcp_server/tests/test_catalog_raw_git_archive.py -q` (expect RED first) | planned | planned/RED |
-| 06-01-02 | 01 | 1 | P6-BASE-01, P6-BIND-02..04, P6-PRES-01/02, P6-CONT-01, P6-AUTH-01 | GREEN plumbing materializer; baseline dcf730…; dirty config unstaged; P6-AUTH-01 criteria recorded | unit | same archive suite GREEN + baseline golden | planned | planned |
+| 06-01-01 | 01 | 1 | P6-TDD-01..03, P6-BIND-02..04, P6-AUTH-01 | RED archive suite; no git-archive authority; no deploy/K8s/second-canary/historical groups | unit | `uv run --project mcp_server --frozen pytest mcp_server/tests/test_catalog_raw_git_archive.py -q` (8 collected failures; pytest exit exactly 1) | present | GREEN |
+| 06-01-02 | 01 | 1 | P6-BASE-01, P6-BIND-02..04, P6-PRES-01/02, P6-CONT-01, P6-AUTH-01 | GREEN plumbing materializer; baseline dcf730…; dirty config unstaged; P6-AUTH-01 criteria recorded | unit | same archive suite: 8 passed; baseline golden exact | present | GREEN |
 | 06-02-01 | 02 | 2 | P6-TERM-01..04, P6-REPT-01, P6-CAN-03..06, P6-PROV-02/03, P6-HARN-19, P6-CAN-01..06 | RED: execute_cli pretransport + run_live_canary post-ID never BLOCKED; durable trio; zero streamable_http_client on Gate0 fail; success no result_directory_used; auth sentinel; one-commit replay; sanitized counts 3/2/1/5 + dry_run_zero_write_proven; final-canary importable stub + env/boundary/token fail tests; AUTH-01 kubernetes_applied=false (missing/true fail closed) | unit | `uv run pytest tests/script/run_catalog_canary_batch.py tests/script/test_run_catalog_phase6_final_canary.py mcp_server/tests/test_catalog_prepare_service.py -q -k 'post_id or execute_cli or pretransport or embedding_transport or same_token or replay or counts or dry_run or final_canary or CLAUDE_JOB or argv_expand or leftover or boundary or kubernetes_applied or AUTH_01'` (collects; pytest exit exactly 1; reject 0/2+) | planned | planned/RED |
 | 06-02-02 | 02 | 2 | same + P6-PRES-01/02, P6-CONT-01, P6-CAN-01..06 | GREEN early-terminal helper; classifier; prepare/search sentinel; prompt Gate 0/10/Terminal; counts from validated manifest only; final-canary launcher job-tmp env expansion + unit tests GREEN (pre-BIND) | unit | full `tests/script/run_catalog_canary_batch.py` + `tests/script/test_run_catalog_phase6_final_canary.py` + prepare/service/security/review/capabilities GREEN | planned | planned |
 | 06-03-01 | 03 | 3 | P6-BASE-01/03, P6-HARN-01..19, P6-TDD-04, P6-PRES-01/02, P6-CONT-01 | Source-complete PREBIND matrix incl. final-canary launcher suite; HARN-01..19 harn_checklist offline/live/deferred; job-tmp workspaces; no unsupported skip | offline matrix | H7-equivalent + archive + plan-02 suite incl. `test_run_catalog_phase6_final_canary.py`; write `06-PREBIND-MATRIX-RECEIPT.json` with `harn_checklist` | planned | planned |
@@ -61,7 +61,7 @@ plans: 5
 
 ## Wave 0 / plan-01–02 RED scaffolding
 
-- [ ] Archive materializer tests (plan 01 Task 1 RED → Task 2 GREEN)
+- [x] Archive materializer tests (plan 01 Task 1 RED → Task 2 GREEN; 8 passed)
 - [ ] execute_cli pretransport durable FAILED_BEFORE_COMMIT + zero streamable_http_client (plan 02)
 - [ ] run_live_canary post-ID never BLOCKED; create-on-failure result_dir ownership
 - [ ] Auth sentinel path without CatalogErrorCode expansion

@@ -309,7 +309,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 0/5 | Planning verified; execution not started | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 1/5 | In progress; raw-Git archive TDD green; no image/runtime/IDs/canary | — |
 
 ## Coverage
 
@@ -359,12 +359,12 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
 - Historical Docker resources and prior canary data/evidence remain unchanged
 
-**Plans**: 5 plans
+**Plans**: 1/5 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — TDD raw-Git exact archive materializer + baseline context golden (resume H8)
+- [x] 06-01-PLAN.md — TDD raw-Git exact archive materializer + baseline context golden (resume H8)
 
 **Wave 2** *(blocked on Wave 1)*
 
