@@ -382,7 +382,7 @@ driver = FalkorDriver(
     host="localhost",
     port=6379,
     username="falkor_user",  # Optional
-    password="falkor_password",  # Optional
+    password="password",  # Optional
     database="my_custom_graph"  # Custom database name
 )
 
@@ -565,7 +565,8 @@ from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerCli
 
 # Configure Ollama LLM client
 llm_config = LLMConfig(
-    api_key="ollama",  # Ollama doesn't require a real API key, but some placeholder is needed
+    # Ollama needs a placeholder, not a real API key.
+    api_key="your_openai_api_key_here",
     model="deepseek-r1:7b",
     small_model="deepseek-r1:7b",
     base_url="http://localhost:11434/v1",  # Ollama's OpenAI-compatible endpoint

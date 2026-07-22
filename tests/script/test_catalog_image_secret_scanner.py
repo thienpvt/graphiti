@@ -504,3 +504,78 @@ class Client:
     result = scanner.scan_tree(root)
     assert result.hit_count == 0
     _result_public_fields(result)
+
+
+def test_posthog_api_key_literal_hits_env_style_non_hit() -> None:
+    """Opaque POSTHOG_API_KEY string Constant hits; env/Call RHS does not."""
+    synthetic = 'POSTHOG_API_KEY = "phc_SYNTH_OPAQUE_TEST_KEY_NOT_REAL_01"\n'
+    hit = scanner.scan_text(synthetic, label='posthog-literal', path_hint='telemetry.py')
+    assert hit.hit_count >= 1
+    assert 'credential_literal' in hit.path_classes
+    _result_public_fields(hit)
+
+    env_style = (
+        'import os\n'
+        'POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY")\n'
+        'POSTHOG_HOST = "https://us.i.posthog.com"\n'
+    )
+    clean = scanner.scan_text(env_style, label='posthog-env', path_hint='telemetry.py')
+    assert clean.hit_count == 0
+    _result_public_fields(clean)
+
+
+def test_readme_password_placeholder_vs_opaque() -> None:
+    """README-like password literals: opaque hits; allowlist placeholders do not."""
+    opaque = 'password="falkor_password"\n'
+    hit = scanner.scan_text(opaque, label='readme-opaque', path_hint='README.md')
+    assert hit.hit_count >= 1
+    assert 'credential_literal' in hit.path_classes
+    _result_public_fields(hit)
+
+    for placeholder in ('password', 'your_password', 'demodemo'):
+        text = f'password="{placeholder}"\n'
+        clean = scanner.scan_text(text, label=f'readme-{placeholder}', path_hint='README.md')
+        assert clean.hit_count == 0
+
+
+def test_repo_telemetry_and_readme_zero_hit() -> None:
+    """Remediated Docker-consumed telemetry + README scan_path hit_count==0."""
+    telemetry = ROOT / 'graphiti_core' / 'telemetry' / 'telemetry.py'
+    readme = ROOT / 'README.md'
+    assert telemetry.is_file() and readme.is_file()
+
+    tel = scanner.scan_path(telemetry)
+    assert tel.hit_count == 0
+    assert not (tel.path_classes & {'credential_literal', 'token_shape', 'namespace_uuid'})
+    _result_public_fields(tel)
+
+    rm = scanner.scan_path(readme)
+    assert rm.hit_count == 0
+    assert not (rm.path_classes & {'credential_literal', 'token_shape', 'namespace_uuid'})
+    _result_public_fields(rm)
+
+
+def test_docker_projection_subset_zero_hit(tmp_path: Path) -> None:
+    """Synthetic Dockerfile.standalone projection subset scans hits==0."""
+    root = tmp_path / 'projection'
+    tel_dir = root / 'graphiti_core' / 'telemetry'
+    tel_dir.mkdir(parents=True)
+    (tel_dir / 'telemetry.py').write_text(
+        'import os\n'
+        'POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY")\n'
+        'POSTHOG_HOST = "https://us.i.posthog.com"\n'
+        'def initialize_posthog():\n'
+        '    key = os.environ.get("POSTHOG_API_KEY")\n'
+        '    if not key:\n'
+        '        return None\n'
+        '    return key\n',
+        encoding='utf-8',
+    )
+    (root / 'README.md').write_text(
+        'driver = FalkorDriver(\n    host="localhost",\n    password="password",\n)\n',
+        encoding='utf-8',
+    )
+    (root / 'graphiti_core' / '__init__.py').write_text('', encoding='utf-8')
+    result = scanner.scan_tree(root)
+    assert result.hit_count == 0
+    _result_public_fields(result)

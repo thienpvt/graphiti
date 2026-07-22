@@ -12,10 +12,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-# PostHog configuration
-# Note: This is a public API key intended for client-side use and safe to commit
-# PostHog public keys are designed to be exposed in client applications
-POSTHOG_API_KEY = 'phc_UG6EcfDbuXz92neb3rMlQFDY0csxgMqRcIPWESqnSmo'
 POSTHOG_HOST = 'https://us.i.posthog.com'
 
 # Environment variable to control telemetry
@@ -73,12 +69,22 @@ def get_graphiti_version() -> str:
         return 'unknown'
 
 
+def _resolve_posthog_api_key() -> str | None:
+    """Resolve PostHog API key from environment; empty/missing disables telemetry."""
+    key = os.environ.get('POSTHOG_API_KEY', '').strip()
+    return key or None
+
+
 def initialize_posthog():
-    """Initialize PostHog client."""
+    """Initialize PostHog client when an API key is configured."""
     try:
         import posthog
 
-        posthog.api_key = POSTHOG_API_KEY
+        api_key = _resolve_posthog_api_key()
+        if not api_key:
+            return None
+
+        posthog.api_key = api_key
         posthog.host = POSTHOG_HOST
         return posthog
     except ImportError:
