@@ -4,7 +4,7 @@ milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 status: executing
 stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-07-22T19:20:00Z"
+last_updated: "2026-07-22T23:55:00Z"
 progress:
   total_phases: 8
   completed_phases: 7
@@ -14,7 +14,7 @@ progress:
 current_phase: 06
 current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
 last_activity: 2026-07-22
-last_activity_desc: Phase 6 Plan 06-03 complete; candidate d54abe9 exact archive and frozen matrix green; 3/5 executed; next Plan 06-04
+last_activity_desc: Quick task u86 remediated image projection; candidate 5efa69f exact-bound and zero-hit; Plan 06-04 image build still requires authorization
 ---
 
 # Project State
@@ -37,10 +37,11 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 - Plans on disk: **5** sequential waves (`06-01`…`06-05`) — **3/5 executed**
 - Plan 06-01: raw-Git exact archive RED/GREEN complete; baseline `dcf730…` golden exact
 - Plan 06-02: post-ID terminal/auth/replay/final-launcher RED/GREEN complete; 57 harness + 309 catalog tests passed
-- Plan 06-03: candidate `d54abe9` bound to 756 exact blobs; context `46a870f81158…`; frozen matrix green
-- Next: Plan 06-04 build/inspect one filtered archive-derived source-bound image; no runtime
-- `canary_ids_allocated=false`; no source-bound image yet; no clean-room runtime; `canary_executed=false`; no canary approval
-- Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains unstaged
+- Plan 06-03 was superseded by scanner/remediation fix-forward candidate `5efa69f`
+- Candidate `5efa69f` bound to 763 exact blobs; context `623845ad65ce…`; frozen matrix and 204-file projection preflight zero-hit
+- Next: Plan 06-04 build/inspect one filtered archive-derived source-bound image only after separate authorization; no runtime
+- `image_build_count=0`; `canary_ids_allocated=false`; no source-bound remediated image; no clean-room runtime; `canary_executed=false`; no canary approval
+- Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains unstaged and excluded from projection
 
 ### Phase 5 (preserved historical facts)
 
@@ -74,7 +75,7 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
-| Phase 6 | 3/5 | In progress; exact candidate bind/frozen matrix complete; next 06-04 |
+| Phase 6 | 3/5 | In progress; remediated candidate exact-bound and projection zero-hit; next 06-04 after image-build authorization |
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
@@ -89,8 +90,8 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 - Active v1.1 spine Phase 0 / 1 / 2 / 3A / 3B / 4 / 5 is complete.
 - Phase 6 authorized by `e52c1b5`; 64 P6-* requirements ingested; five-wave plans written (06-01 archive TDD → 06-02 classification/auth/replay TDD → 06-03 bind/matrix → 06-04 image → 06-05 R0–R3/freeze/handoff).
-- Phase 6 Plans 06-01/02/03 complete (3/5); candidate `d54abe9` exact archive and frozen matrix green; next Plan 06-04; no image/runtime/IDs/canary.
-- [Phase 06]: Image authority is fixed to BIND commit `d54abe9d3d224367cb3a4eb989683a2860a9add2`, tree `4f87cf0c5ece8351ea83307c5078044e613139b3`, context `46a870f81158e1862cfcfb7662b4776c40733a344881ccf6192b643fe61222e8`.
+- Phase 6 Plans 06-01/02/03 complete (3/5); scanner and source-remediation fix-forward complete; candidate `5efa69f` exact archive, frozen matrix, and projection preflight green; next Plan 06-04; no new image/runtime/IDs/canary.
+- [Phase 06]: Current image authority is fixed to BIND commit `5efa69f4ae6a9ec78efbf29193a57c0679a5019e`, tree `d781773fac20a52a82c767117c6d39971b8f613e`, context `623845ad65ce738c96964ae3e292fa700d15a063d8864d58e11691f5a811aa85`. Invalidated candidates `d54abe9` and `6faa068` remain preserved.
 - No automatic catalog-v1 migration, deployment, push, merge, tag, graph clear, or existing-data deletion.
 - Development/live tests use only `oracle-catalog-tool-test`.
 - Never query or mutate `oracle-catalog-v2`.
@@ -105,9 +106,9 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 ### Pending Todos
 
-1. Execute Plan 06-04: one filtered archive-derived image bound to candidate `d54abe9`; inspect labels/layers; no runtime/canary.
+1. Obtain separate authorization before Plan 06-04 builds one filtered archive-derived image bound to candidate `5efa69f`; inspect labels/layers; no runtime/canary.
 2. Do not allocate canary IDs or start runtime until Plans 06-04 then 06-05 execute in order.
-3. Require explicit confirmation before any cleanup/deletion.
+3. Require explicit confirmation before canary identity allocation or any cleanup/deletion.
 
 ### Blockers/Concerns
 
@@ -121,6 +122,7 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260722-u86 | Remediate image credential literals; exact-bind and zero-hit projection | 2026-07-22 | 1419c33 | `.planning/quick/260722-u86-remediate-deterministic-image-scanner-cr/` |
 | 260719-tur | Halt local Compose activation after safety violation; canary not run | 2026-07-19 | uncommitted | `.planning/quick/260719-tur-activate-local-compose-catalog-runtime-a/` |
 | 260719-udj | Implement truthful mutation-free Catalog-v2 runtime readiness | 2026-07-19 | uncommitted | `.planning/quick/260719-udj-implement-truthful-mutation-free-catalog/` |
 | 260718-ca6 | Document Phase 1 residual WR-R01/WR-R02 as accepted residuals | 2026-07-18 | e31bb04 | `.planning/quick/260718-ca6-document-phase-1-residual-findings/` |
@@ -139,8 +141,8 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 ## Session Continuity
 
-**Last session:** 2026-07-22T19:20:00Z
+**Last session:** 2026-07-22T23:55:00Z
 **Resume file:** .planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-04-PLAN.md
 
-Stopped at: Completed 06-03-PLAN.md
-Next: execute Plan 06-04 image build/inspection only; still no runtime/IDs/canary.
+Stopped at: Quick task 260722-u86 complete; candidate `5efa69f` exact-bound and projection zero-hit.
+Next: request separate authorization for Plan 06-04 image build/inspection only; still no runtime/IDs/canary.
