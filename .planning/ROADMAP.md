@@ -309,7 +309,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 4/5 + 4/6 gap | 06-05 incomplete (never resume); Ollama 06-06..06-09 done; 06-10..06-11 pending | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 4/5 + 4/6 gap | Terminal pre-canary stop: Ollama R3 failed after invalid replacement; zero IDs/writes; stacks preserved | 2026-07-23 |
 
 ## Coverage
 
@@ -380,7 +380,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4)*
 
-- [ ] 06-05-PLAN.md — R0–R3 staging complete; prefreeze package committed; **PENDING_TOP_LEVEL_HANDOFF** (no SUMMARY; freeze receipt + canary are top-level only; do not check complete; never resume for Ollama gap work)
+- [!] 06-05-PLAN.md — Historical OpenAI-path R0–R3/prefreeze; final canary failed before commit; immutable, never resume.
 
 **Ollama gap waves** *(internal DAG waves 1–6 on plans 06-06..06-11; gaps-only / wave-filter / direct plan; never resume 06-05)*
 
@@ -400,13 +400,13 @@ Plans:
 
 - [x] 06-09-PLAN.md — Candidate commit, raw-Git bind, new source-bound Ollama image (P6-OLL-BIND-01, P6-OLL-IMG-01; D-04, D-06..08, D-15)
 
-**Gap Wave 5** *(06-10 wave:5; blocked on 06-09)*
+**Gap Wave 5** *(06-10 wave:5; terminal stop)*
 
-- [ ] 06-10-PLAN.md — New clean-room R0–R3 Ollama ready + prefreeze package (P6-OLL-RT-01; D-09..15)
+- [!] 06-10-PLAN.md — R0–R2 green; R3 failed after the canonical MCP activation was replaced/reconfigured. GREEN claim rejected; no prefreeze authority.
 
-**Gap Wave 6** *(06-11 wave:6; blocked on 06-10)*
+**Gap Wave 6** *(06-11 not entered)*
 
-- [ ] 06-11-PLAN.md — Prefreeze commit + checkpoint:human-action blocking-human STOP; top-level uncommitted FREEZE + one canary (P6-OLL-CAN-01, P6-OLL-REPT-01, P6-OLL-SAFE-01; D-16..24); SUMMARY suppressed
+- [!] 06-11-PLAN.md — Not entered. No freeze receipt, canary IDs, canary run, prepare, commit, or catalog writes.
 
 ---
 *Roadmap created: 2026-07-17 for milestone v1.1*

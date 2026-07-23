@@ -1,0 +1,34 @@
+{
+  "schema_version": "phase6-ollama-r1-receipt-v2",
+  "recorded_date": "2026-07-23",
+  "stage": "R1",
+  "passed": true,
+  "result": "GREEN",
+  "classification": "R1_NEO4J_AUTHORITY_GREEN",
+  "project": "graphiti-phase6-cleanroom-d19a171e",
+  "image_id": "sha256:431a24619ac45087d7859aad75d31afc0b79e436489e9a31bbe71fd3c4ef1d69",
+  "namespace_fingerprint": "c52cc1686977454f",
+  "config_fingerprint": "b216393d9bd1d83a73513da667f340343dcf902c36f9b9f87eb98e7de4808ebb",
+  "materialize_clean_room": "exclusive_create_once",
+  "neo4j": {
+    "container": "graphiti-phase6-cleanroom-d19a171e-neo4j-1",
+    "health": "healthy",
+    "network": "graphiti-phase6-cleanroom-d19a171e_default",
+    "data_volume": "graphiti-phase6-cleanroom-d19a171e_neo4j_data",
+    "logs_volume": "graphiti-phase6-cleanroom-d19a171e_neo4j_logs"
+  },
+  "mcp_absent_at_r1": true,
+  "historical_resources_untouched": true,
+  "canary_ids_allocated": false,
+  "canary_executed": false,
+  "namespace_raw_exposed": false,
+  "endpoint_details_recorded": false,
+  "sanitized": true,
+  "deviations": [
+    {
+      "id": "DEV-NEO4J-HEALTH-RACE",
+      "summary": "The first post-start inspection preceded the healthy transition. The same container was observed until healthy; no second start or recreation occurred.",
+      "blocks_green": false
+    }
+  ]
+}

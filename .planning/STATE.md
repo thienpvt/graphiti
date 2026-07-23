@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-status: executing
-stopped_at: Completed 06-09-PLAN.md
-last_updated: "2026-07-23T11:54:00.000Z"
+status: blocked
+stopped_at: Phase 6 native Ollama R3 failed; user selected terminal pre-canary stop
+last_updated: "2026-07-23T14:30:00.000Z"
 progress:
   total_phases: 8
   completed_phases: 7
@@ -14,7 +14,7 @@ progress:
 current_phase: 06
 current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
 last_activity: 2026-07-23
-last_activity_desc: 06-09 complete (Ollama BIND+IMAGE green); next 06-10 R0-R3; never resume 06-05
+last_activity_desc: Native Ollama R0-R2 green; R3 invalid after forbidden replacement; zero canary IDs/writes; terminal stop
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md`
 
 ## Current Position
 
-Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable terminal after failed final canary. Next execution is Ollama gap-closure only.
+Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit; native Ollama remediation stopped at invalid R3. Phase 6 is terminal before a second canary.
 
 ### Phase 6 — OpenAI path (immutable terminal; never resume 06-05)
 
@@ -43,16 +43,17 @@ Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable te
 - `canary_ids_allocated` for OpenAI path was true for that one run; result failed before commit; no second OpenAI canary
 - Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains user-owned, unstaged, excluded from projection/image (dims 1536 vs qwen3 max 1024 noted; do not stage)
 
-### Phase 6 — Native Ollama remediation (next)
+### Phase 6 — Native Ollama remediation (terminal pre-canary stop)
 
 - Gap authority: `ab5fdeb:spec/new-phase.md` (native Ollama operation)
-- Plans: **06-06..06-11** gap_closure; **06-06..06-09 complete**; next **06-10** R0–R3 prefreeze
-- Never resume 06-05; never create 06-05-SUMMARY; never overwrite 06-CANARY-LEDGER / 06-FINAL-REPORT / 06-R0..R3
-- New evidence names only: `06-OLLAMA-*` (preflight + matrix + BIND + IMAGE receipts committed)
-- New clean-room project/volumes required (not reuse `graphiti-phase6-cleanroom-1f529136` or OpenAI image)
-- Ollama candidate `3b349dd` / context `3d782aa9…` / image `sha256:431a246…`; `image_build_count=1`; complete-image scan zero
-- Target: provider `ollama`, model `qwen3-embedding:0.6b`, dimensions `1024`, URL `http://host.docker.internal:11434`, waiver null
-- Clean-room example authority native Ollama; host preflight + MATRIX_GREEN 18/18; BIND exact + IMAGE_GREEN
+- Plans **06-06..06-09** complete. Plan **06-10** stopped incomplete at R3. Plan **06-11** not entered.
+- R0–R2 trusted: fresh project `graphiti-phase6-cleanroom-d19a171e`; schema `0/14` → one bootstrap → `14/14`.
+- R3 failed: first Compose-managed MCP activation lacked required construction configuration.
+- Executor then replaced the failed container with a raw reconfigured container. Missing Compose config authority and changed effective environment invalidate its 28-tool/Ollama-ready observations.
+- User selected terminal pre-canary stop. No superseding runtime, freeze receipt, canary IDs, prepare, commit, or catalog writes.
+- Ollama candidate `3b349dd` / context `3d782aa9…` / image `sha256:431a246…` remain valid image authority only.
+- Native Ollama stack and historical stacks remain intact. Protected config remains modified and unstaged.
+- Never resume 06-05, 06-10, or 06-11. Never reinterpret the rejected R3 GREEN commits as authority.
 
 ### Phase 5 (preserved historical facts)
 
@@ -86,7 +87,7 @@ Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable te
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
-| Phase 6 | 4/5 + 4/6 gap | OpenAI path immutable FAILED_BEFORE_COMMIT; Ollama 06-06..06-09 done; 06-10..06-11 pending |
+| Phase 6 | 4/5 + 4/6 gap | Terminal pre-canary stop: Ollama R3 failed; zero canary IDs/writes; stacks preserved |
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
@@ -124,20 +125,21 @@ Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable te
 - [Phase 06]: 06-08: preflight pulled exact qwen3-embedding:0.6b; native embed 1024; credential_used=false
 - [Phase 06]: 06-08: MATRIX_GREEN 18 checks + required E2E; no image/runtime/canary IDs
 - [Phase 06]: 06-09: Ollama BIND candidate 3b349dd context 3d782aa9; final clean archive 803/803 exact; IMAGE sha256:431a246… build_count=1 scan zero; OpenAI image non-authority
+- [Phase 06]: 06-10 terminal disposition: R0–R2 green; R3 failed because first activation lacked construction config. Post-failure raw-container replacement violated fail-stop and lacks Compose config authority.
+- [Phase 06]: User selected terminal pre-canary stop. Zero canary IDs, prepare, commit, writes, cleanup. All stacks preserved.
 
 ### Pending Todos
 
-1. Execute 06-10 new R0–R3 prefreeze on entirely new runtime resources (not OpenAI project `graphiti-phase6-cleanroom-1f529136`).
-2. Plan 06-11: prefreeze commit + blocking-human freeze STOP; top-level only writes uncommitted 06-OLLAMA-FREEZE-RECEIPT then one Ollama canary after explicit approval.
-3. Never create 06-05-SUMMARY or 06-11-SUMMARY; never rewrite OpenAI-path ledger/report/R receipts; leave stacks intact; keep dirty `config-docker-neo4j.yaml` unstaged.
+None. Phase 6 intentionally terminates blocked before freeze/canary. Any future attempt requires a new explicit phase and authorization; never resume the consumed runtime attempt.
 
 ### Blockers/Concerns
 
+- `P6-OLL-RT-01`, `P6-OLL-CAN-01`, and `P6-OLL-REPT-01` remain unmet. `P6-OLL-SAFE-01` preservation evidence exists, but the planned successful runtime/canary scope did not complete.
 - Preserve unrelated working-tree changes: `.planning/config.json`, prior phase artifacts, Docker/Kubernetes configs, `.codegraph/`, `catalog/`, `mcp_server/sample_catalog.json`.
 - Unrelated `mcp_server/config/config-docker-neo4j.yaml` defaults `qwen3-embedding:0.6b` to 1536 dimensions although official maximum is 1024; intentionally untouched (P6-PRES-01).
+- Never clean, reuse, reconfigure, retry, or reclassify `graphiti-phase6-cleanroom-d19a171e`.
 - Never weaken a real product, transaction, validation, security, test, or hard gate.
 - No remote-state mutation without separate approval.
-- Phase 6 plan artifacts may remain uncommitted by standing order until orchestrator commits.
 
 ## Quick Tasks Completed
 
@@ -164,8 +166,8 @@ Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable te
 
 ## Session Continuity
 
-**Last session:** 2026-07-23T11:54:00.000Z
+**Last session:** 2026-07-23T14:30:00.000Z
 **Resume file:** None
 
-Stopped at: Completed 06-09-PLAN.md
-Next: `/gsd-execute-phase 06 --gaps-only --wave 5` or direct **06-10**; never resume 06-05; new evidence under 06-OLLAMA-* only; do not reuse OpenAI image/runtime.
+Stopped at: Phase 6 terminal pre-canary stop after invalid R3 replacement.
+Next: None. Do not resume 06-05, 06-10, or 06-11. Future runtime work requires a separately authorized phase.

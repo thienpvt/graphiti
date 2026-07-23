@@ -1,0 +1,32 @@
+{
+  "schema_version": "phase6-ollama-r2-receipt-v2",
+  "recorded_date": "2026-07-23",
+  "stage": "R2",
+  "passed": true,
+  "result": "GREEN",
+  "classification": "R2_SCHEMA_BOOTSTRAP_GREEN",
+  "project": "graphiti-phase6-cleanroom-d19a171e",
+  "image_id": "sha256:431a24619ac45087d7859aad75d31afc0b79e436489e9a31bbe71fd3c4ef1d69",
+  "image_id_match": true,
+  "schema_pre": "0/14",
+  "schema_post": "14/14",
+  "pre_count": 0,
+  "post_count": 14,
+  "bootstrap_count": 1,
+  "retry_count": 0,
+  "partial_failure": false,
+  "rollback_attempted": false,
+  "mcp_absent_during_bootstrap": true,
+  "historical_resources_untouched": true,
+  "canary_ids_allocated": false,
+  "canary_executed": false,
+  "endpoint_details_recorded": false,
+  "sanitized": true,
+  "deviations": [
+    {
+      "id": "DEV-COMPOSE-NO-BUILD-FLAG",
+      "summary": "Installed Compose rejected the unsupported run flag before bootstrap execution. Bootstrap then executed exactly once with pull disabled and no build path.",
+      "blocks_green": false
+    }
+  ]
+}

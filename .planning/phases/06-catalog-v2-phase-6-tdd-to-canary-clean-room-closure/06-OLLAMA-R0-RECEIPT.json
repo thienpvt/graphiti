@@ -1,0 +1,43 @@
+{
+  "schema_version": "phase6-ollama-r0-receipt-v2",
+  "recorded_date": "2026-07-23",
+  "stage": "R0",
+  "passed": true,
+  "result": "GREEN",
+  "classification": "R0_ISOLATION_GREEN",
+  "project": "graphiti-phase6-cleanroom-d19a171e",
+  "image": "graphiti-mcp:phase6-cleanroom-3b349dd7cc9a-bound",
+  "image_id": "sha256:431a24619ac45087d7859aad75d31afc0b79e436489e9a31bbe71fd3c4ef1d69",
+  "bind_commit": "3b349dd7cc9aa48a0b1ffdfa52f905097248c60f",
+  "source_context_sha256": "3d782aa9eeb2f84798b7586e4c5f02012f68a0032fb26bbae3cea795e7afc76f",
+  "namespace_fingerprint": "c52cc1686977454f",
+  "config_fingerprint": "b216393d9bd1d83a73513da667f340343dcf902c36f9b9f87eb98e7de4808ebb",
+  "resources_absent_before_create": {
+    "network": true,
+    "neo4j_container": true,
+    "mcp_container": true,
+    "bootstrap_container": true,
+    "data_volume": true,
+    "logs_volume": true
+  },
+  "resources": {
+    "network": "graphiti-phase6-cleanroom-d19a171e_default",
+    "neo4j_container": "graphiti-phase6-cleanroom-d19a171e-neo4j-1",
+    "mcp_container": "graphiti-phase6-cleanroom-d19a171e-graphiti-mcp-1",
+    "data_volume": "graphiti-phase6-cleanroom-d19a171e_neo4j_data",
+    "logs_volume": "graphiti-phase6-cleanroom-d19a171e_neo4j_logs"
+  },
+  "exact_image_selected": true,
+  "project_scoped_volumes_only": true,
+  "no_build": true,
+  "pull_forbidden": true,
+  "historical_resources_untouched": true,
+  "failed_project_reused": false,
+  "protected_config_status": "modified_unstaged",
+  "canary_ids_allocated": false,
+  "canary_executed": false,
+  "namespace_raw_exposed": false,
+  "endpoint_details_recorded": false,
+  "launcher_state_path_recorded": false,
+  "sanitized": true
+}
