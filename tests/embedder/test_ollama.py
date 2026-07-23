@@ -211,3 +211,59 @@ async def test_rejects_malformed_response(response: httpx.Response, error: str) 
         embedder = OllamaEmbedder(OllamaEmbedderConfig(embedding_dim=3), client=client)
         with pytest.raises(ValueError, match=error):
             await embedder.create('test')
+
+
+@pytest.mark.asyncio
+async def test_ollama_embed_request_body_model_dimensions_1024() -> None:
+    """P6-OLL-EMB-01: qwen3-embedding:0.6b posts /api/embed with dimensions=1024."""
+    requests: list[httpx.Request] = []
+    dim = 1024
+    model = 'qwen3-embedding:0.6b'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={'embeddings': [embedding(0.1, dim)]})
+
+    async with mock_client(handler) as client:
+        embedder = OllamaEmbedder(
+            OllamaEmbedderConfig(
+                embedding_model=model,
+                embedding_dim=dim,
+                base_url='http://host.docker.internal:11434',
+            ),
+            client=client,
+        )
+        result = await embedder.create('catalog entity name')
+
+    assert len(result) == dim
+    assert len(requests) == 1
+    assert str(requests[0].url).endswith('/api/embed')
+    body = json.loads(requests[0].content)
+    assert body['model'] == model
+    assert body['dimensions'] == dim
+    assert body['input'] == ['catalog entity name']
+
+
+@pytest.mark.asyncio
+async def test_ollama_dimension_mismatch_fails_before_write() -> None:
+    """P6-OLL-EMB-01: wrong-length embedding raises before any graph/driver call."""
+    driver_calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Server returns 3-d vector while config expects 1024
+        return httpx.Response(200, json={'embeddings': [embedding(0.1, 3)]})
+
+    async with mock_client(handler) as client:
+        embedder = OllamaEmbedder(
+            OllamaEmbedderConfig(
+                embedding_model='qwen3-embedding:0.6b',
+                embedding_dim=1024,
+                base_url='http://host.docker.internal:11434',
+            ),
+            client=client,
+        )
+        with pytest.raises(ValueError, match='dimension 3; expected 1024'):
+            await embedder.create('mismatch probe')
+            driver_calls.append('would-write')  # unreachable on raise
+
+    assert driver_calls == []

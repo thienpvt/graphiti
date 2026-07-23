@@ -130,6 +130,32 @@ class TestOllamaEmbedderFactory:
         with pytest.raises(ValueError, match='Ollama provider configuration not found'):
             EmbedderFactory.create(self._config())
 
+    def test_qwen3_1024_creates_native_embedder_not_openai(self):
+        """P6-OLL-EMB-01: qwen3-embedding:0.6b / 1024 → OllamaEmbedder, no /v1."""
+        from graphiti_core.embedder.openai import OpenAIEmbedder
+
+        client = EmbedderFactory.create(
+            EmbedderConfig(
+                provider='ollama',
+                model='qwen3-embedding:0.6b',
+                dimensions=1024,
+                providers=EmbedderProvidersConfig(
+                    ollama=OllamaProviderConfig(
+                        api_url='http://host.docker.internal:11434',
+                        truncate=True,
+                        timeout=60,
+                    )
+                ),
+            )
+        )
+        assert isinstance(client, OllamaEmbedder)
+        assert not isinstance(client, OpenAIEmbedder)
+        assert client.config.embedding_model == 'qwen3-embedding:0.6b'
+        assert client.config.embedding_dim == 1024
+        assert client.config.api_key is None
+        assert client.config.base_url == 'http://host.docker.internal:11434'
+        assert not client.config.base_url.rstrip('/').endswith('/v1')
+
 
 class TestLLMClientReasoningEffort:
     """The OpenAI factory selects reasoning effort by model family."""
