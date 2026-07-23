@@ -1,23 +1,25 @@
 ---
 phase: 06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure
 plan: 04
-status: blocked
+status: complete
 completed: 2026-07-23
-candidate: cee10976c47122a0e19a87cd506edfc3c3ef5e82
+candidate: 60d270dfad329ca19508300308066776edeead23
 ---
 
 # Plan 06-04 Summary
 
-Built the single image allowed by quick task `260723-9xv`:
+IMAGE gate green for the exact-bound candidate:
 
-- Tag: `graphiti-mcp:phase6-cleanroom-cee10976c471-bound`
-- Image ID: `sha256:ef53905bfab2c14784f1f38c57787ddbb67f38e15770276a9ab547b3011b7942`
-- Candidate: `cee10976c47122a0e19a87cd506edfc3c3ef5e82`
-- Archive context: `922f49c68c8d576cc2887d707309e9b98b7b65c8df549f4e27511489205e4587`
-- Projection: 205 archive-derived files; protected config and planning paths excluded
+- Candidate: `60d270dfad329ca19508300308066776edeead23`
+- Archive: 771 exact raw-Git blobs; zero missing, extra, or mismatched members
+- Context: `0c24ce0aba2c1c316c69e7ff1b8ec47b5f74b1977ad83ca9f519a435fb4dc38a`
+- Frozen checks: 28 scanner, 89 focused Phase 6, 76 Git-dependent Phase 5, 1595 catalog union, 8 raw-Git archive tests
+- Image: `sha256:3602956a626cfa48f9d2cebb0f4ec048736724891866a1d71189da3ace81a572`
+- Tag: `graphiti-mcp:phase6-cleanroom-60d270dfad32-bound`
+- Projection: 205 archive-derived files; protected config and planning tree excluded
+- Complete-image scan: zero hits across root filesystem, config, history, and 17 layer tar payloads
+- Fixed denylist: zero present paths
 
-The candidate-bound `scan_complete_image` authority reported 22 `credential_literal` hits across complete image FS/config/history/layer surfaces. The image remains `IMAGE_BOUND_SCAN_BLOCKED` and is preserved.
+The image build occurred exactly once. Windows junction traversal failed after build while checking the exported rootfs. Verification resumed against the same image/export using regular-file-only rootfs materialization; symlink and layer metadata remained covered by the layer tar scan. No second image was built.
 
-Two source-only follow-up commits corrected classifications for package metadata, explicit test constants, and masked placeholders. Current HEAD scans the preserved image at zero hits, but those bytes are not the image's bound candidate. They cannot retroactively green the image. The one-new-image ceiling is exhausted; no second build occurred.
-
-All prior images remain preserved. Protected configuration remains modified and unstaged. No runtime, Compose, MCP transport, provider call, namespace generation, identity allocation, or canary execution occurred.
+All previous images remain preserved. Protected configuration remains modified and unstaged. No runtime, Compose, MCP transport, provider call, namespace generation, identity allocation, or canary execution occurred.

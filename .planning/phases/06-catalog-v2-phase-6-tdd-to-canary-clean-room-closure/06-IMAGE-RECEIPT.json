@@ -1,17 +1,18 @@
 {
   "schema_version": "phase6-image-receipt-v1",
   "recorded_date": "2026-07-23",
-  "classification": "IMAGE_BOUND_SCAN_BLOCKED",
-  "tag": "graphiti-mcp:phase6-cleanroom-cee10976c471-bound",
-  "image_id": "sha256:ef53905bfab2c14784f1f38c57787ddbb67f38e15770276a9ab547b3011b7942",
-  "commit": "cee10976c47122a0e19a87cd506edfc3c3ef5e82",
-  "revision": "cee10976c47122a0e19a87cd506edfc3c3ef5e82",
+  "classification": "IMAGE_GREEN",
+  "tag": "graphiti-mcp:phase6-cleanroom-60d270dfad32-bound",
+  "image_id": "sha256:3602956a626cfa48f9d2cebb0f4ec048736724891866a1d71189da3ace81a572",
+  "commit": "60d270dfad329ca19508300308066776edeead23",
+  "revision": "60d270dfad329ca19508300308066776edeead23",
   "source_context_label_key": "org.graphiti.source-context-sha256",
-  "source_context_sha256": "922f49c68c8d576cc2887d707309e9b98b7b65c8df549f4e27511489205e4587",
-  "archive_context_sha256": "922f49c68c8d576cc2887d707309e9b98b7b65c8df549f4e27511489205e4587",
+  "source_context_sha256": "0c24ce0aba2c1c316c69e7ff1b8ec47b5f74b1977ad83ca9f519a435fb4dc38a",
+  "archive_context_sha256": "0c24ce0aba2c1c316c69e7ff1b8ec47b5f74b1977ad83ca9f519a435fb4dc38a",
   "build_context_sha256": "53bd62bb9ec99ff70a97a6b12905a7341c24f08b4ee4e196a0f41b580bf68cb0",
+  "projection_manifest_sha256": "8918ece2b8a19cc8c7961314edb9793ad99306122e26a61650ef0ee77194525e",
   "projection_manifest_member_count": 205,
-  "projection_root": "phase6-9xv-image-projection-cee1097",
+  "projection_root": "phase6-b65-image-8wse_pm6/projection",
   "built_from_projection": true,
   "build_context_is_full_archive_root": false,
   "projection_uses_archive_bytes_only": true,
@@ -30,34 +31,29 @@
   ],
   "planning_tree_excluded": true,
   "excluded_config_absent_in_projection": true,
+  "excluded_config_absent_in_image": true,
   "committed_baseline_config_present_in_archive": true,
   "secret_scan_scope": "complete_image_fs_config_history",
   "scanner_authority_path": "scripts/catalog_image_secret_scanner.py",
   "scanner_authority_symbol": "scan_complete_image",
-  "scanner_authority_file_sha256": "5ae5b4e3f6fb8fef92f45d37e486d4eaac77c45cbdf984b919f678cc2cc7b898",
-  "strict_plan04_complete_image_scan_satisfied": false,
-  "bound_scanner_secret_pattern_hits": 22,
+  "scanner_authority_file_sha256": "37bbdfbb362c6e38f0c988617b3ba84300aee8a713ff78a1afde0f3585b78911",
+  "strict_plan04_complete_image_scan_satisfied": true,
+  "bound_scanner_secret_pattern_hits": 0,
+  "secret_pattern_hits": 0,
   "bound_scanner_path_classes": [
-    "binary_skipped",
-    "credential_literal"
+    "binary_skipped"
   ],
-  "post_bind_unbound_scanner_observation": {
-    "head": "986c756",
-    "secret_pattern_hits": 0,
-    "path_classes": [
-      "binary_skipped"
-    ],
-    "authoritative_for_image": false
-  },
-  "secret_pattern_hits": 22,
-  "matched_path_classes": [
-    "credential_literal"
-  ],
+  "denylisted_path_count": 0,
+  "layer_count": 17,
+  "build_log_sha256": "656d0684c2ec5d79de49d006adcea698ddc8104f44aa42885063a69039da1060",
+  "inspect_sha256": "dd5f75a875d40c503e477d15614474743d0a0d5e92f32c0c5cc1e7d99b033d3f",
+  "history_sha256": "562a586b0020f9150f433cc5b911ab2dee7d8ee767f9b2892b8d4128bd22e2ee",
   "docker_pull_flag": "--pull=false",
   "image_build_count": 1,
   "push_performed": false,
   "historical_retag": false,
   "preserved_image_ids": [
+    "sha256:ef53905bfab2c14784f1f38c57787ddbb67f38e15770276a9ab547b3011b7942",
     "sha256:33d22dbf6aac6e95458e4192c3772605c8ae19030d02af17b9390ff7a8a08e5f",
     "sha256:94d50fcab6cb6e9accb137687e74d8a4ef79bebcb627b955e6f9ad70769a7673",
     "sha256:994e1d1307dfd64ba0955a5e2469324721318a81514093b901fd853ad341d099"
@@ -67,5 +63,6 @@
   "canary_ids_allocated": false,
   "canary_executed": false,
   "protected_config_status": "modified_unstaged",
-  "notes": "One new image was built from candidate cee1097, respecting the task ceiling. Its bound scanner authority reports 22 credential_literal hits, so the image cannot be green. Two source-only follow-up commits classify package metadata, test constants, and masked placeholders correctly; current unbound HEAD scans this preserved image at zero hits, but cannot retroactively redefine candidate/image authority. A new PREBIND/BIND/image cycle would require separate authorization because this task's one-new-image ceiling is exhausted. No runtime, provider, namespace, identity, or canary action occurred."
+  "sanitized": true,
+  "notes": "One archive-derived image built from the exact BIND candidate projection. Candidate-bound scan_complete_image reported zero hits over full root filesystem, config, history, and 17 layer tar payloads; fixed denylist absence also passed. A Windows junction traversal error occurred after the image build, before verdict; scanning resumed against the same preserved export using regular-file rootfs materialization and the same candidate-bound scanner. No second image was built. No runtime, provider, namespace, identity, or canary action occurred."
 }
