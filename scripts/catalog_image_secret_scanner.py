@@ -420,6 +420,8 @@ def _scan_python_literals(text: str) -> list[str]:
         normalized_name = _norm_key(name)
         if normalized_name.startswith(('test', 'fake', 'mock', 'dummy', 'example', 'sample')):
             return
+        if not value or set(value) <= {':', '*', 'x', 'X'}:
+            return
         if _is_placeholder(value):
             return
         hits.append('credential_literal')

@@ -705,6 +705,15 @@ def test_complete_image_layer_unparseable_text_fails_closed(tmp_path: Path) -> N
         scanner.scan_complete_image(root)
 
 
+def test_complete_image_masked_dependency_values_non_hit(tmp_path: Path) -> None:
+    root = _clean_complete_image(tmp_path / 'image')
+    masked = root / 'rootfs/usr/lib/python3/site-packages/vendor/masked.py'
+    masked.write_text('password = ":****"\n', encoding='utf-8')
+    result = scanner.scan_complete_image(root)
+    assert result.hit_count == 0
+    _result_public_fields(result)
+
+
 def test_complete_image_os_metadata_and_test_constants_non_hit(tmp_path: Path) -> None:
     root = _clean_complete_image(tmp_path / 'image')
     metadata = root / 'rootfs/usr/lib/python3/site-packages/vendor.dist-info'
