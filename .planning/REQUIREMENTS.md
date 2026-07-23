@@ -282,8 +282,8 @@ Additive after OpenAI-proxy final canary `20260723t065038z-8b0d3621` failed Gate
 - [x] **P6-OLL-LAUNCH-01**: Final-canary launcher builds Ollama argv without unconditional OpenAI waiver; freeze receipt binds provider/model/dimensions/ready/null waiver and rejects openai/unknown/drift.
 - [x] **P6-OLL-PREFLIGHT-01**: Host Ollama preflight proves daemon, exact model, one native embed probe at 1024 dims; sanitized receipt only (no vector/secrets).
 - [x] **P6-OLL-TDD-01**: Complete frozen remediation matrix plus required Ollama E2E pass with zero unexplained skips/deselections before rebind.
-- [ ] **P6-OLL-BIND-01**: Candidate commit + raw-Git exact archive bind under 06-OLLAMA-BIND evidence only.
-- [ ] **P6-OLL-IMG-01**: One new source-bound Ollama image; prior OpenAI image remains historical only.
+- [x] **P6-OLL-BIND-01**: Candidate commit + raw-Git exact archive bind under 06-OLLAMA-BIND evidence only.
+- [x] **P6-OLL-IMG-01**: One new source-bound Ollama image; prior OpenAI image remains historical only.
 - [ ] **P6-OLL-RT-01**: Entirely new clean-room R0–R3 with Ollama ready; never reuse failed project/volumes; 0/14→14/14 one-shot; 28 tools; exact image ID.
 - [ ] **P6-OLL-CAN-01**: Exactly one top-level Ollama final canary after freeze approval under 06-OLLAMA-* live names.
 - [ ] **P6-OLL-SAFE-01**: Preserve user-owned dirty config, historical stacks, and final Ollama stack; no prune/cleanup/graph clear; no wrong staging of dirty overlay.
@@ -396,8 +396,8 @@ Deferred until the deterministic substrate is implemented and verified.
 | P6-OLL-LAUNCH-01 | Phase 6 | Complete |
 | P6-OLL-PREFLIGHT-01 | Phase 6 | Complete |
 | P6-OLL-TDD-01 | Phase 6 | Complete |
-| P6-OLL-BIND-01 | Phase 6 | Pending |
-| P6-OLL-IMG-01 | Phase 6 | Pending |
+| P6-OLL-BIND-01 | Phase 6 | Complete |
+| P6-OLL-IMG-01 | Phase 6 | Complete |
 | P6-OLL-RT-01 | Phase 6 | Pending |
 | P6-OLL-CAN-01 | Phase 6 | Pending |
 | P6-OLL-SAFE-01 | Phase 6 | Pending |

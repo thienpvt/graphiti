@@ -309,7 +309,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 4/5 + 3/6 gap | 06-05 incomplete (never resume); Ollama 06-06..06-08 done; 06-09..06-11 pending | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 4/5 + 4/6 gap | 06-05 incomplete (never resume); Ollama 06-06..06-09 done; 06-10..06-11 pending | — |
 
 ## Coverage
 
@@ -359,7 +359,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
 - Historical Docker resources and prior canary data/evidence remain unchanged
 
-**Plans**: 5/11 plans executed
+**Plans**: 8/11 plans executed
 
 Plans:
 **Wave 1**
@@ -398,7 +398,7 @@ Plans:
 
 **Gap Wave 4** *(06-09 wave:4; blocked on 06-08)*
 
-- [ ] 06-09-PLAN.md — Candidate commit, raw-Git bind, new source-bound Ollama image (P6-OLL-BIND-01, P6-OLL-IMG-01; D-04, D-06..08, D-15)
+- [x] 06-09-PLAN.md — Candidate commit, raw-Git bind, new source-bound Ollama image (P6-OLL-BIND-01, P6-OLL-IMG-01; D-04, D-06..08, D-15)
 
 **Gap Wave 5** *(06-10 wave:5; blocked on 06-09)*
 
