@@ -383,6 +383,75 @@ def test_final_canary_maps_builder_failure_after_allocation(
     assert str(job / 'tmp') not in json.dumps(ledger)
 
 
+def _approved_mcp_metadata() -> dict[str, str]:
+    return {
+        'mcp_url_env': 'GRAPHITI_PHASE6_MCP_URL',
+        'mcp_url_hint_local_only': 'http://127.0.0.1:18000/mcp',
+    }
+
+
+def test_validate_invocation_accepts_approved_mcp_url_fields(tmp_path: Path) -> None:
+    _, environment = _job(tmp_path)
+    freeze = _freeze(tmp_path)
+    approved_path = (
+        ROOT
+        / '.planning'
+        / 'phases'
+        / '06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure'
+        / '06-POST-APPROVAL-INVOCATION.json'
+    )
+    approved = json.loads(approved_path.read_text(encoding='utf-8'))
+    # Bind freeze/image/phase paths to fixtures; keep every approved top-level key.
+    approved['argv_template'] = [
+        'python',
+        'scripts/run_catalog_phase6_final_canary.py',
+        '--freeze-receipt',
+        str(freeze),
+        '--image-receipt',
+        str(tmp_path / '06-IMAGE-RECEIPT.json'),
+        '--mcp-url-env',
+        'GRAPHITI_PHASE6_MCP_URL',
+        '--artifact-parent',
+        '{CLAUDE_JOB_TMP}/phase6-final-canary',
+        '--result-parent',
+        '{CLAUDE_JOB_TMP}/phase6-final-canary',
+        '--phase-dir',
+        str(
+            ROOT / '.planning' / 'phases' / '06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure'
+        ),
+    ]
+    assert approved['mcp_url_env'] == 'GRAPHITI_PHASE6_MCP_URL'
+    assert approved['mcp_url_hint_local_only'] == 'http://127.0.0.1:18000/mcp'
+    job_tmp = launcher.resolve_job_tmp(environment)
+    expanded = launcher._validate_invocation(approved, freeze, job_tmp)
+    assert '--mcp-url-env' in expanded
+    assert expanded[expanded.index('--mcp-url-env') + 1] == 'GRAPHITI_PHASE6_MCP_URL'
+
+
+def test_validate_invocation_rejects_unknown_top_level_field(tmp_path: Path) -> None:
+    _, environment = _job(tmp_path)
+    freeze = _freeze(tmp_path)
+    invocation = _invocation(tmp_path, **_approved_mcp_metadata(), not_an_approved_field='x')
+    raw = json.loads(invocation.read_text(encoding='utf-8'))
+    job_tmp = launcher.resolve_job_tmp(environment)
+    with pytest.raises(
+        launcher.FinalCanaryError, match='post-approval invocation fields are invalid'
+    ):
+        launcher._validate_invocation(raw, freeze, job_tmp)
+
+
+def test_validate_invocation_rejects_non_string_mcp_url_env(tmp_path: Path) -> None:
+    _, environment = _job(tmp_path)
+    freeze = _freeze(tmp_path)
+    invocation = _invocation(tmp_path, mcp_url_env=123)
+    raw = json.loads(invocation.read_text(encoding='utf-8'))
+    job_tmp = launcher.resolve_job_tmp(environment)
+    with pytest.raises(
+        launcher.FinalCanaryError, match='post-approval invocation fields are invalid'
+    ):
+        launcher._validate_invocation(raw, freeze, job_tmp)
+
+
 def test_final_canary_rejects_actual_argv_drift_before_allocation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

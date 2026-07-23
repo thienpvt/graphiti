@@ -227,6 +227,8 @@ def _validate_invocation(raw: dict[str, Any], freeze_receipt: Path, job_tmp: Pat
         'shell',
         'argv_template',
         'argv_expansion',
+        'mcp_url_env',
+        'mcp_url_hint_local_only',
     }
     if set(raw) - (expected_fields | {'notes'}):
         raise FinalCanaryError('post-approval invocation fields are invalid')
@@ -245,6 +247,12 @@ def _validate_invocation(raw: dict[str, Any], freeze_receipt: Path, job_tmp: Pat
     }
     if any(raw.get(key) != value for key, value in required.items()):
         raise FinalCanaryError('post-approval invocation contract is invalid')
+    for optional_mcp_field in ('mcp_url_env', 'mcp_url_hint_local_only'):
+        if optional_mcp_field not in raw:
+            continue
+        value = raw[optional_mcp_field]
+        if not isinstance(value, str) or not value.strip():
+            raise FinalCanaryError('post-approval invocation fields are invalid')
     expansion = raw.get('argv_expansion')
     if (
         not isinstance(expansion, dict)
