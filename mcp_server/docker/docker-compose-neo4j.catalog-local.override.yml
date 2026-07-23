@@ -13,6 +13,18 @@ x-catalog-runtime: &catalog-runtime
 services:
   graphiti-mcp:
     <<: *catalog-runtime
+    env_file: !reset []
+    environment:
+      - CONFIG_PATH=/app/mcp/config/config.yaml
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-demodemo}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+      # Construction-only LLM inputs. Catalog embeddings remain native Ollama.
+      - MODEL_NAME=${MODEL_NAME}
+      - OLLAMA_EMBEDDER_API_URL=${OLLAMA_EMBEDDER_API_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?required MCP construction input}
+      - OPENAI_API_URL=${OPENAI_API_URL}
 
   catalog-bootstrap:
     <<: *catalog-runtime
