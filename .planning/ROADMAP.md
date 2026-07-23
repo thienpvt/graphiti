@@ -359,7 +359,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
 - Historical Docker resources and prior canary data/evidence remain unchanged
 
-**Plans**: 4/5 original complete (06-05 intentionally incomplete); +6 gap-closure Ollama plans (06-06..06-11)
+**Plans**: 5/11 plans executed
 
 Plans:
 **Wave 1**
@@ -386,7 +386,7 @@ Plans:
 
 **Gap Wave 1** *(06-06 wave:1; depends_on:[])*
 
-- [ ] 06-06-PLAN.md — TDD Stage A/B clean-room Ollama config + factory/dimension (P6-OLL-AUTH-01, P6-OLL-CONF-01, P6-OLL-EMB-01; D-01..05, D-14, D-21)
+- [x] 06-06-PLAN.md — TDD Stage A/B clean-room Ollama config + factory/dimension (P6-OLL-AUTH-01, P6-OLL-CONF-01, P6-OLL-EMB-01; D-01..05, D-14, D-21)
 
 **Gap Wave 2** *(06-07 wave:2; blocked on 06-06)*
 

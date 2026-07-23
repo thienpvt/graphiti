@@ -275,9 +275,9 @@ Phase 6 is authorized by fetched fork commit `e52c1b5` under `ITERATIVE_TDD_IMPL
 
 Additive after OpenAI-proxy final canary `20260723t065038z-8b0d3621` failed Gate 2 (`FAILED_BEFORE_COMMIT`). Old OpenAI-path evidence remains immutable terminal. Execute via gaps-only / wave≥6 / direct plan; never resume 06-05.
 
-- [ ] **P6-OLL-AUTH-01**: Prior failed canary remains immutable terminal evidence; Ollama remediation binds only reviewed HEAD and never rewrites old ledger/report/R receipts.
-- [ ] **P6-OLL-CONF-01**: Clean-room catalog-local example and materializer emit native Ollama authority — provider `ollama`, model `qwen3-embedding:0.6b`, dimensions `1024`, host URL default `http://host.docker.internal:11434`, no required API key, truncate true.
-- [ ] **P6-OLL-EMB-01**: Factory and embedder path use native `OllamaEmbedder` `/api/embed` with model/dimensions 1024; no OpenAI proxy path; dimension mismatch fails before graph write; prepare/commit paths prove zero generative LLM calls under spy.
+- [x] **P6-OLL-AUTH-01**: Prior failed canary remains immutable terminal evidence; Ollama remediation binds only reviewed HEAD and never rewrites old ledger/report/R receipts.
+- [x] **P6-OLL-CONF-01**: Clean-room catalog-local example and materializer emit native Ollama authority — provider `ollama`, model `qwen3-embedding:0.6b`, dimensions `1024`, host URL default `http://host.docker.internal:11434`, no required API key, truncate true.
+- [x] **P6-OLL-EMB-01**: Factory and embedder path use native `OllamaEmbedder` `/api/embed` with model/dimensions 1024; no OpenAI proxy path; dimension mismatch fails before graph write; prepare/commit paths prove zero generative LLM calls under spy.
 - [ ] **P6-OLL-CAPA-01**: Capability probe uses Ollama `/api/tags` only; model present ⇒ `embeddings.ready=ready`; missing/unreachable ⇒ `error`; Ollama `unknown` receives no OpenAI waiver; manifest `allow_unknown_embedding_provider=null`.
 - [ ] **P6-OLL-LAUNCH-01**: Final-canary launcher builds Ollama argv without unconditional OpenAI waiver; freeze receipt binds provider/model/dimensions/ready/null waiver and rejects openai/unknown/drift.
 - [ ] **P6-OLL-PREFLIGHT-01**: Host Ollama preflight proves daemon, exact model, one native embed probe at 1024 dims; sanitized receipt only (no vector/secrets).
@@ -389,9 +389,9 @@ Deferred until the deterministic substrate is implemented and verified.
 | P6-TERM-04 | Phase 6 | Pending |
 | P6-REPT-01 | Phase 6 | Pending |
 | P6-CONT-01 | Phase 6 | Complete |
-| P6-OLL-AUTH-01 | Phase 6 | Pending |
-| P6-OLL-CONF-01 | Phase 6 | Pending |
-| P6-OLL-EMB-01 | Phase 6 | Pending |
+| P6-OLL-AUTH-01 | Phase 6 | Complete |
+| P6-OLL-CONF-01 | Phase 6 | Complete |
+| P6-OLL-EMB-01 | Phase 6 | Complete |
 | P6-OLL-CAPA-01 | Phase 6 | Pending |
 | P6-OLL-LAUNCH-01 | Phase 6 | Pending |
 | P6-OLL-PREFLIGHT-01 | Phase 6 | Pending |
