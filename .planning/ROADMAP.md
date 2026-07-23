@@ -309,7 +309,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 4/5 + 0/6 gap | 06-05 incomplete (never resume); Ollama gap plans 06-06..06-11 pending | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 4/5 + 3/6 gap | 06-05 incomplete (never resume); Ollama 06-06..06-08 done; 06-09..06-11 pending | — |
 
 ## Coverage
 
@@ -390,11 +390,11 @@ Plans:
 
 **Gap Wave 2** *(06-07 wave:2; blocked on 06-06)*
 
-- [ ] 06-07-PLAN.md — TDD Stage C/D capability waiver + final-canary freeze authority (P6-OLL-CAPA-01, P6-OLL-LAUNCH-01; D-09, D-14, D-19, D-05)
+- [x] 06-07-PLAN.md — TDD Stage C/D capability waiver + final-canary freeze authority (P6-OLL-CAPA-01, P6-OLL-LAUNCH-01; D-09, D-14, D-19, D-05)
 
 **Gap Wave 3** *(06-08 wave:3; blocked on 06-07)*
 
-- [ ] 06-08-PLAN.md — Config safety, Ollama preflight, complete remediation matrix + E2E (P6-OLL-SAFE-01, P6-OLL-PREFLIGHT-01, P6-OLL-TDD-01; D-05, D-07, D-21..23)
+- [x] 06-08-PLAN.md — Config safety, Ollama preflight, complete remediation matrix + E2E (P6-OLL-SAFE-01 partial, P6-OLL-PREFLIGHT-01, P6-OLL-TDD-01; D-05, D-07, D-21..23)
 
 **Gap Wave 4** *(06-09 wave:4; blocked on 06-08)*
 

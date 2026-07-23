@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 status: executing
-stopped_at: Completed 06-06-PLAN.md
-last_updated: "2026-07-23T09:38:45.033Z"
+stopped_at: Completed 06-08-PLAN.md
+last_updated: "2026-07-23T11:14:32.000Z"
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 55
-  completed_plans: 49
-  percent: 88
+  completed_plans: 52
+  percent: 95
 current_phase: 06
 current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
 last_activity: 2026-07-23
-last_activity_desc: 06-06 complete (native Ollama Stage A/B TDD); next 06-07 capability/launcher; never resume 06-05
+last_activity_desc: 06-08 complete (Ollama preflight + MATRIX_GREEN); next 06-09 bind/image; never resume 06-05
 ---
 
 # Project State
@@ -46,12 +46,12 @@ Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable te
 ### Phase 6 — Native Ollama remediation (next)
 
 - Gap authority: `ab5fdeb:spec/new-phase.md` (native Ollama operation)
-- Plans: **06-06..06-11** gap_closure; **06-06 complete** (Stage A/B TDD); next **06-07**
+- Plans: **06-06..06-11** gap_closure; **06-06..06-08 complete**; next **06-09** bind/image
 - Never resume 06-05; never create 06-05-SUMMARY; never overwrite 06-CANARY-LEDGER / 06-FINAL-REPORT / 06-R0..R3
-- New evidence names only: `06-OLLAMA-*`
+- New evidence names only: `06-OLLAMA-*` (preflight + matrix receipts committed)
 - New clean-room project/volumes/image required (not reuse `graphiti-phase6-cleanroom-1f529136` or OpenAI image)
 - Target: provider `ollama`, model `qwen3-embedding:0.6b`, dimensions `1024`, URL `http://host.docker.internal:11434`, waiver null
-- Clean-room example authority now native Ollama (commits `cb1157c` RED / `1cc58a0` GREEN)
+- Clean-room example authority now native Ollama; host preflight pull performed for exact model; MATRIX_GREEN 18/18
 
 ### Phase 5 (preserved historical facts)
 
@@ -85,7 +85,7 @@ Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable te
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
-| Phase 6 | 4/5 + 1/6 gap | OpenAI path immutable FAILED_BEFORE_COMMIT; Ollama 06-06 done; 06-07..06-11 pending |
+| Phase 6 | 4/5 + 3/6 gap | OpenAI path immutable FAILED_BEFORE_COMMIT; Ollama 06-06..06-08 done; 06-09..06-11 pending |
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
@@ -94,6 +94,8 @@ Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable te
 | Phase 06 P02 | 56min | 2 tasks | 15 task-owned files |
 | Phase 06 P03 | 96min | 2 tasks | 6 planning/source files |
 | Phase 06 P06 | 8min | 2 tasks | 5 files |
+| Phase 06 P07 | 25min | 2 tasks | 7 files |
+| Phase 06 P08 | 14min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -115,12 +117,16 @@ Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable te
 - [Phase 06]: Git object bytes are source authority; checkout and git-archive EOL behavior is excluded.
 - [Phase 06]: Canonical context hash preserves ls-tree order and excludes mode/object ID from the aggregate.
 - [Phase 06]: 06-06: native Ollama clean-room example is ollama/qwen3-embedding:0.6b/1024; reuse OllamaEmbedder; omit api_key
+- [Phase 06]: 06-07: Ollama tags-only readiness, null waiver, freeze authority, config fingerprint, and Gate 1 observed binding verified
+- [Phase 06]: 06-08: protected config-docker-neo4j.yaml deferred unstaged; clean-room example Ollama authority
+- [Phase 06]: 06-08: preflight pulled exact qwen3-embedding:0.6b; native embed 1024; credential_used=false
+- [Phase 06]: 06-08: MATRIX_GREEN 18 checks + required E2E; no image/runtime/canary IDs
 
 ### Pending Todos
 
-1. Execute Ollama gap plan **06-07** (capability/launcher) — never resume 06-05.
-2. Continue 06-08..06-10 sequentially (preflight/matrix → bind/image → new R0–R3 prefreeze).
-3. Plan 06-11: prefreeze commit + blocking-human freeze STOP; top-level only writes uncommitted 06-OLLAMA-FREEZE-RECEIPT then one Ollama canary.
+1. Execute Ollama gap plan **06-09** (candidate/raw-Git bind/new source-bound image) — never resume 06-05.
+2. Execute 06-10 new R0–R3 prefreeze on entirely new runtime resources.
+3. Plan 06-11: prefreeze commit + blocking-human freeze STOP; top-level only writes uncommitted 06-OLLAMA-FREEZE-RECEIPT then one Ollama canary after explicit approval.
 4. Never create 06-05-SUMMARY or 06-11-SUMMARY; never rewrite OpenAI-path ledger/report/R receipts; leave stacks intact; keep dirty `config-docker-neo4j.yaml` unstaged.
 
 ### Blockers/Concerns
@@ -156,8 +162,8 @@ Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable te
 
 ## Session Continuity
 
-**Last session:** 2026-07-23T09:38:45.026Z
+**Last session:** 2026-07-23T11:14:32.000Z
 **Resume file:** None
 
-Stopped at: Completed 06-06-PLAN.md
-Next: `/gsd-execute-phase 06` gaps-only or direct **06-06**; never resume 06-05; new evidence under 06-OLLAMA-* only.
+Stopped at: Completed 06-08-PLAN.md
+Next: `/gsd-execute-phase 06 --gaps-only --wave 4` or direct **06-09**; never resume 06-05; new evidence under 06-OLLAMA-* only.
