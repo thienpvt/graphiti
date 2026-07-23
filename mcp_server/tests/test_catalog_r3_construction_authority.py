@@ -229,9 +229,10 @@ def test_r3_container_authority_requires_compose_labels_and_matching_inputs() ->
     assert receipt['observed_image_id'] == options.expected_image_id
     assert re.fullmatch(r'[0-9a-f]{64}', receipt['compose_config_hash_fingerprint'])
     assert re.fullmatch(r'[0-9a-f]{64}', receipt['compose_files_fingerprint'])
-    assert receipt['construction']['fingerprint'] == materializer.mcp_construction_receipt(
-        inputs, FIXED_NAMESPACE
-    )['fingerprint']
+    assert (
+        receipt['construction']['fingerprint']
+        == materializer.mcp_construction_receipt(inputs, FIXED_NAMESPACE)['fingerprint']
+    )
     for value in (LOCAL_KEY, LOCAL_LLM_URL, LOCAL_LLM_MODEL, LOCAL_OLLAMA_URL):
         assert value not in encoded
 
@@ -247,8 +248,7 @@ def test_r3_container_authority_requires_compose_labels_and_matching_inputs() ->
 
     wrong_environment = _canonical_row(inputs, options)
     wrong_environment['Config']['Env'] = [
-        item.replace(LOCAL_KEY, 'different-value')
-        for item in wrong_environment['Config']['Env']
+        item.replace(LOCAL_KEY, 'different-value') for item in wrong_environment['Config']['Env']
     ]
     with pytest.raises(runner.RunnerError, match='construction'):
         launcher.validate_mcp_container_authority(

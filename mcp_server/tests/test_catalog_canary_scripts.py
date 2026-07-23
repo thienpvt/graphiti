@@ -1634,6 +1634,7 @@ def test_launcher_attests_exact_argv_before_shell_false_subprocess(
     monkeypatch.setattr(launcher.runner, 'attest_host_compose_argv', attest)
     monkeypatch.setattr(launcher.runner, 'host_side_execution_authority_digests', authority)
     monkeypatch.setattr(launcher.subprocess, 'run', run)
+    monkeypatch.setenv('OPENAI_API_KEY', 'catalog-test-construction-key')
     monkeypatch.setenv('COMPOSE_PROJECT_NAME', 'foreign')
     monkeypatch.setenv('COMPOSE_REMOVE_ORPHANS', '1')
     monkeypatch.setenv('COMPOSE_FILE', 'evil.yml')
@@ -1716,6 +1717,7 @@ def test_launcher_sanitizes_ambient_authority(monkeypatch: pytest.MonkeyPatch) -
         'CATALOG_UPSERT__UUID_NAMESPACE',
     ):
         monkeypatch.setenv(key, 'foreign')
+    monkeypatch.setenv('OPENAI_API_KEY', 'catalog-test-construction-key')
     env = launcher.compose_env(options)
     assert all(key not in env for key in ('DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG'))
     assert 'GRAPHITI_CATALOG_UUID_NAMESPACE' not in env
@@ -1777,6 +1779,7 @@ def test_materializer_clean_room_project_syntax_and_single_generation(
     materializer = _load_script('catalog_materializer_clean_room_test', MATERIALIZER_PATH)
     source = ROOT / 'mcp_server/config/config-docker-neo4j.catalog-local.example.yaml'
     generated = __import__('uuid').UUID('12345678-1234-4678-9234-567812345678')
+    construction_env = {'OPENAI_API_KEY': 'catalog-test-construction-key'}
     calls = 0
 
     def uuid4() -> Any:
@@ -1792,6 +1795,7 @@ def test_materializer_clean_room_project_syntax_and_single_generation(
             tmp_path / 'bad.authority',
             project='bad.name',
             data_volume='bad.name_neo4j_data',
+            environ=construction_env,
         )
     fingerprint = materializer.materialize_clean_room(
         source,
@@ -1799,6 +1803,7 @@ def test_materializer_clean_room_project_syntax_and_single_generation(
         tmp_path / 'authority',
         project='clean-one',
         data_volume='clean-one_neo4j_data',
+        environ=construction_env,
     )
     assert calls == 1
     assert fingerprint == materializer.namespace_fingerprint(generated)
@@ -1809,6 +1814,7 @@ def test_materializer_clean_room_project_syntax_and_single_generation(
             tmp_path / 'authority',
             project='clean-one',
             data_volume='clean-one_neo4j_data',
+            environ=construction_env,
         )
     assert calls == 1
 
