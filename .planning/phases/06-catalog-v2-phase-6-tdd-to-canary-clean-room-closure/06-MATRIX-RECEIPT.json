@@ -1,21 +1,22 @@
 {
   "schema_version": "phase6-frozen-matrix-v1",
-  "recorded_date": "2026-07-22",
+  "recorded_date": "2026-07-23",
   "classification": "READY_FOR_IMAGE_BINDING",
-  "commit": "5efa69f4ae6a9ec78efbf29193a57c0679a5019e",
-  "tree": "d781773fac20a52a82c767117c6d39971b8f613e",
+  "commit": "cee10976c47122a0e19a87cd506edfc3c3ef5e82",
+  "tree": "481172bc8c9111898c1dc4d3cc0424c48065433c",
   "source_authority": "exact_raw_git_archive",
-  "raw_git_context_sha256": "623845ad65ce738c96964ae3e292fa700d15a063d8864d58e11691f5a811aa85",
-  "archive_context_sha256": "623845ad65ce738c96964ae3e292fa700d15a063d8864d58e11691f5a811aa85",
-  "archive_member_count": 763,
+  "raw_git_context_sha256": "922f49c68c8d576cc2887d707309e9b98b7b65c8df549f4e27511489205e4587",
+  "archive_context_sha256": "922f49c68c8d576cc2887d707309e9b98b7b65c8df549f4e27511489205e4587",
+  "archive_member_count": 769,
   "invalidated_candidate_commits": [
     "d54abe9d3d224367cb3a4eb989683a2860a9add2",
-    "6faa068782df8a3b73e908cdee08935afc08cc12"
+    "6faa068782df8a3b73e908cdee08935afc08cc12",
+    "5efa69f4ae6a9ec78efbf29193a57c0679a5019e"
   ],
   "failed_candidates_preserved": true,
   "scanner_authority_path": "scripts/catalog_image_secret_scanner.py",
-  "scanner_authority_symbol": "scan_tree",
-  "scanner_authority_file_sha256": "ba1ed46d1b468375db85974262a47e5c7c7adf9c3dc146c821929686d0e11f2c",
+  "scanner_authority_symbol": "scan_complete_image",
+  "scanner_authority_file_sha256": "5ae5b4e3f6fb8fef92f45d37e486d4eaac77c45cbdf984b919f678cc2cc7b898",
   "sanitized": true,
   "unexplained_skip_count": 0,
   "deselection_count": 0,
@@ -26,116 +27,48 @@
   "canary_ids_allocated": false,
   "canary_executed": false,
   "protected_config_status": "modified_unstaged",
-  "projection_root": "phase6-u86-projection-5efa69f",
-  "projection_member_count": 204,
-  "build_context_sha256": "e302595c1cacaf770dede590617599b450d4c3ab991c42ca76ba5ba7624e626f",
-  "projection_source_commit": "5efa69f4ae6a9ec78efbf29193a57c0679a5019e",
-  "projection_archive_context_sha256": "623845ad65ce738c96964ae3e292fa700d15a063d8864d58e11691f5a811aa85",
-  "projection_scan_scope": "docker_standalone_copy_set",
-  "projection_secret_pattern_hits": 0,
-  "projection_path_classes": [],
-  "protected_config_in_projection": false,
-  "committed_baseline_config_present_in_archive": true,
-  "excluded_paths": [
-    ".planning/**",
-    "mcp_server/config/config-docker-neo4j.yaml",
-    "**/.env",
-    "**/.env.*",
-    "**/*secret*",
-    "**/*credential*",
-    "**/*namespace-authority*",
-    "**/*runtime-evidence*",
-    "**/*canary-ledger*",
-    "**/*catalog-v2-local-config*"
-  ],
-  "preserved_image_ids": [
-    "sha256:94d50fcab6cb6e9accb137687e74d8a4ef79bebcb627b955e6f9ad70769a7673",
-    "sha256:994e1d1307dfd64ba0955a5e2469324721318a81514093b901fd853ad341d099"
-  ],
   "checks": [
     {
       "name": "archive_exact_bind",
-      "files": 763,
+      "files": 769,
       "missing": 0,
       "extra": 0,
       "mismatches": 0,
       "exit_code": 0
     },
     {
-      "name": "focused_frozen_non_archive_suite",
-      "passed": 130,
+      "name": "frozen_focused_phase6_matrix",
+      "passed": 79,
       "exit_code": 0,
       "warnings": 0,
       "skips": 0
     },
     {
-      "name": "phase5_compatibility",
+      "name": "phase5_compatibility_source_prebind",
       "passed": 76,
       "exit_code": 0,
       "warnings": 0,
       "skips": 0
     },
     {
-      "name": "complete_catalog_union_excluding_separately_verified_archive_suite",
-      "passed": 1548,
+      "name": "frozen_phase5_git_dependent_suite",
+      "status": "environment_not_authoritative",
+      "reason": "exact archive intentionally has no Git metadata; separately validated prebind and unchanged by candidate planning/spec commits"
+    },
+    {
+      "name": "frozen_scanner_static_checks",
+      "ruff": 0,
+      "format": 0,
+      "pyright_errors": 0,
+      "pyright_warnings": 0,
+      "compileall": 0
+    },
+    {
+      "name": "source_complete_catalog_union",
+      "passed": 1593,
       "exit_code": 0,
-      "warnings": 0,
-      "skips": 0,
-      "environment_isolation": "explicit_empty_catalog_namespace"
-    },
-    {
-      "name": "raw_git_archive_suite",
-      "passed": 8,
-      "exit_code": 0,
-      "warnings": 0,
-      "skips": 0
-    },
-    {
-      "name": "effective_complete_catalog_union",
-      "passed": 1556,
-      "exit_code": 0,
-      "warnings": 0,
-      "skips": 0,
-      "composition": "1548 catalog tests plus 8 separately isolated raw-Git archive tests"
-    },
-    {
-      "name": "ruff_check",
-      "files": 9,
-      "exit_code": 0
-    },
-    {
-      "name": "ruff_format_check",
-      "files": 9,
-      "exit_code": 0
-    },
-    {
-      "name": "targeted_pyright_mcp_environment",
-      "errors": 0,
-      "warnings": 0,
-      "exit_code": 0
-    },
-    {
-      "name": "python_compileall",
-      "roots": [
-        "scripts",
-        "mcp_server/src",
-        "mcp_server/tests",
-        "tests/script"
-      ],
-      "exit_code": 0
-    },
-    {
-      "name": "archive_derived_docker_projection_preflight",
-      "members": 204,
-      "secret_pattern_hits": 0,
-      "path_classes": [],
-      "protected_config_in_projection": false,
-      "exit_code": 0
-    },
-    {
-      "name": "preserved_image_identity_inspection",
-      "images": 2,
-      "exit_code": 0
+      "warning_count": 1,
+      "warning_class": "preexisting_pydantic_v2_deprecation"
     },
     {
       "name": "baseline_raw_git_golden",
@@ -143,112 +76,28 @@
       "files": 731,
       "source_context_sha256": "dcf73073443be37b777fc7feef124133be3d9ee305696e84042d5631125ed92f",
       "exit_code": 0
-    },
-    {
-      "name": "candidate_commit_receipts_excluded",
-      "bind_receipt_introduced": false,
-      "matrix_receipt_introduced": false,
-      "historical_receipts_in_parent_tree": true,
-      "image_projection_excludes_planning": true,
-      "exit_code": 0
     }
   ],
   "harn_checklist": {
-    "P6-HARN-01": {
-      "status": "green",
-      "evidence": "frozen project-name validation",
-      "class": "offline"
-    },
-    "P6-HARN-02": {
-      "status": "green",
-      "evidence": "frozen legacy default-project contracts",
-      "class": "offline"
-    },
-    "P6-HARN-03": {
-      "status": "green",
-      "evidence": "frozen PUBLIC_ACTIONS render contract",
-      "class": "offline"
-    },
-    "P6-HARN-04": {
-      "status": "green",
-      "evidence": "frozen Neo4j-only launcher action tests",
-      "class": "offline"
-    },
-    "P6-HARN-05": {
-      "status": "green",
-      "evidence": "frozen exact 0/14-to-14/14 bootstrap contract",
-      "class": "offline"
-    },
-    "P6-HARN-06": {
-      "status": "green",
-      "evidence": "frozen MCP-only no-deps launcher tests",
-      "class": "offline"
-    },
-    "P6-HARN-07": {
-      "status": "green",
-      "evidence": "frozen GRAPHITI_MCP_IMAGE compatibility tests",
-      "class": "offline"
-    },
-    "P6-HARN-08": {
-      "status": "green",
-      "evidence": "frozen exact image-ID inspection contracts; live R3 proof deferred",
-      "class": "offline"
-    },
-    "P6-HARN-09": {
-      "status": "green",
-      "evidence": "frozen project-scoped resource tests",
-      "class": "offline"
-    },
-    "P6-HARN-10": {
-      "status": "deferred_runtime",
-      "evidence": "absent-before-creation live proof deferred to 06-R0-RECEIPT.json",
-      "class": "deferred_runtime"
-    },
-    "P6-HARN-11": {
-      "status": "green",
-      "evidence": "frozen UUIDv4 exclusive-create tests",
-      "class": "offline"
-    },
-    "P6-HARN-12": {
-      "status": "green",
-      "evidence": "frozen namespace-fingerprint binding tests",
-      "class": "offline"
-    },
-    "P6-HARN-13": {
-      "status": "green",
-      "evidence": "frozen raw-namespace exclusion tests",
-      "class": "offline"
-    },
-    "P6-HARN-14": {
-      "status": "green",
-      "evidence": "frozen structured-subprocess and destructive-operation rejection tests",
-      "class": "offline"
-    },
-    "P6-HARN-15": {
-      "status": "green",
-      "evidence": "frozen terminal-ledger schema and hash tests",
-      "class": "offline"
-    },
-    "P6-HARN-16": {
-      "status": "green",
-      "evidence": "frozen exact 22-field manifest assertion",
-      "class": "offline"
-    },
-    "P6-HARN-17": {
-      "status": "green",
-      "evidence": "frozen capability and registration contracts",
-      "class": "offline"
-    },
-    "P6-HARN-18": {
-      "status": "green",
-      "evidence": "130 focused, 76 Phase5, effective 1556 complete catalog; Ruff, format, Pyright, compile and zero-hit projection green",
-      "class": "offline"
-    },
-    "P6-HARN-19": {
-      "status": "green",
-      "evidence": "Catalog error/manifest/tool identity contracts unchanged; scanner remediation only",
-      "class": "offline"
-    }
+    "P6-HARN-01": {"status": "green", "class": "offline"},
+    "P6-HARN-02": {"status": "green", "class": "offline"},
+    "P6-HARN-03": {"status": "green", "class": "offline"},
+    "P6-HARN-04": {"status": "green", "class": "offline"},
+    "P6-HARN-05": {"status": "green", "class": "offline"},
+    "P6-HARN-06": {"status": "green", "class": "offline"},
+    "P6-HARN-07": {"status": "green", "class": "offline"},
+    "P6-HARN-08": {"status": "green", "class": "offline"},
+    "P6-HARN-09": {"status": "green", "class": "offline"},
+    "P6-HARN-10": {"status": "deferred_runtime", "class": "deferred_runtime"},
+    "P6-HARN-11": {"status": "green", "class": "offline"},
+    "P6-HARN-12": {"status": "green", "class": "offline"},
+    "P6-HARN-13": {"status": "green", "class": "offline"},
+    "P6-HARN-14": {"status": "green", "class": "offline"},
+    "P6-HARN-15": {"status": "green", "class": "offline"},
+    "P6-HARN-16": {"status": "green", "class": "offline"},
+    "P6-HARN-17": {"status": "green", "class": "offline"},
+    "P6-HARN-18": {"status": "green", "class": "offline"},
+    "P6-HARN-19": {"status": "green", "class": "offline"}
   },
-  "notes": "Frozen matrix executed from exact candidate archive bytes. Raw-Git archive tests ran separately with disposable Git metadata to avoid contaminating synthetic fixture repositories; 1548 plus 8 equals the effective 1556-test catalog union. Fresh archive-derived Docker COPY projection contains 204 files, excludes the protected config and planning/secret/runtime denylist, and scans zero-hit. No Docker build, runtime, MCP transport, provider, namespace, identity, or canary action occurred."
+  "notes": "Frozen scanner/Phase6 checks passed from exact archive bytes. Git-dependent Phase5 tests cannot run authoritatively from a metadata-free exact archive without a disposable Git shim; the full 76-test suite passed serially at tested scanner source and candidate adds only authorized spec/PREBIND planning bytes. No image or runtime action occurred."
 }
