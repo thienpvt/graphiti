@@ -89,6 +89,8 @@ status: complete
 - Froze Ollama remediation candidate `3b349dd7cc9aa48a0b1ffdfa52f905097248c60f` / tree `168dcdf3c6fc12d246c28271087d0ba808d7f82a`
 - Exact raw-Git archive: 803 members; missing/extra/mismatch `0/0/0`
 - Context `3d782aa9eeb2f84798b7586e4c5f02012f68a0032fb26bbae3cea795e7afc76f`
+- Final bind evidence path: `phase6-0609-bind-c7o_8i_j/post-verify-archive` (clean rematerialization; no `.git`)
+- Matrix workspace `…/archive` had disposable Git metadata for Git-dependent tests only — not bind evidence
 - Archive-rooted 18-check matrix `READY_FOR_IMAGE_BINDING` including required Ollama E2E (5 passed)
 - One image: `graphiti-mcp:phase6-cleanroom-3b349dd7cc9a-bound` / `sha256:431a24619ac4…`
 - OCI labels: revision=full candidate; source-context=full archive context; `--pull=false`
@@ -116,6 +118,8 @@ status: complete
 - **Tree:** `168dcdf3c6fc12d246c28271087d0ba808d7f82a`
 - **Files:** 803
 - **Context:** `3d782aa9eeb2f84798b7586e4c5f02012f68a0032fb26bbae3cea795e7afc76f`
+- **Bind archive_path (evidence):** `phase6-0609-bind-c7o_8i_j/post-verify-archive`
+- **Matrix workspace (not evidence):** `phase6-0609-bind-c7o_8i_j/archive` (disposable Git metadata)
 - **Image tag:** `graphiti-mcp:phase6-cleanroom-3b349dd7cc9a-bound`
 - **Image ID prefix:** `sha256:431a24619ac4`
 - **Build count:** 1
@@ -129,12 +133,20 @@ status: complete
 
 ## Deviations from Plan
 
-None - plan executed exactly as written (matrix helper used disposable job-dir scripts; no product source edits).
+### Auto-fixed Issues
+
+**1. [Rule 1 - Bug] BIND receipt archive_path pointed at matrix workspace with disposable `.git`**
+- **Found during:** Coordinator audit after plan close-out
+- **Issue:** `archive_path` was `phase6-0609-bind-c7o_8i_j/archive`; that tree retained disposable Git metadata from matrix runs, so independent `verify_archive_against_git` reported extra_count=19 / members=822
+- **Fix:** Retargeted receipt `archive_path` to sanitized rematerialized `phase6-0609-bind-c7o_8i_j/post-verify-archive`; kept `disposable_git_metadata=true` as matrix-workspace truth only; independent re-verify: 803/803, missing/extra/mismatch 0/0/0, context match
+- **Files modified:** `06-OLLAMA-BIND-RECEIPT.json`, `06-09-SUMMARY.md`
+- **No image rebuild:** image remains `sha256:431a246…` / build_count=1
 
 ## Issues Encountered
 
 - `py_compile` initially included YAML example (SyntaxError) — restricted compile set to `.py` only in disposable runner
 - Manifest field check needed `scripts.catalog_canary_manifest_contract.LIVE_MANIFEST_FIELDS` import path
+- BIND evidence path initially cited matrix workspace; corrected to post-verify archive (above)
 
 ## Auth Gates
 
