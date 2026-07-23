@@ -382,9 +382,16 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4)*
 
-- [!] 06-05-PLAN.md — Historical OpenAI-path R0–R3/prefreeze; final canary failed before commit; immutable, never resume.
+- [!] 06-05-PLAN.md — Historical OpenAI-path R0–R3/prefreeze; final canary failed before commit; **sealed intentionally incomplete; never resume; never create 06-05-SUMMARY.md; never mark complete.** Stock `/gsd-execute-phase 6` would select this first (no SUMMARY) — **unfiltered phase execution is FORBIDDEN.**
 
-**Ollama gap waves** *(internal DAG waves 1–6 on plans 06-06..06-11; gaps-only / wave-filter / direct plan; never resume 06-05)*
+**Ollama gap waves** *(internal DAG waves 1–6 on plans 06-06..06-11; NEVER unfiltered phase-6; never resume 06-05)*
+
+**Mandatory remaining invocations** (machine-actionable; fail closed if unfiltered):
+
+1. `06-10` only: `/gsd-execute-phase 6 --gaps-only --wave 5 --no-transition`
+2. Then `06-11` only: `/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition`
+3. After 06-11 checkpoint STOP: top-level FREEZE + one canary **outside** GSD executor; do not resume execute-phase; do not write 06-11-SUMMARY.md
+4. Preflight/postflight: assert selected plan ≠ 06-05; assert 06-05-SUMMARY.md absent before and after
 
 **Gap Wave 1** *(06-06 wave:1; depends_on:[])*
 
@@ -404,11 +411,11 @@ Plans:
 
 **Gap Wave 5** *(06-10 wave:5; pending after fresh 06-09 authority)*
 
-- [ ] 06-10-PLAN.md — Direct next plan only; previous R0–R3 attempt remains immutable historical evidence and is never reused.
+- [ ] 06-10-PLAN.md — **Invoke only via** `/gsd-execute-phase 6 --gaps-only --wave 5 --no-transition`. Previous R0–R3 attempt immutable; never reuse; never select 06-05.
 
 **Gap Wave 6** *(06-11 pending)*
 
-- [ ] 06-11-PLAN.md — Pending. No freeze receipt, canary IDs, canary run, prepare, commit, or catalog writes from the rebound 06-09 execution.
+- [ ] 06-11-PLAN.md — **Invoke only via** `/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition`. Auto task then blocking-human STOP; no 06-11-SUMMARY; top-level FREEZE+canary outside GSD; requirements pending until top-level canary. No freeze receipt/IDs/canary from rebound 06-09.
 
 ---
 *Roadmap created: 2026-07-17 for milestone v1.1*
