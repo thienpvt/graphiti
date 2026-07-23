@@ -137,8 +137,9 @@ def test_materializer_output_has_no_raw_namespace_or_credentials_in_evidence_sur
     materializer.materialize(source, output, namespace)
 
     out = output.read_text(encoding='utf-8')
-    # Password/api_key must be env expansions only (no literal secrets after colon)
-    assert re.search(r'(?i)(password|api_key):\s*[^$\s{\n]', out) is None
+    # YAML password/api_key keys must be env expansions only (not bare secrets).
+    # Anchor to line start so ${OLLAMA_API_KEY:} default forms do not false-positive.
+    assert re.search(r'(?im)^\s*(password|api_key):\s*[^$\s{\n]', out) is None
     # Exactly one occurrence of the namespace UUID (the replaced token site)
     assert out.count(namespace.lower()) == 1
     captured = capsys.readouterr()

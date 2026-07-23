@@ -12,13 +12,15 @@ llm:
       api_url: ${OPENAI_API_URL:https://api.openai.com/v1}
 
 embedder:
-  provider: "openai"
-  model: ${EMBEDDER_MODEL:text-embedding-3-small}
-  dimensions: ${EMBEDDER_DIMENSIONS:1536}
+  provider: "ollama"
+  model: ${EMBEDDER_MODEL:qwen3-embedding:0.6b}
+  dimensions: ${EMBEDDER_DIMENSIONS:1024}
   providers:
-    openai:
-      api_key: ${OPENAI_EMBEDDER_API_KEY}
-      api_url: ${OPENAI_EMBEDDER_API_URL:https://api.openai.com/v1}
+    ollama:
+      api_url: ${OLLAMA_EMBEDDER_API_URL:http://host.docker.internal:11434}
+      truncate: ${OLLAMA_EMBEDDER_TRUNCATE:true}
+      keep_alive: ${OLLAMA_EMBEDDER_KEEP_ALIVE:}
+      timeout: ${OLLAMA_EMBEDDER_TIMEOUT:60}
 
 database:
   provider: "neo4j"

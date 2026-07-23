@@ -1570,7 +1570,8 @@ def test_catalog_local_authority_files_are_secret_free_lf() -> None:
 
     example = paths[1].read_text(encoding='utf-8')
     assert 'GRAPHITI_CATALOG_UUID_NAMESPACE' in example
-    assert not __import__('re').search(r'(?i)(password|api_key):\s*[^$\s{]', example)
+    # Anchor YAML keys; allow ${VAR:} empty-default expansions (not bare secrets).
+    assert not __import__('re').search(r'(?im)^\s*(password|api_key):\s*[^$\s{]', example)
 
 
 def test_materializer_is_deterministic_and_quiet(
