@@ -1,0 +1,452 @@
+{
+  "schema_version": "phase6-ollama-matrix.v1",
+  "recorded_at": "2026-07-23T10:57:13Z",
+  "plan": "06-08",
+  "classification": "MATRIX_GREEN",
+  "all_passed": true,
+  "skip_count": 0,
+  "deselect_count": 0,
+  "unexplained_skip_count": 0,
+  "unexplained_warning_count": 0,
+  "warning_classifications": [
+    {
+      "check": "root_ollama_embedder_tests",
+      "warning_count": 1,
+      "classification": "expected_pytest_warning_noise",
+      "rationale": "Pytest warning summary with zero failures; not a product assertion failure"
+    },
+    {
+      "check": "final_canary_launcher",
+      "warning_count": 1,
+      "classification": "expected_pytest_warning_noise",
+      "rationale": "Pytest warning summary with zero failures; not a product assertion failure"
+    },
+    {
+      "check": "builder_runner_related",
+      "warning_count": 1,
+      "classification": "expected_pytest_warning_noise",
+      "rationale": "Pytest warning summary with zero failures; not a product assertion failure"
+    },
+    {
+      "check": "phase6_focused_suite",
+      "warning_count": 1,
+      "classification": "expected_pytest_warning_noise",
+      "rationale": "Pytest warning summary with zero failures; not a product assertion failure"
+    },
+    {
+      "check": "combined_remediation_union",
+      "warning_count": 1,
+      "classification": "expected_pytest_warning_noise",
+      "rationale": "Pytest warning summary with zero failures; not a product assertion failure"
+    }
+  ],
+  "preflight_ref": "06-OLLAMA-PREFLIGHT.json",
+  "preflight": {
+    "daemon_reachable": true,
+    "model_present": true,
+    "native_endpoint_successful": true,
+    "observed_dimension": 1024,
+    "credential_used": false,
+    "pull_performed": true,
+    "pull_model": "qwen3-embedding:0.6b"
+  },
+  "e2e": {
+    "required": true,
+    "CATALOG_OLLAMA_REQUIRED": "1",
+    "CATALOG_OLLAMA_MODEL": "qwen3-embedding:0.6b",
+    "CATALOG_OLLAMA_DIMENSIONS": 1024,
+    "model": "qwen3-embedding:0.6b",
+    "dimensions": 1024,
+    "status": "pass",
+    "counts": {
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "xfailed": 0,
+      "xpassed": 0,
+      "errors": 0,
+      "warnings": 0,
+      "deselected": 0
+    }
+  },
+  "suite_inventory": [
+    {
+      "name": "changed_python_compile",
+      "status": "pass",
+      "counts": {
+        "files": 15,
+        "root_rc": 0,
+        "mcp_rc": 0
+      },
+      "command_id": "py_compile:changed_ollama_surface",
+      "returncode": null,
+      "paths": null,
+      "selection": null,
+      "stdout_tail_sanitized": ""
+    },
+    {
+      "name": "root_ollama_embedder_tests",
+      "status": "pass",
+      "counts": {
+        "passed": 22,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 1,
+        "deselected": 0
+      },
+      "command_id": "pytest:test_ollama.py",
+      "returncode": 0,
+      "paths": [
+        "tests/embedder/test_ollama.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": "\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[33m                                                   [100%]\u001b[0m\n\u001b[33m============================== warnings summary ===============================\u001b[0m\ngraphiti_core\\driver\\search_interface\\search_interface.py:22\n  C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-acd7200c409615285\\graphiti_core\\driver\\search_interface\\search_interface.py:22: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/\n    class SearchInterface(BaseModel):\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n\u001b[33m\u001b[32m22 passed\u001b[0m, \u001b[33m\u001b[1m1 warning\u001b[0m\u001b[33m in 0.15s\u001b[0m\u001b[0m\n"
+    },
+    {
+      "name": "mcp_factory_tests",
+      "status": "pass",
+      "counts": {
+        "passed": 28,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 0,
+        "deselected": 0
+      },
+      "command_id": "pytest:test_factories.py",
+      "returncode": 0,
+      "paths": [
+        "tests/test_factories.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": "agent-acd7200c409615285\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 28 items\n\ntests\\test_factories.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                     [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m28 passed\u001b[0m\u001b[32m in 0.95s\u001b[0m\u001b[32m ==============================\u001b[0m\n"
+    },
+    {
+      "name": "cleanroom_config_materializer",
+      "status": "pass",
+      "counts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 0,
+        "deselected": 0
+      },
+      "command_id": "pytest:test_catalog_ollama_cleanroom_config.py",
+      "returncode": 0,
+      "paths": [
+        "tests/test_catalog_ollama_cleanroom_config.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": "====================== test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-acd7200c409615285\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 5 items\n\ntests\\test_catalog_ollama_cleanroom_config.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                      [100%]\u001b[0m\n\n\u001b[32m============================== \u001b[32m\u001b[1m5 passed\u001b[0m\u001b[32m in 0.97s\u001b[0m\u001b[32m ==============================\u001b[0m\n"
+    },
+    {
+      "name": "catalog_capabilities",
+      "status": "pass",
+      "counts": {
+        "passed": 41,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 0,
+        "deselected": 0
+      },
+      "command_id": "pytest:test_catalog_capabilities.py",
+      "returncode": 0,
+      "paths": [
+        "tests/test_catalog_capabilities.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": "cope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 41 items\n\ntests\\test_catalog_capabilities.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m [ 90%]\n\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                                                     [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m41 passed\u001b[0m\u001b[32m in 1.40s\u001b[0m\u001b[32m ==============================\u001b[0m\n"
+    },
+    {
+      "name": "final_canary_launcher",
+      "status": "pass",
+      "counts": {
+        "passed": 33,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 1,
+        "deselected": 0
+      },
+      "command_id": "pytest:test_run_catalog_phase6_final_canary.py",
+      "returncode": 0,
+      "paths": [
+        "tests/script/test_run_catalog_phase6_final_canary.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": ".\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[33m                                        [100%]\u001b[0m\n\u001b[33m============================== warnings summary ===============================\u001b[0m\ngraphiti_core\\driver\\search_interface\\search_interface.py:22\n  C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-acd7200c409615285\\graphiti_core\\driver\\search_interface\\search_interface.py:22: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/\n    class SearchInterface(BaseModel):\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n\u001b[33m\u001b[32m33 passed\u001b[0m, \u001b[33m\u001b[1m1 warning\u001b[0m\u001b[33m in 0.16s\u001b[0m\u001b[0m\n"
+    },
+    {
+      "name": "builder_runner_related",
+      "status": "pass",
+      "counts": {
+        "passed": 75,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 1,
+        "deselected": 0
+      },
+      "command_id": "pytest_mixed:builder_runner_related",
+      "returncode": 0,
+      "paths": [
+        "mcp_server/tests/test_catalog_canary_scripts.py",
+        "tests/script/test_run_catalog_phase6_final_canary.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": ", asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 42 items\n\ntests\\test_catalog_canary_scripts.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m [ 83%]\n\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                                                  [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m42 passed\u001b[0m\u001b[32m in 0.83s\u001b[0m\u001b[32m ==============================\u001b[0m\n"
+    },
+    {
+      "name": "schema_bootstrap",
+      "status": "pass",
+      "counts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 0,
+        "deselected": 0
+      },
+      "command_id": "pytest:test_catalog_schema_bootstrap.py",
+      "returncode": 0,
+      "paths": [
+        "tests/test_catalog_schema_bootstrap.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": " session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-acd7200c409615285\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 8 items\n\ntests\\test_catalog_schema_bootstrap.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                          [100%]\u001b[0m\n\n\u001b[32m============================== \u001b[32m\u001b[1m8 passed\u001b[0m\u001b[32m in 0.12s\u001b[0m\u001b[32m ==============================\u001b[0m\n"
+    },
+    {
+      "name": "phase5_focused_suite",
+      "status": "pass",
+      "counts": {
+        "passed": 413,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 0,
+        "deselected": 0
+      },
+      "command_id": "pytest:test_catalog_security_matrix.py,test_catalog_canary_scripts.py,test_catalog_canary_review_regressions.py,test_catalog_service.py,test_catalog_capabilities.py,test_catalog_gates.py,test_catalog_commit_recovery.py,test_catalog_concurrency.py,test_catalog_store_unit.py,test_legacy_mcp_contract_compatibility.py",
+      "returncode": 0,
+      "paths": [
+        "tests/test_catalog_security_matrix.py",
+        "tests/test_catalog_canary_scripts.py",
+        "tests/test_catalog_canary_review_regressions.py",
+        "tests/test_catalog_service.py",
+        "tests/test_catalog_capabilities.py",
+        "tests/test_catalog_gates.py",
+        "tests/test_catalog_commit_recovery.py",
+        "tests/test_catalog_concurrency.py",
+        "tests/test_catalog_store_unit.py",
+        "tests/test_legacy_mcp_contract_compatibility.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": "\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m [ 88%]\n\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                    [ 97%]\u001b[0m\ntests\\test_legacy_mcp_contract_compatibility.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                [100%]\u001b[0m\n\n\u001b[32m============================= \u001b[32m\u001b[1m413 passed\u001b[0m\u001b[32m in 5.07s\u001b[0m\u001b[32m =============================\u001b[0m\n"
+    },
+    {
+      "name": "phase6_focused_suite",
+      "status": "pass",
+      "counts": {
+        "passed": 187,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 1,
+        "deselected": 0
+      },
+      "command_id": "pytest_mixed:phase6_focused_suite",
+      "returncode": 0,
+      "paths": [
+        "tests/embedder/test_ollama.py",
+        "mcp_server/tests/test_factories.py",
+        "mcp_server/tests/test_catalog_ollama_cleanroom_config.py",
+        "mcp_server/tests/test_catalog_capabilities.py",
+        "tests/script/test_run_catalog_phase6_final_canary.py",
+        "mcp_server/tests/test_catalog_canary_scripts.py",
+        "mcp_server/tests/test_catalog_schema_bootstrap.py",
+        "mcp_server/tests/test_catalog_raw_git_archive.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": "0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m [ 82%]\n\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                                                  [ 87%]\u001b[0m\ntests\\test_catalog_schema_bootstrap.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                          [ 93%]\u001b[0m\ntests\\test_catalog_raw_git_archive.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                           [100%]\u001b[0m\n\n\u001b[32m============================ \u001b[32m\u001b[1m132 passed\u001b[0m\u001b[32m in 13.08s\u001b[0m\u001b[32m =============================\u001b[0m\n"
+    },
+    {
+      "name": "combined_remediation_union",
+      "status": "pass",
+      "counts": {
+        "passed": 517,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 1,
+        "deselected": 0
+      },
+      "command_id": "pytest_mixed:combined_remediation_union",
+      "returncode": 0,
+      "paths": [
+        "mcp_server/tests/test_catalog_canary_review_regressions.py",
+        "mcp_server/tests/test_catalog_canary_scripts.py",
+        "mcp_server/tests/test_catalog_capabilities.py",
+        "mcp_server/tests/test_catalog_commit_recovery.py",
+        "mcp_server/tests/test_catalog_concurrency.py",
+        "mcp_server/tests/test_catalog_gates.py",
+        "mcp_server/tests/test_catalog_ollama_cleanroom_config.py",
+        "mcp_server/tests/test_catalog_raw_git_archive.py",
+        "mcp_server/tests/test_catalog_schema_bootstrap.py",
+        "mcp_server/tests/test_catalog_security_matrix.py",
+        "mcp_server/tests/test_catalog_service.py",
+        "mcp_server/tests/test_catalog_store_unit.py",
+        "mcp_server/tests/test_factories.py",
+        "mcp_server/tests/test_legacy_mcp_contract_compatibility.py",
+        "tests/embedder/test_ollama.py",
+        "tests/script/test_run_catalog_phase6_final_canary.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": "\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                    [ 91%]\u001b[0m\ntests\\test_factories.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                     [ 98%]\u001b[0m\ntests\\test_legacy_mcp_contract_compatibility.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                [100%]\u001b[0m\n\n\u001b[32m============================ \u001b[32m\u001b[1m462 passed\u001b[0m\u001b[32m in 16.68s\u001b[0m\u001b[32m =============================\u001b[0m\n"
+    },
+    {
+      "name": "golden_contract_hash",
+      "status": "pass",
+      "counts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 0,
+        "deselected": 33
+      },
+      "command_id": "pytest:test_catalog_canary_scripts.py,test_catalog_raw_git_archive.py",
+      "returncode": 0,
+      "paths": [
+        "tests/test_catalog_canary_scripts.py",
+        "tests/test_catalog_raw_git_archive.py"
+      ],
+      "selection": "pytest -k golden|hash|sha256|digest|hardened",
+      "stdout_tail_sanitized": "erver\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 50 items / 33 deselected / 17 selected\n\ntests\\test_catalog_canary_scripts.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                     [ 88%]\u001b[0m\ntests\\test_catalog_raw_git_archive.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                 [100%]\u001b[0m\n\n\u001b[32m===================== \u001b[32m\u001b[1m17 passed\u001b[0m, \u001b[33m33 deselected\u001b[0m\u001b[32m in 10.61s\u001b[0m\u001b[32m ======================\u001b[0m\n"
+    },
+    {
+      "name": "exact_22_field_manifest",
+      "status": "pass",
+      "counts": {
+        "fields": 22
+      },
+      "command_id": "python:LIVE_MANIFEST_FIELDS==22",
+      "returncode": null,
+      "paths": null,
+      "selection": null,
+      "stdout_tail_sanitized": "MANIFEST_FIELDS 22\nOK\n"
+    },
+    {
+      "name": "exact_28_tool_registry",
+      "status": "pass",
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 0,
+        "deselected": 8
+      },
+      "command_id": "pytest:test_legacy_mcp_contract_compatibility.py",
+      "returncode": 0,
+      "paths": [
+        "tests/test_legacy_mcp_contract_compatibility.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": "===================== test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-acd7200c409615285\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 9 items / 8 deselected / 1 selected\n\ntests\\test_legacy_mcp_contract_compatibility.py \u001b[32m.\u001b[0m\u001b[32m                        [100%]\u001b[0m\n\n\u001b[32m======================= \u001b[32m\u001b[1m1 passed\u001b[0m, \u001b[33m8 deselected\u001b[0m\u001b[32m in 0.09s\u001b[0m\u001b[32m =======================\u001b[0m\n"
+    },
+    {
+      "name": "ruff_check",
+      "status": "pass",
+      "counts": {
+        "files": 14,
+        "returncode": 0
+      },
+      "command_id": "ruff check <touched>",
+      "returncode": null,
+      "paths": null,
+      "selection": null,
+      "stdout_tail_sanitized": "\u001b[1;32mAll checks passed!\u001b[0m\n"
+    },
+    {
+      "name": "ruff_format_check",
+      "status": "pass",
+      "counts": {
+        "files": 14,
+        "returncode": 0
+      },
+      "command_id": "ruff format --check <touched>",
+      "returncode": null,
+      "paths": null,
+      "selection": null,
+      "stdout_tail_sanitized": "14 files already formatted\n"
+    },
+    {
+      "name": "pyright_touched_packages",
+      "status": "pass",
+      "counts": {
+        "root_rc": 0,
+        "mcp_rc": 0
+      },
+      "command_id": "pyright:root+mcp_touched",
+      "returncode": null,
+      "paths": null,
+      "selection": null,
+      "stdout_tail_sanitized": "0 errors, 0 warnings, 0 informations\nWARNING: there is a new pyright version available (v1.1.408 -> v1.1.411).\nPlease install the new version or set PYRIGHT_PYTHON_FORCE_VERSION to `latest`\n\n\n0 errors, 0 warnings, 0 informations\nWARNING: there is a new pyright version available (v1.1.408 -> v1.1.411).\nPlease install the new version or set PYRIGHT_PYTHON_FORCE_VERSION to `latest`\n\n"
+    },
+    {
+      "name": "required_real_ollama_e2e",
+      "status": "pass",
+      "counts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "errors": 0,
+        "warnings": 0,
+        "deselected": 0
+      },
+      "command_id": "pytest:test_catalog_ollama_e2e.py",
+      "returncode": 0,
+      "paths": [
+        "tests/test_catalog_ollama_e2e.py"
+      ],
+      "selection": null,
+      "stdout_tail_sanitized": "====================== test session starts =============================\u001b[0m\nplatform win32 -- Python 3.10.20, pytest-9.0.3, pluggy-1.6.0\nrootdir: C:\\Users\\thien\\PyCharmMiscProject\\graphiti\\.claude\\worktrees\\agent-acd7200c409615285\\mcp_server\\tests\nconfigfile: pytest.ini\nplugins: anyio-4.9.0, Faker-40.23.0, asyncio-1.4.0, timeout-2.4.0, xdist-3.8.0\nasyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ntimeout: 300.0s\ntimeout method: thread\ntimeout func_only: False\ncollected 5 items\n\ntests\\test_catalog_ollama_e2e.py \u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m.\u001b[0m\u001b[32m                                   [100%]\u001b[0m\n\n\u001b[32m============================== \u001b[32m\u001b[1m5 passed\u001b[0m\u001b[32m in 9.45s\u001b[0m\u001b[32m ==============================\u001b[0m\n"
+    }
+  ],
+  "check_count": 18,
+  "image_build_count": 0,
+  "runtime_start_count": 0,
+  "canary_ids_allocated": false,
+  "canary_executed": false,
+  "protected_config_status": "unstaged_deferred_dim_1536",
+  "sanitized": true
+}
