@@ -365,8 +365,6 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 
 Plans:
 
-- [ ] 06-05-PLAN.md
-
 **Wave 1**
 
 - [x] 06-01-PLAN.md — TDD raw-Git exact archive materializer + baseline context golden (resume H8)
@@ -391,8 +389,8 @@ Plans:
 
 **Mandatory remaining invocations** (machine-actionable; fail closed if unfiltered):
 
-1. `06-10` only: `/gsd-execute-phase 6 --gaps-only --wave 5 --no-transition`
-2. Then `06-11` only: `/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition`
+1. `06-10` completed (wave 5). Do not re-run.
+2. `06-11` only: `/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition`
 3. After 06-11 checkpoint STOP: top-level FREEZE + one canary **outside** GSD executor; do not resume execute-phase; do not write 06-11-SUMMARY.md
 4. Preflight/postflight: assert selected plan ≠ 06-05; assert 06-05-SUMMARY.md absent before and after
 

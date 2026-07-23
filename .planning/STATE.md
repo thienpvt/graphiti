@@ -10,7 +10,7 @@ progress:
   completed_phases: 7
   total_plans: 55
   completed_plans: 53
-  percent: 88
+  percent: 96
 current_phase: 06
 current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
 last_activity: 2026-07-23
@@ -128,18 +128,16 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 - [Phase 06]: Historical 06-09 authority `3b349dd` / `sha256:431a246…` remains preserved but is superseded for future execution.
 - [Phase 06]: Fresh 06-09 authority: candidate `da8dce8`, tree `47506ef0`, context `5284da1b…`; archive 812/812 exact; matrix 21/21; image `sha256:85775ff…`; scan zero; build_count=1.
 - [Phase 06]: Rebound 06-09 performed zero runtime starts, IDs, launcher invocations, prepare, commit, or Catalog writes. Previous failed runtime resources/evidence remain immutable.
-- [Phase 06]: 06-10 and 06-11 remain pending. Next authorization target is direct 06-10; 06-05 remains intentionally incomplete.
-- [Phase ?]: 06-10: fresh a75e295d Ollama R0-R3 GREEN; freeze deferred to 06-11
+- [Phase 06]: 06-10 complete — fresh a75e295d Ollama R0–R3 GREEN + prefreeze; 06-11 pending; 06-05 remains intentionally incomplete.
 
 ### Pending Todos
 
-- Direct 06-10 is next. Do not auto-continue from 06-09.
-- 06-11 remains pending behind 06-10.
-- Never resume 06-05 or reuse/reclassify the previous failed runtime attempt.
+- Direct 06-11 is next via `/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition`.
+- Never resume 06-05 or reuse/reclassify historical failed runtime attempts (1f529136 / d19a171e).
 
 ### Blockers/Concerns
 
-- `P6-OLL-RT-01`, `P6-OLL-CAN-01`, and `P6-OLL-REPT-01` remain unmet. `P6-OLL-SAFE-01` preservation evidence exists, but the planned successful runtime/canary scope did not complete.
+- `P6-OLL-RT-01` met (06-10). `P6-OLL-CAN-01` and `P6-OLL-REPT-01` remain unmet until freeze/canary. `P6-OLL-SAFE-01` partial — preservation evidence exists; terminal preservation proof still pending.
 - Preserve unrelated working-tree changes: `.planning/config.json`, prior phase artifacts, Docker/Kubernetes configs, `.codegraph/`, `catalog/`, `mcp_server/sample_catalog.json`.
 - Unrelated `mcp_server/config/config-docker-neo4j.yaml` defaults `qwen3-embedding:0.6b` to 1536 dimensions although official maximum is 1024; intentionally untouched (P6-PRES-01).
 - Never clean, reuse, reconfigure, retry, or reclassify `graphiti-phase6-cleanroom-d19a171e`.
@@ -175,4 +173,4 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 **Resume file:** None
 
 Stopped at: Completed 06-10-PLAN.md
-Next: direct 06-10. Do not resume 06-05; do not auto-start 06-10 in this session.
+Next: direct 06-11 via `/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition`. Do not resume 06-05; do not unfiltered `/gsd-execute-phase 6`.
