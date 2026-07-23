@@ -1,0 +1,69 @@
+{
+  "schema_version": "phase6-r3-receipt-v1",
+  "recorded_date": "2026-07-23",
+  "stage": "R3",
+  "passed": true,
+  "ok": true,
+  "classification": "R3_MCP_READINESS_GREEN",
+  "project": "graphiti-phase6-cleanroom-1f529136",
+  "image": "graphiti-mcp:phase6-cleanroom-60d270dfad32-bound",
+  "expected_image_id": "sha256:3602956a626cfa48f9d2cebb0f4ec048736724891866a1d71189da3ace81a572",
+  "observed_image_id": "sha256:3602956a626cfa48f9d2cebb0f4ec048736724891866a1d71189da3ace81a572",
+  "image_id_match": true,
+  "mcp_container": "graphiti-phase6-cleanroom-1f529136-graphiti-mcp-1",
+  "mcp_health": "healthy",
+  "mcp_port": 18000,
+  "mcp_start_mode": "no_deps",
+  "tool_count": 28,
+  "tools_ready": true,
+  "readiness_calls_only": [
+    "list_tools",
+    "get_status",
+    "get_catalog_capabilities"
+  ],
+  "get_status": {
+    "status": "ok",
+    "message": "Graphiti MCP server is running and connected to neo4j database"
+  },
+  "embeddings": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "ready": "unknown",
+    "native_openai_waiver_applied": true
+  },
+  "namespace_fingerprint": "5d54f7f83eb90194",
+  "namespace_fingerprint_match": true,
+  "uuid_namespace_configured": true,
+  "neo4j_indexes": "ready",
+  "connectivity": "ok",
+  "backend": "neo4j",
+  "prepare_called": false,
+  "generative_llm_called": false,
+  "public_openai_probe": false,
+  "provider_health_probe": false,
+  "order_observed": ["render", "neo4j", "bootstrap", "mcp"],
+  "canary_ids_allocated": false,
+  "canary_executed": false,
+  "canary_ids": null,
+  "sanitized": true,
+  "pre_id_deviations": [
+    {
+      "id": "DEV-MCP-EMBEDDER-API-KEY-ENV",
+      "severity": "pre_id",
+      "summary": "Initial canonical MCP start lacked OPENAI_EMBEDDER_API_KEY because launcher does not load mcp_server/.env. One failed container replaced with same image/project/network/config; process environment sourced from existing local .env without logging secret values.",
+      "replacement_image_id": "sha256:3602956a626cfa48f9d2cebb0f4ec048736724891866a1d71189da3ace81a572",
+      "source_edit": false,
+      "image_rebuild": false,
+      "disposition": "documented_continue",
+      "blocks_green": false
+    }
+  ],
+  "live_verify": {
+    "container_running": true,
+    "health": "healthy",
+    "http_health": {"status": "healthy", "service": "graphiti-mcp"},
+    "tool_count": 28,
+    "prepare_called": false
+  },
+  "notes": "Readiness re-verified live without restart. Only registry/status/zero-arg capabilities. embeddings.ready=unknown accepted under native OpenAI waiver. No prepare. No canary IDs."
+}

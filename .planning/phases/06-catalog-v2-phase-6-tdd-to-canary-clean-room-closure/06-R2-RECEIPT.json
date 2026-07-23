@@ -1,0 +1,56 @@
+{
+  "schema_version": "phase6-r2-receipt-v1",
+  "recorded_date": "2026-07-23",
+  "stage": "R2",
+  "passed": true,
+  "ok": true,
+  "classification": "R2_SCHEMA_BOOTSTRAP_GREEN",
+  "project": "graphiti-phase6-cleanroom-1f529136",
+  "expected_image_id": "sha256:3602956a626cfa48f9d2cebb0f4ec048736724891866a1d71189da3ace81a572",
+  "observed_image_id": "sha256:3602956a626cfa48f9d2cebb0f4ec048736724891866a1d71189da3ace81a572",
+  "image_id_match": true,
+  "preflight": "0/14",
+  "postflight": "14/14",
+  "preflight_ok": true,
+  "postflight_ok": true,
+  "retry_count": 0,
+  "bootstrap_count": 1,
+  "schema_bootstrap_classification": "PASSED_SCHEMA_BOOTSTRAP",
+  "partial_failure": false,
+  "rollback_attempted": false,
+  "mcp_absent_during_bootstrap": true,
+  "neo4j_health_during_bootstrap": "healthy",
+  "order_observed": ["render", "neo4j", "bootstrap"],
+  "pre_inspection": {
+    "matched": 0,
+    "expected": 14,
+    "ready": false,
+    "status": "succeeded"
+  },
+  "post_inspection": {
+    "matched": 14,
+    "expected": 14,
+    "ready": true,
+    "status": "succeeded",
+    "identity": true,
+    "plan": true,
+    "evidence_manifest": true
+  },
+  "canary_ids_allocated": false,
+  "canary_executed": false,
+  "canary_ids": null,
+  "sanitized": true,
+  "pre_id_deviations": [
+    {
+      "id": "DEV-COMPOSE-NO-BUILD-FLAG",
+      "severity": "pre_id",
+      "summary": "Installed Docker Compose v5.1.4 rejects docker compose run --no-build. Bootstrap executed once with equivalent fixed argv omitting only unsupported --no-build. Sanitized diagnostic at C:/Users/thien/.claude/jobs/1f529136/tmp/phase6-bootstrap-compatible-diagnostic.txt.",
+      "outcome": "PASSED_SCHEMA_BOOTSTRAP 0/14 to 14/14 retry_count=0",
+      "disposition": "documented_continue",
+      "blocks_green": false,
+      "source_edit": false,
+      "image_rebuild": false
+    }
+  ],
+  "notes": "Exactly one bootstrap. No repair/drop/replace. No second project. Schema already proven; no re-bootstrap for receipt writing."
+}
