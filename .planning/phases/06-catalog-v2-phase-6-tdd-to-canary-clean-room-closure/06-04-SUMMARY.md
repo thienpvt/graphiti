@@ -2,24 +2,22 @@
 phase: 06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure
 plan: 04
 status: blocked
-completed: 2026-07-22
-candidate: 5efa69f4ae6a9ec78efbf29193a57c0679a5019e
+completed: 2026-07-23
+candidate: cee10976c47122a0e19a87cd506edfc3c3ef5e82
 ---
 
 # Plan 06-04 Summary
 
-Built one source-bound standalone MCP image from the exact archive-derived filtered projection:
+Built the single image allowed by quick task `260723-9xv`:
 
-- Tag: `graphiti-mcp:phase6-cleanroom-5efa69f4ae6-bound`
-- Image ID: `sha256:33d22dbf6aac6e95458e4192c3772605c8ae19030d02af17b9390ff7a8a08e5f`
-- Revision label: exact BIND commit `5efa69f4ae6a9ec78efbf29193a57c0679a5019e`
-- Source-context label: exact full archive context `623845ad65ce738c96964ae3e292fa700d15a063d8864d58e11691f5a811aa85`
-- Build context: 205 archive-derived files; SHA-256 `53bd62bb9ec99ff70a97a6b12905a7341c24f08b4ee4e196a0f41b580bf68cb0`
+- Tag: `graphiti-mcp:phase6-cleanroom-cee10976c471-bound`
+- Image ID: `sha256:ef53905bfab2c14784f1f38c57787ddbb67f38e15770276a9ab547b3011b7942`
+- Candidate: `cee10976c47122a0e19a87cd506edfc3c3ef5e82`
+- Archive context: `922f49c68c8d576cc2887d707309e9b98b7b65c8df549f4e27511489205e4587`
+- Projection: 205 archive-derived files; protected config and planning paths excluded
 
-The protected `mcp_server/config/config-docker-neo4j.yaml`, `.planning/**`, and secret/runtime denylist remained absent from projection and final image. The committed baseline protected path remained present in raw-Git archive authority.
+The candidate-bound `scan_complete_image` authority reported 22 `credential_literal` hits across complete image FS/config/history/layer surfaces. The image remains `IMAGE_BOUND_SCAN_BLOCKED` and is preserved.
 
-Final Graphiti/MCP application paths scanned zero-hit; labels and denylisted paths matched expectations. The stricter Plan 06-04 complete-image gate did not pass: the bound `_assert_no_sensitive_values` authority produced 405 raw matches over 5,137 text payloads across application, OS, and dependency content. These include code identifiers/examples; classification cannot be waived or narrowed under the plan.
+Two source-only follow-up commits corrected classifications for package metadata, explicit test constants, and masked placeholders. Current HEAD scans the preserved image at zero hits, but those bytes are not the image's bound candidate. They cannot retroactively green the image. The one-new-image ceiling is exhausted; no second build occurred.
 
-One preliminary Docker command failed before reading a Dockerfile because the projection omitted the archive Dockerfile. It created no image. The Dockerfile archive byte was added to the projection; exactly one image build then completed.
-
-Plan 06-04 is `IMAGE_BOUND_SCAN_BLOCKED`. Plan 06-05 runtime remains prohibited. No runtime, Compose service, MCP transport, provider call, namespace generation, identity allocation, or canary execution occurred. The built image and historical images remain preserved.
+All prior images remain preserved. Protected configuration remains modified and unstaged. No runtime, Compose, MCP transport, provider call, namespace generation, identity allocation, or canary execution occurred.
