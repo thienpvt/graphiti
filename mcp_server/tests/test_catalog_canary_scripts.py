@@ -1609,6 +1609,14 @@ def test_materializer_is_deterministic_and_quiet(
     assert namespace not in captured.out + captured.err
 
 
+def _set_construction_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Construction allowlist required by compose_env; values are test-only."""
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-construction-key')
+    monkeypatch.setenv('OPENAI_API_URL', 'https://api.openai.com/v1')
+    monkeypatch.setenv('MODEL_NAME', 'gpt-4.1-mini')
+    monkeypatch.setenv('OLLAMA_EMBEDDER_API_URL', 'http://host.docker.internal:11434')
+
+
 def test_launcher_attests_exact_argv_before_shell_false_subprocess(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1637,6 +1645,7 @@ def test_launcher_attests_exact_argv_before_shell_false_subprocess(
     monkeypatch.setenv('COMPOSE_PROJECT_NAME', 'foreign')
     monkeypatch.setenv('COMPOSE_REMOVE_ORPHANS', '1')
     monkeypatch.setenv('COMPOSE_FILE', 'evil.yml')
+    _set_construction_env(monkeypatch)
     for action in ('render', 'status', 'inspect'):
         launcher.run_compose(action)
         expected = launcher.runner.compose_argv(action)
@@ -1708,6 +1717,7 @@ def test_launcher_sanitizes_ambient_authority(monkeypatch: pytest.MonkeyPatch) -
     sys.modules['run_catalog_canary_batch'] = runner
     launcher = _load_script('catalog_launcher_env_test', LAUNCHER_PATH)
     options = runner.ComposeOptions()
+    _set_construction_env(monkeypatch)
     for key in (
         'DOCKER_HOST',
         'DOCKER_CONTEXT',
@@ -1721,6 +1731,90 @@ def test_launcher_sanitizes_ambient_authority(monkeypatch: pytest.MonkeyPatch) -
     assert 'GRAPHITI_CATALOG_UUID_NAMESPACE' not in env
     assert 'CATALOG_UPSERT__UUID_NAMESPACE' not in env
     assert env['NEO4J_URI'] == 'bolt://neo4j:7687'
+    assert env['USERPROFILE']
+
+
+def test_launcher_compose_env_includes_userprofile_for_plugin_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows Docker CLI discovers compose plugins under %USERPROFILE%\\.docker\\cli-plugins."""
+    sys.modules['run_catalog_canary_batch'] = runner
+    launcher = _load_script('catalog_launcher_userprofile_test', LAUNCHER_PATH)
+    options = runner.ComposeOptions()
+    _set_construction_env(monkeypatch)
+    monkeypatch.setenv('USERPROFILE', r'C:\Users\phase6-host')
+    env = launcher.compose_env(options)
+    assert 'USERPROFILE' in launcher.FIXED_SUBPROCESS_ENV
+    assert env['USERPROFILE'] == r'C:\Users\phase6-host'
+    monkeypatch.delenv('USERPROFILE', raising=False)
+    monkeypatch.setenv('HOME', '/home/phase6-host')
+    env_fallback = launcher.compose_env(options)
+    assert env_fallback['USERPROFILE'] == '/home/phase6-host'
+
+
+def test_launcher_inspect_neo4j_waits_same_container_for_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Neo4j health starts as starting; poll the same container until healthy (no recreate)."""
+    sys.modules['run_catalog_canary_batch'] = runner
+    launcher = _load_script('catalog_launcher_neo4j_health_test', LAUNCHER_PATH)
+    options = runner.ComposeOptions(
+        project='clean-one',
+        clean_room=True,
+        image='graphiti-mcp:phase6-test',
+        expected_image_id='sha256:' + 'a' * 64,
+    )
+    resources = runner.compose_resource_identities(options.project)
+    sleeps: list[float] = []
+    observations = [
+        [
+            {
+                'Config': {
+                    'Labels': {
+                        'com.docker.compose.project': options.project,
+                        'com.docker.compose.service': 'neo4j',
+                    }
+                },
+                'Mounts': [
+                    {'Destination': '/data', 'Name': resources['data_volume']},
+                    {'Destination': '/logs', 'Name': resources['logs_volume']},
+                ],
+                'State': {'Health': {'Status': 'starting'}},
+                'NetworkSettings': {'Networks': {resources['network']: {}}},
+            }
+        ],
+        [
+            {
+                'Config': {
+                    'Labels': {
+                        'com.docker.compose.project': options.project,
+                        'com.docker.compose.service': 'neo4j',
+                    }
+                },
+                'Mounts': [
+                    {'Destination': '/data', 'Name': resources['data_volume']},
+                    {'Destination': '/logs', 'Name': resources['logs_volume']},
+                ],
+                'State': {'Health': {'Status': 'healthy'}},
+                'NetworkSettings': {'Networks': {resources['network']: {}}},
+            }
+        ],
+    ]
+
+    def fake_inspect(kind: str, name: str, opts: Any) -> list[dict[str, Any]]:
+        assert kind == 'container'
+        assert name == resources['neo4j_container']
+        assert opts is options
+        return observations.pop(0)
+
+    monkeypatch.setattr(launcher, '_inspect_optional', fake_inspect)
+    monkeypatch.setattr(launcher.time, 'sleep', lambda seconds: sleeps.append(seconds))
+    # Keep deadline far enough that one sleep/retry is allowed without timeout.
+    monkeypatch.setattr(launcher.time, 'time', lambda: 0.0)
+    observed = launcher._inspect_neo4j(options)
+    assert observed['health'] == 'healthy'
+    assert sleeps == [2.0]
+    assert observations == []
 
 
 def test_launcher_public_actions_and_fixed_compose_argv() -> None:
@@ -1754,6 +1848,11 @@ def test_launcher_public_actions_and_fixed_compose_argv() -> None:
         command = runner.compose_argv(action, options)
         assert command[-len(suffix) :] == suffix
         assert runner.attest_host_compose_argv(command, options)['action'] == action
+    bootstrap = runner.compose_argv('bootstrap', options)
+    assert '--pull' in bootstrap and bootstrap[bootstrap.index('--pull') + 1] == 'never'
+    assert '--no-deps' in bootstrap
+    assert '--rm' in bootstrap
+    assert '--no-build' not in bootstrap
 
 
 def test_compose_override_isolated_and_bootstrap_uses_project_environment() -> None:
@@ -1777,6 +1876,7 @@ def test_materializer_clean_room_project_syntax_and_single_generation(
     source = ROOT / 'mcp_server/config/config-docker-neo4j.catalog-local.example.yaml'
     generated = __import__('uuid').UUID('12345678-1234-4678-9234-567812345678')
     calls = 0
+    _set_construction_env(monkeypatch)
 
     def uuid4() -> Any:
         nonlocal calls

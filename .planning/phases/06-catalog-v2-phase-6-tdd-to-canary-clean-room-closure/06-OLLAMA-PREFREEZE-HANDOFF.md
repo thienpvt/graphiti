@@ -1,13 +1,13 @@
 # Phase 6 Plan 10 Ollama Prefreeze Handoff
 
-**status:** PENDING_TOP_LEVEL_HANDOFF  
-**plan:** 06-10  
-**recorded_date:** 2026-07-23  
-**canary_executed:** false  
-**canary_ids_allocated:** false  
-**no_post_allocation_git_commit:** true  
-**summary_created:** false  
-**freeze_receipt_finalized_by_executor:** false  
+**status:** PENDING_TOP_LEVEL_HANDOFF
+**plan:** 06-10
+**recorded_date:** 2026-07-23
+**canary_executed:** false
+**canary_ids_allocated:** false
+**no_post_allocation_git_commit:** true
+**summary_created:** false
+**freeze_receipt_finalized_by_executor:** false
 
 ## Authority
 

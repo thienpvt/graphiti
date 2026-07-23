@@ -374,9 +374,7 @@ def _inspect_neo4j(options: runner.ComposeOptions) -> dict[str, Any]:
             or mounts.get('/logs') != resources['logs_volume']
             or resources['network'] not in networks
         ):
-            raise runner.RunnerError(
-                'neo4j_observation_failed', 'Neo4j runtime binding is invalid'
-            )
+            raise runner.RunnerError('neo4j_observation_failed', 'Neo4j runtime binding is invalid')
         if health == 'healthy':
             return {'health': health, 'mounts': mounts, 'network': resources['network']}
         last_error = f'Neo4j health is {health!r}, waiting for healthy'

@@ -1,10 +1,10 @@
 # Phase 6 Native Ollama Terminal Report (shell)
 
-**status:** PREFREEZE_READY  
-**classification:** R0_R3_GREEN_PENDING_FREEZE  
-**canary_executed:** false  
-**canary_ids_allocated:** false  
-**freeze_receipt_written:** false  
+**status:** PREFREEZE_READY
+**classification:** R0_R3_GREEN_PENDING_FREEZE
+**canary_executed:** false
+**canary_ids_allocated:** false
+**freeze_receipt_written:** false
 
 ## Authority
 
