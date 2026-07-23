@@ -32,6 +32,7 @@
 
 ## 3. Classification shell (live uncommitted)
 
+<!-- phase6-final-canary-live:start -->
 | Field | Value |
 |-------|-------|
 | terminal_class | *(pending top-level handoff)* |
@@ -40,6 +41,7 @@
 | counts.edges | *(pending)* |
 | counts.sources | *(pending)* |
 | counts.evidence_links | *(pending)* |
+<!-- phase6-final-canary-live:end -->
 
 Post-ID allowlist only after identity allocation: `PASSED` | `FAILED_BEFORE_COMMIT` | `FAILED_AFTER_COMMIT`.
 

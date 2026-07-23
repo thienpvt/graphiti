@@ -468,11 +468,27 @@ def _phase_ledger(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _final_report_text(current: str, ledger: dict[str, Any]) -> str:
-    start = current.find(LIVE_FIELDS_START)
-    end = current.find(LIVE_FIELDS_END)
+def _validate_final_report_live_markers(text: str) -> tuple[int, int]:
+    """Require ordered LIVE_FIELDS markers; return (start, end) indexes."""
+    start = text.find(LIVE_FIELDS_START)
+    end = text.find(LIVE_FIELDS_END)
     if start < 0 or end < 0 or end <= start:
         raise FinalCanaryError('final report live field markers are invalid')
+    return start, end
+
+
+def _require_final_report_live_markers(phase_dir: Path) -> None:
+    """Read-only preflight: phase final-report shell must expose live markers."""
+    final_report = phase_dir / '06-FINAL-REPORT.md'
+    try:
+        text = final_report.read_text(encoding='utf-8')
+    except OSError as exc:
+        raise FinalCanaryError('final report shell is unavailable') from exc
+    _validate_final_report_live_markers(text)
+
+
+def _final_report_text(current: str, ledger: dict[str, Any]) -> str:
+    start, end = _validate_final_report_live_markers(current)
     fields = [
         LIVE_FIELDS_START,
         f'- Classification: `{ledger["classification"]}`',
@@ -555,6 +571,8 @@ def run_final_canary(
     image_commit = image.get('commit', image.get('revision'))
     if image.get('image_id') != image_id or image_commit != image_revision:
         raise FinalCanaryError('image receipt differs from freeze')
+
+    _require_final_report_live_markers(phase_dir)
 
     artifact_parent = Path(_option_value(expanded, '--artifact-parent'))
     result_parent = Path(_option_value(expanded, '--result-parent'))

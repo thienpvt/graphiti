@@ -309,6 +309,116 @@ def test_final_canary_calls_builder_and_runner_once_shell_false(
     ).exists()
 
 
+def test_final_report_shell_live_markers_preflight_valid() -> None:
+    phase_report = (
+        ROOT
+        / '.planning'
+        / 'phases'
+        / '06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure'
+        / '06-FINAL-REPORT.md'
+    )
+    text = phase_report.read_text(encoding='utf-8')
+    start, end = launcher._validate_final_report_live_markers(text)
+    assert start < end
+    launcher._require_final_report_live_markers(phase_report.parent)
+
+
+def test_final_report_live_markers_valid_text_does_not_raise() -> None:
+    text = (
+        '# shell\n' + launcher.LIVE_FIELDS_START + '\npending\n' + launcher.LIVE_FIELDS_END + '\n'
+    )
+    start, end = launcher._validate_final_report_live_markers(text)
+    assert start < end
+
+
+@pytest.mark.parametrize(
+    'text',
+    [
+        'no markers',
+        launcher.LIVE_FIELDS_END + '\n' + launcher.LIVE_FIELDS_START,
+        launcher.LIVE_FIELDS_START + '\nno end',
+        'no start\n' + launcher.LIVE_FIELDS_END,
+    ],
+)
+def test_final_report_live_markers_invalid_raise(text: str) -> None:
+    with pytest.raises(
+        launcher.FinalCanaryError, match='final report live field markers are invalid'
+    ):
+        launcher._validate_final_report_live_markers(text)
+
+
+def test_final_report_live_markers_end_before_start_raises() -> None:
+    text = launcher.LIVE_FIELDS_END + '\nmiddle\n' + launcher.LIVE_FIELDS_START
+    with pytest.raises(
+        launcher.FinalCanaryError, match='final report live field markers are invalid'
+    ):
+        launcher._validate_final_report_live_markers(text)
+
+
+def test_final_canary_missing_shell_markers_fail_before_claim_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, environment = _job(tmp_path)
+    freeze = _freeze(tmp_path)
+    invocation = _invocation(tmp_path)
+    _image(tmp_path)
+    monkeypatch.setattr(
+        launcher, '_git_value', lambda argv: '1' * 40 if 'rev-parse' in argv else '42'
+    )
+
+    def forbidden_claim(job_tmp: Path, frozen_head: str) -> tuple[Path, str]:
+        raise AssertionError('_claim_allocation must not run when shell markers missing')
+
+    monkeypatch.setattr(launcher, '_claim_allocation', forbidden_claim)
+    phase_dir = tmp_path / 'phase'
+    phase_dir.mkdir()
+    (phase_dir / '06-FINAL-REPORT.md').write_text(
+        '# Phase 6 Final Report\n\n## 3. Classification shell\n\n| Field | Value |\n',
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(launcher, '_phase_directory', lambda expanded: phase_dir)
+
+    with pytest.raises(
+        launcher.FinalCanaryError, match='final report live field markers are invalid'
+    ):
+        launcher.run_final_canary(
+            freeze_receipt=freeze,
+            invocation=invocation,
+            environment=environment,
+        )
+
+
+def test_final_canary_missing_shell_file_fails_before_claim_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, environment = _job(tmp_path)
+    freeze = _freeze(tmp_path)
+    invocation = _invocation(tmp_path)
+    _image(tmp_path)
+    monkeypatch.setattr(
+        launcher, '_git_value', lambda argv: '1' * 40 if 'rev-parse' in argv else '42'
+    )
+    claimed = False
+
+    def forbidden_claim(job_tmp: Path, frozen_head: str) -> tuple[Path, str]:
+        nonlocal claimed
+        claimed = True
+        raise AssertionError('_claim_allocation must not run when shell missing')
+
+    monkeypatch.setattr(launcher, '_claim_allocation', forbidden_claim)
+    phase_dir = tmp_path / 'phase'
+    phase_dir.mkdir()
+    monkeypatch.setattr(launcher, '_phase_directory', lambda expanded: phase_dir)
+
+    with pytest.raises(launcher.FinalCanaryError, match='final report shell is unavailable'):
+        launcher.run_final_canary(
+            freeze_receipt=freeze,
+            invocation=invocation,
+            environment=environment,
+        )
+    assert claimed is False
+
+
 def test_final_canary_allocation_claim_is_exclusive(tmp_path: Path) -> None:
     job_tmp = tmp_path / 'job' / 'tmp'
     job_tmp.mkdir(parents=True)
