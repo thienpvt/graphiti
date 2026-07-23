@@ -309,7 +309,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 3/5 | In progress; exact candidate archive bound; frozen matrix green; image/runtime/IDs/canary still absent | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 4/5 | Plan 06-05 PENDING_TOP_LEVEL_HANDOFF; R0–R3 green; freeze STOP; no IDs/SUMMARY | — |
 
 ## Coverage
 
@@ -359,7 +359,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
 - Historical Docker resources and prior canary data/evidence remain unchanged
 
-**Plans**: 3/5 plans executed
+**Plans**: 4/5 plans complete; 06-05 intentionally incomplete (PENDING_TOP_LEVEL_HANDOFF)
 
 Plans:
 **Wave 1**
@@ -376,11 +376,11 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 06-04-PLAN.md — Source-bound image from exact archive; OCI labels; deny-list scan; no runtime
+- [x] 06-04-PLAN.md — Source-bound image from exact archive; OCI labels; deny-list scan; no runtime
 
 **Wave 5** *(blocked on Wave 4)*
 
-- [ ] 06-05-PLAN.md — R0–R3 staging, blocking freeze gate, one final canary, no post-allocation commit
+- [ ] 06-05-PLAN.md — R0–R3 staging complete; prefreeze package committed; **PENDING_TOP_LEVEL_HANDOFF** (no SUMMARY; freeze receipt + canary are top-level only; do not check complete)
 
 ---
 *Roadmap created: 2026-07-17 for milestone v1.1*

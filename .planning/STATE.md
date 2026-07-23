@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 status: executing
-stopped_at: Plan 06-04 IMAGE green; Plan 06-05 runtime requires separate authorization
-last_updated: "2026-07-23T02:05:00Z"
+stopped_at: Plan 06-05 STOPPED at terminal freeze checkpoint PENDING_TOP_LEVEL_HANDOFF
+last_updated: "2026-07-23T03:40:00Z"
 progress:
   total_phases: 8
   completed_phases: 7
@@ -14,7 +14,7 @@ progress:
 current_phase: 06
 current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
 last_activity: 2026-07-23
-last_activity_desc: Quick task b65 exactly bound current scanner and produced IMAGE green; runtime and canary remain untouched
+last_activity_desc: Plan 06-05 R0–R3 green + prefreeze package committed; terminal freeze STOP; plan incomplete; no IDs/SUMMARY/FREEZE receipt
 ---
 
 # Project State
@@ -28,21 +28,23 @@ See: `.planning/PROJECT.md`
 
 ## Current Position
 
-Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 06-03 complete.
+Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 06-04 complete. Plan 06-05 prefreeze package committed; plan remains incomplete.
 
-### Phase 6 (4/5 complete → Plan 06-05 authorization gate)
+### Phase 6 (4/5 complete → Plan 06-05 PENDING_TOP_LEVEL_HANDOFF)
 
 - Authority: `e52c1b5:spec/new-phase.md`
 - Requirements ingested: **64/64** P6-* IDs
-- Plans on disk: **5** sequential waves (`06-01`…`06-05`) — **4/5 executed**
+- Plans on disk: **5** sequential waves (`06-01`…`06-05`) — **4/5 complete; 06-05 intentionally incomplete**
 - Plan 06-01: raw-Git exact archive RED/GREEN complete; baseline `dcf730…` golden exact
 - Plan 06-02: post-ID terminal/auth/replay/final-launcher RED/GREEN complete
 - Candidate `60d270d` bound to 771 exact blobs; context `0c24ce0aba2c…`
 - Frozen matrix green: 28 scanner, 89 focused, 76 Git-dependent Phase 5, 1595 catalog union, 8 archive tests
 - Plan 06-04 IMAGE green: `3602956…`; candidate-bound complete-image scan zero hits; fixed denylist zero paths
-- All blocked/historical images remain preserved; exactly one b65 image built
-- Next: Plan 06-05 clean-room runtime R0–R3 requires separate authorization; canary identity allocation remains a later explicit human gate
-- `canary_ids_allocated=false`; no clean-room runtime; `canary_executed=false`; no canary approval
+- Plan 06-05 R0–R3 clean-room green on project `graphiti-phase6-cleanroom-1f529136`; fingerprint `5d54f7f83eb90194`; ports 17474/17687/18000
+- Prefreeze package committed: R0–R3 receipts, PREFREEZE-HANDOFF, FINAL-REPORT shell, FREEZE-INPUTS, POST-APPROVAL-INVOCATION
+- Terminal freeze checkpoint reached; **no** 06-05-SUMMARY.md; **no** final 06-FREEZE-RECEIPT.json from executor
+- Next: top-level writes uncommitted FREEZE receipt (actual HEAD/count), obtains freeze approval, runs `scripts/run_catalog_phase6_final_canary.py` only — do **not** resume gsd-executor
+- `canary_ids_allocated=false`; `canary_executed=false`; no canary approval yet
 - Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains unstaged and excluded from projection/image
 
 ### Phase 5 (preserved historical facts)
@@ -77,7 +79,7 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
-| Phase 6 | 4/5 | In progress; Plan 06-04 IMAGE green; Plan 06-05 runtime authorization required |
+| Phase 6 | 4/5 | Plan 06-05 PENDING_TOP_LEVEL_HANDOFF; R0–R3 green; freeze STOP; no SUMMARY/IDs |
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
@@ -108,9 +110,10 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 ### Pending Todos
 
-1. Obtain separate authorization before starting Plan 06-05 clean-room runtime R0–R3.
-2. Do not allocate canary IDs during R0–R3; stop at the later mandatory human approval gate.
-3. Require explicit confirmation before canary identity allocation or any cleanup/deletion.
+1. Top-level Phase A: write uncommitted 06-FREEZE-RECEIPT.json from FREEZE-INPUTS + actual post-Task3 HEAD/count.
+2. Human freeze approval for top-level only — do not resume gsd-executor / execute-phase.
+3. After approval: expand 06-POST-APPROVAL-INVOCATION.json and run scripts/run_catalog_phase6_final_canary.py once shell=false.
+4. Never create 06-05-SUMMARY.md; never commit FREEZE receipt or live canary outputs; no cleanup/deletion.
 
 ### Blockers/Concerns
 
@@ -145,8 +148,8 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 ## Session Continuity
 
-**Last session:** 2026-07-23T02:05:00Z
-**Resume file:** .planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-05-PLAN.md
+**Last session:** 2026-07-23T03:40:00Z
+**Resume file:** None (do not resume via gsd-executor)
 
-Stopped at: Quick task 260723-b65 complete; candidate `60d270d` image `3602956…` is IMAGE green with zero complete-image hits.
-Next: separately authorize Plan 06-05 runtime R0–R3; still no runtime/IDs/canary.
+Stopped at: Plan 06-05 Task 4 terminal freeze STOP; prefreeze package committed; plan incomplete PENDING_TOP_LEVEL_HANDOFF.
+Next: top-level FREEZE receipt (uncommitted) → human freeze approval → final-canary launcher only; no SUMMARY; no IDs until after approval.
