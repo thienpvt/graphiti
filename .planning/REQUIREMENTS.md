@@ -271,6 +271,24 @@ Phase 6 is authorized by fetched fork commit `e52c1b5` under `ITERATIVE_TDD_IMPL
 - [ ] **P6-REPT-01**: Final sanitized report includes every field required by specification §20 and excludes raw namespace, credentials, tokens, full environment, and sensitive endpoint parameters.
 - [x] **P6-CONT-01**: Passing H1–H7 evidence is reused; work resumes from `BLOCKED_POST_COMMIT_SOURCE_BINDING` and completed work is rerun only when a fix or authoritative gate requires it.
 
+### Native Ollama Remediation (gap closure; ab5fdeb)
+
+Additive after OpenAI-proxy final canary `20260723t065038z-8b0d3621` failed Gate 2 (`FAILED_BEFORE_COMMIT`). Old OpenAI-path evidence remains immutable terminal. Execute via gaps-only / wave≥6 / direct plan; never resume 06-05.
+
+- [ ] **P6-OLL-AUTH-01**: Prior failed canary remains immutable terminal evidence; Ollama remediation binds only reviewed HEAD and never rewrites old ledger/report/R receipts.
+- [ ] **P6-OLL-CONF-01**: Clean-room catalog-local example and materializer emit native Ollama authority — provider `ollama`, model `qwen3-embedding:0.6b`, dimensions `1024`, host URL default `http://host.docker.internal:11434`, no required API key, truncate true.
+- [ ] **P6-OLL-EMB-01**: Factory and embedder path use native `OllamaEmbedder` `/api/embed` with model/dimensions 1024; no OpenAI proxy path; dimension mismatch fails before graph write; prepare/commit paths prove zero generative LLM calls under spy.
+- [ ] **P6-OLL-CAPA-01**: Capability probe uses Ollama `/api/tags` only; model present ⇒ `embeddings.ready=ready`; missing/unreachable ⇒ `error`; Ollama `unknown` receives no OpenAI waiver; manifest `allow_unknown_embedding_provider=null`.
+- [ ] **P6-OLL-LAUNCH-01**: Final-canary launcher builds Ollama argv without unconditional OpenAI waiver; freeze receipt binds provider/model/dimensions/ready/null waiver and rejects openai/unknown/drift.
+- [ ] **P6-OLL-PREFLIGHT-01**: Host Ollama preflight proves daemon, exact model, one native embed probe at 1024 dims; sanitized receipt only (no vector/secrets).
+- [ ] **P6-OLL-TDD-01**: Complete frozen remediation matrix plus required Ollama E2E pass with zero unexplained skips/deselections before rebind.
+- [ ] **P6-OLL-BIND-01**: Candidate commit + raw-Git exact archive bind under 06-OLLAMA-BIND evidence only.
+- [ ] **P6-OLL-IMG-01**: One new source-bound Ollama image; prior OpenAI image remains historical only.
+- [ ] **P6-OLL-RT-01**: Entirely new clean-room R0–R3 with Ollama ready; never reuse failed project/volumes; 0/14→14/14 one-shot; 28 tools; exact image ID.
+- [ ] **P6-OLL-CAN-01**: Exactly one top-level Ollama final canary after freeze approval under 06-OLLAMA-* live names.
+- [ ] **P6-OLL-SAFE-01**: Preserve user-owned dirty config, historical stacks, and final Ollama stack; no prune/cleanup/graph clear; no wrong staging of dirty overlay.
+- [ ] **P6-OLL-REPT-01**: Sanitized 06-OLLAMA final report/ledger only; no secrets/namespace/raw vectors; old OpenAI report untouched.
+
 ## Future Requirements
 
 Deferred until the deterministic substrate is implemented and verified.
@@ -371,6 +389,19 @@ Deferred until the deterministic substrate is implemented and verified.
 | P6-TERM-04 | Phase 6 | Pending |
 | P6-REPT-01 | Phase 6 | Pending |
 | P6-CONT-01 | Phase 6 | Complete |
+| P6-OLL-AUTH-01 | Phase 6 | Pending |
+| P6-OLL-CONF-01 | Phase 6 | Pending |
+| P6-OLL-EMB-01 | Phase 6 | Pending |
+| P6-OLL-CAPA-01 | Phase 6 | Pending |
+| P6-OLL-LAUNCH-01 | Phase 6 | Pending |
+| P6-OLL-PREFLIGHT-01 | Phase 6 | Pending |
+| P6-OLL-TDD-01 | Phase 6 | Pending |
+| P6-OLL-BIND-01 | Phase 6 | Pending |
+| P6-OLL-IMG-01 | Phase 6 | Pending |
+| P6-OLL-RT-01 | Phase 6 | Pending |
+| P6-OLL-CAN-01 | Phase 6 | Pending |
+| P6-OLL-SAFE-01 | Phase 6 | Pending |
+| P6-OLL-REPT-01 | Phase 6 | Pending |
 | BASE-01 | Phase 0 | Pending |
 | BASE-02 | Phase 0 | Pending |
 | BASE-03 | Phase 0 | Pending |

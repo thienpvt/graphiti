@@ -5,8 +5,8 @@ status: planned
 nyquist_compliant: false
 wave_0_complete: false
 created: 2026-07-22
-updated: 2026-07-22
-plans: 5
+updated: 2026-07-23
+plans: 11
 ---
 
 # Phase 6 — Validation Strategy
@@ -54,6 +54,18 @@ plans: 5
 | 06-05-02 | 05 | 5 | P6-RT-R2/R3, P6-PROV-01, P6-HARN-05/06/08/17 | R2 one-shot schema; R3 MCP readiness only | live Docker/MCP | `06-R2-RECEIPT.json` + `06-R3-RECEIPT.json` | planned | planned |
 | 06-05-03 | 05 | 5 | P6-CAN-01, P6-PRES-01 | Prefreeze package + `06-POST-APPROVAL-INVOCATION.json` with argv_template tokens `{CLAUDE_JOB_TMP}` (no `$CLAUDE_JOB_DIR` literals) + argv_expansion contract; no SUMMARY; no final FREEZE; no IDs | artifact | `06-PREFREEZE-HANDOFF.md` + `06-FREEZE-INPUTS.json` + `06-POST-APPROVAL-INVOCATION.json` (assert no `$` in argv_template; argv_expansion present) | planned | planned |
 | 06-05-04 | 05 | 5 | P6-CAN-01..06, P6-TERM-*, P6-REPT-01, P6-PROV-03, P6-AUTH-01, P6-SAFE-02 | Terminal freeze STOP + checkpoint_contract; top-level FREEZE then expand argv per argv_expansion and run exact validated expanded argv once shell=False; dry-run counts 3/2/1/5; AUTH-01; no gsd-executor resume | live handoff (top-level) | uncommitted FREEZE + expanded launcher invocation + CANARY ledger + FINAL REPORT; incomplete plan is success | planned | planned |
+| 06-06-01 | 06 | 6 | P6-OLL-AUTH-01, P6-OLL-CONF-01, P6-OLL-EMB-01 | RED Stage A/B native Ollama config/factory/dim + no-LLM prepare/commit spy; no production config change | unit | `uv run --project mcp_server pytest mcp_server/tests/test_catalog_ollama_cleanroom_config.py mcp_server/tests/test_factories.py -q`; `uv run pytest tests/embedder/test_ollama.py -q` (exit 1 intentional RED) | planned | planned |
+| 06-06-02 | 06 | 6 | P6-OLL-CONF-01, P6-OLL-EMB-01 | GREEN catalog-local.example ollama/qwen3/1024; factory native path; dirty overlay unstaged | unit | same focused suites green; `git status --short mcp_server/config/config-docker-neo4j.yaml` shows unstaged | planned | planned |
+| 06-07-01 | 07 | 7 | P6-OLL-CAPA-01, P6-OLL-LAUNCH-01 | RED capability waiver + final-canary freeze/argv Ollama contracts | unit | `uv run --project mcp_server pytest mcp_server/tests/test_catalog_capabilities.py -q`; `uv run pytest tests/script/test_run_catalog_phase6_final_canary.py -q` (exit 1 intentional RED) | planned | planned |
+| 06-07-02 | 07 | 7 | P6-OLL-CAPA-01, P6-OLL-LAUNCH-01 | GREEN tags-ready/no OpenAI waiver; conditional launcher argv; freeze field authority | unit | same suites green | planned | planned |
+| 06-08-01 | 08 | 8 | P6-OLL-SAFE-01, P6-OLL-PREFLIGHT-01 | Config safety; sanitized host Ollama preflight receipt | runtime preflight | `06-OLLAMA-PREFLIGHT.json`: daemon_reachable, model_present, native_endpoint_successful, observed_dimension=1024, credential_used=false | planned | planned |
+| 06-08-02 | 08 | 8 | P6-OLL-TDD-01 | Complete remediation matrix + required Ollama E2E; zero unexplained skip/deselect | offline matrix + E2E | `06-OLLAMA-MATRIX-RECEIPT.json`: required suite inventory; skip_count=0; deselect_count=0; E2E env model/dim proof | planned | planned |
+| 06-09-01 | 09 | 9 | P6-OLL-BIND-01 | Candidate commit + raw-Git exact archive bind | bind | `06-OLLAMA-BIND-RECEIPT.json` | planned | planned |
+| 06-09-02 | 09 | 9 | P6-OLL-IMG-01 | New source-bound Ollama image; prior OpenAI image historical only | Docker build/inspect | `06-OLLAMA-IMAGE-RECEIPT.json` | planned | planned |
+| 06-10-01 | 10 | 10 | P6-OLL-RT-01 | New clean-room R0–R3: exact 0/14→14/14, 28 tools, exact image ID, ollama/qwen3/1024/ready/null waiver | live Docker/MCP | `06-OLLAMA-R0..R3-RECEIPT.json` with schema/tool/image/provider assertions | planned | planned |
+| 06-10-02 | 10 | 10 | P6-OLL-RT-01 | Prefreeze package under 06-OLLAMA-*; no IDs/SUMMARY/FREEZE finalize | artifact | `06-OLLAMA-PREFREEZE-HANDOFF.md` + FREEZE-INPUTS + POST-APPROVAL-INVOCATION + FINAL-REPORT shell | planned | planned |
+| 06-11-01 | 11 | 11 | P6-OLL-CAN-01, P6-OLL-SAFE-01, P6-OLL-AUTH-01 | Prefreeze completeness commit; markers PENDING_TOP_LEVEL_HANDOFF; no SUMMARY | artifact | prefreeze package present; no 06-11-SUMMARY.md | planned | planned |
+| 06-11-02 | 11 | 11 | P6-OLL-CAN-01, P6-OLL-REPT-01, P6-OLL-SAFE-01 | Terminal human-action blocking-human STOP; top-level FREEZE + one Ollama canary; SUMMARY suppressed | live handoff (top-level) | uncommitted `06-OLLAMA-FREEZE-RECEIPT.json` + CANARY ledger + FINAL REPORT; incomplete plan is success | planned | planned |
 
 *Status legend: planned · planned/RED · GREEN (execution only) · ⚠️ flaky*
 
@@ -71,6 +83,12 @@ plans: 5
 - [ ] Plan 04: no Dockerfile/source edits; labels via `--label` only
 - [ ] Plan 05: `06-POST-APPROVAL-INVOCATION.json` with `{CLAUDE_JOB_TMP}` + argv_expansion (no `$CLAUDE_JOB_DIR` in argv_template) + Task 4 checkpoint_contract
 - [x] Prompt Gate 0 / Terminal / Gate 10 contracts
+- [ ] Plan 06: RED/GREEN native Ollama clean-room config + factory/dim + no-LLM prepare/commit spy
+- [ ] Plan 07: RED/GREEN capability waiver + final-canary freeze/argv Ollama authority
+- [ ] Plan 08: preflight receipt + complete matrix/E2E with zero unexplained skips
+- [ ] Plan 09: Ollama bind receipt + new image receipt
+- [ ] Plan 10: new R0–R3 exact schema/tool/image/provider proofs + prefreeze package
+- [ ] Plan 11: freeze STOP; SUMMARY suppressed; top-level one canary only
 
 Existing H1–H7 tests remain offline authority for already-closed launcher/materializer/bootstrap/registry contracts.
 
@@ -86,6 +104,10 @@ Existing H1–H7 tests remain offline authority for already-closed launcher/mate
 | Dry-run counts + zero write | P6-CAN-03 | Live report/ledger | Assert counts entities=3 edges=2 sources=1 evidence_links=5; dry_run_zero_write_proven=true |
 | P6-AUTH-01 | P6-AUTH-01 | Live ledger + plan criteria | deployment_applied=false; kubernetes_applied=false (missing/true fails closed; never namespace_applied); second_canary=false; historical_group_ids_used=false; mode = iterative TDD + one final clean-room canary |
 | Historical preservation | P6-PRES-03, P6-SAFE-01/02 | Docker inventory | Before/after historical inventory; leave final stack |
+| Host Ollama preflight | P6-OLL-PREFLIGHT-01 | Local Ollama daemon | `/api/tags` + one native embed probe dim=1024; write 06-OLLAMA-PREFLIGHT.json only |
+| Ollama remediation matrix | P6-OLL-TDD-01 | Full frozen suite + required E2E | 06-OLLAMA-MATRIX-RECEIPT.json inventory; skip/deselect=0 |
+| New Ollama clean-room R0–R3 | P6-OLL-RT-01 | New Compose project only | exact 0/14→14/14; 28 tools; exact image ID; provider/model/ready/null waiver |
+| Ollama final canary | P6-OLL-CAN-01, P6-OLL-REPT-01 | One irreversible top-level run | 06-OLLAMA FREEZE/CANARY/FINAL only; never resume 06-05; leave stack |
 
 ---
 

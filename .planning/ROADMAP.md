@@ -309,7 +309,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 4/5 | Plan 06-05 PENDING_TOP_LEVEL_HANDOFF; R0–R3 green; freeze STOP; no IDs/SUMMARY | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 4/5 + 0/6 gap | 06-05 incomplete (never resume); Ollama gap plans 06-06..06-11 pending | — |
 
 ## Coverage
 
@@ -344,7 +344,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 
 **Goal**: Maintainers can prove a source-bound Catalog-v2 runtime in a fresh, isolated Compose authority and execute exactly one final canary without exposing secrets or changing historical resources
 **Depends on**: Phase 5
-**Requirements**: P6-AUTH-01, P6-BASE-01, P6-BASE-02, P6-BASE-03, P6-PRES-01, P6-PRES-02, P6-PRES-03, P6-PROV-01, P6-PROV-02, P6-PROV-03, P6-HARN-01, P6-HARN-02, P6-HARN-03, P6-HARN-04, P6-HARN-05, P6-HARN-06, P6-HARN-07, P6-HARN-08, P6-HARN-09, P6-HARN-10, P6-HARN-11, P6-HARN-12, P6-HARN-13, P6-HARN-14, P6-HARN-15, P6-HARN-16, P6-HARN-17, P6-HARN-18, P6-HARN-19, P6-TDD-01, P6-TDD-02, P6-TDD-03, P6-TDD-04, P6-BIND-01, P6-BIND-02, P6-BIND-03, P6-BIND-04, P6-BIND-05, P6-BIND-06, P6-IMG-01, P6-IMG-02, P6-IMG-03, P6-IMG-04, P6-IMG-05, P6-RT-00, P6-RT-R0, P6-RT-R1, P6-RT-R2, P6-RT-R3, P6-RT-DISP, P6-CAN-01, P6-CAN-02, P6-CAN-03, P6-CAN-04, P6-CAN-05, P6-CAN-06, P6-SAFE-01, P6-SAFE-02, P6-TERM-01, P6-TERM-02, P6-TERM-03, P6-TERM-04, P6-REPT-01, P6-CONT-01
+**Requirements**: P6-AUTH-01, P6-BASE-01, P6-BASE-02, P6-BASE-03, P6-PRES-01, P6-PRES-02, P6-PRES-03, P6-PROV-01, P6-PROV-02, P6-PROV-03, P6-HARN-01, P6-HARN-02, P6-HARN-03, P6-HARN-04, P6-HARN-05, P6-HARN-06, P6-HARN-07, P6-HARN-08, P6-HARN-09, P6-HARN-10, P6-HARN-11, P6-HARN-12, P6-HARN-13, P6-HARN-14, P6-HARN-15, P6-HARN-16, P6-HARN-17, P6-HARN-18, P6-HARN-19, P6-TDD-01, P6-TDD-02, P6-TDD-03, P6-TDD-04, P6-BIND-01, P6-BIND-02, P6-BIND-03, P6-BIND-04, P6-BIND-05, P6-BIND-06, P6-IMG-01, P6-IMG-02, P6-IMG-03, P6-IMG-04, P6-IMG-05, P6-RT-00, P6-RT-R0, P6-RT-R1, P6-RT-R2, P6-RT-R3, P6-RT-DISP, P6-CAN-01, P6-CAN-02, P6-CAN-03, P6-CAN-04, P6-CAN-05, P6-CAN-06, P6-SAFE-01, P6-SAFE-02, P6-TERM-01, P6-TERM-02, P6-TERM-03, P6-TERM-04, P6-REPT-01, P6-CONT-01, P6-OLL-AUTH-01, P6-OLL-CONF-01, P6-OLL-EMB-01, P6-OLL-CAPA-01, P6-OLL-LAUNCH-01, P6-OLL-PREFLIGHT-01, P6-OLL-TDD-01, P6-OLL-BIND-01, P6-OLL-IMG-01, P6-OLL-RT-01, P6-OLL-CAN-01, P6-OLL-SAFE-01, P6-OLL-REPT-01
 **Success Criteria** (what must be TRUE):
 
   1. RED-first acceptance coverage proves validated project authority, fixed allow-listed service staging, explicit source-bound image selection and ID verification, isolated project resources, safe UUIDv4 namespace authority, canonical schema bootstrap, and destructive-operation rejection
@@ -359,7 +359,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
 - Historical Docker resources and prior canary data/evidence remain unchanged
 
-**Plans**: 4/5 plans complete; 06-05 intentionally incomplete (PENDING_TOP_LEVEL_HANDOFF)
+**Plans**: 4/5 original complete (06-05 intentionally incomplete); +6 gap-closure Ollama plans (06-06..06-11)
 
 Plans:
 **Wave 1**
@@ -380,9 +380,36 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4)*
 
-- [ ] 06-05-PLAN.md — R0–R3 staging complete; prefreeze package committed; **PENDING_TOP_LEVEL_HANDOFF** (no SUMMARY; freeze receipt + canary are top-level only; do not check complete)
+- [ ] 06-05-PLAN.md — R0–R3 staging complete; prefreeze package committed; **PENDING_TOP_LEVEL_HANDOFF** (no SUMMARY; freeze receipt + canary are top-level only; do not check complete; never resume for Ollama gap work)
+
+**Ollama gap waves** *(internal DAG waves 1–6 on plans 06-06..06-11; gaps-only / wave-filter / direct plan; never resume 06-05)*
+
+**Gap Wave 1** *(06-06 wave:1; depends_on:[])*
+
+- [ ] 06-06-PLAN.md — TDD Stage A/B clean-room Ollama config + factory/dimension (P6-OLL-AUTH-01, P6-OLL-CONF-01, P6-OLL-EMB-01; D-01..05, D-14, D-21)
+
+**Gap Wave 2** *(06-07 wave:2; blocked on 06-06)*
+
+- [ ] 06-07-PLAN.md — TDD Stage C/D capability waiver + final-canary freeze authority (P6-OLL-CAPA-01, P6-OLL-LAUNCH-01; D-09, D-14, D-19, D-05)
+
+**Gap Wave 3** *(06-08 wave:3; blocked on 06-07)*
+
+- [ ] 06-08-PLAN.md — Config safety, Ollama preflight, complete remediation matrix + E2E (P6-OLL-SAFE-01, P6-OLL-PREFLIGHT-01, P6-OLL-TDD-01; D-05, D-07, D-21..23)
+
+**Gap Wave 4** *(06-09 wave:4; blocked on 06-08)*
+
+- [ ] 06-09-PLAN.md — Candidate commit, raw-Git bind, new source-bound Ollama image (P6-OLL-BIND-01, P6-OLL-IMG-01; D-04, D-06..08, D-15)
+
+**Gap Wave 5** *(06-10 wave:5; blocked on 06-09)*
+
+- [ ] 06-10-PLAN.md — New clean-room R0–R3 Ollama ready + prefreeze package (P6-OLL-RT-01; D-09..15)
+
+**Gap Wave 6** *(06-11 wave:6; blocked on 06-10)*
+
+- [ ] 06-11-PLAN.md — Prefreeze commit + checkpoint:human-action blocking-human STOP; top-level uncommitted FREEZE + one canary (P6-OLL-CAN-01, P6-OLL-REPT-01, P6-OLL-SAFE-01; D-16..24); SUMMARY suppressed
 
 ---
 *Roadmap created: 2026-07-17 for milestone v1.1*
 *Reconciled: 2026-07-17 to graphiti_mcp_pre_canary_roadmap_en.md (Phase 0/1/2/3A/3B/4/5)*
 *Phase 6 planned: 2026-07-22 — 5 sequential plans from e52c1b5 authority (classification TDD inserted as 06-02)*
+*Phase 6 Ollama gap closure planned: 2026-07-23 — 06-06..06-11 from ab5fdeb:spec/new-phase.md (P6-OLL-AUTH-01, P6-OLL-CONF-01, P6-OLL-EMB-01, P6-OLL-CAPA-01, P6-OLL-LAUNCH-01, P6-OLL-PREFLIGHT-01, P6-OLL-TDD-01, P6-OLL-BIND-01, P6-OLL-IMG-01, P6-OLL-RT-01, P6-OLL-CAN-01, P6-OLL-SAFE-01, P6-OLL-REPT-01)*

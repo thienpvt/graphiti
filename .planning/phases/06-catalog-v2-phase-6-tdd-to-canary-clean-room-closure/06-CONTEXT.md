@@ -1,101 +1,144 @@
-# Phase 6: Catalog-v2 TDD-to-Canary Clean-Room Closure - Context
+# Phase 6: Native Ollama Clean-Room Remediation and Final Canary - Context
 
-**Gathered:** 2026-07-22
-**Status:** Ready for planning
-**Mode:** Autonomous infrastructure phase; fetched specification resolves all material decisions
+**Gathered:** 2026-07-23
+**Status:** Ready for gap planning
+**Mode:** Autonomous; updated specification resolves all material decisions
 
 <domain>
 ## Phase Boundary
 
-Close the Phase 6 clean-room harness from the fixed `35227e0` baseline through RED/GREEN acceptance coverage, exact committed-source binding, source-bound image construction, fresh Compose authority staging, and exactly one final isolated Catalog-v2 canary. Preserve historical resources, user-owned state, secrets, catalog contracts, and the final clean-room stack. The terminal result is `PASSED` or a specification-authorized hard-stop/final-canary classification.
-
-Existing committed work at `1031b79` already completed H1-H7 and stopped before image/runtime activity at `BLOCKED_POST_COMMIT_SOURCE_BINDING`; `090f39b` records that truthful stop. Phase 6 resumes from this evidence, fixes forward, and must not repeat completed work without cause.
+Remediate the terminal failed OpenAI-proxy canary through native Ollama TDD, exact fix-forward source/image binding, a wholly new clean-room runtime, and exactly one new final canary. Preserve the prior failed run and all historical resources/evidence unchanged. Stop permanently after the new canary terminal result; never retry or clean up after identity allocation.
 
 </domain>
+
+<spec_lock>
+## Requirements (locked via SPEC.md)
+
+**13 requirements are locked.** See `06-SPEC.md` for full requirements, boundaries, and acceptance criteria.
+
+Downstream agents MUST read `06-SPEC.md` and `spec/new-phase.md` before planning or implementing.
+
+**In scope:** native Ollama config/factory/capability/launcher TDD, sanitized model/probe preflight, fix-forward archive/image, new isolated runtime, one new final canary, append-only sanitized evidence.
+
+**Out of scope:** new provider implementation, OpenAI/proxy workaround, LLM calls, deployment, full ingest, historical mutation/cleanup, and any second new canary.
+
+</spec_lock>
 
 <decisions>
 ## Implementation Decisions
 
-### Fixed Authority and Continuation
-- `fork/v1.1:spec/new-phase.md` at `e52c1b5` is the Phase 6 authorization and acceptance authority.
-- Fixed implementation baseline is commit `35227e0a2c697e643871b5c2052556988c404df6`, tree `fed171af3c49dc96701da26b53fd391511a00735`, source-context SHA-256 `dcf73073443be37b777fc7feef124133be3d9ee305696e84042d5631125ed92f`.
-- Existing implementation commit `1031b7921fc1f6ca2b7f5aa20e7a02a0a2959ff8` and documentation commit `090f39bb87194c38d3806f8a75e5a52d51e13b31` are valid prior iteration history, not authority to skip remaining gates.
-- Reuse the passing H1-H7 evidence. Correct the raw-Git/archive byte-binding defect with a new fix-forward commit; never amend prior candidates.
+### Authority and Historical Isolation
+- **D-01:** Reviewed operation authority is branch `v1.1` at `ab5fdeb70ce18df64b03c28190ee6ad5ab6803db`; the only intervening change from expected `50d6184` is `spec/new-phase.md`.
+- **D-02:** Run `20260723t065038z-8b0d3621`, project `graphiti-phase6-cleanroom-1f529136`, fingerprint `5d54f7f83eb90194`, and its `FAILED_BEFORE_COMMIT` evidence are immutable. Never resume, retry, query, clean, delete, or reclassify them.
+- **D-03:** Existing `06-CANARY-LEDGER.json`, `06-FINAL-REPORT.md`, `06-R0-RECEIPT.json` through `06-R3-RECEIPT.json`, old image, and old runtime remain historical only. New work writes distinct `06-OLLAMA-*` artifacts.
+- **D-04:** Preserve the intentional absence of `06-05-SUMMARY.md`; do not manufacture scheduler completion for the old irreversible operation. Add append-only gap plans and execute only those plans under explicit orchestration.
 
-### Source, Test, and Image Gates
-- Follow RED → minimal implementation → GREEN → adjacent regression → full matrix. Ordinary failures remain inside the loop.
-- Exact raw-Git LF bytes are authoritative. Build and verify an exact archive without checkout/EOL transformation; membership, modes, symlinks, duplicates, collisions, hashes, and full frozen matrix must pass.
-- Stage and commit task-owned source/tests/docs only. No push, merge, rebase, amend, or tag.
-- Build the production image only from the exact passing archive, with commit-derived tag, exact OCI revision/context labels, no pull, no retag, no dirty context, and no secret/config/evidence inclusion.
+### Native Ollama Configuration
+- **D-05:** Exact embedding route: MCP → existing `OllamaEmbedder` → local native `/api/embed` → `qwen3-embedding:0.6b` → 1024 dimensions.
+- **D-06:** Container base URL defaults to `http://host.docker.internal:11434`, expands from `OLLAMA_EMBEDDER_API_URL`, carries no `/v1`, API key, OpenAI embedder variable, proxy token, or authorization header.
+- **D-07:** `truncate=true`; timeout 60 unless an already-reviewed local override exists. The generated config changes only the one namespace token.
+- **D-08:** `mcp_server/config/config-docker-neo4j.yaml` remains protected, unstaged, and unmodified. Optional base-default correction is skipped if exact hunk separation from user changes is not provable.
 
-### Clean-Room Runtime Authority
-- Use only typed, fixed allow-listed launcher actions and structured subprocess argv. No shell or generic Compose passthrough.
-- Preserve the legacy default project while using one explicit fresh validated project for the final runtime.
-- Prove project network, containers, data volume, and log volume absent before creation; reject external/historical volumes and host database bind mounts.
-- Generate exactly one UUIDv4 namespace via the canonical materializer, bind its fingerprint to project/data-volume identity, and never expose the raw value.
-- Stage Neo4j only, run exactly one canonical application-owned 0/14 → 14/14 schema bootstrap, then stage MCP only without dependency recreation. Verify exact running image ID.
-- Readiness calls are limited to exact tool registry, `get_status`, and zero-argument `get_catalog_capabilities`. No proactive embedding/provider probe and no generative LLM operation.
+### Factory, Dimensions, and Zero-LLM Contract
+- **D-09:** Reuse the existing native provider; no new provider or abstraction. Factory tests must prove `OllamaEmbedder`, exact native request body/path, no credential, and no `OpenAIEmbedder` construction.
+- **D-10:** Every returned vector must contain exactly 1024 finite numbers. Dimension mismatch fails before any graph write.
+- **D-11:** Catalog prepare/commit and the whole canary make zero LLM calls. Existing LLM config may remain only for server construction.
 
-### Final Canary Boundary
-- Before allocation of canary run/group/control-group/batch identity, harness/runtime defects may fix forward using new disposable candidates under the specification's proof and cleanup limits.
-- Once any canary identity is allocated, freeze source, commit, image, and runtime. No edit, rebuild, new candidate, retry, reset, graph cleanup, or volume deletion.
-- Execute exactly one final canary with new identities and the committed `graphiti_mcp_phase6_canary_agent_prompt_en.md` contract.
-- An ambiguous commit transport permits bounded read-only reconciliation only; never retry commit.
-- Authentication failure is classified exactly as `FAILED_BEFORE_COMMIT` or `FAILED_AFTER_COMMIT`; never change provider, model, endpoint, credential, response, or embedding dimension.
-- Leave the final clean-room stack and volumes intact after success or failure.
+### Capability and Waiver Policy
+- **D-12:** Exact model presence from `/api/tags` yields `embeddings.ready=ready`; missing model or unreachable daemon yields `error`; raw endpoint stays absent from outputs/logs.
+- **D-13:** Ollama never receives an unknown-readiness waiver. Manifest remains exactly 22 fields with `allow_unknown_embedding_provider=null`.
+- **D-14:** Provider, model, dimensions, readiness, null waiver, endpoint/config authority, image, and Git state are freeze-bound and fail closed on drift.
 
-### Preservation and Reporting
-- Preserve `mcp_server/config/config-docker-neo4j.yaml` untouched and unstaged.
-- Never run global Docker prune/removal, historical project cleanup, Kubernetes action, public OpenAI probe, deployment, or historical/live-group mutation.
-- Never disclose raw namespace, proxy/API token, prepare token, credentials, full container environment, or sensitive endpoint parameters.
-- Final evidence and ledgers are contiguous and sanitized; report baseline, RED/GREEN iterations, test matrix, candidate commits, exact hashes, image/runtime identities, schema transition, readiness, canary gates, and final classification.
+### Launcher and Evidence Namespacing
+- **D-15:** Builder and runner argv are conditional. Ollama gets no `--allow-unknown-embedding-provider` pair; OpenAI waiver behavior may remain for separately authorized deployments.
+- **D-16:** The new launcher/freeze path writes only `06-OLLAMA-*` freeze, invocation, canary-ledger, and final-report artifacts. It must not map new output into old evidence paths.
+- **D-17:** Freeze receipt records only sanitized endpoint/config authority, never the raw URL or namespace.
+
+### Local Ollama Preflight
+- **D-18:** Before image/runtime work, check daemon, GET `/api/tags`, and exact model presence. If absent, only one `ollama pull qwen3-embedding:0.6b` is authorized.
+- **D-19:** Run one harmless native embedding probe with exact dimensions and no credential/proxy/LLM. Persist only reachability, model presence, endpoint success, observed dimension 1024, and `credential_used=false`; never vector values.
+
+### New Runtime and Final Boundary
+- **D-20:** Create a new Compose project, data/log volumes, network, namespace, Neo4j container, MCP container, and canary identities. Reuse none from the failed project.
+- **D-21:** Runtime gate requires absent-before-creation, `0/14` → one bootstrap → first `14/14`, exact image ID, 28 tools, exact Ollama model/dimensions, readiness `ready`, null waiver, bound namespace fingerprint, endpoint reachable, and zero LLM calls.
+- **D-22:** Gate 2 `search_nodes` is the first read-only runtime embedding proof; successful prepare is the second mandatory proof.
+- **D-23:** Commit the new prefreeze package before IDs, then stop at a blocking human freeze checkpoint. Top-level writes the uncommitted freeze receipt and consumes explicit approval; never resume the old or new final executor after that checkpoint.
+- **D-24:** After any new ID allocation: no edit, commit, rebuild, reconfiguration, retry, alternate runtime, cleanup, or deletion. Execute one builder and one runner only; leave the final stack intact.
 
 ### Claude's Discretion
-- Minimal internal decomposition, test grouping, evidence filenames, and a raw-Git-exact archive implementation may follow existing project patterns, provided every fixed contract above remains exact.
+- Use the minimum source/test changes that satisfy RED tests. Prefer existing `OllamaEmbedder`, readiness probe, raw-Git archive, scanner, materializer, launcher, builder, runner, and schema bootstrap.
+- Group the append-only gap work into sequential TDD, bind, image, and runtime/final-canary plans. No parallel mutation across these authorities.
 
 </decisions>
+
+<canonical_refs>
+## Canonical References
+
+**Downstream agents MUST read these before planning or implementing.**
+
+### Updated Authority
+- `spec/new-phase.md` — canonical native Ollama operation and final-canary authorization.
+- `.planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-SPEC.md` — locked requirement IDs and scope.
+
+### Immutable Prior Terminal Evidence
+- `.planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-CANARY-LEDGER.json` — canonical prior terminal ledger; read-only.
+- `.planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-FINAL-REPORT.md` — prior Gate 2 terminal report; read-only.
+- `.planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-R0-RECEIPT.json` through `06-R3-RECEIPT.json` — prior runtime receipts; read-only.
+
+### Existing Contracts
+- `graphiti_mcp_phase6_canary_agent_prompt_en.md` — exact canary protocol and Gate 0 source authority.
+- `mcp_server/config/config-docker-neo4j.catalog-local.example.yaml` — committed clean-room config target.
+- `scripts/materialize_catalog_local_config.py` — namespace-exclusive config materializer.
+- `scripts/run_catalog_phase6_final_canary.py` — freeze validation, allocation, builder/runner launch, and output mapping authority to remediate.
+- `scripts/build_catalog_canary_requests.py` — exact 22-field manifest builder.
+- `scripts/run_catalog_canary_batch.py` — runtime readiness and Gates 0–10 authority.
+
+</canonical_refs>
 
 <code_context>
 ## Existing Code Insights
 
 ### Reusable Assets
-- `scripts/run_catalog_canary_launcher.py` already exposes staged launcher actions, validated project/image/resource authority, ordered state, and sanitization.
-- `scripts/run_catalog_canary_batch.py` already carries the exact 22-field live manifest and canary ledger logic.
-- `scripts/materialize_catalog_local_config.py` already owns UUIDv4 namespace materialization and fingerprint-safe output.
-- `mcp_server/src/services/catalog_schema_bootstrap.py` already implements raw-driver, no-retry exact 0/14 → 14/14 bootstrap.
-- `mcp_server/docker/docker-compose-neo4j.yml` plus the catalog-local override already support project-scoped resources and image selection.
-- `mcp_server/tests/test_catalog_canary_scripts.py` and `test_catalog_schema_bootstrap.py` contain the H1-H7 contract coverage.
-- `.planning/quick/260722-9s8-catalog-v2-phase-6-clean-room-harness-cl/` contains sanitized RED, full-matrix, binding-failure, summary, and operation evidence.
+- `graphiti_core/embedder/ollama.py`: existing native `/api/embed` client already sends model, dimensions, and truncate; validates cardinality, dimension, and finite values.
+- `mcp_server/src/services/factories.py`: existing `ollama` factory branch requires no API key and constructs `OllamaEmbedderConfig` from typed config.
+- `mcp_server/src/services/catalog_capabilities.py`: existing read-only `/api/tags` probe already maps exact-model present to `ready`, missing/unreachable to `error`, and logs only exception type.
+- `scripts/materialize_catalog_local_config.py`: exclusive clean-room authority and one-token namespace replacement.
+- `scripts/catalog_raw_git_archive.py` and `scripts/catalog_image_secret_scanner.py`: exact source and complete-image proof machinery.
+- `scripts/run_catalog_phase6_final_canary.py`: exact-argv, job-temp, freeze, allocation, and one-shot child launch guards; hardcoded OpenAI waiver/output paths are the focused remediation seam.
 
 ### Established Patterns
-- Thin typed orchestration; fixed allowlists; structured argv; no shell interpolation.
-- Raw Neo4j schema authority through application-owned `CatalogNeo4jStore` statements.
-- Fail-closed exact counts/hashes/tool contracts; sanitized machine-readable receipts.
-- Historical and current safety axes remain separate; prior evidence is never rewritten.
-- Fix-forward candidate commits; exact committed source precedes image/runtime authority.
+- RED → minimal GREEN → adjacent regression → full frozen matrix.
+- Structured subprocess argv with `shell=False`; fixed allowlists; no secret-bearing argv.
+- Fix-forward commits and exact raw-Git archive binding.
+- Sanitized receipts; raw namespace, URL parameters, credentials, tokens, vectors, payloads, and environments never enter evidence.
+- Embeddings complete before write transactions; commit performs no network/LLM operation.
 
 ### Integration Points
-- Replace the failing `git archive` byte-binding path with a raw-Git-exact archive/materialization path.
-- Re-run the complete frozen matrix against the final candidate archive.
-- Build and inspect the source-bound runtime image.
-- Drive launcher R0-R3 readiness, then freeze and run the single final canary.
-- Produce Phase 6 verification and final operation report without altering historical evidence.
+- Replace only the clean-room example embedder block; materializer should remain generic.
+- Thread configured embedding dimensions into sanitized capability/freeze authority only if required by tests; never expose endpoint.
+- Make final-canary builder/runner waiver flags conditional and new output paths operation-specific.
+- Keep exact 22-field manifest and exact 28-tool registry unchanged.
 
 </code_context>
 
 <specifics>
 ## Specific Ideas
 
-- Start from the existing `BLOCKED_POST_COMMIT_SOURCE_BINDING` receipt: 733/733 inventory matched; failure was EOL-transformed bytes, not missing files or harness behavior.
-- Prefer Git plumbing (`ls-tree`/`cat-file` or equivalent raw-object materialization) over `git archive` when exact blob bytes are required.
-- Treat successful `prepare_catalog_batch` as the first functional embedding proof.
-- Preserve all existing dirty paths recorded at Phase 6 entry; task commits remain narrowly scoped.
+- Use append-only plans `06-06` onward; preserve old `06-05` plan and missing-summary guard.
+- Use `06-OLLAMA-*` filenames for all new receipts, freeze inputs, invocation, ledger, and report.
+- Required real E2E environment: `CATALOG_OLLAMA_REQUIRED=1`, `CATALOG_OLLAMA_MODEL=qwen3-embedding:0.6b`, `CATALOG_OLLAMA_DIMENSIONS=1024`.
+- Never include a vector or raw endpoint in evidence, even for the harmless probe.
 
 </specifics>
 
 <deferred>
 ## Deferred Ideas
 
-- Production deployment, Kubernetes rollout, full catalog ingest, automatic catalog-v1 migration, non-Neo4j portability, historical resource cleanup, and any second canary remain out of scope.
+- Public/OpenAI provider remediation, automatic migration, full catalog ingest, deployment, Kubernetes, historical cleanup, other Ollama models, and any second canary remain out of scope.
 
 </deferred>
+
+---
+
+*Phase: 06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure*
+*Context gathered: 2026-07-23*

@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 status: executing
-stopped_at: Plan 06-05 STOPPED at terminal freeze checkpoint PENDING_TOP_LEVEL_HANDOFF
-last_updated: "2026-07-23T03:40:00Z"
+stopped_at: OpenAI-path canary FAILED_BEFORE_COMMIT immutable terminal; next Ollama gap plan 06-06
+last_updated: "2026-07-23T12:00:00Z"
 progress:
   total_phases: 8
   completed_phases: 7
-  total_plans: 49
+  total_plans: 55
   completed_plans: 48
-  percent: 94
+  percent: 87
 current_phase: 06
 current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
 last_activity: 2026-07-23
-last_activity_desc: Plan 06-05 R0–R3 green + prefreeze package committed; terminal freeze STOP; plan incomplete; no IDs/SUMMARY/FREEZE receipt
+last_activity_desc: Native Ollama gap-closure plans 06-06..06-11 planned; execute gaps-only from 06-06; never resume 06-05
 ---
 
 # Project State
@@ -28,24 +28,29 @@ See: `.planning/PROJECT.md`
 
 ## Current Position
 
-Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 06-04 complete. Plan 06-05 prefreeze package committed; plan remains incomplete.
+Phase 5 complete (historical). Phase 6 original OpenAI-path work is immutable terminal after failed final canary. Next execution is Ollama gap-closure only.
 
-### Phase 6 (4/5 complete → Plan 06-05 PENDING_TOP_LEVEL_HANDOFF)
+### Phase 6 — OpenAI path (immutable terminal; never resume 06-05)
 
-- Authority: `e52c1b5:spec/new-phase.md`
-- Requirements ingested: **64/64** P6-* IDs
-- Plans on disk: **5** sequential waves (`06-01`…`06-05`) — **4/5 complete; 06-05 intentionally incomplete**
-- Plan 06-01: raw-Git exact archive RED/GREEN complete; baseline `dcf730…` golden exact
-- Plan 06-02: post-ID terminal/auth/replay/final-launcher RED/GREEN complete
-- Candidate `60d270d` bound to 771 exact blobs; context `0c24ce0aba2c…`
-- Frozen matrix green: 28 scanner, 89 focused, 76 Git-dependent Phase 5, 1595 catalog union, 8 archive tests
-- Plan 06-04 IMAGE green: `3602956…`; candidate-bound complete-image scan zero hits; fixed denylist zero paths
-- Plan 06-05 R0–R3 clean-room green on project `graphiti-phase6-cleanroom-1f529136`; fingerprint `5d54f7f83eb90194`; ports 17474/17687/18000
-- Prefreeze package committed: R0–R3 receipts, PREFREEZE-HANDOFF, FINAL-REPORT shell, FREEZE-INPUTS, POST-APPROVAL-INVOCATION
-- Terminal freeze checkpoint reached; **no** 06-05-SUMMARY.md; **no** final 06-FREEZE-RECEIPT.json from executor
-- Next: top-level writes uncommitted FREEZE receipt (actual HEAD/count), obtains freeze approval, runs `scripts/run_catalog_phase6_final_canary.py` only — do **not** resume gsd-executor
-- `canary_ids_allocated=false`; `canary_executed=false`; no canary approval yet
-- Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains unstaged and excluded from projection/image
+- Authority (original): `e52c1b5:spec/new-phase.md`
+- Requirements ingested: **64/64** P6-* IDs + **13/13** P6-OLL-* gap IDs (pending)
+- Plans on disk: **11** (`06-01`…`06-05` original; `06-06`…`06-11` Ollama gap_closure)
+- Plan 06-01..06-04 complete (archive/classification/bind/image)
+- Candidate `60d270d` / image `3602956…` remain historical OpenAI-path authority only
+- Plan 06-05 R0–R3 green on project `graphiti-phase6-cleanroom-1f529136`; fingerprint `5d54f7f83eb90194`; ports 17474/17687/18000 — stack/evidence **immutable**
+- Prefreeze package + terminal freeze STOP recorded; **no** 06-05-SUMMARY.md
+- Top-level OpenAI-path final canary ran once: run `20260723t065038z-8b0d3621`, Gate 2 `FAILED_BEFORE_COMMIT` (OpenAI-proxy credential / not embedding_transport_auth) — ledger/report immutable; never rewrite
+- `canary_ids_allocated` for OpenAI path was true for that one run; result failed before commit; no second OpenAI canary
+- Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains user-owned, unstaged, excluded from projection/image (dims 1536 vs qwen3 max 1024 noted; do not stage)
+
+### Phase 6 — Native Ollama remediation (next)
+
+- Gap authority: `ab5fdeb:spec/new-phase.md` (native Ollama operation)
+- Plans: **06-06..06-11** gap_closure; execute via gaps-only / wave-filter / direct plan starting at **06-06**
+- Never resume 06-05; never create 06-05-SUMMARY; never overwrite 06-CANARY-LEDGER / 06-FINAL-REPORT / 06-R0..R3
+- New evidence names only: `06-OLLAMA-*`
+- New clean-room project/volumes/image required (not reuse `graphiti-phase6-cleanroom-1f529136` or OpenAI image)
+- Target: provider `ollama`, model `qwen3-embedding:0.6b`, dimensions `1024`, URL `http://host.docker.internal:11434`, waiver null
 
 ### Phase 5 (preserved historical facts)
 
@@ -79,7 +84,7 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
-| Phase 6 | 4/5 | Plan 06-05 PENDING_TOP_LEVEL_HANDOFF; R0–R3 green; freeze STOP; no SUMMARY/IDs |
+| Phase 6 | 4/5 + 0/6 gap | OpenAI path immutable FAILED_BEFORE_COMMIT; Ollama gaps 06-06..06-11 pending |
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
@@ -110,10 +115,10 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 ### Pending Todos
 
-1. Top-level Phase A: write uncommitted 06-FREEZE-RECEIPT.json from FREEZE-INPUTS + actual post-Task3 HEAD/count.
-2. Human freeze approval for top-level only — do not resume gsd-executor / execute-phase.
-3. After approval: expand 06-POST-APPROVAL-INVOCATION.json and run scripts/run_catalog_phase6_final_canary.py once shell=false.
-4. Never create 06-05-SUMMARY.md; never commit FREEZE receipt or live canary outputs; no cleanup/deletion.
+1. Execute Ollama gap plan **06-06** (TDD Stage A/B config+factory) via gaps-only / wave≥6 / direct plan — never resume 06-05.
+2. Continue 06-07..06-10 sequentially (capability/launcher → preflight/matrix → bind/image → new R0–R3 prefreeze).
+3. Plan 06-11: prefreeze commit + blocking-human freeze STOP; top-level only writes uncommitted 06-OLLAMA-FREEZE-RECEIPT then one Ollama canary.
+4. Never create 06-05-SUMMARY or 06-11-SUMMARY; never rewrite OpenAI-path ledger/report/R receipts; leave stacks intact; keep dirty `config-docker-neo4j.yaml` unstaged.
 
 ### Blockers/Concerns
 
@@ -148,8 +153,8 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 ## Session Continuity
 
-**Last session:** 2026-07-23T03:40:00Z
-**Resume file:** None (do not resume via gsd-executor)
+**Last session:** 2026-07-23T12:00:00Z
+**Resume file:** None (do not resume 06-05 via gsd-executor)
 
-Stopped at: Plan 06-05 Task 4 terminal freeze STOP; prefreeze package committed; plan incomplete PENDING_TOP_LEVEL_HANDOFF.
-Next: top-level FREEZE receipt (uncommitted) → human freeze approval → final-canary launcher only; no SUMMARY; no IDs until after approval.
+Stopped at: OpenAI-path final canary immutable terminal FAILED_BEFORE_COMMIT (`20260723t065038z-8b0d3621`); Ollama gap plans planned.
+Next: `/gsd-execute-phase 06` gaps-only or direct **06-06**; never resume 06-05; new evidence under 06-OLLAMA-* only.
