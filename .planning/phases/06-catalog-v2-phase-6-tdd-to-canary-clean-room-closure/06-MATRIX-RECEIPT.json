@@ -2,25 +2,26 @@
   "schema_version": "phase6-frozen-matrix-v1",
   "recorded_date": "2026-07-23",
   "classification": "READY_FOR_IMAGE_BINDING",
-  "commit": "cee10976c47122a0e19a87cd506edfc3c3ef5e82",
-  "tree": "481172bc8c9111898c1dc4d3cc0424c48065433c",
+  "commit": "60d270dfad329ca19508300308066776edeead23",
+  "tree": "ea6f5f3af0decf5c1d48ffc7c37eefd089c8d2ce",
   "source_authority": "exact_raw_git_archive",
-  "raw_git_context_sha256": "922f49c68c8d576cc2887d707309e9b98b7b65c8df549f4e27511489205e4587",
-  "archive_context_sha256": "922f49c68c8d576cc2887d707309e9b98b7b65c8df549f4e27511489205e4587",
-  "archive_member_count": 769,
+  "raw_git_context_sha256": "0c24ce0aba2c1c316c69e7ff1b8ec47b5f74b1977ad83ca9f519a435fb4dc38a",
+  "archive_context_sha256": "0c24ce0aba2c1c316c69e7ff1b8ec47b5f74b1977ad83ca9f519a435fb4dc38a",
+  "archive_member_count": 771,
   "invalidated_candidate_commits": [
+    "cee10976c47122a0e19a87cd506edfc3c3ef5e82",
+    "5efa69f4ae6a9ec78efbf29193a57c0679a5019e",
     "d54abe9d3d224367cb3a4eb989683a2860a9add2",
-    "6faa068782df8a3b73e908cdee08935afc08cc12",
-    "5efa69f4ae6a9ec78efbf29193a57c0679a5019e"
+    "6faa068782df8a3b73e908cdee08935afc08cc12"
   ],
   "failed_candidates_preserved": true,
   "scanner_authority_path": "scripts/catalog_image_secret_scanner.py",
   "scanner_authority_symbol": "scan_complete_image",
-  "scanner_authority_file_sha256": "5ae5b4e3f6fb8fef92f45d37e486d4eaac77c45cbdf984b919f678cc2cc7b898",
+  "scanner_authority_file_sha256": "37bbdfbb362c6e38f0c988617b3ba84300aee8a713ff78a1afde0f3585b78911",
   "sanitized": true,
   "unexplained_skip_count": 0,
   "deselection_count": 0,
-  "warning_count": 0,
+  "warning_count": 1,
   "image_build_count": 0,
   "runtime_start_count": 0,
   "namespace_generated": false,
@@ -30,30 +31,45 @@
   "checks": [
     {
       "name": "archive_exact_bind",
-      "files": 769,
+      "files": 771,
       "missing": 0,
       "extra": 0,
       "mismatches": 0,
       "exit_code": 0
     },
     {
-      "name": "frozen_focused_phase6_matrix",
-      "passed": 79,
+      "name": "frozen_scanner_suite",
+      "passed": 28,
       "exit_code": 0,
       "warnings": 0,
       "skips": 0
     },
     {
-      "name": "phase5_compatibility_source_prebind",
-      "passed": 76,
+      "name": "frozen_focused_phase6_matrix",
+      "passed": 89,
       "exit_code": 0,
       "warnings": 0,
       "skips": 0
     },
     {
       "name": "frozen_phase5_git_dependent_suite",
-      "status": "environment_not_authoritative",
-      "reason": "exact archive intentionally has no Git metadata; separately validated prebind and unchanged by candidate planning/spec commits"
+      "passed": 76,
+      "exit_code": 0,
+      "warnings": 0,
+      "skips": 0,
+      "authority": "exact_archive_with_disposable_git_metadata"
+    },
+    {
+      "name": "frozen_complete_catalog_union",
+      "passed": 1595,
+      "exit_code": 0,
+      "warning_count": 1,
+      "warning_class": "preexisting_pydantic_v2_deprecation"
+    },
+    {
+      "name": "frozen_raw_git_archive_suite",
+      "passed": 8,
+      "exit_code": 0
     },
     {
       "name": "frozen_scanner_static_checks",
@@ -62,13 +78,6 @@
       "pyright_errors": 0,
       "pyright_warnings": 0,
       "compileall": 0
-    },
-    {
-      "name": "source_complete_catalog_union",
-      "passed": 1593,
-      "exit_code": 0,
-      "warning_count": 1,
-      "warning_class": "preexisting_pydantic_v2_deprecation"
     },
     {
       "name": "baseline_raw_git_golden",
@@ -99,5 +108,5 @@
     "P6-HARN-18": {"status": "green", "class": "offline"},
     "P6-HARN-19": {"status": "green", "class": "offline"}
   },
-  "notes": "Frozen scanner/Phase6 checks passed from exact archive bytes. Git-dependent Phase5 tests cannot run authoritatively from a metadata-free exact archive without a disposable Git shim; the full 76-test suite passed serially at tested scanner source and candidate adds only authorized spec/PREBIND planning bytes. No image or runtime action occurred."
+  "notes": "Complete frozen matrix executed from exact candidate archive bytes. Archive-local disposable Git metadata supplied candidate Git authority to Git-dependent tests without altering source authority. A separate pristine rematerialization reconfirmed all 771 raw Git blobs and context hash. No image or runtime action occurred."
 }
