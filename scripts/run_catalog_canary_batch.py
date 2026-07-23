@@ -2809,12 +2809,13 @@ def _compose_suffix(action: str) -> list[str]:
     suffixes = {
         'render': ['config', '--quiet'],
         'neo4j': ['up', '--no-build', '--pull', 'never', '-d', 'neo4j'],
+        # Compose v5.1.4 rejects `run --no-build`; pull=never still forbids pulls and
+        # the selected image is pre-bound so no build path is activated.
         'bootstrap': [
             '--profile',
             'catalog-bootstrap',
             'run',
             '--no-deps',
-            '--no-build',
             '--pull',
             'never',
             '--rm',

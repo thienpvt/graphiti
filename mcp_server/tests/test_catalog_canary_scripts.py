@@ -1741,7 +1741,6 @@ def test_launcher_public_actions_and_fixed_compose_argv() -> None:
             'catalog-bootstrap',
             'run',
             '--no-deps',
-            '--no-build',
             '--pull',
             'never',
             '--rm',

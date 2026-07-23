@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,9 @@ FIXED_SUBPROCESS_ENV = (
     'NEO4J_URI',
     'NEO4J_USER',
     'PATH',
+    # Windows Docker CLI loads compose plugins from %USERPROFILE%\.docker\cli-plugins.
+    # Bare allowlisted PATH cannot discover plugins without this host profile key.
+    'USERPROFILE',
 )
 SINGLETON_OPTIONS = {
     '--project',
@@ -56,6 +60,10 @@ SHA256_RE = re.compile(r'^[0-9a-f]{64}$')
 
 def compose_env(options: runner.ComposeOptions) -> dict[str, str]:
     construction = materializer.resolve_mcp_construction_inputs()
+    userprofile = os.environ.get('USERPROFILE', '').strip()
+    if not userprofile:
+        # Non-Windows hosts ignore this key; Windows Docker plugin discovery requires it.
+        userprofile = os.environ.get('HOME', '').strip() or os.path.expanduser('~')
     env = {
         'COMPOSE_PROJECT_NAME': options.project,
         'COMPOSE_REMOVE_ORPHANS': '0',
@@ -70,6 +78,7 @@ def compose_env(options: runner.ComposeOptions) -> dict[str, str]:
         'NEO4J_URI': 'bolt://neo4j:7687',
         'NEO4J_USER': 'neo4j',
         'PATH': os.defpath,
+        'USERPROFILE': userprofile,
     }
     env.update({name: item.value for name, item in construction.items()})
     if set(env) != set(FIXED_SUBPROCESS_ENV) | set(materializer.MCP_CONSTRUCTION_INPUT_NAMES):
@@ -344,26 +353,35 @@ def _require_all_absent(options: runner.ComposeOptions) -> dict[str, bool]:
 
 def _inspect_neo4j(options: runner.ComposeOptions) -> dict[str, Any]:
     resources = runner.compose_resource_identities(options.project)
-    rows = _inspect_optional('container', resources['neo4j_container'], options)
-    if len(rows) != 1:
-        raise runner.RunnerError(
-            'neo4j_observation_failed', 'Neo4j container is absent or ambiguous'
-        )
-    row = rows[0]
-    labels = row.get('Config', {}).get('Labels', {})
-    mounts = {item.get('Destination'): item.get('Name') for item in row.get('Mounts', [])}
-    health = row.get('State', {}).get('Health', {}).get('Status')
-    networks = set(row.get('NetworkSettings', {}).get('Networks', {}))
-    if (
-        labels.get('com.docker.compose.project') != options.project
-        or labels.get('com.docker.compose.service') != 'neo4j'
-        or mounts.get('/data') != resources['data_volume']
-        or mounts.get('/logs') != resources['logs_volume']
-        or health != 'healthy'
-        or resources['network'] not in networks
-    ):
-        raise runner.RunnerError('neo4j_observation_failed', 'Neo4j runtime binding is invalid')
-    return {'health': health, 'mounts': mounts, 'network': resources['network']}
+    # Neo4j healthchecks start as starting; observe the same container until healthy.
+    deadline = time.time() + 180.0
+    last_error = 'Neo4j runtime binding is invalid'
+    while time.time() < deadline:
+        rows = _inspect_optional('container', resources['neo4j_container'], options)
+        if len(rows) != 1:
+            last_error = 'Neo4j container is absent or ambiguous'
+            time.sleep(2.0)
+            continue
+        row = rows[0]
+        labels = row.get('Config', {}).get('Labels', {})
+        mounts = {item.get('Destination'): item.get('Name') for item in row.get('Mounts', [])}
+        health = row.get('State', {}).get('Health', {}).get('Status')
+        networks = set(row.get('NetworkSettings', {}).get('Networks', {}))
+        if (
+            labels.get('com.docker.compose.project') != options.project
+            or labels.get('com.docker.compose.service') != 'neo4j'
+            or mounts.get('/data') != resources['data_volume']
+            or mounts.get('/logs') != resources['logs_volume']
+            or resources['network'] not in networks
+        ):
+            raise runner.RunnerError(
+                'neo4j_observation_failed', 'Neo4j runtime binding is invalid'
+            )
+        if health == 'healthy':
+            return {'health': health, 'mounts': mounts, 'network': resources['network']}
+        last_error = f'Neo4j health is {health!r}, waiting for healthy'
+        time.sleep(2.0)
+    raise runner.RunnerError('neo4j_observation_failed', last_error)
 
 
 def _mcp_absent(options: runner.ComposeOptions) -> bool:
