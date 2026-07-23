@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 status: executing
-stopped_at: Plan 06-04 complete-image scan blocked
-last_updated: "2026-07-23T01:15:00Z"
+stopped_at: Plan 06-04 IMAGE green; Plan 06-05 runtime requires separate authorization
+last_updated: "2026-07-23T02:05:00Z"
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 49
-  completed_plans: 47
-  percent: 92
+  completed_plans: 48
+  percent: 94
 current_phase: 06
 current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
 last_activity: 2026-07-23
-last_activity_desc: Quick task 9xv built one candidate image; bound scanner found 22 hits; current unbound scanner observes zero; new bind/image authorization required
+last_activity_desc: Quick task b65 exactly bound current scanner and produced IMAGE green; runtime and canary remain untouched
 ---
 
 # Project State
@@ -30,20 +30,20 @@ See: `.planning/PROJECT.md`
 
 Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 06-03 complete.
 
-### Phase 6 (3/5 complete → execute 06-04)
+### Phase 6 (4/5 complete → Plan 06-05 authorization gate)
 
 - Authority: `e52c1b5:spec/new-phase.md`
 - Requirements ingested: **64/64** P6-* IDs
-- Plans on disk: **5** sequential waves (`06-01`…`06-05`) — **3/5 executed**
+- Plans on disk: **5** sequential waves (`06-01`…`06-05`) — **4/5 executed**
 - Plan 06-01: raw-Git exact archive RED/GREEN complete; baseline `dcf730…` golden exact
-- Plan 06-02: post-ID terminal/auth/replay/final-launcher RED/GREEN complete; 57 harness + 309 catalog tests passed
-- Plan 06-03 authority superseded by complete-image scanner candidate `cee1097`
-- Candidate `cee1097` bound to 769 exact blobs; context `922f49c68c8d…`; frozen focused matrix green
-- Plan 06-04 remains blocked: one image `ef53905…` built; its bound scanner reports 22 hits
-- Follow-up scanner HEAD `986c756` observes zero hits on the preserved export, but is not bound image authority
-- Next: separately authorize one new PREBIND/BIND/MATRIX/image cycle; no runtime
+- Plan 06-02: post-ID terminal/auth/replay/final-launcher RED/GREEN complete
+- Candidate `60d270d` bound to 771 exact blobs; context `0c24ce0aba2c…`
+- Frozen matrix green: 28 scanner, 89 focused, 76 Git-dependent Phase 5, 1595 catalog union, 8 archive tests
+- Plan 06-04 IMAGE green: `3602956…`; candidate-bound complete-image scan zero hits; fixed denylist zero paths
+- All blocked/historical images remain preserved; exactly one b65 image built
+- Next: Plan 06-05 clean-room runtime R0–R3 requires separate authorization; canary identity allocation remains a later explicit human gate
 - `canary_ids_allocated=false`; no clean-room runtime; `canary_executed=false`; no canary approval
-- Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains unstaged and excluded from projection
+- Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains unstaged and excluded from projection/image
 
 ### Phase 5 (preserved historical facts)
 
@@ -77,7 +77,7 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
-| Phase 6 | 3/5 | In progress; Plan 06-04 image preserved but bound scan blocked; new bind/image authorization required |
+| Phase 6 | 4/5 | In progress; Plan 06-04 IMAGE green; Plan 06-05 runtime authorization required |
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
@@ -92,8 +92,8 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 - Active v1.1 spine Phase 0 / 1 / 2 / 3A / 3B / 4 / 5 is complete.
 - Phase 6 authorized by `e52c1b5`; 64 P6-* requirements ingested; five-wave plans written (06-01 archive TDD → 06-02 classification/auth/replay TDD → 06-03 bind/matrix → 06-04 image → 06-05 R0–R3/freeze/handoff).
-- Phase 6 Plans 06-01/02/03 complete (3/5); Plan 06-04 remains blocked after complete-image fix-forward; no runtime/IDs/canary.
-- [Phase 06]: Latest bound image authority is commit `cee10976c47122a0e19a87cd506edfc3c3ef5e82`, tree `481172bc8c9111898c1dc4d3cc0424c48065433c`, context `922f49c68c8d576cc2887d707309e9b98b7b65c8df549f4e27511489205e4587`; image `ef53905…` is scan-blocked. Current scanner HEAD observes zero but requires a new bind/image cycle. Invalidated candidates/images remain preserved.
+- Phase 6 Plans 06-01 through 06-04 complete (4/5); IMAGE green; no runtime/IDs/canary.
+- [Phase 06]: Latest bound image authority is commit `60d270dfad329ca19508300308066776edeead23`, tree `ea6f5f3af0decf5c1d48ffc7c37eefd089c8d2ce`, context `0c24ce0aba2c1c316c69e7ff1b8ec47b5f74b1977ad83ca9f519a435fb4dc38a`; image `3602956…` is complete-image zero-hit green. Invalidated candidates/images remain preserved.
 - No automatic catalog-v1 migration, deployment, push, merge, tag, graph clear, or existing-data deletion.
 - Development/live tests use only `oracle-catalog-tool-test`.
 - Never query or mutate `oracle-catalog-v2`.
@@ -108,8 +108,8 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 ### Pending Todos
 
-1. Obtain separate authorization for one new PREBIND → BIND → MATRIX → image cycle using current zero-hit scanner source.
-2. Do not allocate canary IDs or start runtime until Plan 06-04 reaches IMAGE green, then Plan 06-05 executes in order.
+1. Obtain separate authorization before starting Plan 06-05 clean-room runtime R0–R3.
+2. Do not allocate canary IDs during R0–R3; stop at the later mandatory human approval gate.
 3. Require explicit confirmation before canary identity allocation or any cleanup/deletion.
 
 ### Blockers/Concerns
@@ -124,6 +124,7 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260723-b65 | Rebind current scanner; IMAGE green after one archive-derived image | 2026-07-23 | 7802e59 | `.planning/quick/260723-b65-authorize-one-additional-phase-6-image-b/` |
 | 260723-9xv | Fix-forward complete-image scanner; bound image remains blocked at 22 hits | 2026-07-23 | 288ff51 | `.planning/quick/260723-9xv-fix-forward-phase-6-complete-image-scann/` |
 | 260722-u86 | Remediate image credential literals; exact-bind and zero-hit projection | 2026-07-22 | 1419c33 | `.planning/quick/260722-u86-remediate-deterministic-image-scanner-cr/` |
 | 260719-tur | Halt local Compose activation after safety violation; canary not run | 2026-07-19 | uncommitted | `.planning/quick/260719-tur-activate-local-compose-catalog-runtime-a/` |
@@ -144,8 +145,8 @@ Phase 5 complete (historical). Phase 6 execution is active; Plans 06-01 through 
 
 ## Session Continuity
 
-**Last session:** 2026-07-23T01:15:00Z
-**Resume file:** .planning/quick/260723-9xv-fix-forward-phase-6-complete-image-scann/260723-9xv-PLAN.md
+**Last session:** 2026-07-23T02:05:00Z
+**Resume file:** .planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-05-PLAN.md
 
-Stopped at: Quick task 260723-9xv incomplete; candidate `cee1097` image bound scanner found 22 hits; current unbound scanner zero-hit observation recorded.
-Next: separately authorize one new bind/image cycle; still no runtime/IDs/canary.
+Stopped at: Quick task 260723-b65 complete; candidate `60d270d` image `3602956…` is IMAGE green with zero complete-image hits.
+Next: separately authorize Plan 06-05 runtime R0–R3; still no runtime/IDs/canary.
