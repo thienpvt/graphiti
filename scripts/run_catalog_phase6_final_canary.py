@@ -37,6 +37,22 @@ AUTH_01 = {
     'canary_invocation_count': 1,
     'mode': 'iterative_tdd_plus_one_final_clean_room_canary',
 }
+OLLAMA_PROVIDER = 'ollama'
+OLLAMA_MODEL = 'qwen3-embedding:0.6b'
+OLLAMA_DIMENSIONS = 1024
+OLLAMA_READINESS = 'ready'
+EMBEDDING_AUTHORITY_KEYS = (
+    'embedding_provider',
+    'embedding_model',
+    'embedding_dimensions',
+    'expected_embedding_readiness',
+    'allow_unknown_embedding_provider',
+)
+# D-16: operation-specific live outputs; never map new run into old 06-CANARY/06-FINAL.
+OLLAMA_LEDGER_NAME = '06-OLLAMA-CANARY-LEDGER.json'
+OLLAMA_FINAL_REPORT_NAME = '06-OLLAMA-FINAL-REPORT.md'
+LEGACY_LEDGER_NAME = '06-CANARY-LEDGER.json'
+LEGACY_FINAL_REPORT_NAME = '06-FINAL-REPORT.md'
 
 
 class FinalCanaryError(RuntimeError):
@@ -170,7 +186,91 @@ def _validate_auth_01(auth: dict[str, Any]) -> None:
         raise FinalCanaryError('P6-AUTH-01 assertion failed')
 
 
-def _validate_freeze(raw: dict[str, Any]) -> tuple[str, int, str]:
+def _validate_embedding_authority(raw: dict[str, Any]) -> dict[str, Any]:
+    """D-14: freeze must bind sanitized embedding authority; Ollama is null-waiver only."""
+    missing = [key for key in EMBEDDING_AUTHORITY_KEYS if key not in raw]
+    if missing:
+        raise FinalCanaryError('freeze embedding authority is incomplete')
+    provider = raw.get('embedding_provider')
+    model = raw.get('embedding_model')
+    dimensions = raw.get('embedding_dimensions')
+    readiness = raw.get('expected_embedding_readiness')
+    waiver = raw.get('allow_unknown_embedding_provider')
+    if provider == OLLAMA_PROVIDER:
+        if (
+            model != OLLAMA_MODEL
+            or dimensions != OLLAMA_DIMENSIONS
+            or readiness != OLLAMA_READINESS
+            or waiver is not None
+        ):
+            raise FinalCanaryError('freeze ollama embedding authority is invalid')
+    elif provider == 'openai':
+        # Separately authorized OpenAI deployments may bind openai waiver only.
+        # Reject residual ollama model under openai provider (no half-migration).
+        if (
+            not isinstance(model, str)
+            or not model
+            or model == OLLAMA_MODEL
+            or type(dimensions) is not int
+            or dimensions < 1
+            or readiness not in {'ready', 'unknown'}
+            or waiver not in (None, 'openai')
+            or (readiness == 'unknown' and waiver != 'openai')
+        ):
+            raise FinalCanaryError('freeze embedding authority is invalid')
+    else:
+        raise FinalCanaryError('freeze embedding provider is invalid')
+    return {
+        'embedding_provider': provider,
+        'embedding_model': model,
+        'embedding_dimensions': dimensions,
+        'expected_embedding_readiness': readiness,
+        'allow_unknown_embedding_provider': waiver,
+    }
+
+
+def _child_waiver_argv(authority: dict[str, Any]) -> list[str]:
+    """D-15: omit waiver pair entirely when null; never hardcode openai on ollama."""
+    waiver = authority.get('allow_unknown_embedding_provider')
+    provider = authority.get('embedding_provider')
+    if provider == OLLAMA_PROVIDER:
+        if waiver is not None:
+            raise FinalCanaryError('ollama freeze must not select embedding waiver')
+        return []
+    if waiver is None:
+        return []
+    if waiver != 'openai' or provider != 'openai':
+        raise FinalCanaryError('embedding waiver is not authorized for provider')
+    return ['--allow-unknown-embedding-provider', 'openai']
+
+
+def _validate_observed_embedding_authority(
+    *,
+    freeze_authority: dict[str, Any],
+    observed: dict[str, Any],
+) -> None:
+    """D-14: reject provider/model/dimension/readiness drift after freeze."""
+    if not isinstance(observed, dict):
+        raise FinalCanaryError('observed embedding authority is invalid')
+    expected_provider = freeze_authority.get('embedding_provider')
+    expected_model = freeze_authority.get('embedding_model')
+    expected_dimensions = freeze_authority.get('embedding_dimensions')
+    expected_ready = freeze_authority.get('expected_embedding_readiness')
+    if observed.get('provider') != expected_provider:
+        raise FinalCanaryError('observed embedding provider drifted from freeze')
+    if observed.get('model') != expected_model:
+        raise FinalCanaryError('observed embedding model drifted from freeze')
+    if observed.get('dimensions') != expected_dimensions:
+        raise FinalCanaryError('observed embedding dimensions drifted from freeze')
+    if observed.get('ready') != expected_ready:
+        raise FinalCanaryError('observed embedding readiness drifted from freeze')
+    if expected_provider == OLLAMA_PROVIDER and observed.get('ready') == 'unknown':
+        raise FinalCanaryError('ollama readiness unknown is not waivable')
+    if expected_provider == OLLAMA_PROVIDER and observed.get('provider') == 'openai':
+        raise FinalCanaryError('ollama freeze rejects openai provider')
+
+
+def _validate_freeze(raw: dict[str, Any]) -> tuple[str, int, str, dict[str, Any]]:
     head = raw.get('head')
     commit = raw.get('commit')
     count = raw.get('git_commit_count_at_freeze')
@@ -200,7 +300,8 @@ def _validate_freeze(raw: dict[str, Any]) -> tuple[str, int, str]:
         )
     ):
         raise FinalCanaryError('freeze receipt is invalid')
-    return head, count, image_id
+    authority = _validate_embedding_authority(raw)
+    return head, count, image_id, authority
 
 
 def _option_value(argv: list[str], option: str) -> str:
@@ -477,14 +578,32 @@ def _validate_final_report_live_markers(text: str) -> tuple[int, int]:
     return start, end
 
 
-def _require_final_report_live_markers(phase_dir: Path) -> None:
+def _live_output_names(embedding_provider: str | None) -> tuple[str, str]:
+    """D-16: Ollama operation writes 06-OLLAMA-*; legacy path keeps historical names."""
+    if embedding_provider == OLLAMA_PROVIDER:
+        return OLLAMA_LEDGER_NAME, OLLAMA_FINAL_REPORT_NAME
+    return LEGACY_LEDGER_NAME, LEGACY_FINAL_REPORT_NAME
+
+
+def _require_final_report_live_markers(
+    phase_dir: Path, *, embedding_provider: str | None = None
+) -> Path:
     """Read-only preflight: phase final-report shell must expose live markers."""
-    final_report = phase_dir / '06-FINAL-REPORT.md'
-    try:
-        text = final_report.read_text(encoding='utf-8')
-    except OSError as exc:
-        raise FinalCanaryError('final report shell is unavailable') from exc
-    _validate_final_report_live_markers(text)
+    _, report_name = _live_output_names(embedding_provider)
+    candidates = [phase_dir / report_name]
+    if report_name != LEGACY_FINAL_REPORT_NAME:
+        # Transition: accept either Ollama-named shell or pre-created shell path.
+        candidates.append(phase_dir / LEGACY_FINAL_REPORT_NAME)
+    last_exc: Exception | None = None
+    for final_report in candidates:
+        try:
+            text = final_report.read_text(encoding='utf-8')
+        except OSError as exc:
+            last_exc = exc
+            continue
+        _validate_final_report_live_markers(text)
+        return final_report
+    raise FinalCanaryError('final report shell is unavailable') from last_exc
 
 
 def _final_report_text(current: str, ledger: dict[str, Any]) -> str:
@@ -509,17 +628,27 @@ def _final_report_text(current: str, ledger: dict[str, Any]) -> str:
     return current[:start] + replacement + current[end + len(LIVE_FIELDS_END) :]
 
 
-def _map_phase_outputs(phase_dir: Path, report: dict[str, Any]) -> None:
+def _map_phase_outputs(
+    phase_dir: Path,
+    report: dict[str, Any],
+    *,
+    embedding_provider: str | None = None,
+    final_report_path: Path | None = None,
+) -> None:
     ledger = _phase_ledger(report)
-    final_report = phase_dir / '06-FINAL-REPORT.md'
+    ledger_name, report_name = _live_output_names(embedding_provider)
+    final_report = final_report_path or (phase_dir / report_name)
     try:
         final_text = _final_report_text(final_report.read_text(encoding='utf-8'), ledger)
     except OSError as exc:
         raise FinalCanaryError('final report shell is unavailable') from exc
     runner = _runner_module()
     try:
-        runner.atomic_write_bytes(final_report, final_text.encode('utf-8'))
-        runner.atomic_write_json(phase_dir / '06-CANARY-LEDGER.json', ledger)
+        # Always write operation-specific names for ollama; never mutate immutable old ledger.
+        target_report = phase_dir / report_name
+        target_ledger = phase_dir / ledger_name
+        runner.atomic_write_bytes(target_report, final_text.encode('utf-8'))
+        runner.atomic_write_json(target_ledger, ledger)
     except Exception as exc:
         raise FinalCanaryError('phase live output update failed') from exc
 
@@ -528,6 +657,9 @@ def _map_failure_after_allocation(
     phase_dir: Path,
     fallback: dict[str, Any],
     result_dir: Path,
+    *,
+    embedding_provider: str | None = None,
+    final_report_path: Path | None = None,
 ) -> None:
     report = fallback
     report_path = result_dir / 'final-report.json'
@@ -538,7 +670,12 @@ def _map_failure_after_allocation(
             candidate = None
         if isinstance(candidate, dict) and candidate.get('classification') in TERMINAL_CLASSES:
             report = candidate
-    _map_phase_outputs(phase_dir, report)
+    _map_phase_outputs(
+        phase_dir,
+        report,
+        embedding_provider=embedding_provider,
+        final_report_path=final_report_path,
+    )
 
 
 def run_final_canary(
@@ -558,7 +695,7 @@ def run_final_canary(
     if actual_argv is not None and actual_argv != expanded[2:]:
         raise FinalCanaryError('actual argv differs from approved invocation')
     phase_dir = _phase_directory(expanded)
-    head, frozen_count, image_id = _validate_freeze(freeze)
+    head, frozen_count, image_id, embedding_authority = _validate_freeze(freeze)
     if _git_value(['rev-parse', 'HEAD']) != head:
         raise FinalCanaryError('freeze HEAD changed')
     if _git_value(['rev-list', '--count', 'HEAD']) != str(frozen_count):
@@ -572,7 +709,11 @@ def run_final_canary(
     if image.get('image_id') != image_id or image_commit != image_revision:
         raise FinalCanaryError('image receipt differs from freeze')
 
-    _require_final_report_live_markers(phase_dir)
+    embedding_provider = embedding_authority['embedding_provider']
+    final_report_path = _require_final_report_live_markers(
+        phase_dir, embedding_provider=embedding_provider
+    )
+    waiver_argv = _child_waiver_argv(embedding_authority)
 
     artifact_parent = Path(_option_value(expanded, '--artifact-parent'))
     result_parent = Path(_option_value(expanded, '--result-parent'))
@@ -606,8 +747,7 @@ def run_final_canary(
             batch_id,
             '--output-dir',
             str(artifact_dir),
-            '--allow-unknown-embedding-provider',
-            'openai',
+            *waiver_argv,
         ]
         built = _run(builder, env)
         payload = artifact_dir / 'accept-tab.payload.json'
@@ -662,8 +802,7 @@ def run_final_canary(
             'git',
             '--image-fingerprint',
             image_id.removeprefix('sha256:'),
-            '--allow-unknown-embedding-provider',
-            'openai',
+            *waiver_argv,
         ]
         completed = _run(runner, env)
         report = _validate_terminal(
@@ -682,11 +821,22 @@ def run_final_canary(
             'auth_01': dict(AUTH_01),
             'stack_preserved': True,
         }
-        _map_phase_outputs(phase_dir, report)
+        _map_phase_outputs(
+            phase_dir,
+            report,
+            embedding_provider=embedding_provider,
+            final_report_path=final_report_path,
+        )
         return result
     except BaseException as exc:
         try:
-            _map_failure_after_allocation(phase_dir, fallback, result_dir)
+            _map_failure_after_allocation(
+                phase_dir,
+                fallback,
+                result_dir,
+                embedding_provider=embedding_provider,
+                final_report_path=final_report_path,
+            )
         except FinalCanaryError as mapping_exc:
             raise mapping_exc from exc
         raise

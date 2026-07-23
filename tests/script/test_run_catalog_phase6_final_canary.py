@@ -25,6 +25,8 @@ def _job(tmp_path: Path) -> tuple[Path, dict[str, str]]:
 
 
 def _freeze(tmp_path: Path, **overrides: Any) -> Path:
+    # Default freeze is separately-authorized OpenAI path (legacy evidence names).
+    # Ollama tests override via OLLAMA_FREEZE_AUTHORITY / _ollama_freeze.
     receipt = {
         'head': '1' * 40,
         'commit': '1' * 40,
@@ -40,6 +42,11 @@ def _freeze(tmp_path: Path, **overrides: Any) -> Path:
         'canary_ids_allocated': False,
         'plan_status': 'PENDING_TOP_LEVEL_HANDOFF',
         'summary_created': False,
+        'embedding_provider': 'openai',
+        'embedding_model': 'text-embedding-3-small',
+        'embedding_dimensions': 1536,
+        'expected_embedding_readiness': 'unknown',
+        'allow_unknown_embedding_provider': 'openai',
     }
     receipt.update(overrides)
     path = tmp_path / '06-FREEZE-RECEIPT.json'
@@ -300,13 +307,11 @@ def test_final_canary_calls_builder_and_runner_once_shell_false(
         '06-FINAL-REPORT.md',
     }
     assert 'Classification: `PASSED`' in final_report.read_text(encoding='utf-8')
-    assert not (
-        ROOT
-        / '.planning'
-        / 'phases'
-        / '06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure'
-        / '06-CANARY-LEDGER.json'
-    ).exists()
+    # Live writes stay under the temp phase dir; never mutate immutable phase evidence.
+    real_phase = (
+        ROOT / '.planning' / 'phases' / '06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure'
+    )
+    assert all(real_phase not in path.parents and path != real_phase for path, _ in phase_writes)
 
 
 def test_final_report_shell_live_markers_preflight_valid() -> None:
@@ -719,10 +724,14 @@ def test_final_canary_ollama_freeze_requires_embedding_authority_fields(tmp_path
             launcher._validate_freeze(receipt)
 
     # Valid Ollama freeze returns head/count/image and preserves authority.
-    head, count, image_id = launcher._validate_freeze({**base, **OLLAMA_FREEZE_AUTHORITY})
+    head, count, image_id, authority = launcher._validate_freeze(
+        {**base, **OLLAMA_FREEZE_AUTHORITY}
+    )
     assert head == '1' * 40
     assert count == 42
     assert image_id.startswith('sha256:')
+    assert authority['embedding_provider'] == 'ollama'
+    assert authority['allow_unknown_embedding_provider'] is None
 
 
 def test_final_canary_ollama_path_omits_openai_waiver_argv(
@@ -875,7 +884,9 @@ def test_final_canary_ollama_path_omits_openai_waiver_argv(
                 raise AssertionError('openai waiver must be absent on Ollama path')
     # D-16: new live outputs must not target immutable old ledger/report names only.
     write_names = {path.name for path, _ in phase_writes}
-    assert '06-CANARY-LEDGER.json' not in write_names or '06-OLLAMA-CANARY-LEDGER.json' in write_names
+    assert (
+        '06-CANARY-LEDGER.json' not in write_names or '06-OLLAMA-CANARY-LEDGER.json' in write_names
+    )
     assert any(name.startswith('06-OLLAMA-') for name in write_names), write_names
     assert str(job / 'tmp') in ' '.join(calls[0])
 
