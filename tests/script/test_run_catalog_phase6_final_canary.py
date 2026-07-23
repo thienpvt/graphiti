@@ -664,3 +664,312 @@ def test_final_canary_auth_01_requires_exact_kubernetes_false(auth_patch: dict[s
             'mode': 'iterative_tdd_plus_one_final_clean_room_canary',
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Stage D (06-07): Ollama freeze authority + waiver-free argv (P6-OLL-LAUNCH-01)
+# ---------------------------------------------------------------------------
+
+OLLAMA_FREEZE_AUTHORITY = {
+    'embedding_provider': 'ollama',
+    'embedding_model': 'qwen3-embedding:0.6b',
+    'embedding_dimensions': 1024,
+    'expected_embedding_readiness': 'ready',
+    'allow_unknown_embedding_provider': None,
+}
+
+
+def _ollama_freeze(tmp_path: Path, **overrides: Any) -> Path:
+    return _freeze(tmp_path, **{**OLLAMA_FREEZE_AUTHORITY, **overrides})
+
+
+def test_final_canary_ollama_freeze_requires_embedding_authority_fields(tmp_path: Path) -> None:
+    """D-14: freeze without Ollama embedding authority fields fails closed."""
+    base = {
+        'head': '1' * 40,
+        'commit': '1' * 40,
+        'git_commit_count_at_freeze': 42,
+        'image_id': 'sha256:' + '2' * 64,
+        'image_revision_commit': '3' * 40,
+        'project': 'graphiti-catalog-v2-phase6-final',
+        'fingerprint': '4' * 64,
+        'r0_passed': True,
+        'r1_passed': True,
+        'r2_passed': True,
+        'r3_passed': True,
+        'canary_ids_allocated': False,
+        'plan_status': 'PENDING_TOP_LEVEL_HANDOFF',
+        'summary_created': False,
+    }
+    # Legacy freeze without embedding authority must fail.
+    with pytest.raises(launcher.FinalCanaryError, match='embedding'):
+        launcher._validate_freeze(dict(base))
+
+    # Missing each required field fails.
+    for missing in (
+        'embedding_provider',
+        'embedding_model',
+        'embedding_dimensions',
+        'expected_embedding_readiness',
+        'allow_unknown_embedding_provider',
+    ):
+        receipt = {**base, **OLLAMA_FREEZE_AUTHORITY}
+        del receipt[missing]
+        with pytest.raises(launcher.FinalCanaryError, match='embedding'):
+            launcher._validate_freeze(receipt)
+
+    # Valid Ollama freeze returns head/count/image and preserves authority.
+    head, count, image_id = launcher._validate_freeze({**base, **OLLAMA_FREEZE_AUTHORITY})
+    assert head == '1' * 40
+    assert count == 42
+    assert image_id.startswith('sha256:')
+
+
+def test_final_canary_ollama_path_omits_openai_waiver_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-15: Ollama freeze builds builder/runner argv without openai waiver pair."""
+    job, environment = _job(tmp_path)
+    freeze = _ollama_freeze(tmp_path)
+    invocation = _invocation(tmp_path)
+    _image(tmp_path)
+    monkeypatch.setattr(
+        launcher, '_git_value', lambda argv: '1' * 40 if 'rev-parse' in argv else '42'
+    )
+    monkeypatch.setattr(launcher, '_allocate_run_id', lambda: '20260723t100000z-ollama')
+
+    def gate0_digests(head: str) -> dict[str, str]:
+        assert head == '1' * 40
+        return {
+            'source_map_sha256': '5' * 64,
+            'runner_sha256': '6' * 64,
+            'execution_map_sha256': '7' * 64,
+        }
+
+    monkeypatch.setattr(launcher, '_gate0_digests', gate0_digests)
+
+    def fake_claim_allocation(job_tmp: Path, frozen_head: str) -> tuple[Path, str]:
+        assert frozen_head == '1' * 40
+        return job_tmp / launcher.ALLOCATION_CLAIM, '20260723t100000z-ollama'
+
+    monkeypatch.setattr(launcher, '_claim_allocation', fake_claim_allocation)
+    phase_dir = tmp_path / 'phase'
+    phase_dir.mkdir()
+    # D-16: Ollama operation uses 06-OLLAMA-* report shell names when required.
+    ollama_report = phase_dir / '06-OLLAMA-FINAL-REPORT.md'
+    ollama_report.write_text(
+        '# Phase 6 Ollama Final Report\n\n'
+        + launcher.LIVE_FIELDS_START
+        + '\n- Classification: ``\n'
+        + launcher.LIVE_FIELDS_END
+        + '\n',
+        encoding='utf-8',
+    )
+    # Compatibility shell if launcher still probes legacy name during transition.
+    (phase_dir / '06-FINAL-REPORT.md').write_text(
+        ollama_report.read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(launcher, '_phase_directory', lambda expanded: phase_dir)
+
+    phase_writes: list[tuple[Path, Any]] = []
+
+    def fake_write_json(path: Path, value: dict[str, Any]) -> None:
+        phase_writes.append((path, value))
+
+    def fake_write_bytes(path: Path, value: bytes) -> None:
+        phase_writes.append((path, value))
+        path.write_bytes(value)
+
+    monkeypatch.setattr(
+        launcher,
+        '_runner_module',
+        lambda: SimpleNamespace(
+            atomic_write_json=fake_write_json,
+            atomic_write_bytes=fake_write_bytes,
+        ),
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
+        assert kwargs.get('shell') is False
+        calls.append(list(argv))
+        if 'build_catalog_canary_requests.py' in ' '.join(argv):
+            artifact_dir = Path(argv[argv.index('--output-dir') + 1])
+            artifact_dir.mkdir(parents=True)
+            (artifact_dir / 'accept-tab.payload.json').write_text('{}', encoding='utf-8')
+            (artifact_dir / 'run-manifest.json').write_text('{}', encoding='utf-8')
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+        result_dir = Path(argv[argv.index('--output-dir') + 1])
+        result_dir.mkdir(parents=True)
+        entries = [
+            {
+                'ordinal': 1,
+                'tool': 'prepare_catalog_batch',
+                'stage': 'PREPARE',
+                'success': True,
+                'error_code': None,
+            },
+            {
+                'ordinal': 2,
+                'tool': 'commit_prepared_catalog_batch',
+                'stage': 'COMMIT',
+                'success': True,
+                'error_code': None,
+            },
+        ]
+        run_id = argv[argv.index('--run-id') + 1]
+        group_id = argv[argv.index('--group-id') + 1]
+        report = {
+            'schema_version': launcher.REPORT_SCHEMA_VERSION,
+            'classification': 'PASSED',
+            'run_id': run_id,
+            'group_id': group_id,
+            'control_group_id': argv[argv.index('--control-group-id') + 1],
+            'batch_id': argv[argv.index('--batch-id') + 1],
+            'counts': {'entities': 3, 'edges': 2, 'sources': 1, 'evidence_links': 5},
+            'dry_run_zero_write_proven': True,
+            'replay': 'skipped',
+            'tool_count': 28,
+            'tool_call_count': 2,
+            'final_ordinal': 2,
+        }
+        report_path = result_dir / 'final-report.json'
+        ledger_path = result_dir / 'tool-ledger.json'
+        report_path.write_text(json.dumps(report), encoding='utf-8')
+        ledger_path.write_text(
+            json.dumps({'schema_version': 1, 'entries': entries}), encoding='utf-8'
+        )
+        (result_dir / 'terminal-artifacts-manifest.json').write_text(
+            json.dumps(
+                {
+                    'schema_version': launcher.TERMINAL_ACCEPTANCE_SCHEMA_VERSION,
+                    'tool_ledger_sha256': hashlib.sha256(ledger_path.read_bytes()).hexdigest(),
+                    'final_report_sha256': hashlib.sha256(report_path.read_bytes()).hexdigest(),
+                    'tool_call_count': 2,
+                    'final_ordinal': 2,
+                    'tool_count': 28,
+                }
+            ),
+            encoding='utf-8',
+        )
+        return SimpleNamespace(returncode=0, stdout=json.dumps(report), stderr='')
+
+    monkeypatch.setattr(launcher.subprocess, 'run', fake_run)
+    result = launcher.run_final_canary(
+        freeze_receipt=freeze,
+        invocation=invocation,
+        environment={**environment, 'GRAPHITI_PHASE6_MCP_URL': 'http://127.0.0.1:8000/mcp'},
+    )
+    assert result['classification'] == 'PASSED'
+    assert len(calls) == 2
+    for argv in calls:
+        joined = ' '.join(argv)
+        assert '--allow-unknown-embedding-provider' not in argv
+        assert 'openai' not in joined or 'build_catalog' in joined or 'run_catalog' in joined
+        # Explicit: no waiver pair anywhere in builder/runner argv.
+        for i, token in enumerate(argv):
+            if token == '--allow-unknown-embedding-provider':
+                raise AssertionError('waiver flag must be absent on Ollama path')
+            if token == 'openai' and i > 0 and argv[i - 1] == '--allow-unknown-embedding-provider':
+                raise AssertionError('openai waiver must be absent on Ollama path')
+    # D-16: new live outputs must not target immutable old ledger/report names only.
+    write_names = {path.name for path, _ in phase_writes}
+    assert '06-CANARY-LEDGER.json' not in write_names or '06-OLLAMA-CANARY-LEDGER.json' in write_names
+    assert any(name.startswith('06-OLLAMA-') for name in write_names), write_names
+    assert str(job / 'tmp') in ' '.join(calls[0])
+
+
+def test_final_canary_rejects_openai_provider_or_unknown_readiness_on_ollama_freeze(
+    tmp_path: Path,
+) -> None:
+    """D-14: Ollama freeze rejects openai provider, unknown readiness, non-null waiver, drift."""
+    base = {
+        'head': '1' * 40,
+        'commit': '1' * 40,
+        'git_commit_count_at_freeze': 42,
+        'image_id': 'sha256:' + '2' * 64,
+        'image_revision_commit': '3' * 40,
+        'project': 'graphiti-catalog-v2-phase6-final',
+        'fingerprint': '4' * 64,
+        'r0_passed': True,
+        'r1_passed': True,
+        'r2_passed': True,
+        'r3_passed': True,
+        'canary_ids_allocated': False,
+        'plan_status': 'PENDING_TOP_LEVEL_HANDOFF',
+        'summary_created': False,
+        **OLLAMA_FREEZE_AUTHORITY,
+    }
+
+    with pytest.raises(launcher.FinalCanaryError):
+        launcher._validate_freeze({**base, 'embedding_provider': 'openai'})
+    with pytest.raises(launcher.FinalCanaryError):
+        launcher._validate_freeze({**base, 'expected_embedding_readiness': 'unknown'})
+    with pytest.raises(launcher.FinalCanaryError):
+        launcher._validate_freeze({**base, 'allow_unknown_embedding_provider': 'openai'})
+    with pytest.raises(launcher.FinalCanaryError):
+        launcher._validate_freeze({**base, 'embedding_model': 'text-embedding-3-small'})
+    with pytest.raises(launcher.FinalCanaryError):
+        launcher._validate_freeze({**base, 'embedding_dimensions': 1536})
+
+    # Observed drift helpers fail closed when present.
+    assert hasattr(launcher, '_validate_observed_embedding_authority') or hasattr(
+        launcher, '_reject_embedding_authority_drift'
+    )
+    reject = getattr(
+        launcher,
+        '_validate_observed_embedding_authority',
+        getattr(launcher, '_reject_embedding_authority_drift', None),
+    )
+    assert callable(reject)
+    with pytest.raises(launcher.FinalCanaryError):
+        reject(
+            freeze_authority=OLLAMA_FREEZE_AUTHORITY,
+            observed={
+                'provider': 'openai',
+                'model': 'qwen3-embedding:0.6b',
+                'ready': 'ready',
+                'dimensions': 1024,
+            },
+        )
+    with pytest.raises(launcher.FinalCanaryError):
+        reject(
+            freeze_authority=OLLAMA_FREEZE_AUTHORITY,
+            observed={
+                'provider': 'ollama',
+                'model': 'qwen3-embedding:0.6b',
+                'ready': 'unknown',
+                'dimensions': 1024,
+            },
+        )
+    # Matching observation is accepted.
+    reject(
+        freeze_authority=OLLAMA_FREEZE_AUTHORITY,
+        observed={
+            'provider': 'ollama',
+            'model': 'qwen3-embedding:0.6b',
+            'ready': 'ready',
+            'dimensions': 1024,
+        },
+    )
+
+
+def test_final_canary_openai_waiver_remains_for_authorized_openai_freeze(tmp_path: Path) -> None:
+    """OpenAI waiver may remain for separately authorized OpenAI deployments only."""
+    if not hasattr(launcher, '_child_waiver_argv'):
+        pytest.skip('helper not yet present in RED')
+    ollama_argv = launcher._child_waiver_argv(
+        {
+            'embedding_provider': 'ollama',
+            'allow_unknown_embedding_provider': None,
+        }
+    )
+    assert ollama_argv == []
+    openai_argv = launcher._child_waiver_argv(
+        {
+            'embedding_provider': 'openai',
+            'allow_unknown_embedding_provider': 'openai',
+        }
+    )
+    assert openai_argv == ['--allow-unknown-embedding-provider', 'openai']

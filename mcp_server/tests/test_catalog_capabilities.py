@@ -779,6 +779,148 @@ async def test_build_async_ollama_ready_and_missing_and_http_error(monkeypatch, 
     assert caps_err.embeddings['ready'] == 'error'
 
 
+# ---------------------------------------------------------------------------
+# Stage C (06-07): Ollama readiness + no OpenAI waiver (P6-OLL-CAPA-01)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ollama_tags_present_ready(monkeypatch):
+    """D-12: provider=ollama + /api/tags has qwen3-embedding:0.6b ⇒ ready."""
+    from services import catalog_capabilities as cap_mod
+
+    def fetch(url: str):
+        assert url.endswith('/api/tags')
+        assert '/api/embed' not in url
+        return 200, json.dumps({'models': [{'name': 'qwen3-embedding:0.6b'}]}).encode()
+
+    monkeypatch.setattr(cap_mod, '_fetch_ollama_tags', fetch)
+    caps = await cap_mod.build_catalog_capabilities_async(
+        config=CatalogConfig(enabled=False, uuid_namespace=None),
+        client=None,
+        backend='neo4j',
+        embedder_provider='ollama',
+        embedder_model='qwen3-embedding:0.6b',
+        ollama_api_url='http://127.0.0.1:11434',
+    )
+    assert caps.embeddings['ready'] == 'ready'
+    assert caps.embeddings['provider'] == 'ollama'
+    assert caps.embeddings['model'] == 'qwen3-embedding:0.6b'
+
+
+@pytest.mark.asyncio
+async def test_ollama_tags_missing_model_error(monkeypatch):
+    """D-12: missing exact model on /api/tags ⇒ embeddings.ready=error."""
+    from services import catalog_capabilities as cap_mod
+
+    def fetch(url: str):
+        assert url.endswith('/api/tags')
+        return 200, json.dumps({'models': [{'name': 'nomic-embed-text:latest'}]}).encode()
+
+    monkeypatch.setattr(cap_mod, '_fetch_ollama_tags', fetch)
+    caps = await cap_mod.build_catalog_capabilities_async(
+        config=CatalogConfig(enabled=False, uuid_namespace=None),
+        client=None,
+        backend='neo4j',
+        embedder_provider='ollama',
+        embedder_model='qwen3-embedding:0.6b',
+        ollama_api_url='http://127.0.0.1:11434',
+    )
+    assert caps.embeddings['ready'] == 'error'
+
+
+@pytest.mark.asyncio
+async def test_ollama_unreachable_error(monkeypatch, caplog, capsys):
+    """D-12: network failure on tags probe ⇒ error; raw URL never logged."""
+    from services import catalog_capabilities as cap_mod
+
+    sensitive = 'http://secret-ollama-host.internal:11434'
+
+    def fetch(url: str):
+        assert url.endswith('/api/tags')
+        raise OSError('connection refused to secret-ollama-host.internal')
+
+    monkeypatch.setattr(cap_mod, '_fetch_ollama_tags', fetch)
+    caps = await cap_mod.build_catalog_capabilities_async(
+        config=CatalogConfig(enabled=False, uuid_namespace=None),
+        client=None,
+        backend='neo4j',
+        embedder_provider='ollama',
+        embedder_model='qwen3-embedding:0.6b',
+        ollama_api_url=sensitive,
+    )
+    assert caps.embeddings['ready'] == 'error'
+    blob = str(caps.model_dump()).lower()
+    assert 'secret-ollama-host' not in blob
+    assert '11434' not in blob
+    captured = capsys.readouterr()
+    logs = '\n'.join(record.getMessage() for record in caplog.records)
+    combined = captured.out + captured.err + logs
+    assert sensitive not in combined
+    assert 'secret-ollama-host' not in combined
+
+
+@pytest.mark.asyncio
+async def test_ollama_raw_url_absent_from_caps_and_logs(monkeypatch, caplog, capsys):
+    """D-12 / T-06-OLL-05: capability dict and logs never carry raw Ollama URL."""
+    from services import catalog_capabilities as cap_mod
+
+    raw_url = 'http://10.9.8.7:11434'
+
+    def fetch(url: str):
+        assert url == f'{raw_url}/api/tags'
+        return 200, json.dumps({'models': [{'name': 'qwen3-embedding:0.6b'}]}).encode()
+
+    monkeypatch.setattr(cap_mod, '_fetch_ollama_tags', fetch)
+    caps = await cap_mod.build_catalog_capabilities_async(
+        config=CatalogConfig(enabled=False, uuid_namespace=None),
+        client=None,
+        backend='neo4j',
+        embedder_provider='ollama',
+        embedder_model='qwen3-embedding:0.6b',
+        ollama_api_url=raw_url,
+    )
+    dumped = caps.model_dump()
+    blob = json.dumps(dumped).lower()
+    assert '10.9.8.7' not in blob
+    assert '11434' not in blob
+    assert 'http://' not in blob
+    assert 'api_url' not in dumped.get('embeddings', {})
+    captured = capsys.readouterr()
+    logs = '\n'.join(record.getMessage() for record in caplog.records)
+    assert raw_url not in captured.out + captured.err + logs
+
+
+def test_ollama_unknown_does_not_get_openai_waiver():
+    """D-13: ollama+unknown never waived by openai; ollama+ready passes with null waiver."""
+    import importlib.util
+    from pathlib import Path
+
+    runner_path = Path(__file__).resolve().parents[2] / 'scripts' / 'run_catalog_canary_batch.py'
+    spec = importlib.util.spec_from_file_location('phase6_runner_capa_waiver', runner_path)
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+
+    ready = runner.evaluate_embedding_readiness(
+        {'provider': 'ollama', 'ready': 'ready'},
+        allow_unknown_embedding_provider=None,
+    )
+    assert ready['status'] == 'pass'
+    assert ready['waiver_applied'] is False
+
+    with pytest.raises(runner.RunnerError, match='unknown'):
+        runner.evaluate_embedding_readiness(
+            {'provider': 'ollama', 'ready': 'unknown'},
+            allow_unknown_embedding_provider='openai',
+        )
+    with pytest.raises(runner.RunnerError, match='unknown'):
+        runner.evaluate_embedding_readiness(
+            {'provider': 'ollama', 'ready': 'unknown'},
+            allow_unknown_embedding_provider=None,
+        )
+
+
 @pytest.mark.asyncio
 async def test_build_async_openai_no_http(monkeypatch):
     from services import catalog_capabilities as cap_mod
