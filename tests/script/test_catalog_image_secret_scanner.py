@@ -703,3 +703,25 @@ def test_complete_image_layer_unparseable_text_fails_closed(tmp_path: Path) -> N
     _write_tar(root / 'layer.tar', {'app/settings.json': b'{password: \xff\xfe}'})
     with pytest.raises(scanner.ScanUnparseableError):
         scanner.scan_complete_image(root)
+
+
+def test_complete_image_os_metadata_and_test_constants_non_hit(tmp_path: Path) -> None:
+    root = _clean_complete_image(tmp_path / 'image')
+    metadata = root / 'rootfs/usr/lib/python3/site-packages/vendor.dist-info'
+    metadata.mkdir(parents=True)
+    (metadata / 'METADATA').write_text(
+        'Description: API key: ``api_key``\nPassword: password\n', encoding='utf-8'
+    )
+    (root / 'rootfs/etc').mkdir(parents=True)
+    (root / 'rootfs/etc/openssl.cnf').write_text(
+        'private_key = $dir/private/cakey.pem\n', encoding='utf-8'
+    )
+    test_dir = root / 'rootfs/usr/lib/python3/site-packages/vendor/test'
+    test_dir.mkdir(parents=True)
+    (test_dir / 'test_auth.py').write_text(
+        'TEST_API_KEY = "synthetic-fixture-value-not-real"\nFAKE_TEST_API_KEY = "fake-value"\n',
+        encoding='utf-8',
+    )
+    result = scanner.scan_complete_image(root)
+    assert result.hit_count == 0
+    _result_public_fields(result)

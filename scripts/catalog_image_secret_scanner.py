@@ -416,7 +416,10 @@ def _scan_python_literals(text: str) -> list[str]:
         if value is None:
             return
         # AST Constant is already a string literal by syntax — never treat as
-        # identifier/var-ref. Only placeholder allowlist suppresses.
+        # identifier/var-ref. Explicit test/example names remain synthetic data.
+        normalized_name = _norm_key(name)
+        if normalized_name.startswith(('test', 'fake', 'mock', 'dummy', 'example', 'sample')):
+            return
         if _is_placeholder(value):
             return
         hits.append('credential_literal')
@@ -869,7 +872,18 @@ def _scan_image_member(raw: bytes, *, member_name: str) -> ScanResult:
         classes.add(_BINARY_SKIPPED)
         return ScanResult(total, frozenset(classes))
 
-    result = scan_text(text, label=member.name, path_hint=member.as_posix())
+    # Image exports include OS/package metadata formats whose ``key: value``
+    # prose is not YAML. Keep token/namespace detection global, then use strict
+    # structured parsers only for formats with literal assignment semantics.
+    kind = _path_kind(member.as_posix())
+    if kind in {'python', 'json', 'env', 'yaml'}:
+        result = scan_text(text, label=member.name, path_hint=member.as_posix())
+    else:
+        global_classes = _scan_token_shapes(text) + _scan_namespace_uuid(text)
+        result = ScanResult(
+            hit_count=len(global_classes),
+            path_classes=frozenset(global_classes),
+        )
     return ScanResult(total + result.hit_count, frozenset(classes | set(result.path_classes)))
 
 
