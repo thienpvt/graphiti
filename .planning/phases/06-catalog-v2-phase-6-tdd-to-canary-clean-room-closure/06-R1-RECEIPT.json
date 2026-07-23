@@ -1,0 +1,58 @@
+{
+  "schema_version": "phase6-r1-receipt-v1",
+  "recorded_date": "2026-07-23",
+  "stage": "R1",
+  "passed": true,
+  "ok": true,
+  "classification": "R1_NEO4J_AUTHORITY_GREEN",
+  "project": "graphiti-phase6-cleanroom-1f529136",
+  "image": "graphiti-mcp:phase6-cleanroom-60d270dfad32-bound",
+  "expected_image_id": "sha256:3602956a626cfa48f9d2cebb0f4ec048736724891866a1d71189da3ace81a572",
+  "namespace_fingerprint": "5d54f7f83eb90194",
+  "namespace_raw_exposed": false,
+  "materialize_clean_room": "exclusive_create_once_prior",
+  "ports": {
+    "neo4j_http": 17474,
+    "neo4j_bolt": 17687,
+    "mcp": 18000
+  },
+  "neo4j": {
+    "container": "graphiti-phase6-cleanroom-1f529136-neo4j-1",
+    "health": "healthy",
+    "image": "neo4j:5.26.0",
+    "network": "graphiti-phase6-cleanroom-1f529136_default",
+    "mounts": {
+      "/data": "graphiti-phase6-cleanroom-1f529136_neo4j_data",
+      "/logs": "graphiti-phase6-cleanroom-1f529136_neo4j_logs"
+    },
+    "volumes_created_here": true
+  },
+  "mcp_absent_at_r1": true,
+  "absent_before_start": {
+    "bootstrap_container": true,
+    "data_volume": true,
+    "logs_volume": true,
+    "mcp_container": true,
+    "neo4j_container": true,
+    "network": true
+  },
+  "config_sha256": "fcfa610351b9dd209ca9e1e8d642179091ba9ba57d1525f28be791f19bd4e749",
+  "execution_map_sha256": "56d62538414259d5fc038c2e0fa28bd2e3e122ba9a12bb3f998d9a25de38217b",
+  "order_observed": ["render", "neo4j"],
+  "historical_resources_untouched": true,
+  "canary_ids_allocated": false,
+  "canary_executed": false,
+  "canary_ids": null,
+  "protected_config_status": "modified_unstaged",
+  "protected_config_path": "mcp_server/config/config-docker-neo4j.yaml",
+  "sanitized": true,
+  "verify_live": {
+    "neo4j_health": "healthy",
+    "data_volume_present": true,
+    "logs_volume_present": true,
+    "docker_neo4j_data_preserved": true,
+    "docker_neo4j_logs_preserved": true,
+    "docker_neo4j_1_preserved": true
+  },
+  "notes": "Neo4j authority from existing exclusive-create runtime. Fingerprint only; raw namespace never recorded. MCP not required at R1. No canary IDs. No restart performed for receipt truth."
+}

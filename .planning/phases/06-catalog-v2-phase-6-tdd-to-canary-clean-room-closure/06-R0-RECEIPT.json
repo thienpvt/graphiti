@@ -1,0 +1,79 @@
+{
+  "schema_version": "phase6-r0-receipt-v1",
+  "recorded_date": "2026-07-23",
+  "stage": "R0",
+  "passed": true,
+  "ok": true,
+  "classification": "R0_ISOLATION_GREEN",
+  "project": "graphiti-phase6-cleanroom-1f529136",
+  "image": "graphiti-mcp:phase6-cleanroom-60d270dfad32-bound",
+  "expected_image_id": "sha256:3602956a626cfa48f9d2cebb0f4ec048736724891866a1d71189da3ace81a572",
+  "image_receipt_classification": "IMAGE_GREEN",
+  "bind_classification": "BOUND_EXACT",
+  "matrix_classification": "READY_FOR_IMAGE_BINDING",
+  "bind_commit": "60d270dfad329ca19508300308066776edeead23",
+  "source_context_sha256": "0c24ce0aba2c1c316c69e7ff1b8ec47b5f74b1977ad83ca9f519a435fb4dc38a",
+  "ports": {
+    "neo4j_http": 17474,
+    "neo4j_bolt": 17687,
+    "mcp": 18000
+  },
+  "launcher_state_run_id": "r0r3-1f529136",
+  "state_dir": "C:/Users/thien/.claude/jobs/1f529136/tmp/phase6-r0r3-state-1f529136",
+  "resources_absent": {
+    "before_neo4j_start": {
+      "network": true,
+      "neo4j_container": true,
+      "mcp_container": true,
+      "bootstrap_container": true,
+      "data_volume": true,
+      "logs_volume": true
+    }
+  },
+  "resources": {
+    "network": "graphiti-phase6-cleanroom-1f529136_default",
+    "neo4j_container": "graphiti-phase6-cleanroom-1f529136-neo4j-1",
+    "mcp_container": "graphiti-phase6-cleanroom-1f529136-graphiti-mcp-1",
+    "bootstrap_container": "graphiti-phase6-cleanroom-1f529136-catalog-bootstrap-1",
+    "data_volume": "graphiti-phase6-cleanroom-1f529136_neo4j_data",
+    "logs_volume": "graphiti-phase6-cleanroom-1f529136_neo4j_logs"
+  },
+  "historical_inventory_before": {
+    "containers": ["docker-neo4j-1"],
+    "volumes": ["docker_neo4j_data", "docker_neo4j_logs"],
+    "networks": ["docker_default"]
+  },
+  "historical_inventory_after_verify": {
+    "containers_present": ["docker-neo4j-1"],
+    "volumes_present": ["docker_neo4j_data", "docker_neo4j_logs"],
+    "mutated": false,
+    "pruned": false
+  },
+  "effective_compose_proofs": {
+    "selected_image": "graphiti-mcp:phase6-cleanroom-60d270dfad32-bound",
+    "project_scoped_volumes_only": true,
+    "no_historical_or_external_data_mounts": true,
+    "no_build_section_activated": true,
+    "pull_policy_forbids_pulls": true,
+    "note": "Pull-policy proof is Compose service policy, not docker build --pull=false."
+  },
+  "order": ["render"],
+  "mutating_actions_this_stage": ["render"],
+  "canary_ids_allocated": false,
+  "canary_executed": false,
+  "canary_ids": null,
+  "namespace_raw_exposed": false,
+  "protected_config_status": "modified_unstaged",
+  "protected_config_path": "mcp_server/config/config-docker-neo4j.yaml",
+  "sanitized": true,
+  "pre_id_deviations": [
+    {
+      "id": "DEV-COMPOSE-NO-BUILD-FLAG",
+      "severity": "pre_id",
+      "summary": "Canonical launcher bootstrap later omits unsupported docker compose run --no-build under Compose v5.1.4; R0 render itself used existing launcher state.",
+      "disposition": "documented_continue",
+      "blocks_green": false
+    }
+  ],
+  "notes": "Continued existing clean-room project graphiti-phase6-cleanroom-1f529136. No new project/volume/image. No canary identity allocation. Historical docker-neo4j resources preserved."
+}
