@@ -127,9 +127,10 @@ def materialize_raw_git_archive(
             path.write_bytes(raw)
         else:
             path.write_bytes(raw)
-            os.chmod(
-                path, stat.S_IRUSR | stat.S_IWUSR | (stat.S_IXUSR if entry.mode == '100755' else 0)
-            )
+            mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+            if entry.mode == '100755':
+                mode |= stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+            os.chmod(path, mode)
         rows.append((entry.path, raw))
     return {'file_count': len(entries), 'source_context_sha256': _context_sha256(rows)}
 
