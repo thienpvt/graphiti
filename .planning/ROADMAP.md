@@ -309,7 +309,9 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 4/5 + 4/6 gap | Terminal pre-canary stop: Ollama R3 failed after invalid replacement; zero IDs/writes; stacks preserved | 2026-07-23 |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 8/11 | 06-09 rebound complete; exact archive + 21/21 matrix + one zero-hit image; stopped before direct 06-10 | — |
+
+**Active-plan progress:** 52/55 complete. Phase 6: 8/11 complete; 06-05 intentionally incomplete; 06-10 and 06-11 pending.
 
 ## Coverage
 
@@ -400,13 +402,13 @@ Plans:
 
 - [x] 06-09-PLAN.md — Candidate commit, raw-Git bind, new source-bound Ollama image (P6-OLL-BIND-01, P6-OLL-IMG-01; D-04, D-06..08, D-15)
 
-**Gap Wave 5** *(06-10 wave:5; terminal stop)*
+**Gap Wave 5** *(06-10 wave:5; pending after fresh 06-09 authority)*
 
-- [!] 06-10-PLAN.md — R0–R2 green; R3 failed after the canonical MCP activation was replaced/reconfigured. GREEN claim rejected; no prefreeze authority.
+- [ ] 06-10-PLAN.md — Direct next plan only; previous R0–R3 attempt remains immutable historical evidence and is never reused.
 
-**Gap Wave 6** *(06-11 not entered)*
+**Gap Wave 6** *(06-11 pending)*
 
-- [!] 06-11-PLAN.md — Not entered. No freeze receipt, canary IDs, canary run, prepare, commit, or catalog writes.
+- [ ] 06-11-PLAN.md — Pending. No freeze receipt, canary IDs, canary run, prepare, commit, or catalog writes from the rebound 06-09 execution.
 
 ---
 *Roadmap created: 2026-07-17 for milestone v1.1*

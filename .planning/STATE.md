@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-status: blocked
-stopped_at: Phase 6 native Ollama R3 failed; user selected terminal pre-canary stop
-last_updated: "2026-07-23T14:30:00.000Z"
+status: in_progress
+stopped_at: completed 06-09
+last_updated: "2026-07-23T15:25:12.000Z"
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 55
-  completed_plans: 53
-  percent: 96
+  completed_plans: 52
+  percent: 95
 current_phase: 06
 current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
 last_activity: 2026-07-23
-last_activity_desc: Native Ollama R0-R2 green; R3 invalid after forbidden replacement; zero canary IDs/writes; terminal stop
+last_activity_desc: 06-09 rebound to exact raw-Git candidate da8dce8; 21/21 matrix and one source-bound image green; zero runtime/IDs/writes; stopped before 06-10
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md`
 
 ## Current Position
 
-Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit; native Ollama remediation stopped at invalid R3. Phase 6 is terminal before a second canary.
+Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. Native Ollama remediation has fresh exact archive/image authority through 06-09 and is stopped before direct 06-10. Phase 6 itemized progress is 8/11; overall active-plan progress is 52/55; 06-05 remains intentionally incomplete.
 
 ### Phase 6 — OpenAI path (immutable terminal; never resume 06-05)
 
@@ -43,17 +43,17 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit; 
 - `canary_ids_allocated` for OpenAI path was true for that one run; result failed before commit; no second OpenAI canary
 - Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains user-owned, unstaged, excluded from projection/image (dims 1536 vs qwen3 max 1024 noted; do not stage)
 
-### Phase 6 — Native Ollama remediation (terminal pre-canary stop)
+### Phase 6 — Native Ollama remediation (stopped after rebound 06-09)
 
-- Gap authority: `ab5fdeb:spec/new-phase.md` (native Ollama operation)
-- Plans **06-06..06-09** complete. Plan **06-10** stopped incomplete at R3. Plan **06-11** not entered.
-- R0–R2 trusted: fresh project `graphiti-phase6-cleanroom-d19a171e`; schema `0/14` → one bootstrap → `14/14`.
-- R3 failed: first Compose-managed MCP activation lacked required construction configuration.
-- Executor then replaced the failed container with a raw reconfigured container. Missing Compose config authority and changed effective environment invalidate its 28-tool/Ollama-ready observations.
-- User selected terminal pre-canary stop. No superseding runtime, freeze receipt, canary IDs, prepare, commit, or catalog writes.
-- Ollama candidate `3b349dd` / context `3d782aa9…` / image `sha256:431a246…` remain valid image authority only.
-- Native Ollama stack and historical stacks remain intact. Protected config remains modified and unstaged.
-- Never resume 06-05, 06-10, or 06-11. Never reinterpret the rejected R3 GREEN commits as authority.
+- Gap authority: `ab5fdeb:spec/new-phase.md` (native Ollama operation).
+- Itemized plans complete: **06-01..06-04 and 06-06..06-09 = 8/11**. **06-05 intentionally incomplete**; 06-10 and 06-11 pending.
+- Previous project `graphiti-phase6-cleanroom-d19a171e`, containers, network, data/log volumes, receipts, and rejected R3 evidence remain historical and untouched.
+- Parent aggregate `8625990` contains the `cbade7f` marker and construction-authority remediation. Frozen Ruff found one real pre-image formatting defect.
+- Fix-forward candidate `da8dce8e0d2719953405e33f9fbe2bd8b863662c`, tree `47506ef00ede538145793719f6ab59c22202a122`, context `5284da1b…`.
+- Raw-Git archive 812/812 exact; 21/21 archive matrix green; native Ollama `qwen3-embedding:0.6b` / 1024 / credential false.
+- New image `sha256:85775ff…`; exact revision/context labels; complete image scan zero hits; one build.
+- Protected config remains modified and unstaged. Zero runtime starts, canary IDs, launcher invocations, prepare/commit calls, or Catalog writes.
+- Stop at completed 06-09. Next is direct 06-10 only under separate execution; never resume 06-05.
 
 ### Phase 5 (preserved historical facts)
 
@@ -87,7 +87,7 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit; 
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
-| Phase 6 | 4/5 + 4/6 gap | Terminal pre-canary stop: Ollama R3 failed; zero canary IDs/writes; stacks preserved |
+| Phase 6 | 8/11 | 06-09 rebound complete; exact archive/image authority; zero runtime/IDs/writes; next direct 06-10 |
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
@@ -124,13 +124,16 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit; 
 - [Phase 06]: 06-08: protected config-docker-neo4j.yaml deferred unstaged; clean-room example Ollama authority
 - [Phase 06]: 06-08: preflight pulled exact qwen3-embedding:0.6b; native embed 1024; credential_used=false
 - [Phase 06]: 06-08: MATRIX_GREEN 18 checks + required E2E; no image/runtime/canary IDs
-- [Phase 06]: 06-09: Ollama BIND candidate 3b349dd context 3d782aa9; final clean archive 803/803 exact; IMAGE sha256:431a246… build_count=1 scan zero; OpenAI image non-authority
-- [Phase 06]: 06-10 terminal disposition: R0–R2 green; R3 failed because first activation lacked construction config. Post-failure raw-container replacement violated fail-stop and lacks Compose config authority.
-- [Phase 06]: User selected terminal pre-canary stop. Zero canary IDs, prepare, commit, writes, cleanup. All stacks preserved.
+- [Phase 06]: Historical 06-09 authority `3b349dd` / `sha256:431a246…` remains preserved but is superseded for future execution.
+- [Phase 06]: Fresh 06-09 authority: candidate `da8dce8`, tree `47506ef0`, context `5284da1b…`; archive 812/812 exact; matrix 21/21; image `sha256:85775ff…`; scan zero; build_count=1.
+- [Phase 06]: Rebound 06-09 performed zero runtime starts, IDs, launcher invocations, prepare, commit, or Catalog writes. Previous failed runtime resources/evidence remain immutable.
+- [Phase 06]: 06-10 and 06-11 remain pending. Next authorization target is direct 06-10; 06-05 remains intentionally incomplete.
 
 ### Pending Todos
 
-None. Phase 6 intentionally terminates blocked before freeze/canary. Any future attempt requires a new explicit phase and authorization; never resume the consumed runtime attempt.
+- Direct 06-10 is next. Do not auto-continue from 06-09.
+- 06-11 remains pending behind 06-10.
+- Never resume 06-05 or reuse/reclassify the previous failed runtime attempt.
 
 ### Blockers/Concerns
 
@@ -166,8 +169,8 @@ None. Phase 6 intentionally terminates blocked before freeze/canary. Any future 
 
 ## Session Continuity
 
-**Last session:** 2026-07-23T14:30:00.000Z
+**Last session:** 2026-07-23T15:25:12.000Z
 **Resume file:** None
 
-Stopped at: Phase 6 terminal pre-canary stop after invalid R3 replacement.
-Next: None. Do not resume 06-05, 06-10, or 06-11. Future runtime work requires a separately authorized phase.
+Stopped at: completed 06-09.
+Next: direct 06-10. Do not resume 06-05; do not auto-start 06-10 in this session.

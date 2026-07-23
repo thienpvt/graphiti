@@ -46,6 +46,10 @@
     "pyright_mcp",
     "required_real_ollama_e2e"
   ],
+  "matrix_expected_warning_classifications": [
+    "pydantic_v2_class_config_deprecation",
+    "pyright_version_update_notice"
+  ],
   "matrix_unexplained_warning_count": 0,
   "missing_count": 0,
   "mode_authority": "git_ls_tree_exact_100644_100755",

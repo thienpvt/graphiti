@@ -47,9 +47,13 @@
   "scanner_authority_file_sha256": "37bbdfbb362c6e38f0c988617b3ba84300aee8a713ff78a1afde0f3585b78911",
   "scanner_authority_path": "scripts/catalog_image_secret_scanner.py",
   "scanner_authority_symbol": "scan_complete_image",
+  "scanner_expected_warning_classifications": [
+    "python_ast_embedded_literal_syntaxwarning"
+  ],
   "scanner_path_classes": [
     "binary_skipped"
   ],
+  "scanner_unexplained_warning_count": 0,
   "schema_version": "phase6-ollama-image-receipt-v2",
   "secret_pattern_hits": 0,
   "secret_scan_scope": "complete_image_fs_config_history_layers_metadata",

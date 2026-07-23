@@ -25,6 +25,7 @@ Candidate `da8dce8e0d2719953405e33f9fbe2bd8b863662c` binds the two aggregate rem
 
 - Classification: `READY_FOR_IMAGE_BINDING`.
 - Checks: 21/21 passed; failures 0; skips 0; unexplained warnings 0.
+- Expected noise classified: Pydantic v2 class-config deprecation, Pyright version notice; scanner AST emitted embedded-literal `SyntaxWarning` noise without hits.
 - R3 construction authority: 7 passed.
 - Builder/runner: 82 passed.
 - Raw-Git archive: 8 passed.
