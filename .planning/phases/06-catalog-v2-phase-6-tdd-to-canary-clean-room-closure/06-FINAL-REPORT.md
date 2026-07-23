@@ -75,3 +75,14 @@ Post-ID allowlist only after identity allocation: `PASSED` | `FAILED_BEFORE_COMM
 - Prefreeze package only. Plan remains incomplete / PENDING_TOP_LEVEL_HANDOFF.
 - No 06-05-SUMMARY.md. No final FREEZE receipt in execute-phase.
 - Documented pre-ID deviations: Compose v5.1.4 `--no-build` omit; MCP embedder API key env replacement without source/image edit.
+
+### Final-canary Gate 2 root cause (sanitized)
+
+- Final canary ran. Gate 2 **FAILED** (not blocked). Live Classification remains allowlisted `FAILED_BEFORE_COMMIT`; failure mode is Gate 2 FAILED with zero writes before prepare/commit.
+- Counts field left `null` by launcher; explicit write counts: prepare=0, commit=0, writes=0.
+- `search_nodes` reached the existing local OpenAI-compatible proxy.
+- Proxy returned HTTP 400 with message text only: `No credentials for provider: openai` (no host/port/path recorded here).
+- `mcp_server/src/services/catalog_embedding_errors.py` classifies auth only for OpenAI `AuthenticationError` or HTTP 401/403 (`is_embedding_transport_auth`). HTTP 400 proxy credential-miss is outside that set.
+- Therefore `mcp_server/src/graphiti_mcp_server.py` emitted generic `graphiti_error_response` rather than `embedding_transport_auth`.
+- Gates 3–10 blocked after Gate 2 failure.
+- Documentation-only update (260723-k2u): no source changes; no retry; no second canary; no cleanup claimed; canonical ledger untouched.
