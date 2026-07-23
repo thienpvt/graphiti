@@ -1,19 +1,17 @@
 {
   "schema_version": "phase6-prebind-matrix-v1",
-  "recorded_date": "2026-07-22",
+  "recorded_date": "2026-07-23",
   "classification": "SOURCE_COMPLETE_GREEN",
-  "tested_source_head": "037181b99f490a7ea6b1292bcf252c8c44a2d933",
-  "tested_source_tree": "47db53bea7e704c250cc62f3b700cd87cdcbb63f",
-  "remediation_source_commits": [
-    "a92a2f041da00b42dcdc3c4f27f2db1140f0530e",
-    "037181b99f490a7ea6b1292bcf252c8c44a2d933"
-  ],
-  "scanner_source_commit": "dd9903d1b88ae16bfee82972ba9339ba0554bb73",
+  "tested_source_head": "e50e211c7614dbf648cbacda2d7da00346da7278",
+  "tested_source_tree": "4cf3903f0ae12bc4332cf3280366305a577a8726",
+  "fix_forward_task": "260723-9xv",
   "scanner_authority_path": "scripts/catalog_image_secret_scanner.py",
-  "scanner_authority_symbol": "scan_tree",
+  "scanner_authority_symbol": "scan_complete_image",
+  "scanner_authority_file_sha256": "5ae5b4e3f6fb8fef92f45d37e486d4eaac77c45cbdf984b919f678cc2cc7b898",
   "invalidated_candidate_commits": [
     "d54abe9d3d224367cb3a4eb989683a2860a9add2",
-    "6faa068782df8a3b73e908cdee08935afc08cc12"
+    "6faa068782df8a3b73e908cdee08935afc08cc12",
+    "5efa69f4ae6a9ec78efbf29193a57c0679a5019e"
   ],
   "candidate_frozen": false,
   "sanitized": true,
@@ -26,49 +24,39 @@
   "canary_ids_allocated": false,
   "canary_executed": false,
   "protected_config_status": "modified_unstaged",
-  "protected_config_worktree_git_blob": "815d00fe64c5e459ea50eec44e2c847a6b485bd4",
   "checks": [
     {
-      "name": "focused_harness_scanner_archive",
-      "passed": 138,
-      "exit_code": 0,
-      "skips": 0
-    },
-    {
-      "name": "phase5_compatibility",
-      "passed": 76,
-      "exit_code": 0,
-      "skips": 0
-    },
-    {
-      "name": "focused_service_launcher_matrix",
-      "passed": 389,
+      "name": "complete_catalog_union",
+      "passed": 1593,
       "exit_code": 0,
       "warnings": 1,
       "warning_class": "preexisting_pydantic_v2_deprecation",
-      "skips": 0
-    },
-    {
-      "name": "complete_catalog_union",
-      "passed": 1556,
-      "exit_code": 0,
-      "skips": 0,
       "environment_isolation": "explicit_empty_catalog_namespace"
     },
     {
-      "name": "scanner_focused_suite",
-      "passed": 23,
+      "name": "focused_phase6_matrix",
+      "passed": 87,
+      "exit_code": 0
+    },
+    {
+      "name": "phase5_compatibility_serial",
+      "passed": 76,
       "exit_code": 0,
-      "skips": 0
+      "note": "serial authoritative run after concurrent shared-workspace drift"
+    },
+    {
+      "name": "scanner_suite",
+      "passed": 26,
+      "exit_code": 0
     },
     {
       "name": "ruff_check",
-      "files": 9,
+      "files": 2,
       "exit_code": 0
     },
     {
       "name": "ruff_format_check",
-      "files": 9,
+      "files": 2,
       "exit_code": 0
     },
     {
@@ -86,114 +74,28 @@
         "tests/script"
       ],
       "exit_code": 0
-    },
-    {
-      "name": "docker_source_roots_secret_preflight",
-      "hit_count": 0,
-      "exit_code": 0,
-      "scope": "safe_copy_roots_without_dirty_protected_config"
-    },
-    {
-      "name": "staged_paths",
-      "count": 0
     }
   ],
   "harn_checklist": {
-    "P6-HARN-01": {
-      "status": "green",
-      "evidence": "source-complete test_catalog_canary_scripts project validation",
-      "class": "offline"
-    },
-    "P6-HARN-02": {
-      "status": "green",
-      "evidence": "source-complete legacy default-project contracts",
-      "class": "offline"
-    },
-    "P6-HARN-03": {
-      "status": "green",
-      "evidence": "source-complete PUBLIC_ACTIONS render contract",
-      "class": "offline"
-    },
-    "P6-HARN-04": {
-      "status": "green",
-      "evidence": "source-complete Neo4j-only launcher action tests",
-      "class": "offline"
-    },
-    "P6-HARN-05": {
-      "status": "green",
-      "evidence": "source-complete schema bootstrap 0/14-to-14/14 contract",
-      "class": "offline"
-    },
-    "P6-HARN-06": {
-      "status": "green",
-      "evidence": "source-complete MCP-only no-deps launcher tests",
-      "class": "offline"
-    },
-    "P6-HARN-07": {
-      "status": "green",
-      "evidence": "source-complete GRAPHITI_MCP_IMAGE compatibility tests",
-      "class": "offline"
-    },
-    "P6-HARN-08": {
-      "status": "green",
-      "evidence": "source-complete exact image-ID inspection contract; live proof deferred to R3",
-      "class": "offline"
-    },
-    "P6-HARN-09": {
-      "status": "green",
-      "evidence": "source-complete project-scoped resource tests",
-      "class": "offline"
-    },
-    "P6-HARN-10": {
-      "status": "deferred_runtime",
-      "evidence": "absent-before-creation proof deferred to 06-R0-RECEIPT.json",
-      "class": "deferred_runtime"
-    },
-    "P6-HARN-11": {
-      "status": "green",
-      "evidence": "source-complete UUIDv4 exclusive-create tests",
-      "class": "offline"
-    },
-    "P6-HARN-12": {
-      "status": "green",
-      "evidence": "source-complete namespace fingerprint binding tests",
-      "class": "offline"
-    },
-    "P6-HARN-13": {
-      "status": "green",
-      "evidence": "source-complete raw namespace exclusion tests",
-      "class": "offline"
-    },
-    "P6-HARN-14": {
-      "status": "green",
-      "evidence": "source-complete subprocess and destructive-operation rejection tests",
-      "class": "offline"
-    },
-    "P6-HARN-15": {
-      "status": "green",
-      "evidence": "source-complete terminal ledger schema and hash tests",
-      "class": "offline"
-    },
-    "P6-HARN-16": {
-      "status": "green",
-      "evidence": "source-complete exact 22-field manifest assertion",
-      "class": "offline"
-    },
-    "P6-HARN-17": {
-      "status": "green",
-      "evidence": "source-complete capability and registration contracts",
-      "class": "offline"
-    },
-    "P6-HARN-18": {
-      "status": "green",
-      "evidence": "138 focused, 76 Phase5, 389 focused service/launcher, 1556 complete catalog, 23 scanner; Ruff, format, Pyright, compile green",
-      "class": "offline"
-    },
-    "P6-HARN-19": {
-      "status": "green",
-      "evidence": "Catalog error/manifest/tool identity contracts unchanged; scanner remediation only",
-      "class": "offline"
-    }
+    "P6-HARN-01": {"status": "green", "class": "offline"},
+    "P6-HARN-02": {"status": "green", "class": "offline"},
+    "P6-HARN-03": {"status": "green", "class": "offline"},
+    "P6-HARN-04": {"status": "green", "class": "offline"},
+    "P6-HARN-05": {"status": "green", "class": "offline"},
+    "P6-HARN-06": {"status": "green", "class": "offline"},
+    "P6-HARN-07": {"status": "green", "class": "offline"},
+    "P6-HARN-08": {"status": "green", "class": "offline"},
+    "P6-HARN-09": {"status": "green", "class": "offline"},
+    "P6-HARN-10": {"status": "deferred_runtime", "class": "deferred_runtime"},
+    "P6-HARN-11": {"status": "green", "class": "offline"},
+    "P6-HARN-12": {"status": "green", "class": "offline"},
+    "P6-HARN-13": {"status": "green", "class": "offline"},
+    "P6-HARN-14": {"status": "green", "class": "offline"},
+    "P6-HARN-15": {"status": "green", "class": "offline"},
+    "P6-HARN-16": {"status": "green", "class": "offline"},
+    "P6-HARN-17": {"status": "green", "class": "offline"},
+    "P6-HARN-18": {"status": "green", "class": "offline"},
+    "P6-HARN-19": {"status": "green", "class": "offline"}
   },
-  "notes": "Credential-literal remediation PREBIND only; not a frozen-candidate claim. Complete catalog union required explicit empty GRAPHITI_CATALOG_UUID_NAMESPACE because local runtime configuration sets an immutable namespace; this is environment isolation, not a waiver. One preexisting Pydantic v2 deprecation warning was observed in the mixed root/MCP focused run; authoritative MCP union remained warning-strict green. No Docker build, runtime, MCP transport, provider, namespace, identity, or canary action occurred. Protected user configuration remained modified and unstaged."
+  "notes": "Source-complete PREBIND for literal-aware complete-image authority. Tests ran against scanner source commit e50e211. A concurrently running helper unexpectedly merged already-authorized fork spec commit e52c1b5 after tests; that merge adds only spec/new-phase.md and is not claimed as tested source. PREBIND receipt will be committed after the merge and that later commit becomes the frozen candidate, with frozen matrix rerun from exact archive bytes. No image, runtime, provider, namespace, identity, or canary action occurred."
 }
