@@ -1,0 +1,23 @@
+{
+  "auth_01": {
+    "canary_invocation_count": 1,
+    "deployment_applied": false,
+    "historical_group_ids_used": false,
+    "kubernetes_applied": false,
+    "mode": "iterative_tdd_plus_one_final_clean_room_canary",
+    "second_canary": false
+  },
+  "batch_id": "accept-tab-catalog-v2-canary-20260723t065038z-8b0d3621",
+  "classification": "FAILED_BEFORE_COMMIT",
+  "control_group_id": "oracle-catalog-v2-canary-20260723t065038z-8b0d3621-empty-control",
+  "counts": null,
+  "dry_run_zero_write_proven": false,
+  "error_code": "graphiti_error_response",
+  "error_type": "RunnerError",
+  "final_ordinal": 8,
+  "group_id": "oracle-catalog-v2-canary-20260723t065038z-8b0d3621",
+  "replay": "skipped",
+  "run_id": "20260723t065038z-8b0d3621",
+  "stack_preserved": true,
+  "tool_call_count": 8
+}

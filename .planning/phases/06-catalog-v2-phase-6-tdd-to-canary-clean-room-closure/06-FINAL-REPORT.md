@@ -33,14 +33,18 @@
 ## 3. Classification shell (live uncommitted)
 
 <!-- phase6-final-canary-live:start -->
-| Field | Value |
-|-------|-------|
-| terminal_class | *(pending top-level handoff)* |
-| dry_run_zero_write_proven | *(pending)* |
-| counts.entities | *(pending)* |
-| counts.edges | *(pending)* |
-| counts.sources | *(pending)* |
-| counts.evidence_links | *(pending)* |
+- Classification: `FAILED_BEFORE_COMMIT`
+- Run ID: `20260723t065038z-8b0d3621`
+- Group ID: `oracle-catalog-v2-canary-20260723t065038z-8b0d3621`
+- Control group ID: `oracle-catalog-v2-canary-20260723t065038z-8b0d3621-empty-control`
+- Batch ID: `accept-tab-catalog-v2-canary-20260723t065038z-8b0d3621`
+- Counts: `null`
+- Dry-run zero-write proven: `false`
+- Replay: `skipped`
+- Tool calls: `8`
+- Final ordinal: `8`
+- AUTH-01: `{"canary_invocation_count": 1, "deployment_applied": false, "historical_group_ids_used": false, "kubernetes_applied": false, "mode": "iterative_tdd_plus_one_final_clean_room_canary", "second_canary": false}`
+- Stack preserved: `true`
 <!-- phase6-final-canary-live:end -->
 
 Post-ID allowlist only after identity allocation: `PASSED` | `FAILED_BEFORE_COMMIT` | `FAILED_AFTER_COMMIT`.
