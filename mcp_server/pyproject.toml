@@ -27,7 +27,8 @@ providers = [
 
 [tool.pyright]
 include = ["src", "tests"]
-extraPaths = ["src"]
+# Monorepo: resolve local graphiti_core (incl. embedder.ollama) over PyPI wheel.
+extraPaths = ["src", ".."]
 pythonVersion = "3.10"
 typeCheckingMode = "basic"
 

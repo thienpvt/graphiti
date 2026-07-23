@@ -21,14 +21,15 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
+from graphiti_core.embedder.ollama import OllamaEmbedder  # noqa: E402
+from graphiti_core.embedder.openai import OpenAIEmbedder  # noqa: E402
+
 from config.schema import (  # noqa: E402
     CatalogConfig,
     EmbedderConfig,
     EmbedderProvidersConfig,
     OllamaProviderConfig,
 )
-from graphiti_core.embedder.ollama import OllamaEmbedder  # noqa: E402
-from graphiti_core.embedder.openai import OpenAIEmbedder  # noqa: E402
 from models.catalog_common import PLAN_STATE_COMMITTED, PLAN_STATE_PREPARED  # noqa: E402
 from models.catalog_entities import CatalogEntityItem  # noqa: E402
 from models.catalog_prepare import (  # noqa: E402
@@ -80,7 +81,9 @@ def test_catalog_local_example_is_native_ollama_qwen3_1024() -> None:
     doc = yaml.safe_load(raw)
     embedder = doc['embedder']
     assert embedder['provider'] == 'ollama'
-    assert embedder['model'] == QWEN_MODEL or embedder['model'] == f'${{EMBEDDER_MODEL:{QWEN_MODEL}}}'
+    assert (
+        embedder['model'] == QWEN_MODEL or embedder['model'] == f'${{EMBEDDER_MODEL:{QWEN_MODEL}}}'
+    )
     # Accept bare 1024 or ${EMBEDDER_DIMENSIONS:1024}
     dims = embedder['dimensions']
     if isinstance(dims, int):
@@ -165,12 +168,13 @@ def test_factory_ollama_qwen3_creates_native_embedder_not_openai() -> None:
     )
     assert isinstance(client, OllamaEmbedder)
     assert not isinstance(client, OpenAIEmbedder)
-    assert client.config.embedding_model == QWEN_MODEL
-    assert client.config.embedding_dim == QWEN_DIM
-    assert client.config.api_key is None
-    assert client.config.base_url == OLLAMA_DEFAULT_URL
-    assert not client.config.base_url.rstrip('/').endswith('/v1')
-    assert '/v1' not in client.config.base_url
+    ollama = client
+    assert ollama.config.embedding_model == QWEN_MODEL
+    assert ollama.config.embedding_dim == QWEN_DIM
+    assert ollama.config.api_key is None
+    assert ollama.config.base_url == OLLAMA_DEFAULT_URL
+    assert not ollama.config.base_url.rstrip('/').endswith('/v1')
+    assert '/v1' not in ollama.config.base_url
 
 
 def _entity() -> CatalogEntityItem:
@@ -352,7 +356,9 @@ def _frozen_artifact(
     return artifact_bytes, art_sha, chunks, root_meta
 
 
-def _wire_commit(service: CatalogService, *, root: dict[str, Any], chunks: list[dict[str, Any]]) -> None:
+def _wire_commit(
+    service: CatalogService, *, root: dict[str, Any], chunks: list[dict[str, Any]]
+) -> None:
     service._store.load_prepared_plan_by_token_digest = AsyncMock(  # type: ignore[method-assign]
         return_value=root
     )

@@ -110,13 +110,14 @@ class TestOllamaEmbedderFactory:
         )
 
         assert isinstance(client, OllamaEmbedder)
-        assert client.config.embedding_model == 'nomic-embed-text'
-        assert client.config.embedding_dim == 768
-        assert client.config.base_url == 'http://ollama:11434'
-        assert client.config.api_key is None
-        assert client.config.truncate is False
-        assert client.config.keep_alive == '5m'
-        assert client.config.timeout == 90
+        ollama = client
+        assert ollama.config.embedding_model == 'nomic-embed-text'
+        assert ollama.config.embedding_dim == 768
+        assert ollama.config.base_url == 'http://ollama:11434'
+        assert ollama.config.api_key is None
+        assert ollama.config.truncate is False
+        assert ollama.config.keep_alive == '5m'
+        assert ollama.config.timeout == 90
 
     def test_api_key_is_forwarded(self):
         client = EmbedderFactory.create(
@@ -124,7 +125,8 @@ class TestOllamaEmbedderFactory:
         )
 
         assert isinstance(client, OllamaEmbedder)
-        assert client.config.api_key == 'secret'
+        ollama = client
+        assert ollama.config.api_key == 'secret'
 
     def test_missing_provider_config_fails(self):
         with pytest.raises(ValueError, match='Ollama provider configuration not found'):
@@ -150,11 +152,12 @@ class TestOllamaEmbedderFactory:
         )
         assert isinstance(client, OllamaEmbedder)
         assert not isinstance(client, OpenAIEmbedder)
-        assert client.config.embedding_model == 'qwen3-embedding:0.6b'
-        assert client.config.embedding_dim == 1024
-        assert client.config.api_key is None
-        assert client.config.base_url == 'http://host.docker.internal:11434'
-        assert not client.config.base_url.rstrip('/').endswith('/v1')
+        ollama = client
+        assert ollama.config.embedding_model == 'qwen3-embedding:0.6b'
+        assert ollama.config.embedding_dim == 1024
+        assert ollama.config.api_key is None
+        assert ollama.config.base_url == 'http://host.docker.internal:11434'
+        assert not ollama.config.base_url.rstrip('/').endswith('/v1')
 
 
 class TestLLMClientReasoningEffort:
