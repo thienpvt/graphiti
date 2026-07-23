@@ -39,7 +39,7 @@ key-files:
 key-decisions:
   - "Protected config-docker-neo4j.yaml left unstaged (default dims 1536 vs qwen3 max 1024); clean-room example is authority"
   - "Preflight authorized one pull of exact qwen3-embedding:0.6b only; native /api/embed dimensions=1024"
-  - "E2E Neo4j password for host clean-room bolt 17687 is compose default demodemo (not catalogtest123); password never stored in receipt"
+  - "E2E used authorized existing host clean-room Neo4j credentials ephemerally; no credential value or endpoint parameter persisted"
   - "Pyright extraPaths adds monorepo root so local graphiti_core.embedder.ollama resolves over PyPI wheel"
 
 patterns-established:
@@ -47,7 +47,7 @@ patterns-established:
   - "Matrix classification MATRIX_GREEN requires 18 named checks, skip_count=0, unexplained_skip_count=0"
   - "isinstance narrow then attribute access for OllamaEmbedder.config under basic pyright"
 
-requirements-completed: [P6-OLL-SAFE-01, P6-OLL-PREFLIGHT-01, P6-OLL-TDD-01]
+requirements-completed: [P6-OLL-PREFLIGHT-01, P6-OLL-TDD-01]
 
 coverage:
   - id: D1
@@ -129,7 +129,7 @@ _Note: TDD-style fix-forward between RED matrix and GREEN matrix_
 
 - Leave dirty `config-docker-neo4j.yaml` unstaged (cannot path-separate user overlay from default 1536); clean-room example is runtime authority
 - Preflight pull only `qwen3-embedding:0.6b`; no other models, no deletes
-- E2E against existing clean-room Neo4j on `17687` with compose auth `demodemo` (password not recorded in receipts)
+- E2E used the authorized existing host clean-room Neo4j connection ephemerally; no credential or endpoint parameter persisted
 - Temporary matrix runner deleted after receipt write; not committed
 
 ## Deviations from Plan
@@ -160,10 +160,10 @@ _Note: TDD-style fix-forward between RED matrix and GREEN matrix_
 - **Verification:** ruff check/format --check pass
 - **Committed in:** `4bc3b99`
 
-**4. [Rule 3 - Blocking] E2E Neo4j AuthError on default catalogtest123**
+**4. [Rule 3 - Blocking] E2E Neo4j authentication mismatch**
 - **Found during:** Task 2 (required E2E)
-- **Issue:** Host clean-room Neo4j on 17687 uses `NEO4J_AUTH=neo4j/demodemo`
-- **Fix:** Matrix E2E env default password `demodemo` for host clean-room; never persisted in receipt
+- **Issue:** Initial local E2E credentials did not match the authorized existing host clean-room Neo4j instance
+- **Fix:** Used that instance's authorized credentials ephemerally; persisted neither credentials nor endpoint parameters
 - **Files modified:** none permanent (ephemeral runner env only; helper deleted)
 - **Verification:** E2E 5 passed
 - **Committed in:** N/A (env only); result in `3de07d2` receipt
@@ -175,7 +175,7 @@ _Note: TDD-style fix-forward between RED matrix and GREEN matrix_
 
 ## Issues Encountered
 
-- Host Neo4j rate-limited after failed auth probes; recovered with correct `demodemo`
+- Host Neo4j rate-limited after failed authentication probes; recovered with authorized ephemeral credentials
 - PyPI graphiti-core in mcp venv missing ollama module for typecheck — fixed via extraPaths, not package install of unreviewed names
 
 ## Auth Gates
