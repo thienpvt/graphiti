@@ -309,9 +309,9 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 8/11 | 06-09 rebound complete; exact archive + 21/21 matrix + one zero-hit image; stopped before direct 06-10 | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 9/11 | 06-10 R0–R3 GREEN + prefreeze on a75e295d; freeze/canary deferred to 06-11; 06-05 intentionally incomplete | — |
 
-**Active-plan progress:** 52/55 complete. Phase 6: 8/11 complete; 06-05 intentionally incomplete; 06-10 and 06-11 pending.
+**Active-plan progress:** 53/55 complete. Phase 6: 9/11 complete; 06-05 intentionally incomplete; 06-11 pending.
 
 ## Coverage
 
@@ -361,9 +361,12 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
 - Historical Docker resources and prior canary data/evidence remain unchanged
 
-**Plans**: 8/11 plans executed
+**Plans**: 9/11 plans executed (06-05 intentionally incomplete; 06-11 pending)
 
 Plans:
+
+- [ ] 06-05-PLAN.md
+
 **Wave 1**
 
 - [x] 06-01-PLAN.md — TDD raw-Git exact archive materializer + baseline context golden (resume H8)
@@ -409,9 +412,9 @@ Plans:
 
 - [x] 06-09-PLAN.md — Candidate commit, raw-Git bind, new source-bound Ollama image (P6-OLL-BIND-01, P6-OLL-IMG-01; D-04, D-06..08, D-15)
 
-**Gap Wave 5** *(06-10 wave:5; pending after fresh 06-09 authority)*
+**Gap Wave 5** *(06-10 wave:5; complete — a75e295d R0–R3 GREEN + 06-OLLAMA prefreeze; stack left running)*
 
-- [ ] 06-10-PLAN.md — **Invoke only via** `/gsd-execute-phase 6 --gaps-only --wave 5 --no-transition`. Previous R0–R3 attempt immutable; never reuse; never select 06-05.
+- [x] 06-10-PLAN.md — **Invoke only via** `/gsd-execute-phase 6 --gaps-only --wave 5 --no-transition`. Previous R0–R3 attempt immutable; never reuse; never select 06-05. SUMMARY present; no FREEZE receipt/IDs/canary.
 
 **Gap Wave 6** *(06-11 pending)*
 

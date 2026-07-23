@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 status: in_progress
-stopped_at: completed 06-09
-last_updated: "2026-07-23T15:25:12.000Z"
+stopped_at: Completed 06-10-PLAN.md
+last_updated: "2026-07-23T16:26:47.682Z"
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 55
-  completed_plans: 52
-  percent: 95
+  completed_plans: 53
+  percent: 88
 current_phase: 06
 current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
 last_activity: 2026-07-23
-last_activity_desc: 06-09 rebound to exact raw-Git candidate da8dce8; 21/21 matrix and one source-bound image green; zero runtime/IDs/writes; stopped before 06-10
+last_activity_desc: 06-10 fresh a75e295d Ollama R0-R3 GREEN + prefreeze package; freeze/canary deferred to 06-11
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md`
 
 ## Current Position
 
-Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. Native Ollama remediation has fresh exact archive/image authority through 06-09 and is stopped before direct 06-10. Phase 6 itemized progress is 8/11; overall active-plan progress is 52/55; 06-05 remains intentionally incomplete.
+Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. Native Ollama remediation completed 06-10 R0–R3 GREEN + prefreeze on fresh project a75e295d. Phase 6 itemized progress is 9/11 (06-05 intentionally incomplete; 06-11 pending).
 
 ### Phase 6 — OpenAI path (immutable terminal; never resume 06-05)
 
@@ -43,17 +43,17 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 - `canary_ids_allocated` for OpenAI path was true for that one run; result failed before commit; no second OpenAI canary
 - Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains user-owned, unstaged, excluded from projection/image (dims 1536 vs qwen3 max 1024 noted; do not stage)
 
-### Phase 6 — Native Ollama remediation (stopped after rebound 06-09)
+### Phase 6 — Native Ollama remediation (stopped after 06-10 prefreeze)
 
 - Gap authority: `ab5fdeb:spec/new-phase.md` (native Ollama operation).
-- Itemized plans complete: **06-01..06-04 and 06-06..06-09 = 8/11**. **06-05 intentionally incomplete**; 06-10 and 06-11 pending.
-- Previous project `graphiti-phase6-cleanroom-d19a171e`, containers, network, data/log volumes, receipts, and rejected R3 evidence remain historical and untouched.
-- Parent aggregate `8625990` contains the `cbade7f` marker and construction-authority remediation. Frozen Ruff found one real pre-image formatting defect.
-- Fix-forward candidate `da8dce8e0d2719953405e33f9fbe2bd8b863662c`, tree `47506ef00ede538145793719f6ab59c22202a122`, context `5284da1b…`.
-- Raw-Git archive 812/812 exact; 21/21 archive matrix green; native Ollama `qwen3-embedding:0.6b` / 1024 / credential false.
-- New image `sha256:85775ff…`; exact revision/context labels; complete image scan zero hits; one build.
-- Protected config remains modified and unstaged. Zero runtime starts, canary IDs, launcher invocations, prepare/commit calls, or Catalog writes.
-- Stop at completed 06-09. Next is direct 06-10 only under separate execution; never resume 06-05.
+- Itemized plans complete: **06-01..06-04 and 06-06..06-10 = 9/11**. **06-05 intentionally incomplete**; 06-11 pending.
+- Historical projects `graphiti-phase6-cleanroom-1f529136` and `graphiti-phase6-cleanroom-d19a171e` remain untouched.
+- Image authority `sha256:85775ff1ead67b2b292ed171373ce496f2cdd83141528831d813a9f6668fc847` / bind `da8dce8` / context `5284da1b…`.
+- Fresh runtime project `graphiti-phase6-cleanroom-a75e295d`; ns_fp `36d75a3ff057e090`; config_fp `6550d751…`; ports 19474/19687/20000; stack left running for 06-11.
+- R0–R3 GREEN: schema 0/14→14/14 once; 28 tools; embeddings ollama / qwen3-embedding:0.6b / 1024 / ready / null waiver; prepare_called=false; llm_calls=0.
+- Prefreeze package committed under 06-OLLAMA-*; no FREEZE receipt; no canary IDs; no prepare/commit/Catalog writes.
+- Protected config remains modified and unstaged.
+- Stop at completed 06-10. Next legal: `/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition` (06-11 only); never resume 06-05.
 
 ### Phase 5 (preserved historical facts)
 
@@ -87,7 +87,7 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
-| Phase 6 | 8/11 | 06-09 rebound complete; exact archive/image authority; zero runtime/IDs/writes; next direct 06-10 |
+| Phase 6 | 9/11 | 06-10 R0–R3 GREEN + prefreeze on a75e295d; freeze/canary deferred to 06-11; 06-05 intentionally incomplete |
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
@@ -99,6 +99,7 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 | Phase 06 P07 | 25min | 2 tasks | 7 files |
 | Phase 06 P08 | 14min | 2 tasks | 5 files |
 | Phase 06 P09 | 16min | 2 tasks | 3 files |
+| Phase 06 P10 | 90min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -128,6 +129,7 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 - [Phase 06]: Fresh 06-09 authority: candidate `da8dce8`, tree `47506ef0`, context `5284da1b…`; archive 812/812 exact; matrix 21/21; image `sha256:85775ff…`; scan zero; build_count=1.
 - [Phase 06]: Rebound 06-09 performed zero runtime starts, IDs, launcher invocations, prepare, commit, or Catalog writes. Previous failed runtime resources/evidence remain immutable.
 - [Phase 06]: 06-10 and 06-11 remain pending. Next authorization target is direct 06-10; 06-05 remains intentionally incomplete.
+- [Phase ?]: 06-10: fresh a75e295d Ollama R0-R3 GREEN; freeze deferred to 06-11
 
 ### Pending Todos
 
@@ -169,8 +171,8 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 
 ## Session Continuity
 
-**Last session:** 2026-07-23T15:25:12.000Z
+**Last session:** 2026-07-23T16:26:47.666Z
 **Resume file:** None
 
-Stopped at: completed 06-09.
+Stopped at: Completed 06-10-PLAN.md
 Next: direct 06-10. Do not resume 06-05; do not auto-start 06-10 in this session.
