@@ -1,6 +1,7 @@
 """Deterministic stdlib image secret scanner (AST + structured literals).
 
-Authority symbol for IMAGE receipts: ``scan_tree`` (also ``scan_text``, ``scan_path``).
+Authority symbol for complete IMAGE receipts: ``scan_complete_image``.
+Tree-only entrypoints remain ``scan_tree``, ``scan_text``, and ``scan_path``.
 
 Python: only string Constant values in credential-like assignment/keyword contexts hit.
 Declarations, references, annotations, and bare keys are non-hits.
@@ -27,9 +28,10 @@ import ast
 import json
 import os
 import re
+import tarfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # Credential-ish left-hand identifiers (Python + structured keys).
 _CREDENTIAL_NAMES = frozenset(
@@ -231,6 +233,23 @@ _BINARY_MIN_OPAQUE_BYTES = 32
 _BINARY_SAMPLE_BYTES = 8192
 _BINARY_NUL_RATIO = 0.01
 _BINARY_CONTROL_RATIO = 0.30
+_IMAGE_LAYER_SUFFIXES = frozenset({'.tar'})
+_IMAGE_DENYLIST_NAMES = frozenset(
+    {
+        '.env',
+        '.planning',
+        'config-docker-neo4j.yaml',
+    }
+)
+_IMAGE_DENYLIST_MARKERS = frozenset(
+    {
+        'namespace-authority',
+        'catalog-v2-local-config',
+        'runtime-evidence',
+        'canary-ledger',
+    }
+)
+_DENYLIST_PATH = 'denylist_path'
 
 
 class ScanUnparseableError(ValueError):
@@ -464,6 +483,14 @@ def _env_credential_hit(raw: str) -> bool:
     return _is_credential_name(key) and not _is_placeholder(val)
 
 
+def _looks_like_code_reference(value: str) -> bool:
+    """True for code-like identifier references embedded in image metadata/history."""
+    raw = value.strip().strip('`"\'')
+    if not raw or any(char.isspace() for char in raw):
+        return False
+    return bool(_IDENTIFIER_VALUE_RE.fullmatch(raw))
+
+
 def _scan_json_data(data: object) -> list[str]:
     """Credential hits from JSON object keys and nested string KEY=VALUE literals.
 
@@ -476,7 +503,15 @@ def _scan_json_data(data: object) -> list[str]:
         if _is_credential_name(str(key)) and isinstance(value, str) and not _is_placeholder(value):
             hits.append('credential_literal')
     for string in _iter_json_strings(data):
-        if _env_credential_hit(string):
+        match = _ENV_LINE_RE.match(string.strip())
+        if not match:
+            continue
+        value = _value_from_structured(match.group('val'))
+        if _is_credential_name(match.group('key')) and not _is_placeholder(value):
+            # Docker history may preserve source snippets such as
+            # ``password=config.password``. Those are references, not literals.
+            if _looks_like_code_reference(value):
+                continue
             hits.append('credential_literal')
     return hits
 
@@ -795,7 +830,117 @@ def scan_tree(root: Path) -> ScanResult:
     return ScanResult(hit_count=total, path_classes=frozenset(classes))
 
 
-# Stable authority symbol alias for IMAGE receipt scanner_authority_symbol.
+def _is_denylisted_image_path(path: PurePosixPath) -> bool:
+    parts = tuple(part.lower() for part in path.parts)
+    if any(part in _IMAGE_DENYLIST_NAMES for part in parts):
+        return True
+    normalized = '/'.join(parts)
+    return any(marker in normalized for marker in _IMAGE_DENYLIST_MARKERS)
+
+
+def _scan_image_member(raw: bytes, *, member_name: str) -> ScanResult:
+    member = PurePosixPath(member_name.lstrip('./'))
+    total = 0
+    classes: set[str] = set()
+    if _is_denylisted_image_path(member):
+        total += 1
+        classes.add(_DENYLIST_PATH)
+
+    suffix = member.suffix.lower()
+    path = Path(member.as_posix())
+    if suffix in _BINARY_SUFFIXES and suffix not in _IMAGE_LAYER_SUFFIXES:
+        classes.add(_BINARY_SKIPPED)
+        return ScanResult(total, frozenset(classes))
+    try:
+        text = raw.decode('utf-8')
+    except UnicodeDecodeError as exc:
+        if _looks_like_text_path(path):
+            raise ScanUnparseableError(member.name, 'non-utf8') from exc
+        if _looks_like_binary_content(raw):
+            classes.add(_BINARY_SKIPPED)
+            return ScanResult(total, frozenset(classes))
+        raise ScanUnparseableError(member.name, 'non-utf8') from exc
+    if not _looks_like_text_path(path) and _looks_like_binary_content(raw):
+        classes.add(_BINARY_SKIPPED)
+        return ScanResult(total, frozenset(classes))
+    if b'\x00' in raw[:_BINARY_SAMPLE_BYTES]:
+        if _looks_like_text_path(path):
+            raise ScanUnparseableError(member.name, 'binary-nul')
+        classes.add(_BINARY_SKIPPED)
+        return ScanResult(total, frozenset(classes))
+
+    result = scan_text(text, label=member.name, path_hint=member.as_posix())
+    return ScanResult(total + result.hit_count, frozenset(classes | set(result.path_classes)))
+
+
+def _scan_layer_tar(path: Path) -> ScanResult:
+    total = 0
+    classes: set[str] = set()
+    try:
+        with tarfile.open(path, 'r:*') as archive:
+            for member in archive:
+                normalized = PurePosixPath(member.name.lstrip('./'))
+                if '..' in normalized.parts or normalized.is_absolute():
+                    total += 1
+                    classes.add(_DENYLIST_PATH)
+                    continue
+                if _is_denylisted_image_path(normalized):
+                    total += 1
+                    classes.add(_DENYLIST_PATH)
+                if not member.isfile():
+                    continue
+                payload = archive.extractfile(member)
+                if payload is None:
+                    raise ScanUnparseableError(normalized.name, 'tar-member')
+                result = _scan_image_member(payload.read(), member_name=normalized.as_posix())
+                total += result.hit_count
+                classes.update(result.path_classes)
+    except (tarfile.TarError, OSError) as exc:
+        raise ScanUnparseableError(path.name, 'tar') from exc
+    return ScanResult(total, frozenset(classes))
+
+
+def scan_complete_image(export_root: Path) -> ScanResult:
+    """Scan complete exported image surfaces without dependency/path waivers.
+
+    Traverses every filesystem path, image JSON/history, and nested layer tar
+    member. Binary payloads retain the explicit ``binary_skipped`` class; fixed
+    forbidden paths are counted separately as ``denylist_path``.
+    """
+    root = Path(export_root)
+    if not root.is_dir():
+        raise ScanUnparseableError(root.name, 'not a directory')
+
+    total = 0
+    classes: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        current = Path(dirpath)
+        kept: list[str] = []
+        for name in sorted(dirnames):
+            child = current / name
+            relative = PurePosixPath(child.relative_to(root).as_posix())
+            if _is_denylisted_image_path(relative):
+                total += 1
+                classes.add(_DENYLIST_PATH)
+            if child.is_symlink() or not _path_inside_root(child, root):
+                continue
+            kept.append(name)
+        dirnames[:] = kept
+        for name in sorted(filenames):
+            path = current / name
+            if path.is_symlink() or not path.is_file():
+                continue
+            relative = PurePosixPath(path.relative_to(root).as_posix())
+            if path.suffix.lower() in _IMAGE_LAYER_SUFFIXES:
+                result = _scan_layer_tar(path)
+            else:
+                result = _scan_image_member(path.read_bytes(), member_name=relative.as_posix())
+            total += result.hit_count
+            classes.update(result.path_classes)
+    return ScanResult(total, frozenset(classes))
+
+
+# Stable tree-only compatibility alias; IMAGE receipts bind scan_complete_image.
 scan = scan_tree
 
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -605,3 +607,99 @@ def test_docker_projection_subset_zero_hit(tmp_path: Path) -> None:
     result = scanner.scan_tree(root)
     assert result.hit_count == 0
     _result_public_fields(result)
+
+
+def _write_tar(path: Path, members: dict[str, bytes]) -> None:
+    with tarfile.open(path, 'w') as archive:
+        for name, raw in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(raw)
+            archive.addfile(info, io.BytesIO(raw))
+
+
+def _clean_complete_image(root: Path) -> Path:
+    root.mkdir()
+    dependency = root / 'rootfs/usr/lib/python3/site-packages/vendor'
+    dependency.mkdir(parents=True)
+    (dependency / 'auth.py').write_text(
+        'def connect(password: str, api_key: str) -> None:\n'
+        '    selected = api_key\n'
+        '    algorithm = "sk-ecdsa-sha2-nistp256"\n',
+        encoding='utf-8',
+    )
+    (root / 'config.json').write_text(
+        json.dumps({'Config': {'Env': ['OPENAI_API_KEY=omitted', 'NAME=demo']}}),
+        encoding='utf-8',
+    )
+    (root / 'history.json').write_text(
+        json.dumps([{'created_by': 'password=config.password'}]),
+        encoding='utf-8',
+    )
+    _write_tar(
+        root / 'layer.tar',
+        {
+            'usr/lib/python3/site-packages/dep.py': (
+                b'def f(client_secret: str) -> str:\n    return client_secret\n'
+            ),
+            'usr/share/doc/example.txt': b'api_key=your_openai_api_key_here\n',
+            'usr/bin/tool': b'\x7fELF' + b'\x00' * 64,
+        },
+    )
+    return root
+
+
+def test_complete_image_clean_dependency_tree_zero_hit(tmp_path: Path) -> None:
+    root = _clean_complete_image(tmp_path / 'image')
+    result = scanner.scan_complete_image(root)
+    assert result.hit_count == 0
+    assert 'credential_literal' not in result.path_classes
+    assert 'token_shape' not in result.path_classes
+    assert 'namespace_uuid' not in result.path_classes
+    _result_public_fields(result)
+
+
+def test_complete_image_scans_dependency_config_history_and_layer(tmp_path: Path) -> None:
+    root = _clean_complete_image(tmp_path / 'image')
+    dependency = root / 'rootfs/usr/lib/python3/site-packages/vendor/auth.py'
+    dependency.write_text(
+        'api_key = "op4que-Cr3dential-Value-9x"\n',
+        encoding='utf-8',
+    )
+    (root / 'config.json').write_text(
+        json.dumps({'Config': {'Env': ['OPENAI_API_KEY=sk-liveOpenAITokenBodyWithEntropy01']}}),
+        encoding='utf-8',
+    )
+    (root / 'history.json').write_text(
+        json.dumps(
+            [
+                {
+                    'created_by': (
+                        'GRAPHITI_CATALOG_UUID_NAMESPACE=11111111-2222-3333-4444-555555555555'
+                    )
+                }
+            ]
+        ),
+        encoding='utf-8',
+    )
+    _write_tar(
+        root / 'layer.tar',
+        {
+            'usr/lib/python3/site-packages/dep.py': (
+                b'client_secret = "real-client-secret-value"\n'
+            ),
+            'app/.planning/receipt.json': b'{}',
+        },
+    )
+    result = scanner.scan_complete_image(root)
+    assert result.hit_count >= 5
+    assert {'credential_literal', 'token_shape', 'namespace_uuid', 'denylist_path'} <= set(
+        result.path_classes
+    )
+    _result_public_fields(result)
+
+
+def test_complete_image_layer_unparseable_text_fails_closed(tmp_path: Path) -> None:
+    root = _clean_complete_image(tmp_path / 'image')
+    _write_tar(root / 'layer.tar', {'app/settings.json': b'{password: \xff\xfe}'})
+    with pytest.raises(scanner.ScanUnparseableError):
+        scanner.scan_complete_image(root)
