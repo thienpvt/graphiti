@@ -112,6 +112,7 @@ def build_catalog_capabilities(
     connectivity: Connectivity | None = None,
     embedder_provider: str | None = None,
     embedder_model: str | None = None,
+    embedder_dimensions: int | None = None,
     neo4j_indexes: IndexReadiness | None = None,
     embeddings_ready: EmbeddingReady | None = None,
 ) -> CatalogCapabilitiesResponse:
@@ -141,6 +142,8 @@ def build_catalog_capabilities(
         'model': embedder_model,
         'ready': emb_ready,
     }
+    if embedder_dimensions is not None:
+        embeddings['dimensions'] = embedder_dimensions
 
     # client is accepted for future safe read-only probes; pure path never calls it.
     _ = client
@@ -322,6 +325,7 @@ async def build_catalog_capabilities_async(
     package_version: str | None = None,
     embedder_provider: str | None = None,
     embedder_model: str | None = None,
+    embedder_dimensions: int | None = None,
     ollama_api_url: str | None = None,
 ) -> CatalogCapabilitiesResponse:
     """Capabilities with bounded read-only probes overlaid on pure config view.
@@ -356,6 +360,7 @@ async def build_catalog_capabilities_async(
         connectivity=connectivity,
         embedder_provider=embedder_provider,
         embedder_model=embedder_model,
+        embedder_dimensions=embedder_dimensions,
         neo4j_indexes=indexes,
         embeddings_ready=emb_ready,
     )

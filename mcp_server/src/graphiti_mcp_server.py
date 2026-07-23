@@ -1729,6 +1729,9 @@ async def get_catalog_capabilities() -> CatalogCapabilitiesResponse | ErrorRespo
         embedder_cfg = getattr(graphiti_service.config, 'embedder', None)
         embedder_provider = getattr(embedder_cfg, 'provider', None) if embedder_cfg else None
         embedder_model = getattr(embedder_cfg, 'model', None) if embedder_cfg else None
+        embedder_dimensions = getattr(embedder_cfg, 'dimensions', None) if embedder_cfg else None
+        if embedder_dimensions is not None and type(embedder_dimensions) is not int:
+            embedder_dimensions = None
         ollama_api_url = None
         if embedder_cfg is not None and embedder_provider == 'ollama':
             providers = getattr(embedder_cfg, 'providers', None)
@@ -1744,6 +1747,7 @@ async def get_catalog_capabilities() -> CatalogCapabilitiesResponse | ErrorRespo
             backend=backend,
             embedder_provider=embedder_provider,
             embedder_model=embedder_model,
+            embedder_dimensions=embedder_dimensions,
             ollama_api_url=ollama_api_url,
         )
     except Exception as e:

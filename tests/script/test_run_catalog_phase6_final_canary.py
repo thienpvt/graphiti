@@ -444,6 +444,16 @@ def test_final_canary_maps_builder_failure_after_allocation(
         launcher, '_git_value', lambda argv: '1' * 40 if 'rev-parse' in argv else '42'
     )
 
+    def gate0_digests(head: str) -> dict[str, str]:
+        assert head == '1' * 40
+        return {
+            'source_map_sha256': '5' * 64,
+            'runner_sha256': '6' * 64,
+            'execution_map_sha256': '7' * 64,
+        }
+
+    monkeypatch.setattr(launcher, '_gate0_digests', gate0_digests)
+
     def fake_claim(job_tmp: Path, frozen_head: str) -> tuple[Path, str]:
         assert frozen_head == '1' * 40
         return job_tmp / launcher.ALLOCATION_CLAIM, '20260722t120000z-failed'
@@ -681,6 +691,7 @@ OLLAMA_FREEZE_AUTHORITY = {
     'embedding_dimensions': 1024,
     'expected_embedding_readiness': 'ready',
     'allow_unknown_embedding_provider': None,
+    'config_fingerprint': 'e' * 64,
 }
 
 
@@ -732,6 +743,7 @@ def test_final_canary_ollama_freeze_requires_embedding_authority_fields(tmp_path
     assert image_id.startswith('sha256:')
     assert authority['embedding_provider'] == 'ollama'
     assert authority['allow_unknown_embedding_provider'] is None
+    assert authority['config_fingerprint'] == OLLAMA_FREEZE_AUTHORITY['config_fingerprint']
 
 
 def test_final_canary_ollama_path_omits_openai_waiver_argv(
@@ -753,6 +765,7 @@ def test_final_canary_ollama_path_omits_openai_waiver_argv(
             'source_map_sha256': '5' * 64,
             'runner_sha256': '6' * 64,
             'execution_map_sha256': '7' * 64,
+            'config_fingerprint': OLLAMA_FREEZE_AUTHORITY['config_fingerprint'],
         }
 
     monkeypatch.setattr(launcher, '_gate0_digests', gate0_digests)
@@ -764,7 +777,7 @@ def test_final_canary_ollama_path_omits_openai_waiver_argv(
     monkeypatch.setattr(launcher, '_claim_allocation', fake_claim_allocation)
     phase_dir = tmp_path / 'phase'
     phase_dir.mkdir()
-    # D-16: Ollama operation uses 06-OLLAMA-* report shell names when required.
+    # D-16: Ollama operation uses 06-OLLAMA-* report shell names only.
     ollama_report = phase_dir / '06-OLLAMA-FINAL-REPORT.md'
     ollama_report.write_text(
         '# Phase 6 Ollama Final Report\n\n'
@@ -772,11 +785,6 @@ def test_final_canary_ollama_path_omits_openai_waiver_argv(
         + '\n- Classification: ``\n'
         + launcher.LIVE_FIELDS_END
         + '\n',
-        encoding='utf-8',
-    )
-    # Compatibility shell if launcher still probes legacy name during transition.
-    (phase_dir / '06-FINAL-REPORT.md').write_text(
-        ollama_report.read_text(encoding='utf-8'),
         encoding='utf-8',
     )
     monkeypatch.setattr(launcher, '_phase_directory', lambda expanded: phase_dir)
@@ -1012,8 +1020,10 @@ def test_final_canary_ollama_freeze_requires_config_fingerprint(tmp_path: Path) 
         'summary_created': False,
         **OLLAMA_FREEZE_AUTHORITY,
     }
+    missing_fp = dict(base)
+    del missing_fp['config_fingerprint']
     with pytest.raises(launcher.FinalCanaryError, match='config_fingerprint|fingerprint'):
-        launcher._validate_freeze(dict(base))
+        launcher._validate_freeze(missing_fp)
     with pytest.raises(launcher.FinalCanaryError, match='config_fingerprint|fingerprint'):
         launcher._validate_freeze({**base, 'config_fingerprint': 'NOTHEX'})
     with pytest.raises(launcher.FinalCanaryError, match='config_fingerprint|fingerprint'):
@@ -1337,14 +1347,15 @@ def test_final_canary_ollama_runner_argv_binds_expected_authority_and_config_fp(
     assert '--allow-unknown-embedding-provider' not in runner_argv
     assert runner_argv[runner_argv.index('--expected-embedding-provider') + 1] == 'ollama'
     assert (
-        runner_argv[runner_argv.index('--expected-embedding-model') + 1]
-        == 'qwen3-embedding:0.6b'
+        runner_argv[runner_argv.index('--expected-embedding-model') + 1] == 'qwen3-embedding:0.6b'
     )
     assert runner_argv[runner_argv.index('--expected-embedding-dimensions') + 1] == '1024'
     assert runner_argv[runner_argv.index('--expected-embedding-readiness') + 1] == 'ready'
     assert runner_argv[runner_argv.index('--config-fingerprint') + 1] == OLLAMA_CONFIG_FINGERPRINT
 
-    ledger_writes = [value for path, value in phase_writes if path.name == '06-OLLAMA-CANARY-LEDGER.json']
+    ledger_writes = [
+        value for path, value in phase_writes if path.name == '06-OLLAMA-CANARY-LEDGER.json'
+    ]
     assert ledger_writes, {path.name for path, _ in phase_writes}
     ledger = ledger_writes[0]
     assert ledger['embedding_provider'] == 'ollama'

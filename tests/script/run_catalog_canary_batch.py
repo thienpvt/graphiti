@@ -1115,13 +1115,23 @@ def test_evaluate_embedding_readiness_compares_expected_authority_all_or_none() 
         )
 
     # Ollama unknown never waived even with expected authority present.
-    with pytest.raises(runner.RunnerError, match='unknown|error'):
+    # Expected readiness compare fails first (drift), which is fail-closed.
+    with pytest.raises(runner.RunnerError, match='readiness|drift|expected|unknown'):
         runner.evaluate_embedding_readiness(
             {**observed, 'ready': 'unknown'},
             expected_embedding_provider='ollama',
             expected_embedding_model='qwen3-embedding:0.6b',
             expected_embedding_dimensions=1024,
             expected_embedding_readiness='ready',
+            allow_unknown_embedding_provider='openai',
+        )
+    with pytest.raises(runner.RunnerError, match='unknown'):
+        runner.evaluate_embedding_readiness(
+            {**observed, 'ready': 'unknown'},
+            expected_embedding_provider='ollama',
+            expected_embedding_model='qwen3-embedding:0.6b',
+            expected_embedding_dimensions=1024,
+            expected_embedding_readiness='unknown',
             allow_unknown_embedding_provider='openai',
         )
 
@@ -1507,6 +1517,10 @@ async def test_execute_cli_pretransport_failure_is_durable_zero_transport(
         control_group_id=manifest['control_group_id'],
         batch_id=manifest['batch_id'],
         allow_unknown_embedding_provider=None,
+        expected_embedding_provider=None,
+        expected_embedding_model=None,
+        expected_embedding_dimensions=None,
+        expected_embedding_readiness=None,
         source_head='1' * 40,
         source_map_sha256='2' * 64,
         runner_sha256='3' * 64,
@@ -1563,6 +1577,10 @@ async def test_execute_cli_success_leaves_result_dir_for_live_runner(
         handoff_seen = True
         assert kwargs['output_dir'] == output
         assert not output.exists()
+        assert kwargs['expected_embedding_provider'] is None
+        assert kwargs['expected_embedding_model'] is None
+        assert kwargs['expected_embedding_dimensions'] is None
+        assert kwargs['expected_embedding_readiness'] is None
         return {'classification': 'PASSED'}
 
     monkeypatch.setattr(runner, 'streamable_http_client', fake_transport)
@@ -1579,6 +1597,10 @@ async def test_execute_cli_success_leaves_result_dir_for_live_runner(
         control_group_id=manifest['control_group_id'],
         batch_id=manifest['batch_id'],
         allow_unknown_embedding_provider=None,
+        expected_embedding_provider=None,
+        expected_embedding_model=None,
+        expected_embedding_dimensions=None,
+        expected_embedding_readiness=None,
         source_head='1' * 40,
         source_map_sha256='2' * 64,
         runner_sha256='3' * 64,
@@ -2090,6 +2112,10 @@ async def test_execute_cli_preflights_manifest_before_transport(
         control_group_id=manifest['control_group_id'],
         batch_id=manifest['batch_id'],
         allow_unknown_embedding_provider=None,
+        expected_embedding_provider=None,
+        expected_embedding_model=None,
+        expected_embedding_dimensions=None,
+        expected_embedding_readiness=None,
         source_head='1' * 40,
         source_map_sha256='2' * 64,
         runner_sha256='3' * 64,

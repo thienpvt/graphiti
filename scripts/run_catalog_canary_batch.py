@@ -2940,17 +2940,57 @@ def evaluate_embedding_readiness(
     embeddings: dict[str, Any],
     *,
     allow_unknown_embedding_provider: str | None = None,
+    expected_embedding_provider: str | None = None,
+    expected_embedding_model: str | None = None,
+    expected_embedding_dimensions: int | None = None,
+    expected_embedding_readiness: str | None = None,
 ) -> dict[str, Any]:
     """Capability embedding policy. Never rewrites readiness.
 
     Explicit waiver only for provider=openai + readiness=unknown when
     allow_unknown_embedding_provider == 'openai'. Other providers' unknown fail.
     error always fails. ready always passes.
+    Expected authority fields are all-or-none when any is supplied.
     """
     if not isinstance(embeddings, dict):
         raise RunnerError('capability_preflight_failed', 'embeddings projection is invalid')
+    expected = (
+        expected_embedding_provider,
+        expected_embedding_model,
+        expected_embedding_dimensions,
+        expected_embedding_readiness,
+    )
+    expected_present = [value is not None for value in expected]
+    if any(expected_present) and not all(expected_present):
+        raise RunnerError(
+            'capability_preflight_failed',
+            'expected embedding authority must be all-or-none',
+        )
     provider = embeddings.get('provider')
+    model = embeddings.get('model')
+    dimensions = embeddings.get('dimensions')
     readiness = embeddings.get('ready')
+    if all(expected_present):
+        if provider != expected_embedding_provider:
+            raise RunnerError(
+                'capability_preflight_failed',
+                'observed embedding provider drifted from expected',
+            )
+        if model != expected_embedding_model:
+            raise RunnerError(
+                'capability_preflight_failed',
+                'observed embedding model drifted from expected',
+            )
+        if dimensions != expected_embedding_dimensions:
+            raise RunnerError(
+                'capability_preflight_failed',
+                'observed embedding dimensions drifted from expected',
+            )
+        if readiness != expected_embedding_readiness:
+            raise RunnerError(
+                'capability_preflight_failed',
+                'observed embedding readiness drifted from expected',
+            )
     waiver_requested = allow_unknown_embedding_provider
     if waiver_requested is not None and waiver_requested != 'openai':
         raise RunnerError(
@@ -2976,9 +3016,13 @@ def evaluate_embedding_readiness(
     return {
         'status': status,
         'provider': provider,
+        'model': model,
+        'dimensions': dimensions,
         'readiness': readiness,
         'waiver_applied': waiver_applied,
         'observed_provider': provider,
+        'observed_model': model,
+        'observed_dimensions': dimensions,
         'observed_readiness': readiness,
     }
 
@@ -3879,8 +3923,11 @@ def _terminal_report(
         'search_verified': flags.get('search_verified', False),
         'control_isolation_verified': flags.get('control_isolation_verified', False),
         'embedding_provider': embedding_policy.get('observed_provider'),
+        'embedding_model': embedding_policy.get('observed_model'),
+        'embedding_dimensions': embedding_policy.get('observed_dimensions'),
         'embedding_readiness': embedding_policy.get('observed_readiness'),
         'waiver_applied': bool(embedding_policy.get('waiver_applied', False)),
+        'config_fingerprint': embedding_policy.get('config_fingerprint'),
         'replay': replay,
         'protected_groups_queried': [],
         'prohibited_tools_called': [],
@@ -4011,6 +4058,10 @@ async def run_live_canary(
     execution_attestor: Any | None = None,
     checkpoint_path: Path | None = None,
     allow_unknown_embedding_provider: str | None = None,
+    expected_embedding_provider: str | None = None,
+    expected_embedding_model: str | None = None,
+    expected_embedding_dimensions: int | None = None,
+    expected_embedding_readiness: str | None = None,
 ) -> dict[str, Any]:
     """Execute one non-resumable attempt; every transport body is strict-model-valid."""
     del checkpoint_path
@@ -4167,13 +4218,21 @@ async def run_live_canary(
         raw_embeddings = dict(capabilities.embeddings or {})
         flags['embedding_policy'] = {
             'observed_provider': raw_embeddings.get('provider'),
+            'observed_model': raw_embeddings.get('model'),
+            'observed_dimensions': raw_embeddings.get('dimensions'),
             'observed_readiness': raw_embeddings.get('ready'),
             'waiver_applied': False,
+            'config_fingerprint': config_fingerprint,
         }
         embedding_policy = evaluate_embedding_readiness(
             raw_embeddings,
             allow_unknown_embedding_provider=allow_unknown_embedding_provider,
+            expected_embedding_provider=expected_embedding_provider,
+            expected_embedding_model=expected_embedding_model,
+            expected_embedding_dimensions=expected_embedding_dimensions,
+            expected_embedding_readiness=expected_embedding_readiness,
         )
+        embedding_policy['config_fingerprint'] = config_fingerprint
         if capabilities_raw != raw_snapshot or canonical_sha256(capabilities_raw) != capability_sha:
             raise RunnerError(
                 'capability_preflight_failed',
@@ -4560,6 +4619,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help='Explicit waiver for provider=openai readiness=unknown only; never rewrites readiness',
     )
+    parser.add_argument('--expected-embedding-provider')
+    parser.add_argument('--expected-embedding-model')
+    parser.add_argument('--expected-embedding-dimensions', type=int)
+    parser.add_argument('--expected-embedding-readiness')
     args = parser.parse_args(argv)
     if args.mode == 'live-canary':
         missing = [
@@ -4602,6 +4665,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             and args.allow_unknown_embedding_provider != 'openai'
         ):
             parser.error('--allow-unknown-embedding-provider only accepts openai')
+        expected_authority = (
+            args.expected_embedding_provider,
+            args.expected_embedding_model,
+            args.expected_embedding_dimensions,
+            args.expected_embedding_readiness,
+        )
+        expected_present = [value is not None for value in expected_authority]
+        if any(expected_present) and not all(expected_present):
+            parser.error(
+                'expected embedding authority flags must be supplied all-or-none: '
+                '--expected-embedding-provider, --expected-embedding-model, '
+                '--expected-embedding-dimensions, --expected-embedding-readiness'
+            )
+        if (
+            args.expected_embedding_dimensions is not None
+            and args.expected_embedding_dimensions < 1
+        ):
+            parser.error('--expected-embedding-dimensions must be a positive integer')
+        if (
+            args.expected_embedding_readiness is not None
+            and args.expected_embedding_readiness
+            not in {
+                'ready',
+                'unknown',
+                'error',
+            }
+        ):
+            parser.error('--expected-embedding-readiness must be ready|unknown|error')
     return args
 
 
@@ -4685,6 +4776,10 @@ async def execute_cli(args: argparse.Namespace) -> dict[str, Any]:
             source_attestor=preverified_source_attestor,
             execution_attestor=preverified_execution_attestor,
             allow_unknown_embedding_provider=args.allow_unknown_embedding_provider,
+            expected_embedding_provider=args.expected_embedding_provider,
+            expected_embedding_model=args.expected_embedding_model,
+            expected_embedding_dimensions=args.expected_embedding_dimensions,
+            expected_embedding_readiness=args.expected_embedding_readiness,
         )
 
 

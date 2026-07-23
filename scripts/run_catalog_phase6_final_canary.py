@@ -51,8 +51,11 @@ EMBEDDING_AUTHORITY_KEYS = (
 # D-16: operation-specific live outputs; never map new run into old 06-CANARY/06-FINAL.
 OLLAMA_LEDGER_NAME = '06-OLLAMA-CANARY-LEDGER.json'
 OLLAMA_FINAL_REPORT_NAME = '06-OLLAMA-FINAL-REPORT.md'
+OLLAMA_INVOCATION_NAME = '06-OLLAMA-POST-APPROVAL-INVOCATION.json'
 LEGACY_LEDGER_NAME = '06-CANARY-LEDGER.json'
 LEGACY_FINAL_REPORT_NAME = '06-FINAL-REPORT.md'
+LEGACY_INVOCATION_NAME = '06-POST-APPROVAL-INVOCATION.json'
+CONFIG_FINGERPRINT_RE = re.compile(r'^[0-9a-f]{64}$')
 
 
 class FinalCanaryError(RuntimeError):
@@ -170,10 +173,19 @@ def _gate0_digests(head: str) -> dict[str, str]:
     try:
         runner = _runner_module()
         source_map = runner.source_authority_map(mode='git', revision=head)
+        host_digests = runner.host_side_execution_authority_digests()
+        config_path = runner.COMPOSE_GENERATED_CONFIG
+        config_fingerprint = host_digests.get(config_path)
+        if (
+            not isinstance(config_fingerprint, str)
+            or CONFIG_FINGERPRINT_RE.fullmatch(config_fingerprint) is None
+        ):
+            raise FinalCanaryError('Gate 0 config_fingerprint is invalid')
         return {
             'source_map_sha256': runner.canonical_sha256({'files': source_map}),
             'runner_sha256': source_map['scripts/run_catalog_canary_batch.py']['lf_sha256'],
-            'execution_map_sha256': runner.compute_execution_map_sha256(),
+            'execution_map_sha256': runner.compute_execution_map_sha256(host_digests),
+            'config_fingerprint': config_fingerprint,
         }
     except FinalCanaryError:
         raise
@@ -187,7 +199,7 @@ def _validate_auth_01(auth: dict[str, Any]) -> None:
 
 
 def _validate_embedding_authority(raw: dict[str, Any]) -> dict[str, Any]:
-    """D-14: freeze must bind sanitized embedding authority; Ollama is null-waiver only."""
+    """D-14/D-17: freeze must bind sanitized embedding authority; Ollama is null-waiver only."""
     missing = [key for key in EMBEDDING_AUTHORITY_KEYS if key not in raw]
     if missing:
         raise FinalCanaryError('freeze embedding authority is incomplete')
@@ -204,6 +216,12 @@ def _validate_embedding_authority(raw: dict[str, Any]) -> dict[str, Any]:
             or waiver is not None
         ):
             raise FinalCanaryError('freeze ollama embedding authority is invalid')
+        config_fingerprint = raw.get('config_fingerprint')
+        if (
+            not isinstance(config_fingerprint, str)
+            or CONFIG_FINGERPRINT_RE.fullmatch(config_fingerprint) is None
+        ):
+            raise FinalCanaryError('freeze config_fingerprint is invalid')
     elif provider == 'openai':
         # Separately authorized OpenAI deployments may bind openai waiver only.
         # Reject residual ollama model under openai provider (no half-migration).
@@ -218,15 +236,24 @@ def _validate_embedding_authority(raw: dict[str, Any]) -> dict[str, Any]:
             or (readiness == 'unknown' and waiver != 'openai')
         ):
             raise FinalCanaryError('freeze embedding authority is invalid')
+        config_fingerprint = raw.get('config_fingerprint')
+        if config_fingerprint is not None and (
+            not isinstance(config_fingerprint, str)
+            or CONFIG_FINGERPRINT_RE.fullmatch(config_fingerprint) is None
+        ):
+            raise FinalCanaryError('freeze config_fingerprint is invalid')
     else:
         raise FinalCanaryError('freeze embedding provider is invalid')
-    return {
+    authority = {
         'embedding_provider': provider,
         'embedding_model': model,
         'embedding_dimensions': dimensions,
         'expected_embedding_readiness': readiness,
         'allow_unknown_embedding_provider': waiver,
     }
+    if provider == OLLAMA_PROVIDER or config_fingerprint is not None:
+        authority['config_fingerprint'] = config_fingerprint
+    return authority
 
 
 def _child_waiver_argv(authority: dict[str, Any]) -> list[str]:
@@ -242,6 +269,44 @@ def _child_waiver_argv(authority: dict[str, Any]) -> list[str]:
     if waiver != 'openai' or provider != 'openai':
         raise FinalCanaryError('embedding waiver is not authorized for provider')
     return ['--allow-unknown-embedding-provider', 'openai']
+
+
+def _child_expected_authority_argv(authority: dict[str, Any]) -> list[str]:
+    """Bind freeze embedding authority into runner expected-* argv."""
+    provider = authority.get('embedding_provider')
+    model = authority.get('embedding_model')
+    dimensions = authority.get('embedding_dimensions')
+    readiness = authority.get('expected_embedding_readiness')
+    if (
+        not isinstance(provider, str)
+        or not provider
+        or not isinstance(model, str)
+        or not model
+        or type(dimensions) is not int
+        or dimensions < 1
+        or not isinstance(readiness, str)
+        or not readiness
+    ):
+        raise FinalCanaryError('freeze embedding authority is incomplete')
+    argv = [
+        '--expected-embedding-provider',
+        provider,
+        '--expected-embedding-model',
+        model,
+        '--expected-embedding-dimensions',
+        str(dimensions),
+        '--expected-embedding-readiness',
+        readiness,
+    ]
+    config_fingerprint = authority.get('config_fingerprint')
+    if config_fingerprint is not None:
+        if (
+            not isinstance(config_fingerprint, str)
+            or CONFIG_FINGERPRINT_RE.fullmatch(config_fingerprint) is None
+        ):
+            raise FinalCanaryError('freeze config_fingerprint is invalid')
+        argv.extend(['--config-fingerprint', config_fingerprint])
+    return argv
 
 
 def _validate_observed_embedding_authority(
@@ -492,6 +557,35 @@ def _validate_terminal(
     return report
 
 
+def _validate_terminal_embedding_authority(
+    report: dict[str, Any],
+    *,
+    embedding_authority: dict[str, Any],
+) -> None:
+    """Defense-in-depth: terminal report must match freeze embedding authority."""
+    observed = {
+        'provider': report.get('embedding_provider'),
+        'model': report.get('embedding_model'),
+        'dimensions': report.get('embedding_dimensions'),
+        'ready': report.get('embedding_readiness'),
+    }
+    # Terminal report may omit fields on pre-commit failures; only enforce when present.
+    if all(value is None for value in observed.values()):
+        return
+    _validate_observed_embedding_authority(
+        freeze_authority=embedding_authority,
+        observed=observed,
+    )
+    expected_fp = embedding_authority.get('config_fingerprint')
+    if expected_fp is not None and report.get('config_fingerprint') not in (None, expected_fp):
+        raise FinalCanaryError('observed config_fingerprint drifted from freeze')
+    if (
+        embedding_authority.get('embedding_provider') == OLLAMA_PROVIDER
+        and report.get('waiver_applied') is True
+    ):
+        raise FinalCanaryError('ollama terminal report must not apply openai waiver')
+
+
 def _phase_directory(expanded: list[str]) -> Path:
     phase_dir = Path(_option_value(expanded, '--phase-dir'))
     if not phase_dir.is_absolute():
@@ -550,7 +644,19 @@ def _launcher_terminal_report(
     }
 
 
-def _phase_ledger(report: dict[str, Any]) -> dict[str, Any]:
+def _phase_ledger(
+    report: dict[str, Any],
+    *,
+    embedding_authority: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Sanitized phase ledger. D-17: fingerprint only; never raw URL/namespace/token."""
+    authority = embedding_authority or {}
+    if 'allow_unknown_embedding_provider' in authority:
+        waiver = authority.get('allow_unknown_embedding_provider')
+    elif 'allow_unknown_embedding_provider' in report:
+        waiver = report.get('allow_unknown_embedding_provider')
+    else:
+        waiver = 'openai' if report.get('waiver_applied') is True else None
     return {
         'classification': report['classification'],
         'run_id': report.get('run_id'),
@@ -566,6 +672,16 @@ def _phase_ledger(report: dict[str, Any]) -> dict[str, Any]:
         'error_type': report.get('error_type'),
         'auth_01': dict(AUTH_01),
         'stack_preserved': True,
+        'embedding_provider': authority.get('embedding_provider', report.get('embedding_provider')),
+        'embedding_model': authority.get('embedding_model', report.get('embedding_model')),
+        'embedding_dimensions': authority.get(
+            'embedding_dimensions', report.get('embedding_dimensions')
+        ),
+        'embedding_readiness': authority.get(
+            'expected_embedding_readiness', report.get('embedding_readiness')
+        ),
+        'allow_unknown_embedding_provider': waiver,
+        'config_fingerprint': authority.get('config_fingerprint', report.get('config_fingerprint')),
     }
 
 
@@ -590,20 +706,13 @@ def _require_final_report_live_markers(
 ) -> Path:
     """Read-only preflight: phase final-report shell must expose live markers."""
     _, report_name = _live_output_names(embedding_provider)
-    candidates = [phase_dir / report_name]
-    if report_name != LEGACY_FINAL_REPORT_NAME:
-        # Transition: accept either Ollama-named shell or pre-created shell path.
-        candidates.append(phase_dir / LEGACY_FINAL_REPORT_NAME)
-    last_exc: Exception | None = None
-    for final_report in candidates:
-        try:
-            text = final_report.read_text(encoding='utf-8')
-        except OSError as exc:
-            last_exc = exc
-            continue
-        _validate_final_report_live_markers(text)
-        return final_report
-    raise FinalCanaryError('final report shell is unavailable') from last_exc
+    final_report = phase_dir / report_name
+    try:
+        text = final_report.read_text(encoding='utf-8')
+    except OSError as exc:
+        raise FinalCanaryError('final report shell is unavailable') from exc
+    _validate_final_report_live_markers(text)
+    return final_report
 
 
 def _final_report_text(current: str, ledger: dict[str, Any]) -> str:
@@ -633,9 +742,10 @@ def _map_phase_outputs(
     report: dict[str, Any],
     *,
     embedding_provider: str | None = None,
+    embedding_authority: dict[str, Any] | None = None,
     final_report_path: Path | None = None,
 ) -> None:
-    ledger = _phase_ledger(report)
+    ledger = _phase_ledger(report, embedding_authority=embedding_authority)
     ledger_name, report_name = _live_output_names(embedding_provider)
     final_report = final_report_path or (phase_dir / report_name)
     try:
@@ -659,6 +769,7 @@ def _map_failure_after_allocation(
     result_dir: Path,
     *,
     embedding_provider: str | None = None,
+    embedding_authority: dict[str, Any] | None = None,
     final_report_path: Path | None = None,
 ) -> None:
     report = fallback
@@ -674,6 +785,7 @@ def _map_failure_after_allocation(
         phase_dir,
         report,
         embedding_provider=embedding_provider,
+        embedding_authority=embedding_authority,
         final_report_path=final_report_path,
     )
 
@@ -714,6 +826,13 @@ def run_final_canary(
         phase_dir, embedding_provider=embedding_provider
     )
     waiver_argv = _child_waiver_argv(embedding_authority)
+    expected_authority_argv = _child_expected_authority_argv(embedding_authority)
+
+    # Gate 0 digests (incl. config_fingerprint) before identity allocation.
+    digests = _gate0_digests(head)
+    expected_config_fp = embedding_authority.get('config_fingerprint')
+    if expected_config_fp is not None and digests.get('config_fingerprint') != expected_config_fp:
+        raise FinalCanaryError('freeze config_fingerprint drifted from host digests')
 
     artifact_parent = Path(_option_value(expanded, '--artifact-parent'))
     result_parent = Path(_option_value(expanded, '--result-parent'))
@@ -755,7 +874,6 @@ def run_final_canary(
         if built.returncode != 0 or not payload.is_file() or not manifest.is_file():
             raise FinalCanaryError('canary builder failed')
 
-        digests = _gate0_digests(head)
         mcp_env_name = _option_value(expanded, '--mcp-url-env')
         mcp_url = env.get(mcp_env_name)
         parsed_mcp_url = urlsplit(mcp_url) if isinstance(mcp_url, str) else None
@@ -802,6 +920,7 @@ def run_final_canary(
             'git',
             '--image-fingerprint',
             image_id.removeprefix('sha256:'),
+            *expected_authority_argv,
             *waiver_argv,
         ]
         completed = _run(runner, env)
@@ -813,6 +932,7 @@ def run_final_canary(
             control_group_id=control_group_id,
             batch_id=batch_id,
         )
+        _validate_terminal_embedding_authority(report, embedding_authority=embedding_authority)
         if _git_value(['rev-list', '--count', 'HEAD']) != str(frozen_count):
             raise FinalCanaryError('freeze commit count changed after canary')
         _validate_auth_01(dict(AUTH_01))
@@ -825,6 +945,7 @@ def run_final_canary(
             phase_dir,
             report,
             embedding_provider=embedding_provider,
+            embedding_authority=embedding_authority,
             final_report_path=final_report_path,
         )
         return result
@@ -835,6 +956,7 @@ def run_final_canary(
                 fallback,
                 result_dir,
                 embedding_provider=embedding_provider,
+                embedding_authority=embedding_authority,
                 final_report_path=final_report_path,
             )
         except FinalCanaryError as mapping_exc:
@@ -853,10 +975,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _invocation_path_for_freeze(phase_dir: Path, freeze_receipt: Path) -> Path:
+    """D-16: Ollama freeze selects only 06-OLLAMA-POST-APPROVAL-INVOCATION.json."""
+    freeze = _load_json(freeze_receipt.resolve())
+    provider = freeze.get('embedding_provider')
+    if provider == OLLAMA_PROVIDER:
+        return phase_dir / OLLAMA_INVOCATION_NAME
+    return phase_dir / LEGACY_INVOCATION_NAME
+
+
 def main(argv: list[str] | None = None) -> int:
     actual_argv = list(sys.argv[1:] if argv is None else argv)
     args = parse_args(actual_argv)
-    invocation = args.phase_dir / '06-POST-APPROVAL-INVOCATION.json'
+    invocation = _invocation_path_for_freeze(args.phase_dir, args.freeze_receipt)
     try:
         result = run_final_canary(
             freeze_receipt=args.freeze_receipt,
