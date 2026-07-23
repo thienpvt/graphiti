@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "after_human_approval": true,
+  "forbid_gsd_executor_resume": true,
+  "forbid_summary": true,
+  "forbid_tracking_updates": true,
+  "forbid_verify_complete_tag_cleanup": true,
+  "forbid_git_commit_after_id_allocation": true,
+  "identities_allocated_before_approval": false,
+  "launcher": "scripts/run_catalog_phase6_final_canary.py",
+  "cwd": "repo_root",
+  "shell": false,
+  "argv_template": [
+    "python",
+    "scripts/run_catalog_phase6_final_canary.py",
+    "--freeze-receipt",
+    ".planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-OLLAMA-FREEZE-RECEIPT.json",
+    "--image-receipt",
+    ".planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure/06-OLLAMA-IMAGE-RECEIPT.json",
+    "--mcp-url-env",
+    "GRAPHITI_PHASE6_MCP_URL",
+    "--artifact-parent",
+    "{CLAUDE_JOB_TMP}/phase6-ollama-final-canary",
+    "--result-parent",
+    "{CLAUDE_JOB_TMP}/phase6-ollama-final-canary",
+    "--phase-dir",
+    ".planning/phases/06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure"
+  ],
+  "argv_expansion": {
+    "env_required": ["CLAUDE_JOB_DIR"],
+    "tokens": {
+      "{CLAUDE_JOB_TMP}": {
+        "source": "env:CLAUDE_JOB_DIR",
+        "require_absolute_existing_dir": true,
+        "append": "tmp",
+        "resolve": true
+      }
+    },
+    "after_expand": {
+      "reject_leftover_braces": true,
+      "reject_leftover_dollar": true,
+      "require_artifact_result_parents_under_job_tmp": true,
+      "boundary_check": "Path.resolve + relative_to job_tmp"
+    },
+    "invoke": "exact_validated_expanded_argv_once_shell_false"
+  },
+  "mcp_url_env": "GRAPHITI_PHASE6_MCP_URL",
+  "mcp_url_hint_local_only": "http://127.0.0.1:20000/mcp",
+  "notes": "Top-level writes uncommitted 06-OLLAMA-FREEZE-RECEIPT.json first (Phase A), solicits approval, then expands argv_template per argv_expansion (read CLAUDE_JOB_DIR from environment — not argv; require absolute existing job dir; resolve <job>/tmp; replace only documented tokens; reject leftover {…}/$…; require artifact/result parents absolute descendants of job_tmp), then invokes that exact validated expanded argv once with shell=False. 'Exactly once' means the expanded argv list, not the raw template. Launcher may also re-validate job-tmp boundary. Allocates IDs just-in-time, builder then runner once, asserts counts/AUTH/terminal, never commits. MCP URL via env only — never argv secret. No GSD continuation. No shell expansion of $CLAUDE_JOB_DIR. Paths use 06-OLLAMA-* freeze and image receipts only."
+}
