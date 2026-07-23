@@ -1,0 +1,9 @@
+{
+  "daemon_reachable": true,
+  "model_present": true,
+  "native_endpoint_successful": true,
+  "observed_dimension": 1024,
+  "credential_used": false,
+  "pull_performed": true,
+  "pull_model": "qwen3-embedding:0.6b"
+}
