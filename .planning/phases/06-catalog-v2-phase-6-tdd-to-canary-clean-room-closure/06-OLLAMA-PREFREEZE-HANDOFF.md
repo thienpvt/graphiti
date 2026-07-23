@@ -1,13 +1,16 @@
 # Phase 6 Plan 10 Ollama Prefreeze Handoff
 
-**status:** PENDING_TOP_LEVEL_HANDOFF
-**plan:** 06-10
+**status:** BLOCKING_HUMAN_FREEZE_CHECKPOINT
+**plan:** 06-11
 **recorded_date:** 2026-07-23
 **canary_executed:** false
 **canary_ids_allocated:** false
 **no_post_allocation_git_commit:** true
 **summary_created:** false
 **freeze_receipt_finalized_by_executor:** false
+**execution_status:** PENDING_TOP_LEVEL_HANDOFF
+**executor_resume_allowed:** false
+**final_canary_owner:** top-level outside GSD executor
 
 ## Authority
 
@@ -63,6 +66,12 @@
 - Protected dirty config `mcp_server/config/config-docker-neo4j.yaml` remains unstaged and preserved.
 - Stack `graphiti-phase6-cleanroom-a75e295d` left running for 06-11.
 
-## Next legal invocation
+## Terminal checkpoint contract
 
-`/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition` (plan 06-11 only).
+- Task 1 complete. Plan 06-11 is intentionally incomplete at its blocking-human checkpoint.
+- Suppress `06-11-SUMMARY.md` under every executor path. Never create `06-05-SUMMARY.md`.
+- Never resume 06-05, 06-11, `gsd-executor`, or `/gsd-execute-phase` after this checkpoint.
+- Execute-phase returns control without continuation. No verify/complete/tag/cleanup lifecycle follows.
+- Top-level alone writes the uncommitted `06-OLLAMA-FREEZE-RECEIPT.json`, presents the freeze package, then runs exactly one canary only after genuine human approval.
+- P6-OLL-CAN-01 and P6-OLL-REPT-01 remain pending until the top-level canary terminates.
+- No canary identity has been allocated. No prepare, commit, Catalog write, source rebuild, runtime mutation, or cleanup occurred.

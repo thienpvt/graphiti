@@ -309,9 +309,9 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 9/11 | 06-10 R0–R3 GREEN + prefreeze on a75e295d; freeze/canary deferred to 06-11; 06-05 intentionally incomplete | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 9/11 | 06-11 blocking-human freeze checkpoint; top-level handoff pending; 06-05 sealed | — |
 
-**Active-plan progress:** 53/55 complete. Phase 6: 9/11 complete; 06-05 intentionally incomplete; 06-11 pending.
+**Active-plan progress:** 53/55 complete. Phase 6: 9/11 complete; 06-05 sealed; 06-11 intentionally incomplete at the blocking-human checkpoint.
 
 ## Coverage
 
@@ -361,7 +361,7 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 - No push, merge, rebase, amend, tag, deployment, Kubernetes action, global prune, historical cleanup, public OpenAI probe, credential change, or raw namespace/token disclosure
 - Historical Docker resources and prior canary data/evidence remain unchanged
 
-**Plans**: 9/11 plans executed (06-05 intentionally incomplete; 06-11 pending)
+**Plans**: 9/11 plans complete (06-05 sealed; 06-11 intentionally incomplete at blocking-human checkpoint)
 
 Plans:
 
@@ -387,12 +387,12 @@ Plans:
 
 **Ollama gap waves** *(internal DAG waves 1–6 on plans 06-06..06-11; NEVER unfiltered phase-6; never resume 06-05)*
 
-**Mandatory remaining invocations** (machine-actionable; fail closed if unfiltered):
+**Terminal handoff** (machine-actionable; fail closed):
 
-1. `06-10` completed (wave 5). Do not re-run.
-2. `06-11` only: `/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition`
-3. After 06-11 checkpoint STOP: top-level FREEZE + one canary **outside** GSD executor; do not resume execute-phase; do not write 06-11-SUMMARY.md
-4. Preflight/postflight: assert selected plan ≠ 06-05; assert 06-05-SUMMARY.md absent before and after
+1. `06-10` completed. Do not re-run.
+2. `06-11` Task 1 completed; blocking-human checkpoint reached. Do not resume.
+3. Top-level writes the uncommitted freeze receipt, obtains genuine human approval, then runs exactly one canary **outside** GSD executor.
+4. Never write `06-11-SUMMARY.md` or `06-05-SUMMARY.md`; never run verify/complete/tag/cleanup after identity allocation.
 
 **Gap Wave 1** *(06-06 wave:1; depends_on:[])*
 
@@ -414,9 +414,9 @@ Plans:
 
 - [x] 06-10-PLAN.md — **Invoke only via** `/gsd-execute-phase 6 --gaps-only --wave 5 --no-transition`. Previous R0–R3 attempt immutable; never reuse; never select 06-05. SUMMARY present; no FREEZE receipt/IDs/canary.
 
-**Gap Wave 6** *(06-11 pending)*
+**Gap Wave 6** *(06-11 blocking-human checkpoint)*
 
-- [ ] 06-11-PLAN.md — **Invoke only via** `/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition`. Auto task then blocking-human STOP; no 06-11-SUMMARY; top-level FREEZE+canary outside GSD; requirements pending until top-level canary. No freeze receipt/IDs/canary from rebound 06-09.
+- [!] 06-11-PLAN.md — Task 1 complete; terminal blocking-human STOP reached. Intentionally incomplete; no `06-11-SUMMARY.md`; no executor resume. Top-level FREEZE + exactly one post-approval canary outside GSD. P6-OLL-CAN-01/REPT-01 pending until terminal canary evidence.
 
 ---
 *Roadmap created: 2026-07-17 for milestone v1.1*
