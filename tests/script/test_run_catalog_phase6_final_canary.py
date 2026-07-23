@@ -984,3 +984,427 @@ def test_final_canary_openai_waiver_remains_for_authorized_openai_freeze(tmp_pat
         }
     )
     assert openai_argv == ['--allow-unknown-embedding-provider', 'openai']
+
+
+# ---------------------------------------------------------------------------
+# Fix-forward (06-07): strict OLLAMA artifacts + observed/runtime authority
+# ---------------------------------------------------------------------------
+
+OLLAMA_CONFIG_FINGERPRINT = 'e' * 64
+
+
+def test_final_canary_ollama_freeze_requires_config_fingerprint(tmp_path: Path) -> None:
+    """D-17: Ollama freeze requires sanitized lowercase 64-hex config_fingerprint."""
+    base = {
+        'head': '1' * 40,
+        'commit': '1' * 40,
+        'git_commit_count_at_freeze': 42,
+        'image_id': 'sha256:' + '2' * 64,
+        'image_revision_commit': '3' * 40,
+        'project': 'graphiti-catalog-v2-phase6-final',
+        'fingerprint': '4' * 64,
+        'r0_passed': True,
+        'r1_passed': True,
+        'r2_passed': True,
+        'r3_passed': True,
+        'canary_ids_allocated': False,
+        'plan_status': 'PENDING_TOP_LEVEL_HANDOFF',
+        'summary_created': False,
+        **OLLAMA_FREEZE_AUTHORITY,
+    }
+    with pytest.raises(launcher.FinalCanaryError, match='config_fingerprint|fingerprint'):
+        launcher._validate_freeze(dict(base))
+    with pytest.raises(launcher.FinalCanaryError, match='config_fingerprint|fingerprint'):
+        launcher._validate_freeze({**base, 'config_fingerprint': 'NOTHEX'})
+    with pytest.raises(launcher.FinalCanaryError, match='config_fingerprint|fingerprint'):
+        launcher._validate_freeze({**base, 'config_fingerprint': 'A' * 64})
+    head, count, image_id, authority = launcher._validate_freeze(
+        {**base, 'config_fingerprint': OLLAMA_CONFIG_FINGERPRINT}
+    )
+    assert head == '1' * 40
+    assert count == 42
+    assert image_id.startswith('sha256:')
+    assert authority['config_fingerprint'] == OLLAMA_CONFIG_FINGERPRINT
+    assert authority['embedding_provider'] == 'ollama'
+
+
+def test_final_canary_main_selects_ollama_invocation_by_freeze_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-16: main() selects only 06-OLLAMA-POST-APPROVAL-INVOCATION.json for ollama freeze."""
+    phase_dir = tmp_path / 'phase'
+    phase_dir.mkdir()
+    freeze = phase_dir / '06-OLLAMA-FREEZE-RECEIPT.json'
+    freeze.write_text(
+        json.dumps(
+            {
+                'head': '1' * 40,
+                'commit': '1' * 40,
+                'git_commit_count_at_freeze': 42,
+                'image_id': 'sha256:' + '2' * 64,
+                'image_revision_commit': '3' * 40,
+                'project': 'graphiti-catalog-v2-phase6-final',
+                'fingerprint': '4' * 64,
+                'r0_passed': True,
+                'r1_passed': True,
+                'r2_passed': True,
+                'r3_passed': True,
+                'canary_ids_allocated': False,
+                'plan_status': 'PENDING_TOP_LEVEL_HANDOFF',
+                'summary_created': False,
+                **OLLAMA_FREEZE_AUTHORITY,
+                'config_fingerprint': OLLAMA_CONFIG_FINGERPRINT,
+            }
+        ),
+        encoding='utf-8',
+    )
+    ollama_inv = phase_dir / '06-OLLAMA-POST-APPROVAL-INVOCATION.json'
+    legacy_inv = phase_dir / '06-POST-APPROVAL-INVOCATION.json'
+    ollama_inv.write_text('{"schema_version":1}', encoding='utf-8')
+    legacy_inv.write_text('{"schema_version":1,"legacy":true}', encoding='utf-8')
+    image = tmp_path / 'image.json'
+    image.write_text(
+        json.dumps({'image_id': 'sha256:' + '2' * 64, 'commit': '3' * 40}),
+        encoding='utf-8',
+    )
+    seen: dict[str, Path] = {}
+
+    def fake_run_final_canary(**kwargs: Any) -> dict[str, Any]:
+        seen['invocation'] = kwargs['invocation']
+        return {'classification': 'PASSED', 'ok': True}
+
+    monkeypatch.setattr(launcher, 'run_final_canary', fake_run_final_canary)
+    argv = [
+        '--freeze-receipt',
+        str(freeze),
+        '--image-receipt',
+        str(image),
+        '--mcp-url-env',
+        'GRAPHITI_PHASE6_MCP_URL',
+        '--artifact-parent',
+        str(tmp_path / 'art'),
+        '--result-parent',
+        str(tmp_path / 'res'),
+        '--phase-dir',
+        str(phase_dir),
+    ]
+    rc = launcher.main(argv)
+    assert rc == 0
+    assert seen['invocation'] == ollama_inv
+    assert seen['invocation'].name == '06-OLLAMA-POST-APPROVAL-INVOCATION.json'
+    assert seen['invocation'] != legacy_inv
+
+
+def test_final_canary_main_keeps_legacy_invocation_for_openai_freeze(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Authorized OpenAI freeze still uses 06-POST-APPROVAL-INVOCATION.json."""
+    phase_dir = tmp_path / 'phase'
+    phase_dir.mkdir()
+    freeze = phase_dir / '06-FREEZE-RECEIPT.json'
+    freeze.write_text(
+        json.dumps(
+            {
+                'head': '1' * 40,
+                'commit': '1' * 40,
+                'git_commit_count_at_freeze': 42,
+                'image_id': 'sha256:' + '2' * 64,
+                'image_revision_commit': '3' * 40,
+                'project': 'graphiti-catalog-v2-phase6-final',
+                'fingerprint': '4' * 64,
+                'r0_passed': True,
+                'r1_passed': True,
+                'r2_passed': True,
+                'r3_passed': True,
+                'canary_ids_allocated': False,
+                'plan_status': 'PENDING_TOP_LEVEL_HANDOFF',
+                'summary_created': False,
+                'embedding_provider': 'openai',
+                'embedding_model': 'text-embedding-3-small',
+                'embedding_dimensions': 1536,
+                'expected_embedding_readiness': 'unknown',
+                'allow_unknown_embedding_provider': 'openai',
+            }
+        ),
+        encoding='utf-8',
+    )
+    legacy_inv = phase_dir / '06-POST-APPROVAL-INVOCATION.json'
+    ollama_inv = phase_dir / '06-OLLAMA-POST-APPROVAL-INVOCATION.json'
+    legacy_inv.write_text('{"schema_version":1}', encoding='utf-8')
+    ollama_inv.write_text('{"schema_version":1,"ollama":true}', encoding='utf-8')
+    image = tmp_path / 'image.json'
+    image.write_text(
+        json.dumps({'image_id': 'sha256:' + '2' * 64, 'commit': '3' * 40}),
+        encoding='utf-8',
+    )
+    seen: dict[str, Path] = {}
+
+    def fake_run_final_canary(**kwargs: Any) -> dict[str, Any]:
+        seen['invocation'] = kwargs['invocation']
+        return {'classification': 'PASSED', 'ok': True}
+
+    monkeypatch.setattr(launcher, 'run_final_canary', fake_run_final_canary)
+    rc = launcher.main(
+        [
+            '--freeze-receipt',
+            str(freeze),
+            '--image-receipt',
+            str(image),
+            '--mcp-url-env',
+            'GRAPHITI_PHASE6_MCP_URL',
+            '--artifact-parent',
+            str(tmp_path / 'art'),
+            '--result-parent',
+            str(tmp_path / 'res'),
+            '--phase-dir',
+            str(phase_dir),
+        ]
+    )
+    assert rc == 0
+    assert seen['invocation'] == legacy_inv
+    assert seen['invocation'].name == '06-POST-APPROVAL-INVOCATION.json'
+
+
+def test_final_canary_ollama_rejects_legacy_report_fallback(tmp_path: Path) -> None:
+    """D-16: Ollama path must not fall back to 06-FINAL-REPORT.md shell."""
+    phase_dir = tmp_path / 'phase'
+    phase_dir.mkdir()
+    legacy = phase_dir / '06-FINAL-REPORT.md'
+    legacy.write_text(
+        '# Legacy\n\n'
+        + launcher.LIVE_FIELDS_START
+        + '\n- Classification: ``\n'
+        + launcher.LIVE_FIELDS_END
+        + '\n',
+        encoding='utf-8',
+    )
+    with pytest.raises(launcher.FinalCanaryError, match='final report|shell|unavailable'):
+        launcher._require_final_report_live_markers(phase_dir, embedding_provider='ollama')
+    ollama_report = phase_dir / '06-OLLAMA-FINAL-REPORT.md'
+    ollama_report.write_text(legacy.read_text(encoding='utf-8'), encoding='utf-8')
+    path = launcher._require_final_report_live_markers(phase_dir, embedding_provider='ollama')
+    assert path == ollama_report
+
+
+def test_final_canary_ollama_runner_argv_binds_expected_authority_and_config_fp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ollama runner argv carries expected authority + config_fingerprint; digests before claim."""
+    job, environment = _job(tmp_path)
+    freeze = _ollama_freeze(tmp_path, config_fingerprint=OLLAMA_CONFIG_FINGERPRINT)
+    invocation = _invocation(tmp_path)
+    _image(tmp_path)
+    monkeypatch.setattr(
+        launcher, '_git_value', lambda argv: '1' * 40 if 'rev-parse' in argv else '42'
+    )
+    monkeypatch.setattr(launcher, '_allocate_run_id', lambda: '20260723t120000z-ollama')
+
+    claim_order: list[str] = []
+
+    def gate0_digests(head: str) -> dict[str, str]:
+        claim_order.append('gate0')
+        assert head == '1' * 40
+        return {
+            'source_map_sha256': '5' * 64,
+            'runner_sha256': '6' * 64,
+            'execution_map_sha256': '7' * 64,
+            'config_fingerprint': OLLAMA_CONFIG_FINGERPRINT,
+        }
+
+    monkeypatch.setattr(launcher, '_gate0_digests', gate0_digests)
+
+    def fake_claim_allocation(job_tmp: Path, frozen_head: str) -> tuple[Path, str]:
+        claim_order.append('claim')
+        assert frozen_head == '1' * 40
+        return job_tmp / launcher.ALLOCATION_CLAIM, '20260723t120000z-ollama'
+
+    monkeypatch.setattr(launcher, '_claim_allocation', fake_claim_allocation)
+    phase_dir = tmp_path / 'phase'
+    phase_dir.mkdir()
+    ollama_report = phase_dir / '06-OLLAMA-FINAL-REPORT.md'
+    ollama_report.write_text(
+        '# Phase 6 Ollama Final Report\n\n'
+        + launcher.LIVE_FIELDS_START
+        + '\n- Classification: ``\n'
+        + launcher.LIVE_FIELDS_END
+        + '\n',
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(launcher, '_phase_directory', lambda expanded: phase_dir)
+
+    phase_writes: list[tuple[Path, Any]] = []
+
+    def fake_write_json(path: Path, value: dict[str, Any]) -> None:
+        phase_writes.append((path, value))
+
+    def fake_write_bytes(path: Path, value: bytes) -> None:
+        phase_writes.append((path, value))
+        path.write_bytes(value)
+
+    monkeypatch.setattr(
+        launcher,
+        '_runner_module',
+        lambda: SimpleNamespace(
+            atomic_write_json=fake_write_json,
+            atomic_write_bytes=fake_write_bytes,
+            COMPOSE_GENERATED_CONFIG='mcp_server/config/config-docker-neo4j.catalog-local.yaml',
+        ),
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
+        assert kwargs.get('shell') is False
+        calls.append(list(argv))
+        if 'build_catalog_canary_requests.py' in ' '.join(argv):
+            artifact_dir = Path(argv[argv.index('--output-dir') + 1])
+            artifact_dir.mkdir(parents=True)
+            (artifact_dir / 'accept-tab.payload.json').write_text('{}', encoding='utf-8')
+            (artifact_dir / 'run-manifest.json').write_text('{}', encoding='utf-8')
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+        result_dir = Path(argv[argv.index('--output-dir') + 1])
+        result_dir.mkdir(parents=True)
+        entries = [
+            {
+                'ordinal': 1,
+                'tool': 'prepare_catalog_batch',
+                'stage': 'PREPARE',
+                'success': True,
+                'error_code': None,
+            },
+            {
+                'ordinal': 2,
+                'tool': 'commit_prepared_catalog_batch',
+                'stage': 'COMMIT',
+                'success': True,
+                'error_code': None,
+            },
+        ]
+        run_id = argv[argv.index('--run-id') + 1]
+        group_id = argv[argv.index('--group-id') + 1]
+        report = {
+            'schema_version': launcher.REPORT_SCHEMA_VERSION,
+            'classification': 'PASSED',
+            'run_id': run_id,
+            'group_id': group_id,
+            'control_group_id': argv[argv.index('--control-group-id') + 1],
+            'batch_id': argv[argv.index('--batch-id') + 1],
+            'counts': {'entities': 3, 'edges': 2, 'sources': 1, 'evidence_links': 5},
+            'dry_run_zero_write_proven': True,
+            'replay': 'skipped',
+            'tool_count': 28,
+            'tool_call_count': 2,
+            'final_ordinal': 2,
+            'embedding_provider': 'ollama',
+            'embedding_model': 'qwen3-embedding:0.6b',
+            'embedding_dimensions': 1024,
+            'embedding_readiness': 'ready',
+            'waiver_applied': False,
+            'config_fingerprint': OLLAMA_CONFIG_FINGERPRINT,
+        }
+        report_path = result_dir / 'final-report.json'
+        ledger_path = result_dir / 'tool-ledger.json'
+        report_path.write_text(json.dumps(report), encoding='utf-8')
+        ledger_path.write_text(
+            json.dumps({'schema_version': 1, 'entries': entries}), encoding='utf-8'
+        )
+        (result_dir / 'terminal-artifacts-manifest.json').write_text(
+            json.dumps(
+                {
+                    'schema_version': launcher.TERMINAL_ACCEPTANCE_SCHEMA_VERSION,
+                    'tool_ledger_sha256': hashlib.sha256(ledger_path.read_bytes()).hexdigest(),
+                    'final_report_sha256': hashlib.sha256(report_path.read_bytes()).hexdigest(),
+                    'tool_call_count': 2,
+                    'final_ordinal': 2,
+                    'tool_count': 28,
+                }
+            ),
+            encoding='utf-8',
+        )
+        return SimpleNamespace(returncode=0, stdout=json.dumps(report), stderr='')
+
+    monkeypatch.setattr(launcher.subprocess, 'run', fake_run)
+    result = launcher.run_final_canary(
+        freeze_receipt=freeze,
+        invocation=invocation,
+        environment={**environment, 'GRAPHITI_PHASE6_MCP_URL': 'http://127.0.0.1:8000/mcp'},
+    )
+    assert result['classification'] == 'PASSED'
+    assert claim_order[0] == 'gate0'
+    assert 'claim' in claim_order
+    assert claim_order.index('gate0') < claim_order.index('claim')
+    assert len(calls) == 2
+    runner_argv = calls[1]
+    assert '--allow-unknown-embedding-provider' not in runner_argv
+    assert runner_argv[runner_argv.index('--expected-embedding-provider') + 1] == 'ollama'
+    assert (
+        runner_argv[runner_argv.index('--expected-embedding-model') + 1]
+        == 'qwen3-embedding:0.6b'
+    )
+    assert runner_argv[runner_argv.index('--expected-embedding-dimensions') + 1] == '1024'
+    assert runner_argv[runner_argv.index('--expected-embedding-readiness') + 1] == 'ready'
+    assert runner_argv[runner_argv.index('--config-fingerprint') + 1] == OLLAMA_CONFIG_FINGERPRINT
+
+    ledger_writes = [value for path, value in phase_writes if path.name == '06-OLLAMA-CANARY-LEDGER.json']
+    assert ledger_writes, {path.name for path, _ in phase_writes}
+    ledger = ledger_writes[0]
+    assert ledger['embedding_provider'] == 'ollama'
+    assert ledger['embedding_model'] == 'qwen3-embedding:0.6b'
+    assert ledger['embedding_dimensions'] == 1024
+    assert ledger['embedding_readiness'] == 'ready'
+    assert ledger['allow_unknown_embedding_provider'] is None
+    assert ledger['config_fingerprint'] == OLLAMA_CONFIG_FINGERPRINT
+    # D-17: no raw URL/namespace/token material.
+    blob = json.dumps(ledger).lower()
+    assert 'http://' not in blob
+    assert 'namespace' not in blob or 'fingerprint' in blob
+    assert 'token' not in blob
+    assert str(job / 'tmp') in ' '.join(calls[0])
+
+
+def test_final_canary_ollama_config_fingerprint_mismatch_fails_before_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Host config digest must match freeze config_fingerprint before allocation."""
+    _job_path, environment = _job(tmp_path)
+    freeze = _ollama_freeze(tmp_path, config_fingerprint=OLLAMA_CONFIG_FINGERPRINT)
+    invocation = _invocation(tmp_path)
+    _image(tmp_path)
+    monkeypatch.setattr(
+        launcher, '_git_value', lambda argv: '1' * 40 if 'rev-parse' in argv else '42'
+    )
+    claimed = {'n': 0}
+
+    def gate0_digests(head: str) -> dict[str, str]:
+        assert head == '1' * 40
+        return {
+            'source_map_sha256': '5' * 64,
+            'runner_sha256': '6' * 64,
+            'execution_map_sha256': '7' * 64,
+            'config_fingerprint': 'f' * 64,  # mismatch
+        }
+
+    monkeypatch.setattr(launcher, '_gate0_digests', gate0_digests)
+
+    def fake_claim(job_tmp: Path, frozen_head: str) -> tuple[Path, str]:
+        claimed['n'] += 1
+        return job_tmp / launcher.ALLOCATION_CLAIM, 'should-not-allocate'
+
+    monkeypatch.setattr(launcher, '_claim_allocation', fake_claim)
+    phase_dir = tmp_path / 'phase'
+    phase_dir.mkdir()
+    (phase_dir / '06-OLLAMA-FINAL-REPORT.md').write_text(
+        '# Ollama\n\n'
+        + launcher.LIVE_FIELDS_START
+        + '\n- Classification: ``\n'
+        + launcher.LIVE_FIELDS_END
+        + '\n',
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(launcher, '_phase_directory', lambda expanded: phase_dir)
+    with pytest.raises(launcher.FinalCanaryError, match='config_fingerprint|fingerprint'):
+        launcher.run_final_canary(
+            freeze_receipt=freeze,
+            invocation=invocation,
+            environment={**environment, 'GRAPHITI_PHASE6_MCP_URL': 'http://127.0.0.1:8000/mcp'},
+        )
+    assert claimed['n'] == 0

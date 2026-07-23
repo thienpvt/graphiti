@@ -1049,6 +1049,147 @@ def test_embedding_waiver_matrix_and_capability_hash_immutable() -> None:
         )
 
 
+def test_evaluate_embedding_readiness_compares_expected_authority_all_or_none() -> None:
+    """Gate 1: expected provider/model/dimensions/readiness must all match when supplied."""
+    observed = {
+        'provider': 'ollama',
+        'model': 'qwen3-embedding:0.6b',
+        'dimensions': 1024,
+        'ready': 'ready',
+    }
+    ok = runner.evaluate_embedding_readiness(
+        observed,
+        expected_embedding_provider='ollama',
+        expected_embedding_model='qwen3-embedding:0.6b',
+        expected_embedding_dimensions=1024,
+        expected_embedding_readiness='ready',
+        allow_unknown_embedding_provider=None,
+    )
+    assert ok['status'] == 'pass'
+    assert ok['waiver_applied'] is False
+    assert ok['observed_provider'] == 'ollama'
+    assert ok['observed_model'] == 'qwen3-embedding:0.6b'
+    assert ok['observed_dimensions'] == 1024
+    assert ok['observed_readiness'] == 'ready'
+
+    # Partial expected authority is invalid (all-or-none).
+    with pytest.raises(runner.RunnerError, match='expected'):
+        runner.evaluate_embedding_readiness(
+            observed,
+            expected_embedding_provider='ollama',
+            expected_embedding_model='qwen3-embedding:0.6b',
+        )
+
+    # Drift fails closed.
+    with pytest.raises(runner.RunnerError, match='provider|drift|expected'):
+        runner.evaluate_embedding_readiness(
+            observed,
+            expected_embedding_provider='openai',
+            expected_embedding_model='qwen3-embedding:0.6b',
+            expected_embedding_dimensions=1024,
+            expected_embedding_readiness='ready',
+        )
+    with pytest.raises(runner.RunnerError, match='model|drift|expected'):
+        runner.evaluate_embedding_readiness(
+            observed,
+            expected_embedding_provider='ollama',
+            expected_embedding_model='other',
+            expected_embedding_dimensions=1024,
+            expected_embedding_readiness='ready',
+        )
+    with pytest.raises(runner.RunnerError, match='dimension|drift|expected'):
+        runner.evaluate_embedding_readiness(
+            observed,
+            expected_embedding_provider='ollama',
+            expected_embedding_model='qwen3-embedding:0.6b',
+            expected_embedding_dimensions=1536,
+            expected_embedding_readiness='ready',
+        )
+    with pytest.raises(runner.RunnerError, match='readiness|drift|expected'):
+        runner.evaluate_embedding_readiness(
+            {**observed, 'ready': 'error'},
+            expected_embedding_provider='ollama',
+            expected_embedding_model='qwen3-embedding:0.6b',
+            expected_embedding_dimensions=1024,
+            expected_embedding_readiness='ready',
+        )
+
+    # Ollama unknown never waived even with expected authority present.
+    with pytest.raises(runner.RunnerError, match='unknown|error'):
+        runner.evaluate_embedding_readiness(
+            {**observed, 'ready': 'unknown'},
+            expected_embedding_provider='ollama',
+            expected_embedding_model='qwen3-embedding:0.6b',
+            expected_embedding_dimensions=1024,
+            expected_embedding_readiness='ready',
+            allow_unknown_embedding_provider='openai',
+        )
+
+
+def test_parse_args_expected_embedding_authority_all_or_none() -> None:
+    """CLI expected-authority flags are all-or-none for live-canary."""
+    base = [
+        '--mode',
+        'live-canary',
+        '--mcp-url',
+        'http://127.0.0.1:8000/mcp',
+        '--payload',
+        'payload.json',
+        '--manifest',
+        'manifest.json',
+        '--run-id',
+        'rid',
+        '--group-id',
+        'oracle-catalog-v2-canary-rid',
+        '--control-group-id',
+        'oracle-catalog-v2-canary-rid-empty-control',
+        '--batch-id',
+        'accept-tab-catalog-v2-canary-rid',
+        '--output-dir',
+        'out-dir-missing',
+        '--source-head',
+        '1' * 40,
+        '--source-map-sha256',
+        'a' * 64,
+        '--runner-sha256',
+        'b' * 64,
+        '--execution-map-sha256',
+        'c' * 64,
+    ]
+    # Partial expected authority fails.
+    with pytest.raises(SystemExit):
+        runner.parse_args(
+            [
+                *base,
+                '--expected-embedding-provider',
+                'ollama',
+                '--expected-embedding-model',
+                'qwen3-embedding:0.6b',
+            ]
+        )
+    # Full set accepted.
+    args = runner.parse_args(
+        [
+            *base,
+            '--expected-embedding-provider',
+            'ollama',
+            '--expected-embedding-model',
+            'qwen3-embedding:0.6b',
+            '--expected-embedding-dimensions',
+            '1024',
+            '--expected-embedding-readiness',
+            'ready',
+            '--config-fingerprint',
+            'd' * 64,
+        ]
+    )
+    assert args.expected_embedding_provider == 'ollama'
+    assert args.expected_embedding_model == 'qwen3-embedding:0.6b'
+    assert args.expected_embedding_dimensions == 1024
+    assert args.expected_embedding_readiness == 'ready'
+    assert args.config_fingerprint == 'd' * 64
+
+
 def test_raw_capability_sha_uses_unmodified_server_dict() -> None:
     """Capability SHA is canonical over raw server dict; raw structure stays unchanged."""
     raw = {

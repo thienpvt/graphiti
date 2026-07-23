@@ -801,11 +801,29 @@ async def test_ollama_tags_present_ready(monkeypatch):
         backend='neo4j',
         embedder_provider='ollama',
         embedder_model='qwen3-embedding:0.6b',
+        embedder_dimensions=1024,
         ollama_api_url='http://127.0.0.1:11434',
     )
     assert caps.embeddings['ready'] == 'ready'
     assert caps.embeddings['provider'] == 'ollama'
     assert caps.embeddings['model'] == 'qwen3-embedding:0.6b'
+    assert caps.embeddings['dimensions'] == 1024
+
+
+def test_build_catalog_capabilities_includes_embedder_dimensions():
+    """Fix-forward: capabilities.embeddings carries configured dimensions (D-14/D-17)."""
+    from services.catalog_capabilities import build_catalog_capabilities
+
+    caps = build_catalog_capabilities(
+        config=CatalogConfig(enabled=False, uuid_namespace=None),
+        embedder_provider='ollama',
+        embedder_model='qwen3-embedding:0.6b',
+        embedder_dimensions=1024,
+        embeddings_ready='ready',
+    )
+    assert caps.embeddings['dimensions'] == 1024
+    assert caps.embeddings['provider'] == 'ollama'
+    assert 'api_url' not in caps.embeddings
 
 
 @pytest.mark.asyncio
