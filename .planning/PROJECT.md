@@ -20,9 +20,16 @@ Delivered strict catalog-v2 contracts and identity, server-owned topology and ha
 
 **Accepted debt:** `DEV-P6-POST-ID-EVIDENCE-COMMITS`, Phase 1 WR-R01/WR-R02, and Phase 2 PR-02-02-RED-COMMIT remain visible. Final and historical runtime resources remain preserved.
 
-## Next Milestone Goals
+## Current Milestone: v1.2 FE/BO Catalog Pilot and Object Context
 
-Not defined. Production promotion of the tested image digest requires a separate approved rollout. Start future planning with `/gsd-new-milestone`.
+**Goal:** Prove representative FE/BO data from `catalog/catalog.json` can become deterministic, evidence-backed graph context usable by AI agents from a newly built image.
+
+**Target features:**
+- Validate and deterministically convert `catalog/catalog.json` without invoking an LLM or reparsing Docling output
+- Ingest a committed connected FE sample and structurally rich BO sample into a new isolated test group
+- Preserve normalized object identity plus page/raw-text evidence from the authoritative JSON
+- Add one exact read-only object-context tool returning typed object details, bounded immediate neighbors, evidence excerpts, and source locators
+- Build a new source-bound image and validate changed v1.2 behavior plus runtime smoke without repeating the completed v1.1 final canary
 
 ## Requirements
 
@@ -52,7 +59,11 @@ Not defined. Production promotion of the tested image digest requires a separate
 
 ### Active
 
-- [ ] Production promotion of the tested image digest under a separately approved rollout
+- [ ] Deterministically validate and convert a representative FE/BO slice from `catalog/catalog.json`
+- [ ] Ingest that slice through immutable prepare and token-only commit into a new isolated test group
+- [ ] Return compact exact object context with bounded immediate relationships and evidence locators
+- [ ] Build a source-bound v1.2 image and prove changed behavior plus runtime startup without repeating the v1.1 final canary
+- [ ] Production promotion of a tested image digest remains separately approved rollout work
 
 ### Archived in v1.1
 
@@ -87,7 +98,11 @@ Not defined. Production promotion of the tested image digest requires a separate
 - Relationship scoring or inference and agent context/path/impact tools — later retrieval milestone
 - Catalog delta, retirement, business transaction entities, or FE/BO runtime correlation — later domain work
 - Automatic catalog-v1 to catalog-v2 identity migration — identities must never be silently reinterpreted
-- Production migration, production writes, or canary execution — requires separate approval after v1.1 verification
+- Production migration or production writes — requires separate approval after milestone verification
+- Full 1,261-table catalog ingestion — v1.2 proves a representative bounded slice only
+- BO inferred relationships or FE-to-BO mappings — current normalized catalog has no BO relationship records
+- Natural-language context orchestration, multi-hop paths, impact analysis, and catalog delta/retirement — later retrieval milestones
+- Docling regeneration or cross-check — `catalog/catalog.json` is v1.2 normalized authority
 
 ## Context
 
@@ -165,6 +180,8 @@ Existing unrelated working-tree changes in `mcp_server/k8s/graphiti-neo4j.yaml`,
 | Keep capability discovery mutation-free and available while writes are disabled | Agents need safe contract discovery before attempting writes | ✓ Phase 2 |
 | Promote only an already-tested source-bound image digest | Rebuilding after canary would sever tested-image authority | ✓ Phase 6 image/canary evidence |
 | Accept `DEV-P6-POST-ID-EVIDENCE-COMMITS` as visible governance debt | Evidence-only commits violated the no-post-ID rule but did not alter tested product/runtime authority | ⚠ Accepted 2026-07-24 |
+| Treat `catalog/catalog.json` as v1.2 normalized authority | Docling output was already normalized with an LLM; v1.2 must validate and convert that fixed artifact without another extraction path | — Pending |
+| Validate v1.2 deltas instead of repeating the v1.1 final canary | `9f01998..cf2e484` changes only `.planning/`; v1.1 image passed elsewhere and cannot be reproduced as the same digest | — Pending |
 
 ## Evolution
 
@@ -184,4 +201,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-24 after v1.1 milestone completion*
+*Last updated: 2026-07-24 after starting v1.2 milestone*
