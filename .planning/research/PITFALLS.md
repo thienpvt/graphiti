@@ -1,598 +1,310 @@
 # Pitfalls Research
 
-**Domain:** Catalog-v2 pre-canary hardening (deterministic Graphiti MCP catalog tools)
-**Researched:** 2026-07-17
+**Domain:** v1.2 FE/BO Catalog Pilot and Object Context
+**Researched:** 2026-07-24
 **Confidence:** HIGH
-**Scope:** v1.1 hardening only — identity grammar, validation, prepare/commit, manifests, verification. No canary execution. Replaces obsolete v1.0 ecosystem pitfall research.
-
-**Approved contract corrections (override any conflicting research):**
-1. Prepare persists **bounded immutable canonical payload** server-side (restart-safe; chunked non-Entity OK). Hashes/counts alone insufficient. Commit receives token only.
-2. Prepare validates/resolves/projects only — **no required embeddings**. Commit embeds from stored payload before domain tx.
-3. Commit success: **one Neo4j tx** for domain + evidence + manifest + terminal batch status + plan terminal state. Separate post-rollback failure-status tx only for failures.
-4. Exact tools: `prepare_catalog_batch`, `commit_prepared_catalog_batch`, `discard_prepared_catalog_batch`, `get_catalog_capabilities`, `get_catalog_evidence`, `get_catalog_batch_manifest`, `resolve_typed_edges`.
-5. Catalog-v2 breaks seven deterministic request identity/provenance/hash contracts where required; preserve tool names and semantic tools; do not claim v1 payloads remain accepted.
-6. Capabilities work whenever server init succeeds, even if catalog writes disabled.
-7. Required error codes include: , , , , , , , , .
-8. No canary, no production/live-group writes, no parser/inference, no automatic catalog-v1 migration.
-
 
 ## Critical Pitfalls
 
-### Pitfall 1: Silent v1 → v2 identity reinterpretation
+### 1. Input Digest Drift, Duplicate Identity, and Invalid Shape
 
-**What goes wrong:**
-Catalog-v2 changes graph-key grammar, FE/BO/COMMON segregation, or hash field sets while reads/writes still match bare v1 keys (`TABLE::HR.EMP`, no plane). Existing Neo4j objects under `oracle-catalog-tool-test` or any residual fixture get “updated” under a new UUIDv5, or verify falsely reports match because resolvers strip plane prefixes. Canary later collides with live `oracle-catalog-v2` if keys are normalized instead of fail-closed.
+**What Goes Wrong:** Preparation accepts changed or malformed `catalog/catalog.json`, silently collapses duplicate logical objects, or permits NaN/infinity values that defeat stable validation and serialization. Commit token then describes input other than input reviewed.
 
-**Why it happens:**
-v1 identity is `UUIDv5(ns, group_id|entity_type|graph_key)` with prefixes only (`ENTITY_TYPE_PREFIXES` in `catalog_common.py`). v1.1 deliberately breaks schema. Convenience normalizers (“accept either form”) look like migration helpers but are silent rekeying. PROJECT forbids automatic v1→v2 migration.
+**Warning Signs:** Digest differs between prepare and commit; duplicate canonical keys appear; counts vary across identical runs; JSON parsing accepts non-finite constants; nested shapes differ from expected documents/tables/columns/relationships structure.
 
-**How to avoid:**
-- Fail closed on non-v2 keys when catalog-v2 mode is active; never strip/add FE/BO/COMMON silently.
-- Do not recompute UUIDs for stored v1 rows under new grammar.
-- Separate test group remains `oracle-catalog-tool-test`; never write `oracle-catalog-v2`.
-- Document key grammar version on batch status/manifest; reject cross-version payload.
+**Prevention/Tests:** Stream-read bounded input, compute and retain cryptographic digest, reject duplicate deterministic identities before writes, reject non-finite numbers explicitly, validate complete nested shape and exact collection limits, and test malformed roots, missing fields, duplicate keys, NaN, infinity, and digest mismatch.
 
-**Warning signs:**
-- Same logical table yields different UUID after “hardening” deploy without re-ingest.
-- Verify passes on keys that lack plane segment.
-- Migration “helpers” in identity module without explicit version gate.
-- Tests assert UUID equality across v1 fixture and v2 grammar.
+**Phase:** Input contract and prepare gate.
 
-**Prevention / tests:**
-- Unit: v1-shaped `graph_key` → `validation_error` / `graph_key_prefix_mismatch` under v2 validators.
-- Unit: v2 key → UUID differs from v1 key for same table name.
-- Integration: pre-seeded v1 node not MATCH-updated by v2 upsert of “equivalent” name.
-- Negative: no code path maps v1→v2 without explicit offline procedure (absent in v1.1).
+### 2. Nondeterministic or Biased FE/BO Sample Selection
 
-**Phase to address:**
-Phase 1 — FE/BO/COMMON identity grammar + fail-closed validation.
+**What Goes Wrong:** Pilot sample changes with file order, map iteration, database return order, or operator choice. FE sample may look connected only by chance; BO sample may favor convenient tables and conceal structural weaknesses.
 
----
+**Warning Signs:** Repeated preparation emits different samples; selected objects depend on insertion order; FE connectivity is asserted without deterministic traversal; BO selection uses relationships despite authoritative input containing zero BO relations.
 
-### Pitfall 2: Recursive validation not fail-closed (`extra` allowed)
+**Prevention/Tests:** Define stable ordering and tie-breakers, avoid randomness, select FE from verified connected components, select BO by deterministic structural-richness score, record selection rationale, and assert byte-identical manifests across repeated runs and reordered equivalent input.
 
-**What goes wrong:**
-Unknown fields on nested entities/edges/provenance/attributes are ignored (Pydantic default). Clients think execution flags, plane markers, evidence refs, or hash fields were accepted; server drops them. Immutable flags (`dry_run`, `atomic`, prepare tokens) smuggled under aliases change behavior only on some code paths. Hardening “looks complete” while contracts are open.
+**Phase:** Pilot sample design.
 
-**Why it happens:**
-Current catalog models (`catalog_entities.py`, `catalog_edges.py`, `catalog_provenance.py`, `catalog_batch.py`) do not show recursive `extra='forbid'` / strict config on every nested model. `attributes`/`metadata` allow free maps with only protected-key and nested-JSON bounds. Agents send experimental fields freely.
+### 3. FE/BO Database-Token Identity Collision
 
-**How to avoid:**
-- `model_config = ConfigDict(extra='forbid')` on every catalog request model and nested item, recursively.
-- Immutable execution flags: reject client mutation of server-owned fields; freeze after prepare.
-- Re-validate at service boundary (not only MCP parse) so `model_construct` / internal callers cannot bypass.
-- Keep attribute maps allowlisted or JSON-blob-only with forbidden top-level collisions.
+**What Goes Wrong:** Identical table or column names from FE and BO map to same identity because deterministic key omits database token. Upserts merge distinct catalog objects and corrupt endpoint ownership.
 
-**Warning signs:**
-- Fixture with `"_debug": true` still upserts.
-- Prepare payload accepts unknown `commit_mode`.
-- Unit suite never uses `pytest.raises` on extra keys at depth ≥2.
+**Warning Signs:** UUID fixtures match across FE and BO for same qualified object name; canonical keys start at schema/table level; counts shrink after mixed-database preparation; object context returns cross-database properties.
 
-**Prevention / tests:**
-- Parametrized extras at root, entity, edge, source, nested provenance, attribute child.
-- Flag immutability: mutate `dry_run`/`atomic` after model build → error.
-- Service-level reject when raw dict injected past MCP.
+**Prevention/Tests:** Include normalized database token in every table, column, and relationship identity preimage; keep FE and BO tokens explicit; add collision fixtures using identical schema/table/column names in both databases; assert distinct UUIDv5 values and isolated reads.
 
-**Phase to address:**
-Phase 1 — strict recursive contracts.
+**Phase:** Identity contract before ingestion.
 
----
+### 4. Bare Foreign-Key Endpoint Qualification
 
-### Pitfall 3: Canonical bytes / hash field omissions → false idempotence
+**What Goes Wrong:** Relationship endpoints represented as bare table or column names bind to wrong schema or database. Ambiguous references may pass string validation but create false edges.
 
-**What goes wrong:**
-`canonical_sha256` (`catalog_identity.py`) hashes only fields present in `entity_canonical_payload` / `edge_canonical_payload` (`catalog_service.py`). New v2 fields (plane, code-unit role, endpoint map version, evidence link ids, prepare plan id) omitted from payload → two different domain objects share hash → no-op “unchanged” skips real updates, or batch retry accepts divergent content. Combined batch hash (`request_sha256`/`catalog_sha256`) may cover a subset of nested collections. Client hash optional path (`assert_optional_client_hash`) masks server authority if callers skip it.
+**Warning Signs:** Endpoint resolver chooses first name match; endpoint keys omit database or schema; duplicate table names exist; unresolved references are guessed; relationship manifests lack fully qualified endpoint evidence.
 
-**Why it happens:**
-v1 payloads listed a fixed field set. Hardening adds fields without extending both (1) hash input and (2) persisted `content_sha256` compare. JSON key order is handled (`sort_keys=True`) but **field inclusion** is the real bug. Float/`None` policy drift between prepare snapshot and commit re-hash.
+**Prevention/Tests:** Require full server-defined endpoint qualification, resolve against prepared object index only, reject ambiguity and missing endpoints, never infer schema/database from proximity, and test same-name objects across schemas and FE/BO tokens.
 
-**How to avoid:**
-- Single authoritative canonicalizer for each domain object and for whole-batch catalog hash; version the recipe string in manifest.
-- Every mutable domain field either in hash or explicitly excluded with comment + test.
-- Server always recomputes; client hash audit-only → `content_hash_mismatch`.
-- Prepare freezes canonical bytes; commit re-hashes frozen snapshot only (not live re-serialize of mutated model).
+**Phase:** Relationship normalization and validation.
 
-**Warning signs:**
-- Changing plane/FE marker does not change `content_sha256`.
-- Batch retry with extra evidence link returns all `unchanged`.
-- Prepare hash ≠ commit hash for identical logical payload after field reorder only (serialization bug) or equal hashes for dropped fields (omission bug).
+### 5. Invented BO Relationships or Semantics
 
-**Prevention / tests:**
-- Mutation matrix: flip each v2 field → hash changes; flip excluded identity fields → hash stable.
-- Batch hash covers entities+edges+provenance+evidence links+endpoint map version.
-- Prepare/commit: bit-identical canonical bytes across process restart from stored plan.
-- NaN/Inf still rejected (`_reject_non_finite`).
+**What Goes Wrong:** Implementation fabricates BO foreign keys, joins, ownership, or business meaning to make BO appear connected. This violates source fidelity: authoritative input has zero BO relationships.
 
-**Phase to address:**
-Phase 2 — authoritative batch hashing; also Phase 3 prepare immutability.
+**Warning Signs:** BO pilot graph contains relationship records not traceable to source; heuristics infer links from matching column names; summaries say BO is connected; evidence fields cite generated reasoning rather than source records.
 
----
+**Prevention/Tests:** Treat zero BO relations as valid source state, select BO for structural richness only, prohibit heuristic relationship synthesis, assert BO relationship count remains zero, and label absence as source fact rather than readiness defect.
 
-### Pitfall 4: FE/BO/COMMON identity collisions and overloaded code units
+**Phase:** Sample preparation and acceptance reporting.
 
-**What goes wrong:**
-Front-end and back-end objects share unqualified names (`CUSTOMER`, package `ORDER_MGMT`) and collapse to one UUIDv5. Overloaded PL/SQL units (same name, different args) share `PROCEDURE::`/`FUNCTION::` key. Synonyms and targets collide. Search/resolve returns wrong plane’s object; edges attach across planes.
+### 6. Evidence Fidelity Loss or Source Leakage
 
-**Why it happens:**
-v1 keys are type-prefix + qualified name only. Oracle catalogs need plane + overload discriminator. Developers reuse `name_canonical` as graph_key without overload signature or FE/BO tag.
+**What Goes Wrong:** Context omits exact source evidence, mutates raw/canonical names, or returns raw documents and oversized source text beyond bounded need. Auditability disappears or sensitive catalog content leaks.
 
-**How to avoid:**
-- Fail-closed grammar: plane segment required (`FE`|`BO`|`COMMON`) in graph_key/edge_key rules; document exact format.
-- Code-unit keys include deterministic overload identity (normalized args), not bare name.
-- Separate UUID inputs must include plane; never optional default to COMMON.
-- Endpoint resolution matches plane + type + key.
+**Warning Signs:** Returned facts lack source document/object locator; `name_raw` differs from input; logs contain payload fragments; context response includes whole DDL/PDF text; evidence is reconstructed from graph labels instead of stored source-bound fields.
 
-**Warning signs:**
-- One UUID for FE screen and BO table with same leaf name.
-- Package procedure upsert overwrites sibling overload.
-- Edge `Calls` links FE stub to BO body unintentionally.
+**Prevention/Tests:** Preserve exact `name_raw` and canonical fields, attach minimal source locators and digest, return only allowlisted evidence fields, redact logs to batch IDs and counts, test fidelity byte-for-byte, and test unrelated source text never appears.
 
-**Prevention / tests:**
-- Distinct UUIDs for FE vs BO same leaf name.
-- Two overloads → two keys/UUIDs; collision attempt → `deterministic_uuid_conflict` / validation error.
-- Cross-plane endpoint mismatch → `endpoint_type_mismatch` or dedicated plane error.
-- Property tests on grammar parser reject ambiguous keys.
+**Phase:** Evidence model and object-context API.
 
-**Phase to address:**
-Phase 1 — identity grammar.
+### 7. Batch Caps Enforced Too Late
 
----
+**What Goes Wrong:** Limits are checked after expansion, embedding, or transaction start. Oversized requests consume memory/provider quota or partially write before rejection.
 
-### Pitfall 5: Missing or client-owned edge endpoint maps
+**Warning Signs:** More than 500 entities, 2,000 edges, or 5,000 provenance links reaches write code; nested provenance expansion bypasses top-level count checks; limit failures occur after embedder calls; process memory scales without bound.
 
-**What goes wrong:**
-v1 checks prefix match per endpoint type but not finite server map of allowed `(edge_type → (source_types, target_types))`. Client can assert `ForeignKeyTo` from `Procedure`→`Sequence`, or `EnforcedBy` without DDL plane. Hardening claims “server-owned endpoint maps” but enforces only prefixes → invalid topology becomes “searchable truth.”
+**Prevention/Tests:** Validate complete expanded request before embeddings and transaction; enforce 500/2,000/5,000 defaults at trust boundary; bound strings and nested references; add tests at limit, limit plus one, and multiplicative nested expansion.
 
-**Why it happens:**
-`CatalogEdgeItem` validates allowlisted types and graph_key prefixes (`catalog_edges.py`), not pairwise endpoint maps. Generic `DependsOn`/`ReferencesByCode` invite abuse.
+**Phase:** Request validation and batch orchestration.
 
-**How to avoid:**
-- Frozen server map per edge type; reject before side effects with structured code.
-- Capabilities discovery exposes map version; clients must not embed private maps as authority.
-- Standalone edge upsert and batch preflight share one checker.
-- No generic endpoint creation (retain v1 `missing_endpoint` / `generic_endpoint_conflict`).
+### 8. Frozen v1.1 Canary Artifact Contamination
 
-**Warning signs:**
-- Unit tests only cover happy FK Table→Table.
-- Map lives in client docs only.
-- Different code paths (edge tool vs batch) disagree on allowed pairs.
+**What Goes Wrong:** v1.2 preparation rewrites, reuses, or appends to frozen v1.1 canary artifacts. Historical evidence becomes ambiguous and terminal freeze checkpoint loses integrity.
 
-**Prevention / tests:**
-- Exhaustive negative table: each edge type × disallowed endpoint pair.
-- Map version bump changes capabilities payload; old clients get clear validation errors.
-- Live: disallowed pair → zero RELATES_TO rows.
+**Warning Signs:** Existing canary paths show modified timestamps or git diffs; v1.2 output names overlap v1.1; scripts default to old artifact directories; acceptance compares mixed-version manifests.
 
-**Phase to address:**
-Phase 2 — server-owned endpoint maps + capabilities.
+**Prevention/Tests:** Treat frozen canary artifacts as immutable inputs, write v1.2 artifacts to new versioned paths, snapshot hashes before and after work, fail on mutation, and exclude old artifact directories from cleanup or regeneration.
 
----
+**Phase:** Workspace setup and artifact production.
 
-### Pitfall 6: Cartesian provenance / evidence expansion
+### 9. Unbounded One-Hop Cypher and Payload Fan-Out
 
-**What goes wrong:**
-`UpsertProvenanceRequest` and `NestedProvenancePayload` bound links as `len(sources) * (len(entity_targets) + len(edge_targets))` (`catalog_provenance.py`, `catalog_batch.py`). That **is** Cartesian product: every source links to every target. v1.1 requires **explicit** evidence links. Cartesian silently multiplies MENTIONS/`episodes` attachments, hits 5k link caps incorrectly, creates false provenance density, and makes verify “green” while evidence is meaningless.
+**What Goes Wrong:** “One hop” is mistaken for bounded work. High-degree objects return every neighbor, property, or evidence blob, causing latency, memory, and MCP payload failures.
 
-**Why it happens:**
-v1 designed bulk attach for convenience. Hardening language says “exact evidence links without Cartesian expansion” but reusing v1 request shape preserves the product.
+**Warning Signs:** Cypher lacks explicit limits and deterministic ordering; variable-length patterns appear; response size tracks node degree without ceiling; `collect(*)` or unrestricted property maps are returned; timeout grows on hub tables.
 
-**How to avoid:**
-- Replace product API with explicit link list: `(source_key, target_kind, target_key[, evidence_span])`.
-- Bound by link count only, not sources×targets.
-- Generate one MENTIONS / one episode-id append per explicit link; deterministic `catalog_mentions_uuid` per pair remains, but pairs are caller-enumerated.
-- Reject empty link list when sources present if policy requires evidence.
+**Prevention/Tests:** Use exact one-hop patterns only, constrain labels and `group_id`, apply deterministic per-section and total limits, return allowlisted projections, expose truncation metadata, and load-test a synthetic high-degree table for query and serialized payload bounds.
 
-**Warning signs:**
-- 10 sources × 50 entities = 500 links without 500 explicit rows in request.
-- Tests assert product formula as feature.
-- Manifest link count ≠ request explicit link count.
+**Phase:** Read-only object context implementation.
 
-**Prevention / tests:**
-- Request with 2 sources and 2 entities but **one** explicit link → exactly one MENTIONS.
-- Product-shaped legacy payload → `validation_error` under v2.
-- Cap tests use link list length, not product.
-- Live concurrency: no extra links under dual writers.
-
-**Phase to address:**
-Phase 3 — exact evidence links (prepare/commit path); models in Phase 1–2 if API breaks.
+### 10. Group Isolation Omitted on Any Read or Write
 
----
-
-### Pitfall 7: Mutable prepared payloads / false prepare-commit idempotence
-
-**What goes wrong:**
-Prepare returns a plan id/token but server keeps mutable in-memory structures or re-reads client body on commit. Client mutates entities between prepare and commit; commit applies new body while status still references prepare hash. Or commit recomputes UUIDs from fresh body → identity drift. Discard does not invalidate token; replay commits twice.
-
-**Why it happens:**
-v1 tools are single-shot upserts. Prepare/commit/discard is new. Easy to store request dict by reference, or trust client to resend body.
+**What Goes Wrong:** Object lookup, neighbor traversal, endpoint validation, or upsert matches UUID/name without `group_id`. Data crosses tenant/test boundaries even if top-level tool accepted a group.
 
-**How to avoid:**
-- Persist immutable prepared snapshot: **full bounded canonical payload** + server hashes + derived UUIDs under plan identity (chunked non-Entity nodes OK). Hashes/counts alone insufficient.
-- Prepare does **not** compute required embeddings; commit embeds from stored payload before domain tx.
-- Token binds to snapshot hash; mismatch → reject (`prepared_plan_conflict` / hash mismatch).
-- Discard / TTL expiry deletes or tombstones plan; commit after discard → `prepared_plan_not_found` / `prepared_plan_already_consumed` / `prepared_plan_expired`.
-- No partial domain writes at prepare; prepare is write-free for domain graph (only non-Entity plan+payload records).
-- Commit success path: one Neo4j tx for domain + evidence + manifest + terminal batch status + plan terminal state; separate post-rollback failure-status tx only for failures.
+**Warning Signs:** Any Cypher `MATCH` or `MERGE` lacks `group_id`; endpoint existence checks are global; same UUID fixture in two groups returns mixed results; tests only use one populated group.
 
+**Prevention/Tests:** Thread validated `group_id` through every query and identity lookup, constrain every node and edge match, use only `oracle-catalog-tool-test` for target test writes, and seed adversarial second-group duplicates to prove no cross-group reads or writes.
 
-**Warning signs:**
-- Commit accepts body fields absent from prepare response.
-- Two commits with same token both create domain rows.
-- Prepare writes Entity nodes (search pollution).
-- Prepare stores only hashes/counts (cannot rehydrate).
-- Embeddings computed at prepare instead of commit.
-- Domain succeeds without co-committed manifest/terminal plan state.
-- Prepare stores only hashes/counts (cannot rehydrate).
-- Embeddings computed at prepare instead of commit.
-- Domain succeeds without co-committed manifest/terminal plan state.
+**Phase:** Persistence and object-context query gates.
 
+### 11. Read Tool Triggers Writes, Embeddings, or Index Mutation
 
-**Prevention / tests:**
-- Mutate client body after prepare → commit still applies original snapshot or rejects resubmitted divergence.
-- Commit ×2 same token → second no-op or `batch_conflict`, domain counts stable.
-- Discard then commit → error; domain unchanged.
-- Process restart: prepare in DB, new process commits successfully from durable snapshot.
-
-**Phase to address:**
-Phase 3 — prepare/commit/discard protocol.
+**What Goes Wrong:** Object context calls ingestion helpers, generates embeddings, updates timestamps, lazily creates indexes, or records access state. Read becomes nondeterministic and violates exact read-only contract.
 
----
+**Warning Signs:** Embedder mock receives calls; transaction contains `CREATE`, `MERGE`, `SET`, or `DELETE`; read changes database counters; context depends on LLM/embedder availability; driver bootstrap side effects occur per request.
 
-### Pitfall 8: Insecure tokens, TTL, concurrency, and replay
+**Prevention/Tests:** Build dedicated parameterized read query path, prohibit mutation clauses and model calls, run before/after graph snapshots, use fail-fast embedder stubs, inspect executed Cypher, and assert repeated reads produce equal output and zero writes.
 
-**What goes wrong:**
-Predictable plan tokens (raw batch_id, sequential ints). Tokens logged in full. TTL not enforced → indefinite commit. Concurrent commit of same plan double-applies without compare-and-set. Replay after success re-enters writing state. Timing attacks on token compare if relevant.
+**Phase:** Object-context API.
 
-**Why it happens:**
-Status today uses deterministic batch UUID (`catalog_batch_uuid`) which is right for batch identity but wrong if reused as secret capability token. Logs often include ids; PROJECT allows batch IDs but not secrets.
+### 12. Ingest Atomicity Regression
 
-**How to avoid:**
-- High-entropy commit token; store only hash (SHA-256) server-side; compare digest.
-- Bind token to `group_id` + plan uuid + content hash.
-- TTL on prepared plans; expire → non-committable.
-- Single-winner commit CAS on plan state (`prepared`→`committing`→`committed`/`failed`) inside Neo4j, same pattern as source CAS / batch claim in v1 store.
-- Log plan id + counts only; never raw token.
+**What Goes Wrong:** v1.2 sample orchestration opens multiple commits, writes before all embeddings complete, or catches conflict after partial upserts. Retry no longer means exactly one deterministic state.
 
-**Warning signs:**
-- Token equals `batch_id` or UUIDv5 of batch.
-- Logs contain `commit_token=`.
-- Parallel commit tests flake with double domain rows.
-- Expired plan still commits in tests with freezegun off.
+**Warning Signs:** Entities remain after edge conflict; embedder failure leaves nodes; transaction count exceeds one commit batch; rollback test observes changed timestamps; error handler continues after failed write.
 
-**Prevention / tests:**
-- Token entropy / format tests; storage has hash only.
-- Concurrent dual commit → one success, one conflict; one domain effect.
-- TTL expiry unit + optional live.
-- Log capture assert no token/raw payload.
-
-**Phase to address:**
-Phase 3 — secure prepare/commit; Phase 5 security suite.
+**Prevention/Tests:** Validate whole request first, generate all embeddings before write transaction, execute all entities/edges/provenance in one transaction, propagate conflicts, verify rollback on each write stage, and compare graph snapshots after injected failures.
 
----
+**Phase:** Atomic ingest and token commit.
 
-### Pitfall 9: Neo4j atomic boundary regressions (races, failed-status, embeddings)
+### 13. Prepare/Commit Boundary Leaks Write Authority
 
-**What goes wrong:**
-Hardening splits prepare/commit or manifest writes and reintroduces: embed-inside-tx, multi-`execute_query` auto-commit, status committed while domain rolls back, source validation TOCTOU without CAS, unordered target locks, domain write outside `group_id`. Composite UNIQUE constraints skipped (`ensure_uuid_uniqueness_constraints` short-circuit bugs). Cartesian evidence multiplies lock sets past practical tx time.
+**What Goes Wrong:** Prepare writes graph state or commit accepts raw payload instead of isolated token. Token can be replayed against changed input, another group, another source image, or altered deployment namespace.
 
-**Why it happens:**
-v1 closed these (`catalog_store.py` source CAS, ordered retained locks, embeddings before tx, failed status in separate tx). New code paths copy “simple MERGE” without the ceremony. Schema init `_schema_ready` flag can hide failed constraint presence across multi-worker processes (in-memory only).
+**Warning Signs:** Prepare requires DB write permissions; commit receives catalog objects; token lacks digest/group/sample/image binding; mutable server cache is sole token record; token remains valid after source-bound inputs change.
 
-**How to avoid:**
-- Reuse store primitives; do not fork second write path.
-- Commit domain + manifest + terminal status rules explicitly ordered; failed-status after rollback only.
-- Embeddings complete before domain tx open.
-- Every MATCH/MERGE keeps `group_id`.
-- Constraint ensure remains fail-closed; workers must not assume peer initialized schema without verification where required.
-- Keep live concurrency tests mandatory for commit path.
+**Prevention/Tests:** Keep prepare read/compute-only, issue opaque single-purpose token bound to input digest, group, deterministic sample manifest, image source, namespace, limits, and expiry; commit accepts token only; reject tamper, replay, cross-group, stale, and mismatched-image cases before transaction.
 
-**Warning signs:**
-- New Cypher without `group_id`.
-- `SET n = $map` returns.
-- Commit path calls embedder under open tx.
-- `_schema_ready = True` without SHOW verification.
-- Skipped neo4j int tests in CI for “speed”.
-
-**Prevention / tests:**
-- Fault injection: fail mid-commit → zero partial entities/edges/evidence; status `failed` or absent per contract.
-- Concurrent source update / dual batch claim → structured `batch_conflict` / `deterministic_uuid_conflict`.
-- Embedder raise → no domain writes.
-- Constraint missing → fail closed, no repair DROP.
-- Residual count 0 on `oracle-catalog-tool-test`; `oracle-catalog-v2` node count unchanged.
+**Phase:** Prepare/token-only commit protocol.
 
-**Phase to address:**
-Phase 3–4 write paths; Phase 5 live concurrency gates.
+### 14. New Image Not Bound to Reviewed Source or Delta
 
----
+**What Goes Wrong:** Acceptance tests image built from different commit, dirty context, mutable tag, or extra files. “New image” then proves neither reviewed source nor intended v1.2 delta.
 
-### Pitfall 10: Manifest drift and verify false green
+**Warning Signs:** Image metadata lacks immutable source revision; build context contains untracked payloads; tag is reused; runtime package diff exceeds declared delta; report records tag but not digest.
 
-**What goes wrong:**
-`verify_catalog_batch` compares live graph to client re-supplied lists (v1 pattern) instead of durable manifest written at commit. Manifest omitted fields (edge endpoints, evidence links, plane, hash recipe version). Verify checks counts only not identities. Manifest updated out-of-band or partially on retry. Operators trust verify while graph ≠ committed plan.
+**Prevention/Tests:** Build from identified source plus explicit v1.2 delta, record image digest and source revision, inspect included files, compare runtime content against trusted v1.1 tested source, require source-bound acceptance manifest, and use digest rather than mutable tag.
 
-**Why it happens:**
-v1 verify is request-driven. v1.1 requires durable exact manifest + manifest-backed verification. Easy to “enhance” verify without persisting manifest, or persist summary counts only.
+**Phase:** Image build and delta acceptance.
 
-**How to avoid:**
-- On successful commit, persist full manifest (entity/edge/source/link UUIDs, keys, content hashes, endpoint UUIDs, map version, hash recipe version) under batch identity.
-- Verify loads manifest by `group_id`+`batch_id` (or plan id); client body cannot redefine expected set.
-- Drift → structured failure listing mismatches; never repair silently.
-- Dry-run produces no durable manifest (or explicitly marked non-authoritative).
+### 15. Secret or Catalog Payload Included in Image
 
-**Warning signs:**
-- Verify passes after manual Neo4j delete of one entity.
-- Manifest node missing but status `committed`.
-- Verify API still requires full entity list identical to upsert.
-- Manifest hash ≠ batch catalog hash.
+**What Goes Wrong:** Build context captures `.env`, credentials, normalized 19MB catalog, generated tokens, raw documents, or logs. Deleted later layers may still retain content.
 
-**Prevention / tests:**
-- Commit → manifest present; verify no client domain list → pass.
-- Delete one node → verify fail; manifest unchanged.
-- Retry identical commit → manifest stable (byte/hash equality).
-- Conflicting retry → no manifest overwrite.
-- Read-only verify works when mutation gate disabled.
+**Warning Signs:** Broad `COPY .`; missing `.dockerignore` entries; secret scanner finds keys; image history exposes build args; catalog paths appear in layer inventory; acceptance artifact contains full payload.
 
-**Phase to address:**
-Phase 4 — durable manifests + manifest-backed verification.
+**Prevention/Tests:** Use narrow explicit `COPY`, exclude catalog and local artifacts, use runtime secret injection, scan final image and history for secrets and catalog fingerprints, inspect layers, and fail acceptance on any source payload or credential match.
 
----
+**Phase:** Image packaging and security gate.
 
-### Pitfall 11: Read/write gate confusion and accidental live/canary activity
+### 16. Dirty User Tree Overwritten or Smuggled into Results
 
-**What goes wrong:**
-Single `catalog_upsert.enabled=false` disables resolve/verify/status too, or write tools ignore gate. Split gates misconfigured so mutation enabled in shared env. Tests or docs use `oracle-catalog-v2` / production URI. “Canary prep” scripts actually ingest. K8s/sample manifest edits ship with enabled writes. Agents call `clear_graph` or delete tools during cleanup.
+**What Goes Wrong:** Automation resets, cleans, formats, stages, or packages unrelated user changes. Current dirty files and untracked artifacts are lost or accidentally attributed to v1.2.
 
-**Why it happens:**
-v1 one feature flag. v1.1 wants read-only diagnostics while mutation disabled. Operational pressure to “just run canary”. Working tree already has k8s/sample paths that must not be task-mutated casually.
+**Warning Signs:** `git clean`, hard reset, blanket checkout, global formatter, `git add -A`, or broad build context use; pre-existing dirty paths change unexpectedly.
 
-**How to avoid:**
-- Separate flags: mutation vs read diagnostics; capabilities discovery advertises both.
-- Hard-code test group allowlist in live tests; assert forbidden group untouched before/after.
-- No canary execution in v1.1; docs are procedure-only.
-- Never `clear_graph` for cleanup; scoped deletes of tool-test UUIDs only if absolutely required (prefer tx rollback + explicit test fixtures).
-- CI env: mutation disabled by default except labeled integration jobs.
+**Prevention/Tests:** Capture initial status, touch only explicit v1.2 paths, never clean/reset/delete, avoid broad staging, compare final status to baseline, preserve all frozen and dirty files, and report unrelated changes without modifying them.
 
-**Warning signs:**
-- Integration log shows `group_id=oracle-catalog-v2`.
-- Verify fails with `feature_disabled` when only writes should be gated.
-- Node counts on forbidden group change during test run.
-- README “run canary” without approval gate language.
+**Phase:** Every phase; especially setup, build, and handoff.
 
-**Prevention / tests:**
-- Mutation off → upsert/prepare/commit error `feature_disabled`; resolve/verify/status/capabilities succeed.
-- Pre/post probe: forbidden group checksum/count stable.
-- Grep CI and tests for forbidden group string as write target.
-- Docs lint: canary marked non-executed.
+### 17. Readiness Overclaim or Repeat of v1.1 Canary
 
-**Phase to address:**
-Phase 4 — split gates; Phase 5 — isolation/docs enforcement.
+**What Goes Wrong:** Team reruns trusted v1.1 canary despite zero runtime diff, treats sample success as production readiness, or claims BO relationship coverage source cannot provide. Time re-proves frozen substrate while new delta remains under-tested.
 
----
+**Warning Signs:** Plan includes v1.1 canary rerun; acceptance says full ingest, production-ready, or all catalogs; report hides BO zero-relation limit; source-bound image and delta tests are missing; sample bounds are unstated.
 
-### Pitfall 12: Log / response leakage (tokens, payloads, source text)
+**Prevention/Tests:** Trust shipped v1.1 substrate and recorded zero runtime diff, never repeat v1.1 canary, test only v1.2 delta on new source-bound image, state sample and source limits, separate pilot acceptance from deployment readiness, and require evidence for every readiness claim.
 
-**What goes wrong:**
-Debug logs print full catalog payloads, evidence strings, raw DDL, commit tokens, credentials from config. Error messages echo attribute maps. MCP responses include server-only secrets. Telemetry captures batch bodies.
-
-**Why it happens:**
-f-string logging culture in Graphiti (`logger.debug(f'...{payload}')`). Catalog evidence fields are large (`MAX_EVIDENCE_LENGTH=8192`). Prepare tokens are new secret material.
-
-**How to avoid:**
-- Log `group_id`, `batch_id`/`plan_id`, counts, error codes only.
-- Redact tokens always; store hash only.
-- Structured errors: codes + short messages; no raw source text.
-- Review MCP tool result models for accidental field exposure.
-
-**Warning signs:**
-- Test log fixtures contain `name_raw` lists or SHA inputs.
-- Exception handlers `str(request)`.
-- Token appears in `CatalogIngestStatus` response.
-
-**Prevention / tests:**
-- Caplog assertions on success/failure paths.
-- Response schema tests: no `commit_token` after first return policy; never `password`.
-- Security suite cases from v1.0 remain green and extended for tokens.
-
-**Phase to address:**
-Phase 5 — security/logging; design discipline in Phases 3–4.
-
----
-
-### Pitfall 13: Legacy MCP compatibility break and dual-stack false confidence
-
-**What goes wrong:**
-Hardening renames tools, changes required fields on existing seven tools, or breaks 14 legacy tools registration. Semantic `add_memory`/`add_triplet` still create generic endpoints while catalog claims exclusive deterministic path—agents mix paths and “verify” only catalog slice. Test suite green on catalog units while MCP listing drops tools.
-
-**Why it happens:**
-v1 promised additive tools. v2 contracts want stricter shapes; tempting to change in place without versioning. Registration is central in `graphiti_mcp_server.py`.
-
-**How to avoid:**
-- Keep v1 tool names working with documented compatibility mode **or** explicit versioned tool names; no silent required-field change without error code.
-- Registration test: catalog + legacy counts; `MISSING []`.
-- Agents must not use `add_triplet` for catalog; docs + optional runtime warnings.
-- Compatibility suite runs every phase gate.
-
-**Warning signs:**
-- Runtime tool count ≠ expected.
-- Existing MCP regression file skipped.
-- Catalog verify green while `add_triplet` polluted group.
-
-**Prevention / tests:**
-- 86 legacy MCP tests remain; catalog registration snapshot.
-- Mixed-path isolation test: semantic tools do not run in catalog int modules.
-- Contract tests for unchanged v1 fields where compatibility required.
-
-**Phase to address:**
-Phase 5 — compatibility; continuous regression each phase.
-
----
-
-### Pitfall 14: Overloaded verify / status vocabulary hides incomplete hardening
-
-**What goes wrong:**
-Status lifecycle vocabulary (`planned`/`validating`/…/`committed`/`failed`) confuses with durable terminal-only persistence (v1 STAT-03 nuance). Prepare states bolted on without clarifying restart-safe set. Verify “passed” means schema-valid request not graph match. Capabilities endpoint overclaims endpoint map / hash version.
-
-**Why it happens:**
-v1 already had model/read vocabulary vs persisted terminal states. v1.1 adds prepare states—easy to over-persist or under-document.
-
-**How to avoid:**
-- Explicit state machine table: which states durable, which ephemeral.
-- Verify response distinguishes `manifest_match`, `missing`, `hash_mismatch`, `plane_mismatch`.
-- Capabilities returns exact versions; tests pin them.
-
-**Warning signs:**
-- Status `writing` survives process restart.
-- Verify boolean `ok` without per-item codes.
-- Capabilities missing hash recipe version.
-
-**Prevention / tests:**
-- Restart-safe matrix for each state.
-- Verify error taxonomy unit tests.
-- Capabilities snapshot test.
-
-**Phase to address:**
-Phase 4 status/manifest; Phase 5 docs/tests.
-
----
+**Phase:** Acceptance, reporting, and release decision.
 
 ## Technical Debt Patterns
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Keep Cartesian provenance API | Less client work | False evidence density; wrong caps | Never for v1.1 |
-| Optional plane default COMMON | Easier migration | FE/BO collision | Never |
-| Hash subset of fields “for speed” | Smaller canonicalizer | False idempotence | Never |
-| In-memory prepare only | Faster spike | Lost on restart; dual-writer races | Never (restart-safe required) |
-| Reuse v1 verify client lists | Less store work | Manifest drift invisible | Never for v1.1 verify |
-| Skip live concurrency this milestone | Faster CI | TOCTOU regressions | Never for commit path |
-| Silent v1 key accept | Soft migration | Identity corruption | Never |
-| Log full payload in debug | Easy debug | Leakage / PII / tokens | Never in product paths |
-| Single feature flag for all catalog | Simple config | Read diagnostics die with writes | Only temporary pre-Phase 4 |
-| Claim multi-backend support | Marketing | Untested Falkor/Kuzu paths | Never this milestone |
+### Validation Split Across Layers
 
-## Integration Gotchas
+Duplicated partial checks drift. Keep authoritative request validation at trust boundary, then retain narrow defensive assertions at Cypher construction boundary for labels, properties, `group_id`, and token bindings.
 
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| Neo4j 5.26 constraints | Assume stock Graphiti UNIQUE on uuid alone | Catalog composite `(uuid, group_id)` CREATE IF NOT EXISTS; verify SHOW; no DROP |
-| Neo4j transactions | `execute_query` per MERGE | One domain tx; failed status separate |
-| Embedder | Embed inside write tx / after partial write | All embeddings before tx; fail `embedding_failed` |
-| Graphiti search | Expect CatalogIngestBatch / plan nodes in entity search | Non-Entity labels only for status/plan/manifest |
-| MCP FastMCP | Change tool signatures in place | Additive or versioned; registration snapshot |
-| Source CAS | Check hash in Python then write | Fixed Cypher CAS + retained locks (v1 pattern) |
-| Evidence links | Product of sources×targets | Explicit link rows only |
-| group_id | Default empty / shared | Required; tests only `oracle-catalog-tool-test` |
-| UUID namespace | Auto-gen per process | Immutable `GRAPHITI_CATALOG_UUID_NAMESPACE` |
-| Canary group | Write `oracle-catalog-v2` in tests | Probe-only; zero mutation |
+### Identity Logic Embedded in Queries
 
-## Performance Traps
+Ad hoc UUID preimages inside Cypher become inconsistent. Compute canonical, versioned identity preimages server-side; pass UUID and exact preserved names as parameters.
 
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Cartesian evidence | Tx timeouts; link cap false hits | Explicit links | >~50 sources × >~100 targets |
-| Unbounded prepare store | Disk growth; stale commits | TTL + discard + cap plans/group | Long-running MCP |
-| Per-item round trips | Slow batch | Bulk MERGE in one tx | 500 entities / 2k edges defaults |
-| Re-embed unchanged | Cost/latency; vector churn | Hash short-circuit before embed | Large retries |
-| Lock order inversion | Deadlocks under concurrency | Fixed `ORDER BY uuid, kind` | Parallel provenance |
-| Manifest full scan verify | Slow verify | Keyed MATCH by manifest UUID list | Full catalog later (~14k) — design now |
-| Schema ensure every request | Latency | Process-local ready flag **plus** correct SHOW | High QPS (still fail closed if missing) |
+### Unversioned Acceptance Artifacts
 
-## Security Mistakes
+Generic filenames invite overwrite and v1.1/v1.2 mixing. Use immutable versioned paths and record hashes, source revision, image digest, input digest, group, and bounded sample manifest.
 
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| Client labels/properties in Cypher | Injection | Allowlists only; re-validate at store |
-| Raw commit token storage/logs | Replay / theft | Store hash; log ids only |
-| Predictable tokens | Cross-client commit | CSPRNG token bound to plan hash |
-| Protected property via attributes | Identity clobber | Denylist + forbid extra |
-| group_id omission | Cross-tenant read/write | Require + MATCH predicate |
-| Trust client UUID | Identity takeover | Server UUIDv5 only |
-| MD5 / short hash | Collision / policy break | SHA-256 64 lowercase hex only |
-| Capabilities over-exposure | Info leak of internal limits | Safe public map; no secrets |
-| Mutation enabled in shared Neo4j | Accidental canary/live write | Split gates; env defaults off |
-| Error echo of source text | Data leak | Bounded messages; codes |
+### Convenience Reads Through Ingest Facade
 
-## UX Pitfalls (operator / agent)
+Reusing mutation-oriented Graphiti flows for context lookup couples reads to embeddings, background index work, and mutable timestamps. Keep object context in dedicated Neo4j read operation with fixed projections.
 
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Opaque `validation_error` | Cannot fix plane/key | Field path + grammar hint |
-| Cartesian surprise | Huge link counts | Explicit links + examples |
-| Verify needs full resend | Fragile agents | Manifest-backed verify |
-| One flag kills diagnostics | Blind ops | Split read/write gates |
-| Silent no-op on hash omit | Believe data applied | Field-complete hashes + statuses |
-| Docs imply canary ran | False production confidence | Procedure only; approval required |
+### Implicit Qualification Defaults
 
-## "Looks Done But Isn't" Checklist
+Defaulting absent database/schema from surrounding records makes malformed input look valid. Reject incomplete or ambiguous endpoint identities; normalization must be explicit and testable.
 
-- [ ] **Strict models:** Extra keys rejected at every nesting level — not only root.
-- [ ] **FE/BO/COMMON grammar:** Parser + UUID tests for plane and overloads; v1 keys fail closed.
-- [ ] **Endpoint map:** Server map enforced on edge tool **and** batch; capabilities versioned.
-- [ ] **Hash completeness:** Mutation matrix includes all v2 fields; batch hash covers all collections.
-- [ ] **Explicit evidence:** No sources×targets product; one request row per link.
-- [ ] **Prepare immutability:** Snapshot durable; commit ignores mutated client body or rejects.
-- [ ] **Token safety:** Hash-at-rest; TTL; single-winner CAS; no token in logs.
-- [ ] **Atomic commit:** Embed before tx; rollback completeness; failed status separate.
-- [ ] **Manifest:** Written on commit; verify uses manifest not client lists; drift detected.
-- [ ] **Split gates:** Reads work when mutation off.
-- [ ] **Isolation:** Only `oracle-catalog-tool-test` writes; `oracle-catalog-v2` unchanged probes.
-- [ ] **Legacy MCP:** Tool counts + regression suite green.
-- [ ] **No canary execution:** Docs/procedure only; no full 14k ingest.
-- [ ] **Logging:** Caplog tests for payload/token absence.
-- [ ] **Compatibility with v1 objects:** No silent rekey of existing nodes.
+### Mutable Tags as Evidence
+
+Container tags are navigation aids, not acceptance identity. Reports and commit tokens must bind immutable image digest.
+
+### Count-Only Fidelity Checks
+
+Matching 1,261 tables and 10,649 columns does not prove correct identity, endpoints, names, or evidence. Add deterministic manifest hashes and targeted semantic fixtures.
+
+### Pilot Logic Becoming Production Policy
+
+FE connected-sample and BO structural-score rules serve bounded acceptance only. Do not promote them into general ingestion selection or completeness claims.
 
 ## Recovery Strategies
 
-| Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| Silent rekey / wrong plane UUIDs | HIGH | Stop writers; do not “fix” in place; rebuild in tool-test only; production needs approved migration (out of scope) |
-| Cartesian evidence explosion | MEDIUM | Discard plan; re-ingest with explicit links; delete tool-test residuals by batch UUID |
-| Partial commit (bug) | HIGH | Tx fix first; tool-test cleanup by known UUIDs; never clear_graph |
-| Manifest drift | MEDIUM | Trust graph or re-commit after fix; mark status failed if policy says; no silent manifest rewrite |
-| Token leak | MEDIUM | Invalidate all prepared plans; rotate nothing else if hash-only storage; scrub logs |
-| Forbidden group write | HIGH | Halt; incident; do not automate delete; human recovery |
-| Hash recipe change mid-flight | MEDIUM | Bump recipe version; require re-prepare; reject old plans |
-| Constraint create fail (dup data) | HIGH | Fail closed; manual dedupe; no DROP in product |
+### Input or Manifest Mismatch
+
+Abort before embedding or transaction. Preserve diagnostic counts and non-sensitive identifiers, invalidate token, regenerate prepare artifact from authoritative input, then compare deterministic manifest and digest.
+
+### Duplicate or Ambiguous Identity
+
+Do not pick winner. Emit bounded conflict report with canonical keys and source locators, fix normalization/qualification rule, regenerate sample, and prove reordered input produces same manifest.
+
+### Partial-Write Evidence
+
+Treat as atomicity gate failure. Stop acceptance, snapshot affected test group, identify transaction boundary leak, restore only isolated test group through approved test setup, and rerun injected-failure rollback tests before success path.
+
+### Cross-Group Read or Write
+
+Stop pilot operations. Preserve query and test evidence without payload content, patch every match boundary, add adversarial duplicate fixtures, and rerun complete isolation suite.
+
+### Frozen Artifact Mutation
+
+Stop and compare against recorded hashes. Do not repair by regeneration. Restore from trusted frozen source only through approved workflow, then move v1.2 output to new paths.
+
+### Image Provenance Failure
+
+Reject image regardless of functional tests. Rebuild from identified source and explicit delta, use narrow context, rescan layers/secrets, record digest, and rerun only v1.2 delta acceptance.
+
+### Oversized Context Response
+
+Fail closed with bounded error or explicit truncation metadata; never stream unlimited neighbors. Tighten deterministic limits and projections, then test hub-object latency and serialized size.
+
+### Dirty Tree Collision
+
+Stop before overwrite. Record colliding paths, choose new output paths or ask owner, and leave unrelated modifications untouched. Never clean or reset as recovery.
+
+### Overclaimed Report
+
+Withdraw readiness statement, retain factual evidence, rewrite scope around bounded FE/BO samples, zero BO relationships, source-bound image, and untested operational areas.
 
 ## Pitfall-to-Phase Mapping
 
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| Silent v1→v2 reinterpretation | Phase 1 Identity grammar | v1 key rejected; UUID ≠ v1; no update of pre-seeded v1 nodes |
-| Recursive validation open | Phase 1 Strict contracts | Extra-key matrix all depths |
-| Hash field omissions / false idempotence | Phase 2 Batch hashing | Mutation matrix; prepare/commit byte equality |
-| FE/BO/overload collisions | Phase 1 Identity grammar | Distinct UUIDs; conflict tests |
-| Client endpoint maps | Phase 2 Endpoint maps + capabilities | Negative pair table; map version |
-| Cartesian evidence | Phase 3 Evidence links (API earlier if needed) | Explicit single-link live count |
-| Mutable prepare / replay | Phase 3 Prepare/commit/discard | Restart commit; discard; dual commit |
-| Token/TTL/concurrency | Phase 3 + Phase 5 security | Hash-at-rest; TTL; race test |
-| Neo4j atomic regressions | Phase 3–4 writes + Phase 5 live | Fault inject; concurrent CAS |
-| Manifest drift / false verify | Phase 4 Manifests + verify | Delete-one-node verify fail |
-| Gate / live canary accident | Phase 4 gates + Phase 5 isolation | Forbidden group probe; read-only mode |
-| Log/token leakage | Phase 5 security | Caplog + response schema |
-| Legacy MCP break | Phase 5 compatibility (each gate) | Registration + 86 legacy tests |
-| Status/verify vocabulary lie | Phase 4–5 | State matrix + capabilities pin |
+| Phase | Primary Pitfalls | Required Gate |
+|---|---|---|
+| 1. Input contract | Digest drift, duplicates, non-finite values, malformed shape, late caps | Full bounded validation and stable digest |
+| 2. Identity contract | FE/BO collision, bare FK qualification, implicit defaults | Cross-database collision and ambiguity fixtures |
+| 3. Pilot selection | Nondeterministic sample, FE bias, invented BO facts | Reorder-stable FE connectivity and BO structural manifest |
+| 4. Evidence model | Fidelity loss, source leakage, count-only checks | Exact-name and allowlisted-evidence tests |
+| 5. Prepare protocol | Prepare writes, weak token binding, replay | Read-only prepare and tamper/replay rejection |
+| 6. Atomic commit | Late embedding, split transactions, partial writes | Injected-failure graph snapshot equality |
+| 7. Object context | Unbounded one-hop, cross-group reads, read mutation | Bounded payload, adversarial isolation, zero-write proof |
+| 8. Artifact handling | Frozen contamination, dirty-tree overwrite | Before/after hashes and status comparison |
+| 9. Image build | Wrong source, mutable tag, secret/catalog inclusion | Source revision, image digest, layer and secret scan |
+| 10. Acceptance | Repeat-canary waste, readiness overclaim | v1.2-delta-only report with explicit limits |
 
-Suggested v1.1 phase spine (roadmap consumer):
+## Looks Done But Isn't Checklist
 
-1. **Strict contracts + FE/BO identity grammar** — fail closed; no silent v1 rekey; `unsupported_identity_schema` / `invalid_system_key`.
-2. **Endpoint maps + authoritative hashing + capabilities** — server maps (`edge_endpoint_pair_not_allowed`); complete hashes; capabilities after init even if writes off.
-3. **Prepare/commit/discard + explicit evidence** — full payload prepare; embed at commit; one success tx; exact tool names; plan error codes.
-4. **Manifests + manifest verify + split read/write gates** — durable truth; `manifest_mismatch`; safe diagnostics.
-5. **Exhaustive tests, security, compatibility, docs** — no canary; no auto migration; isolation proof.
-
+- [ ] Input digest is recorded and rechecked at commit.
+- [ ] Root and every nested collection shape are validated.
+- [ ] Duplicate deterministic identities fail before embedding.
+- [ ] NaN and infinity are rejected explicitly.
+- [ ] Limits cover expanded entities, edges, and provenance links.
+- [ ] FE sample remains connected under deterministic ordering.
+- [ ] BO sample uses structural richness without invented relations.
+- [ ] Reordered equivalent input yields identical sample manifest.
+- [ ] Database token participates in every relevant UUIDv5 preimage.
+- [ ] Same qualified names in FE and BO produce distinct identities.
+- [ ] Bare or ambiguous FK endpoints are rejected, not guessed.
+- [ ] BO relationship count remains exactly zero for this input.
+- [ ] `name_raw` and `name_canonical` remain exact.
+- [ ] Evidence links to source locator and input digest.
+- [ ] Logs contain batch IDs and counts only.
+- [ ] Prepare performs no graph mutation.
+- [ ] Commit accepts isolated token only, not catalog payload.
+- [ ] Token binds group, digest, sample, namespace, image, limits, and expiry.
+- [ ] Token tamper, replay, stale, cross-group, and image mismatch fail.
+- [ ] All embeddings complete before transaction opens.
+- [ ] Any commit-stage failure leaves graph snapshot unchanged.
+- [ ] Every read and write query constrains `group_id`.
+- [ ] Object context uses exact one-hop patterns only.
+- [ ] Neighbor and payload bounds are deterministic and reported.
+- [ ] Object context returns allowlisted properties only.
+- [ ] Read path performs no writes, embeddings, or LLM calls.
+- [ ] High-degree object test stays within query and payload ceilings.
+- [ ] Frozen v1.1 canary artifact hashes remain unchanged.
+- [ ] Existing dirty and untracked user files remain untouched.
+- [ ] New image records immutable source revision and image digest.
+- [ ] Build context excludes catalog, raw docs, tokens, logs, and secrets.
+- [ ] Final image layers and history pass secret/catalog scans.
+- [ ] Acceptance tests only v1.2 delta; v1.1 canary is not repeated.
+- [ ] Report states 2 documents, 1,261 tables, 10,649 columns, and 434 FE relationships.
+- [ ] Report states BO has zero relationships.
+- [ ] Pilot success is not labeled full-ingest or production readiness.
+- [ ] Source-bound image plus delta acceptance evidence is retained.
 
 ## Sources
 
-- `.planning/PROJECT.md` — v1.1 goals, constraints, out-of-scope (no canary, no v1 silent migration, test group only)
-- `.planning/milestones/v1.0-MILESTONE-AUDIT.md` — v1 closures (CAS, locks, embeddings-before-tx, isolation) that must not regress
-- `.planning/milestones/v1.0-phases/02-provenance-and-atomic-batch/02-VERIFICATION.md` — atomic/status/provenance truths
-- `mcp_server/src/services/catalog_identity.py` — UUIDv5 formulas, `canonical_sha256`, optional client hash
-- `mcp_server/src/services/catalog_service.py` — canonical payload field sets, prepare-less single-shot flow
-- `mcp_server/src/services/catalog_store.py` — composite UNIQUE, CAS, schema ensure, no SET-map
-- `mcp_server/src/models/catalog_*.py` — allowlists, Cartesian link bound, missing `extra='forbid'`, batch hash fields
-- `mcp_server/tests/test_catalog_*.py` — v1 unit/live/concurrency baselines to extend
-
----
-*Pitfalls research for: Catalog-v2 pre-canary hardening*
-*Researched: 2026-07-17*
-*Confidence: HIGH — grounded in current mcp_server catalog implementation and v1.0 verification artifacts; phase names are recommendations for roadmap authoring*
+- User-provided authoritative v1.2 scope and catalog facts, 2026-07-24. Confidence: HIGH.
+- Trusted shipped v1.1 substrate and frozen canary status, as declared in task context. Confidence: HIGH.
+- Project constraints for deterministic UUIDv5 identity, Neo4j behavior, bounded batches, group isolation, atomic transactions, pre-transaction embeddings, logging, and data preservation. Confidence: HIGH.

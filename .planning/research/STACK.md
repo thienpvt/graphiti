@@ -1,319 +1,265 @@
 # Stack Research
 
-**Domain:** Catalog-v2 pre-canary hardening (deterministic MCP catalog layer)
-**Researched:** 2026-07-17
+**Domain:** v1.2 FE/BO Catalog Pilot and Object Context (deterministic MCP catalog layer)
+**Researched:** 2026-07-24
 **Confidence:** HIGH
-**Milestone:** v1.1 — subsequent to shipped v1.0 typed primitives
+**Milestone:** v1.2 — subsequent to shipped v1.1 catalog-v2 pre-canary hardening
 
 ## Verdict
 
-**Add zero new runtime dependencies.** Harden with already-installed Pydantic 2.11.x, Neo4j 5.26+/driver 5.28.x, stdlib (`uuid`, `hashlib`, `hmac`, `secrets`, `json`, `datetime`, `re`, `asyncio`), and existing `CatalogNeo4jStore` / `CatalogService` / FastMCP surface.
+**Add zero new runtime or dev dependencies.** v1.2 is conversion + selection + one compact read tool + targeted image acceptance on the already-shipped catalog-v2 stack.
 
-v1.0 already delivered seven tools, UUIDv5, SHA-256, allowlists, embeddings-before-tx, dry-run/atomic, provenance, and `CatalogIngestBatch` status. v1.1 is **contract and control-plane hardening**, not a stack rewrite.
+Reuse:
+
+- Pydantic strict models (`CatalogStrictModel`, `extra='forbid'`)
+- Existing catalog MCP tools (prepare/commit/resolve/evidence/manifest)
+- Offline builder patterns in `scripts/build_catalog_canary_requests.py`
+- Stdlib JSON/hash/path/graph selection
+- Existing source-bound Docker/image/canary scripts
+
+Do **not** reopen v1.1 final canary Gates 0–10. Do **not** add parsers, schema-frameworks, graph libraries, streaming JSON libs, or LLM/Docling paths.
 
 ## Recommended Stack
 
 ### Core Technologies (unchanged — reuse)
 
-| Technology | Version (verified in worktree) | Purpose | Why for v1.1 |
-|------------|--------------------------------|---------|--------------|
-| Python | `>=3.10,<4` (runtime 3.10.20 checked) | Runtime | Keep 3.10 min; no 3.11-only APIs (`enum.StrEnum` already polyfilled) |
-| `uv` + `mcp_server/uv.lock` | lockfile-driven | Install truth | Do not hand-edit versions; no new deps → no lock churn |
-| `mcp` (FastMCP) | **1.27.2** (`>=1.27.2,<2`) | Tool registration | Additive tools only; same `@mcp.tool()` pattern |
-| `graphiti-core` | **0.29.2** | Embedder + search interop | Catalog writes stay off `EntityNode.save` / queue / LLM |
-| `neo4j` driver | **5.28.1** (req `>=5.26.0`) | Async Bolt + real txs | Control-plane + domain writes via `tx.run` |
-| Neo4j server | **5.26+** (compose `neo4j:5.26.0`) | Graph storage | Composite UNIQUE, MERGE, parameterized Cypher only |
-| Pydantic | **2.11.7** (req `>=2.11.5`) | Strict recursive contracts | `ConfigDict(extra='forbid')` on **every** nested model |
-| `pydantic-settings` | **2.10.1** | CatalogConfig gates | Split read/write flags without new config libs |
-| `openai` (embedder transport) | **2.43.0** range | Embeddings only | Still no LLM extraction for catalog tools |
-| `pyyaml` | **6.0.3** | YAML config | Existing `${VAR}` expansion |
+| Technology | Version (repo-grounded) | Purpose | Why for v1.2 |
+|------------|-------------------------|---------|--------------|
+| Python | `>=3.10,<4` (`mcp_server/pyproject.toml`) | Runtime | Keep 3.10 min; no 3.11-only APIs |
+| `uv` + `mcp_server/uv.lock` | lockfile-driven | Install truth | Zero new deps → no lock churn |
+| `mcp` (FastMCP) | `>=1.27.2,<2` | Tool registration | One additive `@mcp.tool()` for object context |
+| `graphiti-core` | path/editable monorepo source | Embedder + search interop | Catalog writes stay off LLM/queue/`EntityNode.save` |
+| `neo4j` driver | `>=5.26.0` (via graphiti-core) | Async Bolt + real txs | Prepare/commit + one hop neighbor MATCH |
+| Neo4j server | 5.26+ (compose baseline) | Graph storage | Parameterized Cypher only; fixed labels |
+| Pydantic | installed 2.x (`CatalogStrictModel`) | Strict request/response contracts | Validate converted payloads + new tool I/O |
+| `pydantic-settings` | installed | CatalogConfig gates | No new config system |
+| Native Ollama embedder | already wired v1.1 | Name/fact embeddings before write tx | Unchanged; no new embedder package |
+| `pyyaml` | `>=6.0.3` | YAML config | Existing catalog-local compose override |
 
-### Supporting Libraries (already present — reuse)
+### Supporting Libraries (already present — reuse, do not re-declare)
 
-| Library | Version | Purpose | When for v1.1 |
-|---------|---------|---------|---------------|
-| stdlib `uuid` | 3.10 | UUIDv5 identities + FE/BO/COMMON name material | Extend identity strings; never caller UUID authority |
-| stdlib `hashlib` | 3.10 | SHA-256 canonical audit | Combined batch/manifest hashes |
-| stdlib `hmac` + `secrets` | 3.10 | Opaque prepare/commit tokens | `secrets.token_urlsafe(32)`; store **hash only**; `hmac.compare_digest` on verify |
-| stdlib `json` | 3.10 | Canonical dumps + nested serialization | Existing `sort_keys=True, separators=(',', ':')` |
-| stdlib `datetime` (UTC) | 3.10 | `expires_at`, `prepared_at`, `committed_at` | Bounded plan TTL; no external scheduler |
-| `typing-extensions` | locked | TypedDict on <3.12 | Response shapes only if needed |
-| `httpx` (dev) | **0.28.1** | MCP HTTP tests | Gate-split / tool-list tests |
-| `tenacity` | via graphiti-core | LLM retries | **Do not** wrap catalog writes |
+| Library / module | Where | Purpose in v1.2 | When |
+|------------------|-------|-----------------|------|
+| stdlib `json` | scripts + models | Load `catalog/catalog.json`; canonical dumps | Always. `object_pairs_hook` duplicate-key reject already in builder |
+| stdlib `hashlib` | `catalog_identity`, `catalog_authority_hashing` | SHA-256 authority + content hashes | Catalog bytes + request payloads |
+| stdlib `uuid` | `services/catalog_identity.py` | Server UUIDv5 only | Never caller UUID authority |
+| stdlib `hmac` + `secrets` | identity / prepare | Plan tokens | Unchanged prepare/commit |
+| stdlib `pathlib`, `argparse`, `tempfile`, `dataclasses` | scripts | Offline converter CLI | New/extended builder script |
+| stdlib `collections` (`Counter`, `defaultdict`, `deque`) | scripts | Deterministic FE component selection | BFS/degree — **not** networkx |
+| stdlib `re`, `unicodedata` | hashing + keys | BOM/control reject; key grammar | Authority + graph_key |
+| stdlib `ast` + existing scanner | `scripts/catalog_image_secret_scanner.py` | Image secret scan | Targeted image acceptance |
+| `models.catalog_*` | `mcp_server/src/models/` | Entity/edge/evidence/batch/prepare contracts | Validate converted slice before prepare |
+| `services.catalog_service` / `catalog_store` | `mcp_server/src/services/` | Prepare/commit/resolve/evidence + new neighbor read | Object-context tool |
+| `scripts/build_catalog_canary_requests.py` | scripts | Table→entity/edge conversion, FK join, strict validate | **Extend or extract**; do not rewrite |
+| `scripts/catalog_authority_hashing.py` | scripts | raw/lf SHA-256, git/archive authority | Pin `catalog.json` digest in slice manifest |
+| `scripts/run_catalog_canary_batch.py` + launcher | scripts | Source-bound run surface | Thin v1.2 acceptance driver only |
+| `scripts/catalog_image_secret_scanner.py` | scripts | `scan_complete_image` | Image receipt without new scanner |
+| pytest / pytest-asyncio / ruff / pyright | dev group | Unit + live tests | Same markers; isolated test group only |
 
 ### Development Tools (unchanged)
 
-| Tool | Locked | Purpose | Notes |
-|------|--------|---------|-------|
-| pytest | **9.0.3** | Unit/service/store/MCP/live | Markers: unit, integration, requires_neo4j |
-| pytest-asyncio | **1.4.0** | Async fixtures | Existing patterns |
-| pytest-timeout | **2.4.0** | Hang protection | Live Neo4j |
-| pytest-xdist | dev group | Parallel **unit** only | Never parallelize shared-group Neo4j writes |
-| ruff | **0.15.x** | Format/lint | line-length 100, single quotes |
-| pyright | **1.1.408** | basic typecheck | mcp_server mode |
-| faker | **40.x** | Optional noise | Prefer fixed fixtures for determinism |
-
-## Exact Mechanisms for v1.1 Scope
-
-### 1. Strict recursive Pydantic contracts
-
-**Use (installed):**
-
-```python
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-class CatalogStrictModel(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',          # reject unknown fields
-        strict=True,             # no str→int / truthy coercion at trust boundary
-        validate_assignment=True # immutable-feeling flags stay valid after setattr
-        # frozen=True optional for pure value objects (identity refs, endpoint maps)
-    )
-```
-
-**Contract note (v1.1):** Catalog-v2 **intentionally breaks** seven deterministic request identity/provenance/hash contracts where required. Preserve MCP **tool names** and legacy semantic tools; do **not** claim catalog-v1 request payloads remain accepted. Capabilities work whenever server initialization succeeds, even if catalog writes are disabled.
-
-**Critical fact (verified against Pydantic docs + local 2.11.7):**
-- `extra='forbid'` is **per-model**. Outer forbid does **not** cascade into nested models.
-- `revalidate_instances` also does **not** propagate to nested models.
-- Every nested request model (`CatalogEntityItem`, edge items, provenance targets, prepare plan body, evidence links, manifest sections) must declare its own `model_config`.
-
-**Current gap:** `mcp_server/src/models/catalog_*.py` use bare `BaseModel` (default `extra='ignore'`). v1.1 must set forbid/strict on the full tree and add unit tests for nested extras + type coercion.
-
-**Immutable execution flags:** model `dry_run`, `atomic`, prepare/commit mode as `Literal[...]` (already used for batch `atomic: Literal[True]`) plus `validate_assignment=True` or `frozen=True` on request shells so post-parse mutation cannot flip gates.
-
-**Do not add:** `pydantic[email]`, `pydantic-extra-types`, `jsonschema`, `marshmallow`, `cerberus`, `attrs`.
-
-### 2. Catalog-v2 FE/BO system-scoped identities
-
-**Use:** existing `catalog_identity.py` UUIDv5 helpers + stdlib `uuid.uuid5`.
-
-**Pattern (extend, do not replace):**
-- Keep configured `GRAPHITI_CATALOG_UUID_NAMESPACE` as sole namespace authority.
-- Materialize system scope **inside the name string** before uuid5, e.g.  
-  `group_id|entity_type|FE|graph_key`, `...|BO|...`, `...|COMMON|...`  
-  (exact grammar is product decision; stack requirement is: scope is server-owned name material, never a second namespace UUID and never a client-supplied UUID).
-- Edge / source / batch / evidence-link identities follow the same server-name composition.
-- Visible graph_key grammar (prefix + system tag) is validation-layer only; identity remains uuid5 of composed name.
-
-**Do not add:** `ulid`, `shortuuid`, `hashids`, custom base58 libs, caller UUID fields as authority.
-
-### 3. Server-owned edge endpoint maps + capabilities + hashes
-
-**Use:**
-- Module-level `frozenset` / `dict[str, frozenset[tuple[str, str]]]` (or nested frozensets) in `catalog_common.py` / new `catalog_endpoint_map.py` — pure Python constants.
-- Existing `canonical_sha256` for domain content + combined batch hash covering entities, edges, provenance, evidence, system scopes.
-- Capabilities discovery: pure function returning a **fixed** Pydantic response (supported entity/edge types, endpoint map digest, limits, feature flags, protocol version). No reflection over Neo4j schema.
-
-**Do not add:** dynamic ontology DB, GraphQL, OpenAPI codegen packages, Redis capability cache.
-
-### 4. Restart-safe prepare / commit / discard control plane
-
-**Storage primitive (already proven in v1.0):** non-`Entity` Neo4j label nodes with composite uniqueness.
-
-| Concern | Mechanism | Why |
-|---------|-----------|-----|
-| Durable plan/status | New label e.g. `CatalogBatchPlan` (or extend `CatalogIngestBatch` with explicit lifecycle) | Same isolation pattern as `CatalogIngestBatch`; excluded from Graphiti entity search |
-| Identity uniqueness | `CREATE CONSTRAINT ... IF NOT EXISTS FOR (n:Label) REQUIRE (n.uuid, n.group_id) IS UNIQUE` | Already used for Entity/RELATES_TO/Episodic/MENTIONS/CatalogIngestBatch; coexists with Graphiti RANGE indexes where single-prop UNIQUE does not |
-| Upsert semantics | `MERGE (n:Label {uuid:$uuid, group_id:$group_id}) ON CREATE SET ... ON MATCH SET ...` selective properties | Neo4j docs: MERGE does not take free property maps; selective SET preserves fields; never `SET n = $map` |
-| Concurrency | Claim row under uniqueness + status CAS (`FOREACH` guard like existing batch status) | MERGE alone ≠ uniqueness under races; constraint + conditional SET is the v1.0 pattern |
-| Terminal immutability | Refuse overwrite of `committed` / hash mismatch → `batch_conflict` | Existing `already_committed` / `hash_conflict` guards |
-| Bounded TTL | Store `expires_at` (UTC datetime); expire = status transition or delete in app logic on read/commit | Community Neo4j has **no** built-in property TTL without Enterprise/APOC jobs; app-enforced expiry is correct |
-| Payload bound | Store **bounded immutable canonical catalog payload** server-side (restart-safe) so commit receives only a token — hashes/counts alone are **insufficient** | Approved contract: commit must rehydrate domain content from prepare snapshot; chunk non-Entity control nodes if needed |
-| Manifest | Separate non-Entity node or properties on committed batch: exact entity/edge/evidence UUID lists as JSON **strings** (bounded) via existing `serialize_nested_json` | Neo4j properties are primitives; nested structures already stringified |
-
-**Transactions (approved contract):**
-- Prepare: control-plane write only — persist immutable plan + **full bounded canonical payload** (chunked non-Entity nodes OK); **no domain Entity writes**; **does NOT compute required embeddings**.
-- Commit: load payload from plan → compute embeddings from stored payload **before** opening domain tx → **one Neo4j transaction** writes domain data + evidence + manifest + terminal batch status + plan terminal state where supported.
-- Discard: write tx flips plan to discarded/expired; never domain delete of unrelated data.
-- Failed domain write: full rollback of the commit domain/control unit; **separate post-rollback failure-status transaction allowed only for failure reporting**.
-
-**Driver APIs to keep using:**
-- `Neo4jDriver.transaction()` / session `execute_write` with `tx.run(cypher, **params)`
-- `executor.execute_query` only for schema init / reads outside multi-statement atomicity
-- Parameterized values only; labels from fixed server maps
-
-**Do not add:** Redis/RQ/Celery for plans, SQLite sidecar, file-backed plan store, Kafka, temporal/workflow engines, APOC as required dependency, Neo4j Fabric.
-
-### 5. Secure opaque prepare/commit tokens
-
-**Use stdlib only:**
-
-```python
-import hashlib
-import hmac
-import secrets
-
-def issue_plan_token() -> tuple[str, str]:
-    """Return (token_plaintext_once, token_sha256_hex_to_store)."""
-    token = secrets.token_urlsafe(32)  # ~43 chars, 256-bit entropy
-    digest = hashlib.sha256(token.encode('ascii')).hexdigest()
-    return token, digest
-
-def verify_plan_token(presented: str, stored_digest_hex: str) -> bool:
-    presented_digest = hashlib.sha256(presented.encode('ascii')).hexdigest()
-    return hmac.compare_digest(presented_digest, stored_digest_hex)
-```
-
-**Rules:**
-- Return plaintext token **once** on prepare response; persist only SHA-256 (or HMAC with server secret if multi-instance shared secret exists — default single-digest is enough when Neo4j is the sole store).
-- Never log token plaintext or full plan payload.
-- Constant-time compare always (`hmac.compare_digest`).
-- Bind token to `(group_id, batch_uuid, request_sha256, expires_at)` server-side; ignore client identity claims.
-- Optional: `hmac.new(server_secret, token, hashlib.sha256)` if operators inject a deploy secret; still no new packages (`hmac` is stdlib).
-
-**Do not add:** `PyJWT` / `jose` / `itsdangerous` / `authlib` for plan tokens (overkill; no need for portable signed JWTs inside a Neo4j-bound control plane). No OAuth libraries.
-
-### 6. Explicit evidence links (no Cartesian expansion)
-
-**Use:** existing provenance path (Episodic + MENTIONS + fact attachment) + **explicit** link rows with server uuid5 (`catalog_mentions_uuid` pattern).
-
-**Stack rule:** reject nested “all sources × all targets” expansion as the write shape. v1.0 `NestedProvenancePayload` already bounds `sources * targets`; v1.1 should prefer explicit `(source_key, target_ref)` lists and hash those links into the combined batch hash.
-
-**Do not add:** graph algorithms packages, networkx for link expansion.
-
-### 7. Read/write gate split
-
-**Use:** extend `CatalogConfig` in `config/schema.py` with pydantic-settings / YAML:
-
-| Flag | Default | Effect |
-|------|---------|--------|
-| `enabled` (existing) | `false` | Master write gate |
-| `reads_enabled` (new, optional) | `true` when diagnostics needed | `resolve_*`, `verify_*`, `get_*_status`, capabilities |
-| `writes_enabled` or keep `enabled` | `false` | All mutate/prepare/commit/discard/upsert |
-
-Return existing structured codes (`feature_disabled`, `backend_unavailable`) — no new HTTP framework.
-
-**Do not add:** feature-flag SaaS SDKs, LaunchDarkly, Unleash clients.
-
-### 8. Pagination for verify/manifest reads
-
-**Use:** request fields `limit` + `cursor`/`offset` with hard caps; Cypher `SKIP $skip LIMIT $limit` with **integer parameters** only (never string-concat limits). Default small pages; total counts via separate `count()` query or precomputed manifest counts.
-
-**Do not add:** GraphQL cursor libs, elasticsearch for catalog admin reads.
-
-### 9. Tests (dev stack only — already installed)
-
-| Layer | Tool | Focus |
-|-------|------|-------|
-| Unit | pytest | recursive extra forbid, strict coercion, FE/BO identity vectors, endpoint map, hash coverage, token hash+compare, gate split |
-| Service | pytest + mocks | prepare→commit→discard state machine, replay identical hash, conflict, expiry |
-| Store | pytest + Neo4j | composite UNIQUE, MERGE guards, non-Entity labels absent from search |
-| MCP | pytest + tool list | schema surface, read tools live when writes disabled |
-| Concurrency | asyncio gather | single logical plan/domain object under concurrent prepare/commit |
-| Security | unit | Cypher injection attempts on labels/props, token timing-safe path, no payload logging |
-| Compatibility | existing MCP tests | seven v1 tools + semantic tools unchanged |
-
-**Do not add:** hypothesis (optional later only if property tests requested), testcontainers (compose Neo4j already), factory_boy, tox, nox.
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| pytest + pytest-asyncio | Converter unit tests; object-context service/store tests | Deterministic fixtures over faker |
+| pytest-timeout | Live Neo4j hang protection | Keep |
+| ruff / pyright | Format + basic typecheck | line-length 100, single quotes |
+| Docker + `Dockerfile.standalone` | Source-bound image build | `mcp_server/docker/build-standalone.sh` pattern |
+| compose override | `docker-compose-neo4j.catalog-local.override.yml` | Local Neo4j + catalog config; not K8s deploy |
 
 ## Installation
 
 ```bash
-# No new packages for v1.1 hardening.
-cd mcp_server
-uv sync --group dev
+# No new packages. From repo root / mcp_server as today:
+uv sync --extra dev          # root library if needed
+cd mcp_server && uv sync     # MCP runtime + dev group
 
-# Verify installed pins (example from this worktree)
-uv run python -c "import pydantic,neo4j; from importlib.metadata import version; \
-print(pydantic.VERSION, neo4j.__version__, version('mcp'), version('graphiti-core'))"
+# Do NOT:
+# uv add orjson ijson jsonschema networkx pandas msgspec docling
 ```
 
-If a lock refresh is unavoidable for unrelated reasons, still **do not** introduce new direct dependencies for this milestone.
+## Exact Mechanisms for v1.2 Scope
+
+### 1. Strict JSON validation / conversion (offline)
+
+**Authority:** untracked ~19 MB `catalog/catalog.json` (`schema_version: "1.0"`, 2 documents, 1261 tables, 10649 columns, 434 relationships). Normalized JSON is sole authority — no Docling, no LLM reparse.
+
+**Use (installed / stdlib):**
+
+| Concern | Mechanism | Existing anchor |
+|---------|-----------|-----------------|
+| Load | `json.loads(..., object_pairs_hook=_reject_duplicate_keys)` | `build_catalog_canary_requests.strict_json_bytes` / `strict_load` |
+| BOM / controls | reject UTF-8 BOM + binary Cc | `strict_json_bytes`, `catalog_authority_hashing.canonical_text_bytes_lf` |
+| Authority pin | `sha256_raw_bytes` + optional `lf_sha256` of catalog file | `catalog_authority_hashing.authority_digest` |
+| Shape check | Lightweight required-key / type asserts **or** thin Pydantic view models only for the **selected slice**, not a second full-catalog schema stack | Prefer asserts + reuse `CatalogEntityItem` / `CatalogEdgeItem` / `UpsertCatalogBatchRequest` on **output** |
+| Output validate | `validate_request` + model field allowlists; hardened path uses `identity_schema_version=catalog-v2`, `system_key` ∈ {`FE`,`BO`,`COMMON`} | `validate_request`, `build_hardened_payload_from_fixture`, `CatalogStrictModel` |
+| Content hashes | `services.catalog_identity.canonical_sha256` / `_with_content_hashes` | Already used by builder |
+| Table expand | `merge_table_objects`, `build_table_request`, `make_entity` / `make_edge` | Already maps columns/constraints/indexes → Contains / PrimaryKeyOf / DocumentedBy |
+| FK edges | `build_fk_request` pattern: qualify bare `from_table`/`to_table` names against selected table ids via `endswith('.' + name)` | **Required** — catalog relationships store bare names (`T_ACQ_FEE_RULES`), tables store `SVFE_SHB.T_...` |
+| Atomic write | `_atomic_write_missing` / `_atomic_replace_set` | Commit request artifacts deterministically |
+
+**Do not** introduce `jsonschema`, `orjson`, `ijson`, `msgspec`, or a second ontology layer. 19 MB fits stdlib `json.load` once per conversion run. `jsonschema` appears only as a **transitive** lock entry — not a direct dep and not an API to adopt.
+
+**Conversion output:** hardened catalog-v2 batch payloads (prepare-ready), not live Neo4j writes from the converter process.
+
+### 2. Deterministic representative selection
+
+**Observed structure (repo inspection):**
+
+| Slice | Schema / doc | Tables | Relationships in JSON |
+|-------|--------------|--------|------------------------|
+| FE | `SVFE_SHB` / `SVFE Database Dictionary…pdf` | 637 | 434 (`DOCUMENTED_FOREIGN_KEY` 429, `DOCUMENTED_RELATIONSHIP` 5); bare table names |
+| BO | `MAIN1` / `Data dictionary SVBO…pdf` | 624 | **0** relationship records |
+
+**Use stdlib only:**
+
+1. Index tables by `id` and by `(schema, name_canonical)`.
+2. Qualify each relationship endpoint: unique match under selected system schema; fail closed on 0 or >1 matches.
+3. Build undirected adjacency for FE from qualified FK endpoints.
+4. Pick FE connected sample with **frozen tie-break rules** (sort keys, not hash randomization), e.g.:
+   - Prefer component containing known good anchor tables if still desired (`ACCEPT_TAB` lineage) **or** largest component by (edge_count, table_count, min(table_id));
+   - Then bound to batch limits (`DEFAULT_MAX_ENTITIES_PER_BATCH=500`, edges 2000, evidence 5000) by deterministic BFS/priority from a frozen seed table id.
+5. Pick BO **structurally rich** table(s) by frozen score, e.g. `(n_columns, n_indexes, n_primary_keys, n_constraints, table_id)` — BO has no FK records; richness is columnar/index structure only.
+6. Emit a committed selection manifest: `catalog_sha256`, selected table ids, relationship ids, counts, system_key per batch, seed/tie-break version string.
+
+**Do not** add `networkx`, `pandas`, or ML clustering. Selection is offline script logic with golden expected ids/counts in tests.
+
+### 3. Compact object-context retrieval (runtime)
+
+**Gap:** existing reads are split:
+
+- `resolve_typed_entities` / `resolve_typed_edges` — identity/status, not full typed detail + neighbors
+- `get_catalog_evidence` — paginated compact evidence for one target
+- `get_catalog_batch_manifest` — batch membership
+
+**Add one** read-only MCP tool (name TBD in plan phase), same stack:
+
+| Layer | Stack choice |
+|-------|----------------|
+| Transport | `@mcp.tool()` on `CatalogSafeFastMCP` in `graphiti_mcp_server.py` |
+| Request/response | New `CatalogStrictModel` types in `models/catalog_*.py` + compact DTOs in `catalog_responses.py` |
+| Service | `CatalogService` method: gate → group_id scope → load focal entity → bound neighbors → evidence excerpts → locators |
+| Store | New **parameterized** Cypher on `CatalogNeo4jStore`: one-hop `RELATES_TO` by `group_id` + focal `uuid`/`graph_key`; fixed allowlisted return properties; `LIMIT` bound |
+| Safety | No client labels/property names in Cypher; no write path; no embeddings call on read |
+
+**Response shape (stack constraint, not product copy):** typed focal object fields already stored on Entity, immediate neighbor edges/nodes (bounded), evidence excerpts (`CompactEvidenceLink`-class projection), source locators (page / document_id from evidence or attributes). Hard caps on neighbor count and excerpt length (`MAX_EVIDENCE_LENGTH` already 8192; use tighter tool default).
+
+**Do not** add Neo4j GDS, APOC requirement, Elasticsearch, or a general graph-query API. **Do not** implement multi-hop path/impact tools (out of scope).
+
+### 4. Targeted image acceptance
+
+**Reuse v1.1 image machinery; narrow the gate:**
+
+| Piece | Reuse | v1.2 change |
+|-------|-------|-------------|
+| Build | `mcp_server/docker/Dockerfile.standalone` + `build-standalone.sh` / CI `publish-mcp-image.yml` pattern | Build new source-bound image from v1.2 runtime sources |
+| Secret scan | `scripts/catalog_image_secret_scanner.py` (`scan_complete_image`) | Same |
+| Authority digests | `catalog_authority_hashing` + runner `SOURCE_AUTHORITY_PATHS` / execution map | Extend path list if new converter modules are authority-bound |
+| Runtime smoke | compose catalog-local override + `/health` + tool list | Prove new object-context tool registered; prepare/commit path still importable |
+| Ingest proof | Existing prepare + token-only commit against **new isolated test group** | FE+BO slice only; not full catalog |
+| Final canary | `run_catalog_phase6_final_canary.py` Gates 0–10 | **Do not re-run** as v1.2 acceptance |
+
+**Do not** add BuildKit frontend frameworks, Syft/Grype as hard deps, or K8s deploy. Production digest promotion stays separate approval.
 
 ## Alternatives Considered
 
-| Recommended | Alternative | When alternative might win | Why not now |
-|-------------|-------------|----------------------------|-------------|
-| Neo4j non-Entity plan nodes | Redis plan store | Multi-region ephemeral cache | Extra ops surface; breaks single-store restart story; not installed as required |
-| `secrets` + SHA-256 digest | JWT (PyJWT) | Cross-service portable claims | Plan is bound to local Neo4j row; JWT adds key mgmt without benefit |
-| Pydantic `extra='forbid'` tree | jsonschema draft validators | Non-Python clients share one schema file | Server already Pydantic; dual validators drift |
-| App-enforced `expires_at` | APOC TTL / Enterprise TTL | Ops wants automatic background purge | APOC not a hard dep; Community TTL absent; explicit discard is enough pre-canary |
-| Module frozenset endpoint map | DB-stored ontology | Frequent type additions by non-devs | Catalog types are fixed allowlists by design |
-| Cypher `SKIP`/`LIMIT` | Application-only slicing after full MATCH | Tiny result sets | Manifests can be large; push bound to Neo4j |
-| Extend `CatalogIngestBatch` | Second graph DB | Isolation fashion | Violates single Neo4j backend decision |
+| Recommended | Alternative | When alternative might win |
+|-------------|-------------|----------------------------|
+| stdlib `json` one-shot load | `ijson` streaming | Only if catalog grows multi-GB and conversion must run in tiny RAM — not true at 19 MB |
+| Pydantic validate **outputs** | Draft a full JSON Schema + `jsonschema` | External non-Python consumers need a portable schema doc — still generate from Pydantic, do not add runtime dep |
+| Stdlib adjacency/BFS | `networkx` | Complex graph analytics / multi-criteria Steiner subgraph — YAGNI for representative slice |
+| One MCP object-context tool | Agent chains resolve+evidence+search | Higher token cost, non-atomic bounds; milestone asks one compact tool |
+| Extend builder script | New package/poetry project for ETL | Splits identity/hash authority; increases drift risk |
+| Thin v1.2 acceptance driver | Full Phase-6 final canary replay | Cannot reproduce v1.1 image digest; policy forbids repeat |
 
-## What NOT to Use / NOT to Add
+## What NOT to Use
 
 | Avoid | Why | Use instead |
 |-------|-----|-------------|
-| Any new runtime PyPI package for this milestone | YAGNI; lock/review cost; attack surface | Installed Pydantic, neo4j, stdlib |
-| FalkorDB/Kuzu/Neptune catalog write path | Explicit non-goal; no portability claim | Neo4j gate + `backend_unavailable` |
-| LLM / queue / `add_episode` for catalog-v2 | Breaks deterministic identity | Existing deterministic upserts |
-| `EntityNode.save` / bulk SET-map for control plane | Label/property loss; search pollution | Dedicated store Cypher (v1.0 pattern) |
-| Caller UUID as identity | Violates server authority | UUIDv5 only |
-| MD5 / non-canonical hashes | Forbidden / unstable audit | SHA-256 lowercase 64 hex + canonical JSON |
-| Interpolating client labels/property names into Cypher | Injection | Fixed allowlists → fixed Cypher fragments |
-| `SET n = $map` / free property maps on MERGE | Wipes preserved fields; Neo4j MERGE map limits | Selective `SET n.prop = $prop` |
-| Redis/Celery/RQ/Temporal for prepare state | New infra; dual-write failure modes | Neo4j plan nodes + TTL fields |
-| PyJWT / OAuth / session middleware for plan tokens | Overkill inside MCP tool params | `secrets` + hashed token on plan node |
-| APOC as required | Not guaranteed in target deployments | Pure Cypher + app logic |
-| Automatic v1→v2 identity migration | Silent re-key risk | Explicit dual-read docs only; no code migration |
-| Production canary / live `oracle-catalog-v2` writes | Out of scope | Tests only on `oracle-catalog-tool-test` |
-| `clear_graph` / DROP CONSTRAINT repair | Data destruction / schema fights with Graphiti | CREATE IF NOT EXISTS only; fail closed on dup data |
-| Hypothesis/property-based **framework** (unless later requested) | Extra dep | Table-driven exhaustive vectors |
-| NetworkX / graph-tool | Not needed for endpoint maps | Dict/frozenset constants |
+| Any new PyPI dependency | YAGNI; lock churn; review surface | Stdlib + installed Pydantic/neo4j/mcp |
+| `orjson` / `ujson` / `msgspec` | Speed irrelevant at 19 MB; hash authority must match stdlib canonicalization already used in identity | `json` + existing `canonical_sha256` |
+| `ijson` | Unnecessary streaming complexity | `json.load` |
+| `jsonschema` as direct API | Duplicates Pydantic contracts; transitive-only today | `CatalogStrictModel` + builder `validate_request` |
+| `networkx` / `rustworkx` | Selection is tiny deterministic BFS | `defaultdict` + `deque` |
+| `pandas` / `polars` | Tabular convenience hides deterministic ordering bugs | Plain lists + `sort` key tuples |
+| Docling / PDF parsers | JSON is normalized authority; reparse non-deterministic | Read `catalog/catalog.json` only |
+| LLM extraction / `add_memory` for pilot slice | Breaks deterministic identity and sync commit | `prepare_catalog_batch` + `commit_prepared_catalog_batch` |
+| `add_triplet` for catalog FKs | Generic endpoints / non-catalog edge identity | Typed catalog edges (`ForeignKeyTo`, etc.) |
+| Caller-supplied UUIDs as identity | Forbidden by project constraints | Server UUIDv5 via `catalog_identity` |
+| MD5 / non-SHA-256 content hashes | Forbidden | SHA-256 lowercase hex |
+| FalkorDB/Kuzu/Neptune work in v1.2 | Neo4j-first; no portability claim | Neo4j only |
+| APOC / GDS / arbitrary Cypher tool | Injection + ops dependency | Fixed allowlisted store queries |
+| Full Phase-6 final canary harness as v1.2 gate | Explicitly out of scope; planning-only commits after v1.1 canary | Delta acceptance: image build + smoke + slice ingest + object-context asserts |
+| K8s deploy / live `oracle-catalog-v2` writes | Operations constraint | Isolated test group only (new group id; never mutate live) |
+| Full 1261-table ingest | Out of scope | Bounded FE connected + BO rich sample within batch limits |
+| BO inferred FKs / FE↔BO maps | No BO relationship records; inference is later milestone | BO structural entities/edges only (Contains, PK, indexes, DocumentedBy) |
+| New embedder provider packages | Ollama path already proven | Existing config |
+| `tenacity` around catalog writes | Masks tx failures | Fail closed; rollback |
 
 ## Stack Patterns by Variant
 
-**If only read diagnostics are needed in an environment:**
-- `writes_enabled=false` (or `enabled=false`), keep resolve/verify/status/capabilities registered
-- No prepare/commit code paths open txs that mutate domain labels
+**If conversion stays offline-only (default):**
 
-**If prepare/commit is enabled:**
-- Require valid `uuid_namespace` (existing validator)
-- Embeddings run at **commit** from stored prepare payload (not at prepare)
-- Plan token required for commit/discard; hash compare constant-time
-- Prepare stores full bounded payload (chunk if needed); not hashes-only
+- Keep converter under `scripts/` importing `mcp_server/src` models/identity (same path bootstrap as `build_catalog_canary_requests.py`).
+- Runtime image gains **only** the object-context tool + store/service code — not the 19 MB JSON.
 
-**If manifest exceeds property size comfort:**
-- Store manifest as chunked non-Entity child nodes keyed by `(batch_uuid, chunk_index)` with composite uniqueness — still pure Neo4j, no object store
-- Chunk oversized prepare payloads the same way; hashes/counts alone are not a valid prepare store
+**If selection must be re-run in CI:**
 
-**If multi-instance MCP shares one Neo4j:**
-- All plan state in Neo4j (already); optional shared HMAC secret via env for token digests
-- No sticky sessions required
+- Commit selection manifest + request payloads as golden artifacts; CI verifies converter replay hash-equals golden.
+- Do not fetch PDFs or regenerate JSON.
+
+**If object-context needs attributes not currently returned by resolve:**
+
+- Extend store MATCH RETURN list with allowlisted property keys already written at upsert time.
+- Do not open a generic property projection API.
+
+**If image acceptance cannot use prior canary freeze receipts:**
+
+- Bind new freeze to v1.2 source digests + new image id (`sha256:…`).
+- Smoke: health, tool ledger includes new tool, one dry-run prepare of fixture slice optional; skip Gate 0–10 ACCEPT_TAB final canary script.
+
+## Integration Points (implementation map)
+
+| Feature | Primary touch points | Avoid touching |
+|---------|----------------------|----------------|
+| JSON → catalog-v2 requests | `scripts/build_catalog_canary_requests.py` (extract shared pure fns) or sibling `scripts/build_catalog_fe_bo_pilot_requests.py`; `models.catalog_*`; `services.catalog_identity` | `graphiti_core` extraction prompts; Docling |
+| Selection manifest | New small pure module under `scripts/` + tests in `mcp_server/tests/test_catalog_*.py` | Live Neo4j |
+| Ingest pilot | Existing `prepare_catalog_batch` / `commit_prepared_catalog_batch`; runner patterns from `run_catalog_canary_batch.py` | `clear_graph`; live groups |
+| Object context tool | `graphiti_mcp_server.py`, `catalog_service.py`, `catalog_store.py`, `catalog_entities.py` / `catalog_responses.py` | Semantic `search_nodes` rewrite |
+| Image | `Dockerfile.standalone`, secret scanner, thin acceptance script | `run_catalog_phase6_final_canary.py` full path |
 
 ## Version Compatibility
 
 | Package A | Compatible With | Notes |
 |-----------|-----------------|-------|
-| pydantic **2.11.7** | Python 3.10+ | `ConfigDict`, `strict=True`, `extra='forbid'` verified locally |
-| neo4j driver **5.28.1** | Neo4j server **5.26+** | Composite node/rel UNIQUE; async transactions |
-| graphiti-core **0.29.2** | neo4j `>=5.26.0` | Catalog store bypasses fragile save paths intentionally |
-| mcp **1.27.2** | pydantic v2 | Tool schema from function signatures / models |
-| pytest **9** + pytest-asyncio **1.4** | Python 3.10 | Existing mcp_server dev group |
+| Python 3.10+ | All mcp_server code | No `enum.StrEnum`; polyfill remains |
+| Pydantic 2.x strict models | FastMCP tool args | Nested `extra='forbid'` must stay per-model |
+| neo4j driver 5.26+ | Neo4j 5.26+ | Composite UNIQUE already used for catalog identity |
+| `mcp` 1.27.x | existing `CatalogSafeFastMCP` | Additive tool only |
+| Ollama embedder config | prepare/commit embeddings-before-tx | Unchanged contract |
+| `catalog/catalog.json` `schema_version=1.0` | Converter tie-break version N | Pin file SHA-256 in manifest; bump converter version if mapping rules change |
 
-**Transaction limitations (document in operator notes, not “solved” by new libs):**
-- Neo4j Community: no multi-DB XA; one database per driver config.
-- Long prepare windows are **not** held open as Bolt transactions — durable plan node + later commit tx.
-- Schema `CREATE CONSTRAINT` is auto-commit DDL; run before write traffic (existing `ensure_uuid_uniqueness_constraints`).
-- Uniqueness constraint creation fails closed on pre-existing duplicate `(uuid, group_id)` — no automatic repair.
+## Confidence Assessment
 
-## Integration Points (code)
-
-| Concern | Integration point |
-|---------|-------------------|
-| Strict models | `mcp_server/src/models/catalog_*.py` — shared `CatalogStrictModel` base |
-| Identity scope | `services/catalog_identity.py` — extend name composition; keep pure |
-| Endpoint map / capabilities | `models/catalog_common.py` (+ small map module); MCP read tool |
-| Plan/manifest store | `services/catalog_store.py` — mirror `CatalogIngestBatch` helpers |
-| Orchestration | `services/catalog_service.py` — prepare/commit/discard state machine |
-| Config gates | `config/schema.py` `CatalogConfig` |
-| MCP surface | `graphiti_mcp_server.py` `@mcp.tool` registrations |
-| Tests | `mcp_server/tests/` — unit without Neo4j; `*_int` for live |
+| Area | Level | Notes |
+|------|-------|-------|
+| Zero new deps | HIGH | All four v1.2 concerns covered by installed stack + stdlib |
+| Conversion reuse of builder | HIGH | `build_table_request` / `build_fk_request` / `validate_request` already encode mapping |
+| FE relationship qualification | HIGH | Verified bare names vs `SCHEMA.TABLE` ids; builder already uses `endswith` join |
+| BO has no FK records | HIGH | Counter over full relationship list = 0 for MAIN1 |
+| Object-context needs new tool/query | HIGH | Resolve/evidence insufficient alone for "details + neighbors + locators" |
+| Skip full final canary | HIGH | PROJECT.md decision + milestone_context |
+| Exact FE seed table set | MEDIUM | Product choice of seed/component left to plan phase; stack does not depend on it |
 
 ## Sources
 
-- Local worktree pins: `mcp_server` uv env — pydantic **2.11.7**, neo4j **5.28.1**, graphiti-core **0.29.2**, mcp **1.27.2** (2026-07-17)
-- Local verification: nested `extra='forbid'` requires per-model config; outer-only forbid allows nested extras (HIGH)
-- [Pydantic ConfigDict](https://pydantic.dev/docs/validation/latest/api/pydantic/config/) — `extra`, `strict`, `frozen`, `validate_assignment`; non-propagation of some options (HIGH)
-- [Neo4j 5 constraints syntax](https://neo4j.com/docs/cypher-manual/5/constraints/syntax/) — composite UNIQUE, `IF NOT EXISTS` (HIGH)
-- [Neo4j 5 MERGE](https://neo4j.com/docs/cypher-manual/5/clauses/merge/) — no free property map on MERGE; constraints needed for concurrent uniqueness (HIGH)
-- Python stdlib docs: `secrets.token_urlsafe`, `hmac.compare_digest`, `hashlib.sha256`, `uuid.uuid5` (HIGH)
-- Existing implementation: `catalog_store.py` `CatalogIngestBatch` MERGE/claim/status guards; `catalog_identity.py` uuid5 + canonical SHA-256 (HIGH)
-- Project constraints: `.planning/PROJECT.md` v1.1 scope; Neo4j-first; no production/canary (HIGH)
+- Repo: `mcp_server/pyproject.toml`, `mcp_server/src/models/catalog_*.py`, `mcp_server/src/services/catalog_{service,store,identity}.py`, `mcp_server/src/graphiti_mcp_server.py`
+- Repo: `scripts/build_catalog_canary_requests.py`, `scripts/catalog_authority_hashing.py`, `scripts/catalog_image_secret_scanner.py`, `scripts/run_catalog_phase6_final_canary.py`, `scripts/run_catalog_canary_batch.py`
+- Repo: `mcp_server/docker/Dockerfile.standalone`, `docker-compose-neo4j.catalog-local.override.yml`, `.github/workflows/publish-mcp-image.yml`
+- Repo inspection: `catalog/catalog.json` structure/counts/schemas/relationship naming (local file read; not dumped)
+- Repo: `.planning/PROJECT.md` v1.2 scope, constraints, out-of-scope list
+- Prior research: v1.1 STACK research (2026-07-17) — zero-dep verdict carried forward; milestone focus updated
 
 ---
-*Stack research for: Catalog-v2 pre-canary hardening*
-*Researched: 2026-07-17*
-*Replaces obsolete v1.0-oriented stack notes for this milestone*
+*Stack research for: v1.2 FE/BO Catalog Pilot and Object Context*
+*Researched: 2026-07-24*
+*New dependencies: none*

@@ -1,162 +1,214 @@
 # Project Research Summary
 
-**Project:** Deterministic Catalog Ingestion for Graphiti MCP — v1.1 Catalog-v2 Pre-Canary Hardening
-**Domain:** Deterministic Neo4j catalog MCP control plane (identity, prepare/commit, manifests, verification)
-**Researched:** 2026-07-17
+**Project:** Deterministic Catalog Ingestion for Graphiti MCP — v1.2 FE/BO Catalog Pilot and Object Context
+**Domain:** Additive MCP catalog-v2 pilot (offline sample conversion + one exact read-only context tool)
+**Researched:** 2026-07-24
 **Confidence:** HIGH
 
 ## Executive Summary
 
-v1.1 hardens the shipped v1.0 deterministic catalog MCP surface before any regenerated canary. Experts build this as an additive administrative path beside Graphiti semantic tools: Pydantic-strict contracts, server-owned allowlists and endpoint maps, UUIDv5 identity, SHA-256 audit, Neo4j real transactions, embeddings outside domain writes, non-Entity control labels. Zero new runtime dependencies — extend installed Pydantic 2.11.x, neo4j 5.28.x, FastMCP, stdlib, and existing CatalogService / CatalogNeo4jStore.
+v1.2 is thin additive pilot on shipped v1.1 catalog-v2 substrate. Goal: prove deterministic FE connected sample and BO structural sample from frozen `catalog/catalog.json` authority (2 docs, 1,261 tables, 10,649 columns, 434 FE-only relationships, 0 BO relationships), ingest via existing prepare/token-commit path into isolated test group, and expose one new read-only MCP tool `get_catalog_object_context` returning typed focal object, bounded one-hop neighbors, evidence excerpts, confidence, and source locators. No LLM, no Docling, no full catalog ingest, no invented BO edges, no FE/BO maps, no multi-hop/path/impact, no images in object context, zero new dependencies, no v1.1 final canary Gates 0-10 replay.
 
-Approved prepare/commit contract (authoritative): `prepare_catalog_batch` validates/resolves/projects and persists a **bounded immutable canonical payload** server-side (restart-safe; chunked non-Entity control nodes if needed; **hashes/counts alone insufficient**). Commit clients send **only a token**. Prepare does **not** compute required embeddings. `commit_prepared_catalog_batch` embeds from the stored payload **before** opening its domain transaction, then writes **domain data + evidence + manifest + terminal batch status + plan terminal state in one Neo4j transaction** where supported. A separate post-rollback failure-status transaction is allowed **only** for failure reporting. Exact tools: `prepare_catalog_batch`, `commit_prepared_catalog_batch`, `discard_prepared_catalog_batch`, `get_catalog_capabilities`, `get_catalog_evidence`, `get_catalog_batch_manifest`, `resolve_typed_edges`.
+Recommended approach: offline scripts own authority load/sample/convert into new `catalog/pilot-v12-requests/` artifacts; runtime reuses prepare (immutable control-plane plan, no domain writes, no embeddings) and commit (embed stored payload then one domain transaction); surgical CatalogService/Store/MCP registration for bounded neighbor read. Acceptance is delta-only on source-bound image plus pilot receipts.
 
-Key risks: silent v1 to v2 rekey; open nested validation; incomplete hashes; Cartesian provenance; hashes-only prepare; embed-at-prepare; split success txs without co-committed manifest; gate confusion; live-group/canary writes. Mitigate with fail-closed FE/BO grammar, recursive extra=forbid, server endpoint maps, explicit evidence links, full payload prepare, embed-at-commit, single success tx, split read/write gates, tests only on `oracle-catalog-tool-test`. Catalog-v2 **intentionally breaks** seven deterministic request identity/provenance/hash contracts where required; preserve **tool names** and legacy semantic tools — do **not** claim old catalog-v1 request payloads remain accepted. No canary, production/live-group writes, parser/inference, or automatic v1 migration this milestone.
+Key risks: FE/BO identity collision if database token omitted; bare FK qualification; invented BO relations; frozen v1.1 canary contamination; unbounded one-hop fan-out; prepare/commit boundary misuse; readiness overclaim. Mitigate with plane-qualified keys, fail-closed endpoint resolve, dedicated pilot artifact dir, neighbor default 50 / hard 200, evidence via existing page caps, group_id on every match, and explicit pilot-not-production scope.
 
 ## Key Findings
 
 ### Recommended Stack
 
-Add **no** new packages. Reuse Python 3.10+, Pydantic 2.11.x (`ConfigDict(extra='forbid', strict=True)` on every nested model), neo4j async driver + real txs, FastMCP additive tools, stdlib uuid/hashlib/hmac/secrets/json, existing embedder **at commit only** for prepared batches, non-Entity control nodes mirroring CatalogIngestBatch.
+Add **zero** new runtime or dev dependencies. Reuse Python 3.10+, uv lockfiles, FastMCP, Pydantic `CatalogStrictModel`, neo4j 5.26+, existing CatalogService/Store/identity, stdlib JSON/hash/BFS selection, offline builder patterns from `scripts/build_catalog_canary_requests.py`, secret scanner, Dockerfile.standalone. Do not add networkx, jsonschema, orjson, Docling, LLM paths, or Phase-6 canary harness as v1.2 gate.
 
 **Core technologies:**
-- **Pydantic 2.11.x:** recursive fail-closed contracts — nested extra does not inherit
-- **Neo4j 5.26+ / driver 5.28.x:** MERGE + composite UNIQUE + one success write unit
-- **stdlib secrets/hmac:** opaque prepare tokens; store digest only
-- **Existing CatalogNeo4jStore:** domain Cypher + control labels; no EntityNode.save for catalog
-- **pydantic-settings CatalogConfig:** split write vs read/capabilities gates
+- Python / uv / existing lockfiles — runtime truth; no lock churn
+- Pydantic CatalogStrictModel — validate converted payloads + tool I/O
+- neo4j async driver + fixed Cypher — prepare/commit + one-hop neighbor MATCH
+- FastMCP additive `@mcp.tool` — register `get_catalog_object_context` only
+- Stdlib json/hashlib/uuid/collections — offline convert + deterministic sample
+- Native Ollama embedder (shipped) — commit path only; object context never embeds
+
+Detail: `.planning/research/STACK.md`
 
 ### Expected Features
 
 **Must have (table stakes):**
-- Strict recursive request contracts + immutable execution flags
-- Catalog-v2 FE/BO/COMMON identity grammar (fail closed; `unsupported_identity_schema`, `invalid_system_key`)
-- Server-owned edge endpoint maps (`edge_endpoint_pair_not_allowed`)
-- Authoritative combined batch hashes + `get_catalog_capabilities` (works after server init even if writes disabled)
-- Prepare/commit/discard with full payload + token protocol (exact tool names above)
-- Explicit evidence links (no Cartesian) + `provenance_link_conflict`
-- Durable manifests + manifest-backed verification (`manifest_mismatch`)
-- `resolve_typed_edges`, `get_catalog_evidence`, `get_catalog_batch_manifest`
-- Split read/write gates; legacy tool names + semantic tools preserved
-- Plan codes: `prepared_plan_not_found`, `prepared_plan_expired`, `prepared_plan_conflict`, `prepared_plan_already_consumed`
+- Authority gate on `catalog/catalog.json` inventory + SHA-256
+- Deterministic connected FE sample (SVFE_SHB + authoritative FKs)
+- Deterministic rich BO sample (MAIN1 structure only; zero BO relations)
+- FE/BO isolation (separate manifests, prepares, commits)
+- Prepare validates full request; persists immutable canonical control-plane plan; **no domain writes; no embeddings**
+- Token-only commit; embeds stored payload before domain transaction; atomic rollback
+- Exact focal-object read; bounded one-hop neighbors; stable order + truncation metadata
+- Evidence excerpts + source locators + confidence; no-write read posture
+- Batch caps 500 / 2,000 / 5,000; zero new deps; frozen v1.1 canary dirs untouched
+- New pilot artifact directory per run/version
 
-**Should have (trust differentiators):**
-- Capabilities as versioned contract surface (maps, grammar, hash recipe, limits)
-- Manifest as post-restart verification authority
-- Read diagnostics while mutation disabled
+**Should have (differentiators):**
+- Relationship-connected FE canary (not isolated writes)
+- Rich BO without invented edges
+- Typed context envelope + canonical response digest
+- Explicit truncation metadata; negative-delta / zero-write acceptance proof
+- Source-scoped run ledger cross-linking digests
 
-**Defer (not v1.1):**
-- Parser / inference / path-impact APIs
-- Automatic v1 to v2 migration; canary execution; production writes
-- FalkorDB catalog claims; full 14k ingest; K8s deploy
+**Defer / excluded:**
+- Full catalog ingest; production promotion; FE/BO maps; inferred BO FKs
+- Multi-hop, path, impact, NL orchestration, Docling/LLM
+- Object-context **images** (not in v1.2 product scope)
+- Repeat v1.1 canary Gates 0-10
+
+**Object-context bounds (architecture authority):**
+- `neighbor_limit` default **50**, hard max **200** (1-hop only)
+- Evidence via existing evidence page cap (`max_page_size` / `HARD_MAX_PAGE_SIZE` 500); compact excerpts only
+- No image fields in tool contract
+
+Detail: `.planning/research/FEATURES.md` (image claims superseded by this summary + ARCHITECTURE)
 
 ### Architecture Approach
 
-Additive MCP tools on shared CatalogService / CatalogNeo4jStore. Domain labels remain searchable Entity/RELATES_TO; control plane uses non-Entity CatalogIngestBatch, CatalogPreparedPlan (+ payload chunks), CatalogBatchManifest, optional CatalogEvidenceLink. Ordering: validate → endpoint map → UUIDv5 → domain hash → prepare stores payload **or** commit embeds then one success tx. No LLM/queue/add_episode on catalog path.
+Thin additive slice: offline converter/sampler then existing prepare/commit into isolated group then one new read path (UUID probe + bounded RELATES_TO + evidence page). Server never loads 18MB authority on request path. Historical `catalog/canary-v2-requests*` frozen; pilot writes only `catalog/pilot-v12-requests/`.
 
 **Major components:**
-1. **Models (catalog_*):** recursive forbid; FE/BO grammar; evidence/manifest DTOs
-2. **Identity + endpoint map:** UUIDv5 name material; frozen server maps; full-domain SHA-256
-3. **Plan/manifest modules:** immutable payload lifecycle; token mint/verify; manifest assembly
-4. **CatalogService:** gates; prepare/commit/discard; resolve/verify modes
-5. **CatalogNeo4jStore:** domain MERGEs + control CRUD + CAS; no conflict repair
+1. `scripts/build_catalog_pilot_requests.py` (+ optional pure convert module) — validate, sample FE/BO, map v2 keys, hash, emit pilot artifacts
+2. Existing prepare/commit/identity/manifest/evidence — unchanged ingest substrate
+3. `get_catalog_object_context` (MCP + CatalogService + one store neighbor helper) — read-only compact DTO
+4. `scripts/run_catalog_pilot_acceptance.py` — delta smoke; not Phase-6 canary
+5. Source-bound image smoke — prove new tool registration + pilot path; no full canary replay
+
+**Prepare/commit contract (shipped v1.1, do not misstate):**
+- Prepare: validate; persist immutable canonical **control-plane** plan; no domain graph writes; no embeddings
+- Commit: token only; embed from stored payload; single domain transaction; fail then full rollback
+
+Detail: `.planning/research/ARCHITECTURE.md`
 
 ### Critical Pitfalls
 
-1. **Silent v1 to v2 rekey** — fail closed on non-v2 keys; no auto-migration
-2. **Nested validation open** — extra=forbid on every nested model + service re-validate
-3. **Hash field omissions** — single versioned canonicalizer covering all domain collections
-4. **Hashes-only prepare / embed-at-prepare** — full payload store; embed only at commit
-5. **Split success txs / Cartesian evidence / gate-kills-reads** — one success tx; explicit links; split gates; no live/canary writes
+1. **FE/BO identity collision / bare FK ends** — include database token in every preimage; require fully qualified endpoints; fail closed on ambiguity
+2. **Invented BO relationships** — zero BO relations is source fact; structural sample only
+3. **Frozen v1.1 canary contamination** — new `pilot-v12-requests/` only; hash-guard historical dirs
+4. **Unbounded one-hop / group_id omit / read mutates** — LIMIT+ORDER; group on every MATCH; `_read_gate` only; no embedder
+5. **Prepare/commit authority leak + readiness overclaim** — token binds digest/group/sample/namespace/limits/expiry; prepare may persist control-plane plan but not domain; do not claim production readiness or rerun v1.1 canary
+6. **Dirty tree / secret-in-image** — touch only explicit v1.2 paths; narrow COPY; scan image
+
+Detail: `.planning/research/PITFALLS.md` (correct prepare language: control-plane plan may persist; domain must not)
 
 ## Implications for Roadmap
 
-### Phase 1: Strict contracts + FE/BO identity grammar
-**Rationale:** All later work depends on fail-closed payloads and collision-free UUIDs
-**Delivers:** Recursive forbid/strict models; FE/BO/COMMON grammar; immutable flags; unit vectors
-**Addresses:** Strict contracts; identity isolation
-**Avoids:** Silent rekey; open nested extras
-**Error codes:** `validation_error`, `unsupported_identity_schema`, `invalid_system_key`, `graph_key_prefix_mismatch`
+Suggested phase structure (gateable; context path parallel converter path then join):
 
-### Phase 2: Endpoint maps + authoritative hashing + capabilities
-**Rationale:** Preflight topology and complete hashes before control-plane writes
-**Delivers:** Server EDGE_ENDPOINT_MAP; full-domain hash; `get_catalog_capabilities` (init-success even if writes off); map wired into edge/batch preflight
-**Addresses:** Endpoint authority; capabilities; hash completeness
-**Avoids:** Client maps; false idempotence
-**Error codes:** `edge_endpoint_pair_not_allowed`, `content_hash_mismatch`, `endpoint_type_mismatch`
+### Phase 1: Object-context models and caps
+**Rationale:** No runtime deps; defines contract before store/service
+**Delivers:** `catalog_object_context` request/response (`extra=forbid`); neighbor default 50 / hard 200; evidence page bounds; capabilities stub; reject bad group_id/limits
+**Addresses:** Exact focal contract, bound validation, zero image fields
+**Avoids:** Invented product bounds; image scope creep
 
-### Phase 3: Prepare/commit/discard + explicit evidence
-**Rationale:** Restart-safe multi-step ingest is the core v1.1 protocol
-**Delivers:** Full payload prepare; token; `commit_prepared_catalog_batch` (embed-then-one-tx); discard; explicit evidence links; CAS/TTL
-**Addresses:** Prepare protocol; evidence; concurrency
-**Avoids:** Domain-at-prepare; hashes-only plan; Cartesian product; dual success txs
-**Error codes:** `prepared_plan_*`, `provenance_link_conflict`, `embedding_failed`, `batch_conflict`
+### Phase 2: Store bounded neighbor read
+**Rationale:** Single new Cypher primitive; unit-testable with fake driver
+**Delivers:** Parameterized 1-hop RELATES_TO; group_id required; stable ORDER; LIMIT; allowlisted projection
+**Addresses:** Bounded one-hop context
+**Avoids:** Unbounded MATCH; label injection; dynamic properties
 
-### Phase 4: Manifests + manifest verify + split gates + edge resolve
-**Rationale:** Audit/restart truth and safe ops posture
-**Delivers:** Durable manifest co-committed; `get_catalog_batch_manifest` / `get_catalog_evidence`; manifest-backed verify; `resolve_typed_edges`; read vs write gates
-**Addresses:** Manifests; diagnostics under write-disable
-**Avoids:** Verify-by-client-list false green; single flag killing reads
-**Error codes:** `manifest_mismatch`, `feature_disabled` (writes only)
+### Phase 3: Service get_catalog_object_context + unit tests
+**Rationale:** Compose resolve + neighbors + evidence; prove no write/embed
+**Delivers:** found/missing/integrity paths; truncation flags; confidence + locators + excerpts
+**Addresses:** Typed envelope; no-write posture; evidence fidelity
+**Avoids:** Read-time repair; search_nodes misuse; image binding
 
-### Phase 5: Exhaustive tests, security, compatibility, docs
-**Rationale:** Gate milestone without canary execution
-**Delivers:** Unit/service/store/MCP/concurrency/Neo4j/security/compat suites on `oracle-catalog-tool-test`; isolation probes; migration + canary procedure docs only
-**Addresses:** Compatibility; logging; isolation
-**Avoids:** Live `oracle-catalog-v2` mutation; payload/token logs; tool renames
+### Phase 4: MCP tool registration
+**Rationale:** Thin adapter after service green
+**Delivers:** Tool visible; read-only init pattern (mirror get_catalog_evidence)
+**Addresses:** Additive MCP surface; existing tools unchanged
+**Avoids:** Bootstrap write side effects on read init
+
+### Phase 5: Converter/sampler pure functions + unit tests
+**Rationale:** Parallel with 1-4; offline only
+**Delivers:** FE connected + BO structural mapping; plane keys PREFIX::{FE|BO}::DB.SCHEMA; explicit evidence_links; stable hashes; tiny fixture tests
+**Addresses:** Deterministic samples; FE/BO isolation; authority inventory checks
+**Avoids:** BO invented FKs; nondeterministic selection; v1 keys without plane
+
+### Phase 6: Build pilot artifacts from real catalog.json
+**Rationale:** Needs pure convert; pins reviewable digests
+**Delivers:** catalog/pilot-v12-requests/{manifest,fe,bo}; authority sha pin; refuse overwrite on drift
+**Addresses:** New pilot dir; frozen canary dirs untouched
+**Avoids:** Writing canary-v2-requests*; full 1261 dump
+
+### Phase 7: Integration prepare/commit + object_context_int
+**Rationale:** Join paths; live Neo4j isolated group only
+**Delivers:** Token commit FE/BO; context on FE table/column + BO table; group isolation fixtures
+**Addresses:** Atomic commit; exact context; caps
+**Avoids:** Protected groups; partial writes; late cap checks
+
+### Phase 8: Delta acceptance runner
+**Rationale:** One-command offline to runtime proof without Phase-6 canary
+**Delivers:** Receipts, declared-delta, zero-write read proof, replay idempotency
+**Addresses:** Deterministic acceptance artifacts; negative-delta
+**Avoids:** Full v1.1 canary replay; readiness overclaim
+
+### Phase 9: Source-bound image + runtime smoke
+**Rationale:** Last; proves packaging of new tool only
+**Delivers:** Image digest + source revision; secret/catalog scan; tool list + pilot smoke
+**Addresses:** Source-bound image acceptance
+**Avoids:** Mutable tag as identity; secret/catalog in layers; Gates 0-10
 
 ### Phase Ordering Rationale
 
-- Contracts/identity before maps/hashes (invalid keys must not reach store)
-- Maps/hashes/capabilities before prepare (plan identity incomplete otherwise)
-- Full payload prepare before commit (commit is pure apply of frozen plan)
-- Manifest/verify after commit path exists
-- Security/compat continuous but final gate is isolation + docs without canary
+- Models then store then service then MCP matches existing catalog tool layering
+- Converter/artifacts parallel until integration join
+- Acceptance after green int; image last
+- Avoids frozen-artifact and canary-replay pitfalls by construction
+- Prepare/commit unchanged code path exercised, not reimplemented
 
 ### Research Flags
 
-Phases likely needing deeper research during planning:
-- **Phase 3:** payload chunking property limits; single-tx size under defaults; token CAS details
-- **Phase 4:** manifest property size vs chunk children; verify pagination
+Phases needing deeper research during planning:
+- **Phase 5-6:** Exact FE seed/component table ids; BO column-rich table id; fixed DB token string; one-batch vs split FK batch under caps
+- **Phase 7:** Pilot group id (oracle-catalog-tool-test vs oracle-catalog-v12-pilot-test)
 
 Phases with standard patterns (skip research-phase):
-- **Phase 1:** Pydantic forbid/strict patterns already verified
-- **Phase 2:** frozenset maps + existing canonical_sha256
-- **Phase 5:** extend v1.0 test/doc patterns
+- **Phase 1-4:** Mirror existing catalog evidence/resolve adapter + Pydantic forbid patterns
+- **Phase 8-9:** Thin runner + existing image/secret scan scripts
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Local pins + Neo4j/Pydantic docs; zero-new-deps clear |
-| Features | HIGH | PROJECT.md v1.1 + operator contracts; approved tool/error names applied |
-| Architecture | HIGH | Live catalog modules + approved prepare/commit atomicity contract |
-| Pitfalls | HIGH | Grounded in v1.0 store/service + v1.1 failure modes |
+| Stack | HIGH | Repo lockfiles + zero-dep verdict; all concerns covered |
+| Features | HIGH | Scope clear; image fields in FEATURES.md superseded by product correction |
+| Architecture | HIGH | Live modules + catalog facts inspected; bounds explicit |
+| Pitfalls | HIGH | Repo constraints + v1.1 freeze policy; prepare wording corrected here |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- Exact FE/BO graph_key grammar string format: freeze in phase design (plane segment placement, overload signature normalization)
-- Neo4j property size for max batch payload: plan chunk schema + limits in Phase 3 planning
-- Whether legacy seven tools accept any v2-only fields additively: document fail-closed vs additive optional fields per tool without claiming v1 payloads remain valid under v2 grammar
-- Hash recipe version string for protocol bump on coverage change
+- Exact FE connected table set and BO structural table id — choose in plan-phase with reorder-stable fixtures
+- Fixed database segment constant for v2 key body (e.g. ORCL) — lock in converter + manifest
+- Neighbor/evidence config constants vs CatalogConfig fields — prefer constants if config churn unwanted
+- FEATURES.md still lists image limits — treat SUMMARY + ARCHITECTURE as contract authority for v1.2 object context
+- Some PITFALLS prepare read-only lines overstate — prepare may write control-plane plan; must not domain-write or embed
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `.planning/PROJECT.md` — v1.1 active requirements, constraints, out-of-scope
-- Approved milestone contract (prepare payload, embed-at-commit, one success tx, tool names, error codes, no canary/migration)
-- Live `mcp_server` catalog identity/service/store and models
-- Pydantic ConfigDict / Neo4j 5 constraints and MERGE docs
-- Parallel research STACK, FEATURES, ARCHITECTURE, PITFALLS (2026-07-17), corrected in synthesis
+
+- `.planning/research/STACK.md` — zero-dep stack, conversion/selection/image mechanisms
+- `.planning/research/FEATURES.md` — table stakes / anti-features (images stripped for v1.2 context)
+- `.planning/research/ARCHITECTURE.md` — component map, bounds 50/200, build order, pilot dir
+- `.planning/research/PITFALLS.md` — critical failure modes and phase gates
+- `.planning/PROJECT.md` — v1.2 goal, constraints, out-of-scope
+- Shipped v1.1 catalog-v2: prepare control-plane plan + token commit embed-then-tx; UUIDv5; evidence; Neo4j 5.26+
+- Repo: mcp_server catalog service/store/identity, graphiti_mcp_server.py, models/catalog_*
+- Repo: scripts/build_catalog_canary_requests.py, authority hashing, image secret scanner
+- Authority facts: catalog/catalog.json — 2 documents, 1,261 tables, 10,649 columns, 434 FE relationships, 0 BO relationships, schemas SVFE_SHB + MAIN1
 
 ### Secondary (MEDIUM confidence)
-- v1.0 milestone verification artifacts (CAS, embeddings-before-tx, isolation patterns to retain)
+
+- Exact FE/BO sample member ids — product choice deferred to plan phase
+- Config flag names for neighbor caps — may stay module constants
 
 ### Tertiary (LOW confidence)
-- Exact chunk sizing thresholds for prepare payloads — validate against Neo4j property limits in Phase 3
+
+- None material for roadmap structure
 
 ---
-*Research completed: 2026-07-17*
+*Research completed: 2026-07-24*
 *Ready for roadmap: yes*

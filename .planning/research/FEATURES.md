@@ -1,316 +1,309 @@
 # Feature Research
 
-**Domain:** Deterministic catalog MCP hardening (v1.1 Catalog-v2 Pre-Canary)
-**Researched:** 2026-07-17
+**Domain:** v1.2 FE/BO Catalog Pilot and Object Context
+**Researched:** 2026-07-24
 **Confidence:** HIGH
-
-**Scope note:** v1.0 shipped seven deterministic Neo4j catalog tools (entity/edge upsert, entity resolve, batch verify, provenance, atomic batch, ingest status). This document covers only v1.1 hardening observable from MCP clients and operators. Do not re-specify shipped v1.0 behavior except as compatibility baseline.
 
 ## Feature Landscape
 
-### Table Stakes (Operators and Agents Expect These)
+v1.2 is a bounded pilot over shipped v1.1 catalog-v2 primitives. It proves two deterministic
+samples and one exact read-only context tool. It does not reopen v1.1 foundation work.
 
-Missing any of these makes the surface untrustworthy for a regenerated catalog-v2 canary.
+### Table Stakes
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Strict recursive request contracts | Agents emit partial/extra fields; silent accept corrupts identity | MEDIUM | `extra='forbid'` recursively on all catalog request models and nested items; unknown fields fail closed with `validation_error` before any Neo4j/embedder work |
-| Immutable execution flags | Retry/replay must not reinterpret `dry_run`/`atomic` mid-plan | LOW | Flags are part of request identity; changing them on a prepared/committed batch returns conflict, never mutates plan semantics |
-| Catalog-v2 FE/BO/COMMON identity grammar | FE and BO objects collide without visible isolation | MEDIUM | Graph keys and type grammar must deterministically separate FE, BO, COMMON; wrong-lane keys fail closed; no silent reinterpretation of v1 keys as v2 |
-| Server-owned edge endpoint-pair maps | Client-supplied endpoint types alone cannot prevent illegal pairs | MEDIUM | Every allowlisted edge type has a finite source×target type map enforced before side effects; unknown/illegal pairs return structured errors |
-| Authoritative combined batch hashes | Client-only hashes can omit nested content | MEDIUM | Server computes canonical SHA-256 over all domain content (entities, edges, provenance, flags as documented); optional client hash compared; mismatch = `content_hash_mismatch` / `batch_conflict` |
-| Capabilities discovery | Agents must know limits, gates, identity grammar, endpoint maps without reading source | LOW | Read-only discovery response: enabled flags, limits, entity/edge allowlists, endpoint maps, protocol version, FE/BO grammar version — no secrets |
-| Durable prepare / commit / discard | Multi-step agent ingest needs restart-safe plans without partial domain writes | HIGH | Prepare persists **bounded immutable canonical payload** + hashes (restart-safe; chunked non-Entity OK; hashes-only insufficient); commit receives **token only**, embeds from stored payload, applies plan; discard drops plan without domain mutation; identical-plan replay idempotent |
-| Explicit evidence links (no Cartesian expansion) | Source×target product explodes and invents unproven links | MEDIUM | Provenance accepts only explicit `(source, target)` pairs or equivalent bounded links; reject implicit all-to-all; preserve deterministic source identity |
-| Durable batch manifests | Post-commit audit cannot rely on client memory | HIGH | Committed batch stores exact entity/edge/provenance identity list + hashes under non-`Entity` labels; restart-safe; excluded from entity search/communities |
-| Manifest-backed verification | Verify-by-batch-id without re-sending full payload | MEDIUM | `verify_catalog_batch` (or successor) can load expected set from durable manifest; report missing/wrong-type/endpoint/hash/provenance gaps |
-| `resolve_typed_edges` | Operators need edge diagnostics symmetric to entity resolve | MEDIUM | Read-only: found state, UUID, type, endpoints, hash, embedding presence, duplicates, anomalies; never writes or embeds |
-| Split read/write gates | Diagnostics must work while mutation is disabled | LOW | Writes gated by `catalog_upsert.enabled` (or write gate); resolve/verify/status/capabilities/manifest reads remain available under a read gate or always-on policy |
-| Legacy tool compatibility | Existing automations must not break | MEDIUM | Seven v1 tools keep schemas and deterministic guarantees; additive tools/fields only; search interop and `group_id` isolation unchanged |
-| Structured fail-closed errors | Operators need machine-actionable codes, not stack traces | LOW | Extend documented codes; never log full payloads/credentials/source text |
-| Test-group isolation | Implementation must not touch live catalog groups | LOW | Tests only `oracle-catalog-tool-test`; no `oracle-catalog-v2` writes; no production/canary execution in this milestone |
+| Feature | Why Expected | Complexity | Testable Contract |
+|---|---|---:|---|
+| Normalized authority gate | All pilot facts must come from one stable input | Low | Accept only `catalog/catalog.json`; verify inventory and SHA-256 before selection |
+| Deterministic connected FE sample | FE pilot must exercise authoritative relationships | Medium | Same input yields same connected sample, order, manifest, and digest |
+| Deterministic rich BO sample | BO pilot must exercise useful table/column structure | Medium | Same structural scoring and tie-breakers yield same sample and digest |
+| FE/BO isolation | Different sources must not contaminate identity or evidence | Medium | Separate manifests, prepare tokens, commits, and acceptance snapshots |
+| Immutable prepare | Invalid or incomplete data must never reach write transaction | High | Prepare validates all data, performs pre-write work, and writes nothing |
+| Token-only commit | Caller cannot replace prepared content | High | Commit accepts only valid prepare token bound to immutable payload digest |
+| Atomic idempotent commit | Retry must preserve exact graph identity | High | Whole batch commits or rolls back; replay creates no duplicate object |
+| Exact focal-object read | Context must identify one requested typed object | Medium | Exact scoped identity returns one object or typed not-found/integrity error |
+| Bounded one-hop context | Output must remain predictable and local | Medium | Only direct neighbors returned under fixed count limits |
+| Stable output ordering | Repeat reads need reproducible output | Low | Explicit total sort order includes UUID tie-breaker |
+| Evidence excerpts and locators | Context needs audit trail | Medium | Every excerpt has bounded text and stable source-bound locator |
+| Source-bound images | Image proof must belong to same source authority | Medium | Image source digest and locator match focal source document |
+| No-write read posture | Read tool must not mutate, infer, repair, or embed | Low | Success and failure paths produce zero graph delta |
+| Deterministic acceptance artifacts | Pilot must be replayable and reviewable | Medium | Canonical manifests and snapshots have repeatable digests |
+| Frozen canary directories | Historical acceptance must not drift | Low | Each run creates new directory; existing canary files never change |
+| Batch-cap enforcement | Existing safety ceilings remain authoritative | Low | Reject above 500 entities, 2,000 edges, or 5,000 provenance links |
+| Zero new dependencies | Existing stack already supports all work | Low | Dependency manifests and lockfiles add no v1.2 package |
+| Existing behavior preservation | v1.2 is additive | Medium | Existing MCP tools, exact resolve/search, and native Ollama remain unchanged |
 
-### Differentiators (Trustworthy Catalog Behavior)
+### Differentiators
 
-These distinguish a canary-ready administrative surface from generic graph write APIs.
+| Feature | Value Proposition | Complexity | Testable Contract |
+|---|---|---:|---|
+| Relationship-connected FE canary | Proves useful graph context, not isolated object writes | Medium | Every non-root FE sample object connects through authoritative FE relation |
+| Rich BO without invented edges | Demonstrates BO value while preserving source truth | Medium | BO selection uses table/column structure only; adds no inferred BO relation |
+| Typed context envelope | Gives clients machine-checkable object context | Medium | Focal, neighbor, relation, evidence, image, and locator types are explicit |
+| Canonical response digest | Makes read regressions visible | Low | Unchanged request and graph yield same canonical response digest |
+| Explicit truncation metadata | Prevents silent loss at bounds | Low | Every bounded collection reports applied limit and truncation state |
+| Negative-delta proof | Detects unrelated mutations | High | Before/after comparison permits only manifest-declared changes |
+| Source-scoped run ledger | Links selection, prepare, commit, and acceptance | Medium | Batch ID and artifact digests cross-reference one immutable run |
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| Visible FE/BO lane separation | Agents and operators can tell front-end vs back-office catalog objects without out-of-band docs | MEDIUM | Grammar in keys/attributes is inspectable via resolve/manifest; wrong lane is a hard error, not a soft warning |
-| Endpoint-pair authority on server | Schema integrity survives buggy agents and regenerated parsers | MEDIUM | Maps are server constants; capabilities expose them; clients cannot widen pairs |
-| Immutable prepare-then-commit protocol | Agent crash mid-ingest cannot leave half-applied domain state for a prepared plan | HIGH | Prepare does not write domain entities/edges and does **not** embed; commit embeds then atomically writes domain+evidence+manifest+terminal statuses in one Neo4j tx where supported; discard non-destructive to domain |
-| Exact evidence links | Provenance remains auditable and non-fabricating under concurrent writes | MEDIUM | Explicit links + ordered/CAS patterns already proven in v1.0; v1.1 forbids Cartesian expansion path in nested batch |
-| Manifest as verification authority | Post-restart operators verify committed intent without replaying full request bodies | HIGH | Manifest hash must match commit-time plan hash; verify can assert completeness against manifest alone |
-| Capabilities as contract surface | Multi-agent fleets pin behavior to server-advertised protocol/grammar versions | LOW | Version fields must change when maps/grammar/hash coverage change |
-| Read diagnostics under write-disable | Safe production posture: inspect without enabling mutation | LOW | Operator can leave writes off, still resolve/verify/status/capabilities |
-| Migration guidance without silent rekey | Catalog-v1 → v2 is explicit and operator-driven | LOW | Docs only: no automatic identity migration; changing namespace or grammar re-keys — never silent |
+### Anti-Features
 
-### Anti-Features (Seem Useful; Reject)
+| Anti-Feature | Why Avoid | Required Alternative |
+|---|---|---|
+| Full catalog ingest | v1.2 is bounded pilot | Commit only manifest-selected FE and BO samples |
+| Inferred BO relations | Normalized authority has no BO relations | Return BO table/column structure only |
+| FE/BO maps | Mapping would assert unsupported cross-source semantics | Keep source namespaces and contexts isolated |
+| Natural-language orchestration | Adds ambiguity and model dependence | Use typed exact MCP request fields |
+| Multi-hop traversal | Expands scope and response variance | Return one-hop neighbors only |
+| Path finding | Not needed for focal context pilot | Defer until explicit bounded path requirement |
+| Impact analysis | Requires unsupported semantics | Return direct authoritative relations without impact claims |
+| User-facing delta analysis | Delta exists only for acceptance | Keep comparison in canary artifacts |
+| Docling or LLM processing | JSON is sole normalized authority | Apply fixed deterministic rules only |
+| Production promotion | Pilot acceptance is not deployment authorization | Stop at isolated canary evidence |
+| Repeat v1.1 canary | v1.1 is shipped and frozen | Reuse contracts without rerunning old canary |
+| Caller UUID authority | Breaks deterministic identity | Derive UUIDv5 server-side from fixed namespace |
+| Dynamic Cypher labels/properties | Enables injection and schema drift | Use fixed server allowlists and query parameters |
+| Read-time repair | Violates no-write read posture | Return typed integrity error |
+| Unbounded evidence text | Risks oversized responses and source leakage | Cap counts and excerpt length |
+| New framework/package | Existing Python, Pydantic, Neo4j, MCP suffice | Add zero dependencies |
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| Silent unknown-field strip | "Be lenient with agents" | Hides schema drift; identity/hash diverge from client intent | Fail closed with field path in `validation_error` |
-| Auto FE/BO remapping of v1 keys | "Ease migration" | Rekeys identities; breaks retry/idempotency; corrupts canary baselines | Explicit new keys + documented migration; never reinterpret |
-| Client-supplied endpoint maps | "Support new pairs without deploy" | Injection/schema drift; Cypher-adjacent risk; non-reproducible graphs | Server allowlist only; expand via versioned release |
-| Cartesian provenance (all sources × all targets) | "Fewer lines of agent code" | Invents unproven links; blows limits; non-auditable | Explicit evidence links only |
-| Prepare that writes domain objects | "Faster commit" | Partial domain state on crash; breaks atomic story | Prepare = plan/status only; domain write only on commit |
-| Mutable prepared plans | "Edit without re-prepare" | Hash/identity ambiguity; race with concurrent commit | Immutable plan; discard + re-prepare |
-| Soft warnings for illegal endpoint pairs | "Partial success" | Leaves illegal edges if atomic false elsewhere; canary false confidence | Fail closed before side effects; atomic batches roll back fully |
-| Automatic v1→v2 identity migration tool in-process | "One-click upgrade" | Dangerous on live groups; out of scope; irreversible rekey risk | Separate approved ops milestone; docs-only guidance in v1.1 |
-| Production/canary execution in this milestone | "Prove end-to-end" | Scope breach; mutates live groups; blocks honest gate | Docs + procedure only; execute canary under separate approval |
-| Parser / inferred relationships / path-impact APIs | "Complete catalog product" | Different milestone; contaminates substrate hardening | Defer: parser, inference, object-context, delta/retirement |
-| Caller UUID as identity authority | "Match external systems" | Breaks deterministic UUIDv5 contract | Server UUIDv5 only; external IDs as attributes |
-| Logging full catalog payloads | "Easier debug" | Secrets/PII/source leakage | Batch IDs + counts + structured codes only |
-| Disabling reads when writes disabled | "Single feature flag" | Blocks diagnosis of failed canaries | Split read/write gates |
-| FalkorDB/other backend claims | "Portability" | Unproven transaction/label/vector semantics | Neo4j only; no portability claim |
+## Observable Contracts
 
-## Observable Contracts (Client/Operator Perspective)
+### Normalized Authority
 
-### Request validation
+1. `catalog/catalog.json` is sole normalized authority.
+2. Authority contains exactly 2 documents.
+3. Authority contains exactly 1,261 tables.
+4. Authority contains exactly 10,649 columns.
+5. Authority contains exactly 434 relationships, all FE.
+6. FE source `SVFE_SHB` contains exactly 637 tables.
+7. BO source `MAIN1` contains exactly 624 tables.
+8. Inventory mismatch fails before sample selection or prepare.
+9. Authority SHA-256 binds every sample manifest and acceptance run.
+10. PDF, DDL, dictionary, parser, Docling, and LLM outputs cannot override JSON.
 
-- Complete nested validation before any embedding or Neo4j write.
-- Unknown fields at any nesting depth → `validation_error` with path.
-- Collection/string/hash/prefix/confidence/NaN/infinity/protected-property rules remain enforced.
-- Execution flags (`dry_run`, `atomic`, prepare/commit mode) are validated and, once prepared, immutable relative to that `batch_id` + plan hash.
+### Deterministic Sampling
 
-### Identity (catalog-v2)
+1. FE sample uses only `SVFE_SHB` objects and authoritative FE relationships.
+2. FE sample forms a connected subgraph under documented selection rules.
+3. FE ranking, closure, and tie-breakers use explicit total ordering.
+4. BO sample uses only `MAIN1` tables and columns.
+5. BO richness uses deterministic structural metrics such as column count and metadata coverage.
+6. BO selection creates no relation from naming similarity or shared columns.
+7. Sample sizes are fixed below shipped batch caps.
+8. Cap overflow fails; selection never silently truncates graph closure.
+9. Each source gets separate canonical manifest and SHA-256 digest.
+10. Equivalent input yields byte-identical canonical sample content.
 
-- UUIDv5 authority unchanged: entity `group_id|entity_type|graph_key`; edge `group_id|edge_type|edge_key`; source `group_id|Source|source_key`; batch `group_id|Batch|batch_id`.
-- FE/BO/COMMON isolation is visible in grammar (keys and/or typed attributes as specified in phase design) and fail-closed on violation.
-- Caller database UUIDs never identity authority.
-- Namespace still immutable deployment config; change rekeys everything — document, never auto-generate.
+### Prepare and Commit
 
-### Endpoint pairs
+1. FE and BO use isolated prepare calls and separate commit tokens.
+2. Prepare validates full request before issuing commit authority.
+3. Validation covers collection counts, string limits, hashes, prefixes, nested references,
+   confidence range, NaN, infinity, protected properties, and `group_id`.
+4. Prepare rejects more than 500 entities, 2,000 edges, or 5,000 provenance links.
+5. Server derives all identities through UUIDv5 and fixed `GRAPHITI_CATALOG_UUID_NAMESPACE`.
+6. Caller UUIDs never control identity.
+7. Embeddings are generated before opening Neo4j write transaction.
+8. Embedding failure produces no graph write and no usable token.
+9. Prepared payload is immutable and content-addressed by deterministic digest.
+10. Commit accepts token only, never a resubmitted catalog payload.
+11. Token binds batch ID, source, `group_id`, namespace, and prepared digest.
+12. Commit returns only after transaction commit or rollback.
+13. Conflict or write failure rolls back complete batch.
+14. Retry preserves `created_at`, endpoint UUIDs, labels, `name_raw`, and `name_canonical`.
+15. Retry may update only allowed mutable fields, including `updated_at`.
+16. Logs contain batch IDs and counts only, never full payload, document, source text, or secrets.
 
-- For each edge type, only documented `(source_entity_type, target_entity_type)` pairs accepted.
-- Prefix checks still apply per endpoint type.
-- `EnforcedBy` still requires non-empty evidence.
-- Illegal pair → structured error before embeddings/writes.
+### `get_catalog_object_context`
 
-### Hashes and capabilities
+1. Tool name is exactly `get_catalog_object_context`.
+2. Request requires `group_id`, source, object type, and exact canonical object identity.
+3. Resolution is exact: no BM25, vector search, fuzzy match, alias expansion, or LLM fallback.
+4. Success returns exactly one typed focal object.
+5. Duplicate exact matches return typed integrity error, not arbitrary first match.
+6. Missing exact match returns typed not-found result.
+7. Default `neighbor_limit` is 25; accepted range is 0 through 100.
+8. Neighbors are direct stored one-hop objects only.
+9. Neighbor query fetches at most requested limit plus one for truncation detection.
+10. Neighbor order is relation type, object type, canonical name, source, then UUID.
+11. No second-hop object, path, transitive claim, inferred relation, or impact result appears.
+12. Default `evidence_limit` is 10; accepted range is 0 through 25.
+13. Each evidence excerpt is at most 1,000 Unicode code points.
+14. Every evidence item has typed stable locator and source document digest.
+15. Default `image_limit` is 3; accepted range is 0 through 10.
+16. Every image has source document binding and typed locator.
+17. Source-mismatched evidence or image is never returned.
+18. Response reports applied limits and `truncated` for each bounded collection.
+19. Invalid bounds fail before database access.
+20. Every read constrains exact `group_id` and source.
+21. Tool uses Neo4j read access only.
+22. Tool never calls prepare, commit, embedder, LLM, queue, index creation, or repair.
+23. Success, not-found, validation, and integrity-error paths perform zero writes.
+24. Unchanged graph and request produce same logical response and canonical digest.
 
-- Server-authoritative content/request/catalog hashes cover all domain-bearing fields defined by the contract.
-- Optional client hashes compared; mismatch fails closed.
-- Capabilities tool/response exposes: write/read enabled, limits, allowlists, endpoint maps, protocol/grammar versions, backend = Neo4j only.
+### Acceptance Artifacts
 
-### Prepare / commit / discard
-
-**Approved tools (exact names):** `prepare_catalog_batch`, `commit_prepared_catalog_batch`, `discard_prepared_catalog_batch`, `get_catalog_capabilities`, `get_catalog_evidence`, `get_catalog_batch_manifest`, `resolve_typed_edges`.
-
-| Operation | Domain graph write | Embeddings | Persists | Idempotent replay | On conflict |
-|-----------|--------------------|------------|----------|-------------------|-------------|
-| prepare | No | **No** (validation/resolution/projections only) | Immutable plan + **full bounded canonical payload** (+ hashes); token returned | Same plan → unchanged; different content same id → `prepared_plan_conflict` | No domain mutation |
-| commit | Yes — **one Neo4j tx**: domain + evidence + manifest + terminal batch status + plan terminal state | **Yes** — from stored payload **before** domain tx | Terminal committed state | Same plan hash → unchanged / already_consumed | Full rollback; optional separate failure-status tx only |
-| discard | No | No | Clears/marks plan discarded | Safe if already discarded | Never deletes unrelated domain data |
-| dry_run (legacy/path) | No | No | No persistent plan (or non-authoritative) | N/A | Validation only |
-
-### Provenance evidence
-
-- Explicit links only; no sources×targets product.
-- Missing targets → `provenance_target_missing`, no partial write under atomic.
-- No LLM, queue, or `add_memory` path.
-
-### Manifest and verification
-
-- On successful commit: durable manifest with exact identities, counts, hashes, timestamps.
-- Manifest nodes non-`Entity`; excluded from search/communities (same isolation principle as `CatalogIngestBatch`).
-- Verification modes: explicit keys (v1), batch_id → status, batch_id → manifest-backed expected set.
-- `resolve_typed_edges` mirrors entity resolve diagnostics for edges.
-
-### Gates
-
-| Surface | Write gate off | Read gate off (if separate) |
-|---------|----------------|-----------------------------|
-| upsert_* / prepare / commit | `feature_disabled` | N/A |
-| resolve_* / verify / status / capabilities / manifest read | Allowed | `feature_disabled` or equivalent |
-| Existing non-catalog MCP tools | Unaffected | Unaffected |
-
-### Required structured error codes (v1.1 additive)
-
-`unsupported_identity_schema`, `invalid_system_key`, `edge_endpoint_pair_not_allowed`, `prepared_plan_not_found`, `prepared_plan_expired`, `prepared_plan_conflict`, `prepared_plan_already_consumed`, `manifest_mismatch`, `provenance_link_conflict` — plus retained v1 codes (`validation_error`, `feature_disabled`, `content_hash_mismatch`, …).
-
-### Security / privacy
-
-- No client labels/property names interpolated into Cypher.
-- No credentials, full payloads, raw documents, or complete source text in logs or status/manifest summary fields.
-- `group_id` required and constrains every catalog read/write.
-- Bounded nested JSON (depth/nodes/string lengths) to resist payload bombs.
-
-### Compatibility
-
-- Preserve **MCP tool names** and legacy **semantic** tools. Catalog-v2 **intentionally breaks** seven deterministic request identity/provenance/hash contracts where required — **do not** claim old catalog-v1 request payloads remain accepted.
-- Search: catalog entities via `search_nodes`; facts via `search_memory_facts`.
-- No `clear_graph`, no live-group mutation in tests, no canary execution, no automatic v1→v2 migration, no parser/inference.
+1. Each run writes a new canary directory.
+2. Frozen v1.1 and prior v1.2 canary directories are never overwritten.
+3. Canonical serialization fixes field order, collection order, UTF-8 encoding, and digest rules.
+4. Manifest records authority, sample, prepare, commit, and context-response digests.
+5. FE and BO artifacts remain separate and source-bound.
+6. Before snapshot records exact pilot-group object, edge, evidence, and image inventories.
+7. After snapshot records same dimensions.
+8. Delta acceptance allows only manifest-declared additions and allowed idempotent updates.
+9. Unrelated source, group, label, endpoint, evidence, or image change fails acceptance.
+10. Commit replay produces zero identity-count delta.
+11. Context calls produce zero before/after graph delta.
+12. No dependency file or lockfile gains a v1.2 package.
 
 ## Feature Dependencies
 
-```
-Strict recursive contracts
-    └──requires──> Immutable execution flags
-                       └──enhances──> Authoritative batch hashes
+```text
+Authority inventory + digest
+  => deterministic FE selection => FE manifest => FE prepare => FE commit
+  => deterministic BO selection => BO manifest => BO prepare => BO commit
 
-FE/BO identity grammar
-    └──requires──> Strict recursive contracts
-    └──enhances──> Manifest identity lists
+Shipped v1.1 typed ingest + UUIDv5 + evidence + immutable prepare/token commit
+  => source-isolated pilot writes
+  => exact focal lookup
+  => bounded one-hop context
 
-Server endpoint-pair maps
-    └──requires──> Strict recursive contracts
-    └──requires──> Capabilities discovery (advertise maps)
-    └──enhances──> resolve_typed_edges / edge upsert safety
-
-Authoritative hashes
-    └──requires──> Strict contracts + explicit evidence model
-    └──requires──> Prepare/commit immutability
-
-Prepare/commit/discard
-    └──requires──> Authoritative hashes
-    └──requires──> Endpoint-pair maps + FE/BO grammar
-    └──requires──> Explicit evidence links
-    └──requires──> Durable manifests (on commit)
-    └──conflicts──> Prepare-with-domain-writes (anti-feature)
-
-Durable manifests
-    └──requires──> Successful atomic commit path
-    └──enhances──> Manifest-backed verification
-
-Manifest-backed verification
-    └──requires──> Durable manifests
-    └──enhances──> Split read/write gates (verify while writes off)
-
-resolve_typed_edges
-    └──requires──> Endpoint-pair maps (anomaly reporting)
-    └──enhances──> Manifest-backed verification
-
-Split read/write gates
-    └──enhances──> Capabilities discovery
-    └──enhances──> All read-only diagnostics
-
-Legacy compatibility
-    └──conflicts──> Breaking schema renames without aliases
-    └──requires──> Additive-only MCP tool changes
-
-Docs + tests (exhaustive)
-    └──requires──> All table-stakes contracts frozen
-    └──conflicts──> Production/canary execution (out of scope)
+Before snapshot + source manifests + commits + context reads
+  => image binding checks
+  => declared-delta proof
+  => no-write proof
+  => frozen acceptance directory
 ```
 
-### Dependency Notes
+Dependency rules:
 
-- **Prepare/commit requires hashes + maps + grammar + evidence:** plan identity is incomplete without all four; otherwise commit cannot be deterministic.
-- **Manifest requires commit:** do not persist "expected" domain manifests from prepare alone if that implies domain presence; prepare stores plan, commit stores manifest of applied identities.
-- **Manifest-backed verify requires read path while writes disabled:** otherwise operators cannot audit a locked environment.
-- **Legacy compatibility conflicts with silent v2 rekey:** additive tools preferred over redefining `graph_key` meaning in place.
+- FE and BO commits do not depend on each other.
+- BO selection does not depend on inferred relationships.
+- Context acceptance depends only on corresponding source commit.
+- Production promotion is not an output dependency.
+- No phase depends on new packages, Docling, LLMs, or natural-language parsing.
 
-## Edge Cases (Must Specify in Requirements)
+## Edge Cases
 
-| Case | Expected behavior |
-|------|-------------------|
-| Unknown nested field in attributes/source_refs | `validation_error`; no write |
-| Prepared batch_id reused with different content hash | conflict; plan unchanged |
-| Commit after discard | fail; no domain write |
-| Commit when write gate off | `feature_disabled`; plan retained |
-| Prepare when write gate off | `feature_disabled` (prepare is mutation of control plane) unless design explicitly allows plan-only under read — default: prepare needs write gate |
-| Resolve/verify when write gate off | success if data exists |
-| Illegal endpoint pair in dry_run | error; no write; no plan unless prepare path |
-| Explicit provenance link to missing target | `provenance_target_missing`; atomic full fail |
-| Cartesian-sized link explosion attempt | reject at validation (link count / require explicit pairs) |
-| FE key used with BO-only edge pair | fail closed |
-| Concurrent identical commit | one logical domain outcome; idempotent unchanged |
-| Concurrent different content same batch_id | one winner; loser `batch_conflict`; no mixed graph |
-| Embedding failure during commit | no domain partial write; failed status via post-rollback status tx only |
-| Prepare stores hashes only | **rejected by contract** — payload must be rehydratable at commit |
-| Capabilities when writes disabled | still returns maps/limits/`enabled=false` after successful server init |
-| Server restart after prepare before commit | plan durable; commit still applies or discards |
-| Server restart after commit | status+manifest durable; verify works |
-| Legacy tool **names** without prepare | names preserved; v2 request contracts may fail closed on v1-shaped payloads |
-| Capabilities under disabled catalog writes | still returns enabled=false + maps/limits whenever server init succeeds |
+| Case | Expected Behavior |
+|---|---|
+| Authority count differs | Fail before selection; no token and no write |
+| Same path has changed JSON | New digest invalidates old manifest/token binding |
+| FE candidates tie | Canonical identity and UUID tie-breakers choose stable order |
+| FE closure exceeds cap | Fail with cap detail; do not truncate silently |
+| BO table has zero columns | Score deterministically under documented rule |
+| BO name resembles FE name | Keep isolated; create no map or inferred edge |
+| UUID namespace changes after prepare | Reject token at commit |
+| Embedder fails midway | Prepare fails; graph remains unchanged |
+| Prepared artifact changes | Digest mismatch rejects commit |
+| One batch row conflicts | Roll back complete transaction |
+| Valid token replays | Return idempotent result; create no duplicate |
+| Focal object absent | Typed not-found; zero writes |
+| Duplicate exact focal identity | Typed integrity error; no repair write |
+| `neighbor_limit` is zero | Return focal object and empty neighbor list |
+| Any limit exceeds maximum | Validation error before Neo4j access |
+| More neighbors than limit | Return stable prefix with `truncated: true` |
+| Neighbor sort fields tie | UUID decides final order |
+| Evidence text exceeds cap | Return bounded excerpt, truncation marker, full locator |
+| Evidence locator missing | Return fixed integrity outcome; never invent locator |
+| Image belongs to other document | Omit/reject and fail image-binding acceptance |
+| Same identity exists in another group | Exact `group_id` prevents disclosure |
+| Concurrent identical reads | Return same ordering and no side effects |
+| Frozen canary path exists | Refuse overwrite; allocate new run directory |
+| Read transaction unavailable | Return operational error; never fall back to write mode |
 
-## Migration Implications
+## MVP Definition
 
-| Topic | v1.1 stance |
-|-------|-------------|
-| Existing v1 identities in test/live graphs | Leave untouched; no auto-migration |
-| New catalog-v2 FE/BO keys | New writes only under explicit grammar |
-| Namespace change | Forbidden as casual ops; full rekey; docs warn |
-| Client scripts on seven tools | Keep working; optional new tools for prepare/commit/manifest/resolve_edges/capabilities |
-| Regenerated canary | Procedure documented; **not executed** this milestone |
-| Production writes | Out of scope |
-| Hash coverage expansion | Protocol version bump; old client hashes may mismatch until clients recompute — document |
+MVP is one bounded vertical pilot:
 
-## MVP Definition (v1.1 Hardening)
+1. Validate authoritative JSON inventory and digest.
+2. Select deterministic connected FE sample from `SVFE_SHB`.
+3. Select deterministic structurally rich BO sample from `MAIN1` without inferred relations.
+4. Produce separate source-bound manifests and digests.
+5. Enforce shipped batch caps.
+6. Prepare and token-commit FE and BO independently.
+7. Expose exact read-only `get_catalog_object_context`.
+8. Return typed focal object, stable bounded one-hop neighbors, evidence, locators, and images.
+9. Prove source binding, idempotent retry, group isolation, declared delta, and zero-write reads.
+10. Freeze acceptance in new canary directories.
+11. Add zero dependencies and preserve existing tools, exact search/resolve, and native Ollama.
 
-### Ship in this milestone
+MVP excludes full ingest, inferred BO relations, FE/BO maps, natural-language orchestration,
+multi-hop/path/impact/delta features, Docling, LLM processing, production promotion, and any
+repeat of v1.1 canary.
 
-- [ ] Strict recursive fail-closed request contracts + immutable flags
-- [ ] Catalog-v2 FE/BO/COMMON identity grammar (visible, deterministic)
-- [ ] Server-owned edge endpoint-pair maps enforced pre-side-effect
-- [ ] Authoritative combined hashing + capabilities discovery
-- [ ] Durable prepare / commit / discard protocol
-- [ ] Explicit evidence links (no Cartesian expansion)
-- [ ] Durable manifests + manifest-backed verification
-- [ ] `resolve_typed_edges`
-- [ ] Split read/write gates
-- [ ] Legacy seven-tool compatibility + search/isolation preserved
-- [ ] Exhaustive unit/service/store/MCP/concurrency/Neo4j/security/compat tests on `oracle-catalog-tool-test` only
-- [ ] Operator docs: contracts, migration guidance, canary procedure **without** execution
+## Requirement-Ready Categories
 
-### Explicitly defer (not v1.1)
+### Authority Requirements
 
-- [ ] Oracle/SQL/PLSQL parser
-- [ ] Inferred relationships / scoring
-- [ ] Object-context / path / impact APIs
-- [ ] Catalog delta / retirement / FE-BO runtime correlation
-- [ ] Automatic v1→v2 identity migration
-- [ ] Production migration, production writes, canary execution
-- [ ] FalkorDB or multi-backend catalog claims
-- [ ] K8s deployment / full 14k entity ingest
+- SHALL accept only `catalog/catalog.json` as normalized authority.
+- SHALL verify all authoritative inventory counts before selection.
+- SHALL bind every artifact to authority SHA-256.
 
-## Feature Prioritization Matrix
+### Sampling Requirements
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Strict recursive contracts | HIGH | MEDIUM | P1 |
-| FE/BO identity grammar | HIGH | MEDIUM | P1 |
-| Endpoint-pair maps | HIGH | MEDIUM | P1 |
-| Authoritative hashes | HIGH | MEDIUM | P1 |
-| Capabilities discovery | HIGH | LOW | P1 |
-| Prepare/commit/discard | HIGH | HIGH | P1 |
-| Explicit evidence links | HIGH | MEDIUM | P1 |
-| Durable manifests | HIGH | HIGH | P1 |
-| Manifest-backed verification | HIGH | MEDIUM | P1 |
-| resolve_typed_edges | HIGH | MEDIUM | P1 |
-| Split read/write gates | HIGH | LOW | P1 |
-| Legacy compatibility + tests/docs | HIGH | MEDIUM | P1 |
-| Auto migration tooling | MEDIUM | HIGH | P3 (out of scope) |
-| Parser / inference / path APIs | HIGH later | HIGH | P3 (later milestone) |
-| Canary execution | HIGH later | MEDIUM | P3 (separate approval) |
+- SHALL select a connected FE sample using authoritative FE relations only.
+- SHALL select a rich BO sample using BO structure only.
+- SHALL use fixed scoring, total ordering, and deterministic digests.
+- SHALL keep FE and BO manifests isolated.
 
-**Priority key:**
-- P1: Must have for v1.1 pre-canary hardening
-- P2: Should have if schedule allows (none reserved — hardening is the milestone)
-- P3: Future / explicit non-goal this milestone
+### Write-Safety Requirements
 
-## Competitor / Baseline Feature Analysis
+- SHALL validate full request and shipped caps before commit authority.
+- SHALL derive UUIDv5 identity server-side.
+- SHALL finish embeddings before write transaction.
+- SHALL commit by token only and roll back atomically.
+- SHALL preserve protected identity and creation fields on retry.
 
-| Feature | Semantic Graphiti MCP (`add_memory`) | Generic Cypher admin | Deterministic catalog (this product) |
-|---------|--------------------------------------|----------------------|--------------------------------------|
-| Exact identity | No (LLM extract + fresh UUIDs) | Manual | UUIDv5 + hashes |
-| Typed endpoints | Weak / generic create risk | Manual | Fail-closed maps |
-| Idempotent retry | Queue/async hazards | Manual | Designed |
-| Provenance | Episode extract | Ad hoc | Explicit links, no Cartesian |
-| Agent crash safety | Partial episodes possible | Manual tx | Prepare/commit + atomic domain |
-| Audit expected set | No | Manual queries | Durable manifest |
-| FE/BO isolation | None | Manual labels | Grammar + gates |
+### Context Requirements
+
+- SHALL resolve one exact typed focal object within source and `group_id`.
+- SHALL return only stable bounded one-hop neighbors.
+- SHALL enforce neighbor 0..100, evidence 0..25, and image 0..10.
+- SHALL cap excerpts at 1,000 Unicode code points.
+- SHALL report applied bounds and truncation.
+- SHALL use read-only database posture with no LLM or embedder call.
+
+### Evidence and Acceptance Requirements
+
+- SHALL bind evidence and images to exact source document and locator.
+- SHALL create deterministic manifests, snapshots, and response digests.
+- SHALL preserve frozen canary directories.
+- SHALL prove declared delta, idempotent replay, and zero-write reads.
+- SHALL add zero dependencies.
+
+## Feature Prioritization
+
+| Priority | Capability | Exit Signal |
+|---:|---|---|
+| P0 | Authority inventory and digest gate | Counts and digest match authoritative facts |
+| P0 | Deterministic FE/BO sample manifests | Repeated derivation yields identical isolated manifests |
+| P0 | Immutable isolated prepare | Tokens bind separate source payloads and digests |
+| P0 | Atomic token-only commit | Replay adds nothing; injected failure rolls back all |
+| P0 | Exact read-only focal lookup | Typed FE and BO focal tests pass with zero writes |
+| P0 | Bounded stable one-hop neighbors | Bound, ordering, and truncation tests pass |
+| P0 | Evidence excerpts and locators | Every item has valid source-bound locator |
+| P0 | Delta/no-write acceptance | Only declared commit delta; read delta is zero |
+| P1 | Source-bound images | Correct images pass; mismatches fail |
+| P1 | Canonical context digest | Repeated reads produce same digest |
+| P1 | Run-ledger cross-links | Every artifact digest resolves within run |
+| Excluded | Full ingest and production promotion | No implementation or acceptance claim |
+| Excluded | Inference, maps, paths, impact, NL | No schema, tool, or dependency added |
+
+Recommended order:
+
+1. Lock authority gate and canonical digest format.
+2. Lock deterministic FE/BO selectors and separate manifests.
+3. Exercise shipped prepare/commit under isolation and caps.
+4. Add minimum exact read-only context focal lookup.
+5. Add bounded neighbors, evidence, locators, and image binding.
+6. Freeze delta, replay, isolation, and no-write acceptance artifacts.
 
 ## Sources
 
-- `.planning/PROJECT.md` — v1.1 active requirements and non-goals
-- `.planning/milestones/v1.0-REQUIREMENTS.md` — shipped baseline (86 requirements)
-- `mcp_server/src/models/catalog_*.py` — current request/response contracts
-- `mcp_server/src/graphiti_mcp_server.py` / catalog services — existing seven-tool surface
-- Operator constraints: Neo4j-only, test group isolation, no production/canary execution
-
----
-*Feature research for: Catalog-v2 Pre-Canary Hardening (MCP client/operator contracts)*
-*Researched: 2026-07-17*
-*Replaces: obsolete v1.0-oriented FEATURES.md content for this milestone*
+- User-provided authoritative v1.2 scope and inventory facts, 2026-07-24. Confidence: HIGH.
+- Shipped v1.1 contract: deterministic catalog-v2 typed ingest, evidence, immutable prepare,
+  token-only commit, manifests, exact resolve/search, and native Ollama. Confidence: HIGH.
+- Project constraints: Neo4j-first transactions, server UUIDv5 identity, validation, embedding
+  order, group isolation, safe logging, field preservation, and batch caps. Confidence: HIGH.
+- `catalog/catalog.json` intentionally not inspected; supplied inventory is authoritative.
+  Confidence: HIGH.
