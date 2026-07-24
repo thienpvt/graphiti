@@ -100,52 +100,50 @@
 
 ## Traceability
 
-Populated during roadmap creation. Every v1.2 requirement must map to exactly one roadmap phase.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PILT-01 | TBD | Pending |
-| PILT-02 | TBD | Pending |
-| PILT-03 | TBD | Pending |
-| PILT-04 | TBD | Pending |
-| PILT-05 | TBD | Pending |
-| PILT-06 | TBD | Pending |
-| PILT-07 | TBD | Pending |
-| PILT-08 | TBD | Pending |
-| PILT-09 | TBD | Pending |
-| PILT-10 | TBD | Pending |
-| CTX-01 | TBD | Pending |
-| CTX-02 | TBD | Pending |
-| CTX-03 | TBD | Pending |
-| CTX-04 | TBD | Pending |
-| CTX-05 | TBD | Pending |
-| CTX-06 | TBD | Pending |
-| CTX-07 | TBD | Pending |
-| CTX-08 | TBD | Pending |
-| CTX-09 | TBD | Pending |
-| CTX-10 | TBD | Pending |
-| INTG-01 | TBD | Pending |
-| INTG-02 | TBD | Pending |
-| INTG-03 | TBD | Pending |
-| INTG-04 | TBD | Pending |
-| INTG-05 | TBD | Pending |
-| INTG-06 | TBD | Pending |
-| INTG-07 | TBD | Pending |
-| INTG-08 | TBD | Pending |
-| ACPT-01 | TBD | Pending |
-| ACPT-02 | TBD | Pending |
-| ACPT-03 | TBD | Pending |
-| ACPT-04 | TBD | Pending |
-| ACPT-05 | TBD | Pending |
-| ACPT-06 | TBD | Pending |
-| ACPT-07 | TBD | Pending |
-| ACPT-08 | TBD | Pending |
+| PILT-01 | Phase 7 | Pending |
+| PILT-02 | Phase 7 | Pending |
+| PILT-03 | Phase 7 | Pending |
+| PILT-04 | Phase 7 | Pending |
+| PILT-05 | Phase 7 | Pending |
+| PILT-06 | Phase 7 | Pending |
+| PILT-07 | Phase 7 | Pending |
+| PILT-08 | Phase 7 | Pending |
+| PILT-09 | Phase 7 | Pending |
+| PILT-10 | Phase 7 | Pending |
+| CTX-01 | Phase 8 | Pending |
+| CTX-02 | Phase 8 | Pending |
+| CTX-03 | Phase 8 | Pending |
+| CTX-04 | Phase 8 | Pending |
+| CTX-05 | Phase 8 | Pending |
+| CTX-06 | Phase 8 | Pending |
+| CTX-07 | Phase 8 | Pending |
+| CTX-08 | Phase 8 | Pending |
+| CTX-09 | Phase 8 | Pending |
+| CTX-10 | Phase 8 | Pending |
+| INTG-01 | Phase 9 | Pending |
+| INTG-02 | Phase 9 | Pending |
+| INTG-03 | Phase 9 | Pending |
+| INTG-04 | Phase 9 | Pending |
+| INTG-05 | Phase 9 | Pending |
+| INTG-06 | Phase 9 | Pending |
+| INTG-07 | Phase 9 | Pending |
+| INTG-08 | Phase 9 | Pending |
+| ACPT-01 | Phase 10 | Pending |
+| ACPT-02 | Phase 10 | Pending |
+| ACPT-03 | Phase 10 | Pending |
+| ACPT-04 | Phase 10 | Pending |
+| ACPT-05 | Phase 10 | Pending |
+| ACPT-06 | Phase 10 | Pending |
+| ACPT-07 | Phase 10 | Pending |
+| ACPT-08 | Phase 10 | Pending |
 
 **Coverage:**
 - v1.2 requirements: 36 total
-- Mapped to phases: 0
-- Unmapped: 36
+- Mapped to phases: 36
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-24*
-*Last updated: 2026-07-24 after v1.2 scope approval*
+*Last updated: 2026-07-24 after v1.2 roadmap creation*
