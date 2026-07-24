@@ -285,9 +285,9 @@ Additive after OpenAI-proxy final canary `20260723t065038z-8b0d3621` failed Gate
 - [x] **P6-OLL-BIND-01**: Candidate commit + raw-Git exact archive bind under 06-OLLAMA-BIND evidence only.
 - [x] **P6-OLL-IMG-01**: One new source-bound Ollama image; prior OpenAI image remains historical only.
 - [x] **P6-OLL-RT-01**: Entirely new clean-room R0–R3 with Ollama ready; never reuse failed project/volumes; 0/14→14/14 one-shot; 28 tools; exact image ID.
-- [ ] **P6-OLL-CAN-01**: Exactly one top-level Ollama final canary after freeze approval under 06-OLLAMA-* live names.
-- [ ] **P6-OLL-SAFE-01**: Preserve user-owned dirty config, historical stacks, and final Ollama stack; no prune/cleanup/graph clear; no wrong staging of dirty overlay.
-- [ ] **P6-OLL-REPT-01**: Sanitized 06-OLLAMA final report/ledger only; no secrets/namespace/raw vectors; old OpenAI report untouched.
+- [x] **P6-OLL-CAN-01**: Exactly one top-level Ollama final canary after freeze approval under 06-OLLAMA-* live names.
+- [x] **P6-OLL-SAFE-01**: Preserve user-owned dirty config, historical stacks, and final Ollama stack; no prune/cleanup/graph clear; no wrong staging of dirty overlay. Runtime preservation passed; maintainer accepted `DEV-P6-POST-ID-EVIDENCE-COMMITS` as explicit governance debt on 2026-07-24.
+- [x] **P6-OLL-REPT-01**: Sanitized 06-OLLAMA final report/ledger only; no secrets/namespace/raw vectors; old OpenAI report untouched.
 
 ## Future Requirements
 
@@ -399,9 +399,9 @@ Deferred until the deterministic substrate is implemented and verified.
 | P6-OLL-BIND-01 | Phase 6 | Complete |
 | P6-OLL-IMG-01 | Phase 6 | Complete |
 | P6-OLL-RT-01 | Phase 6 | Complete |
-| P6-OLL-CAN-01 | Phase 6 | Pending |
-| P6-OLL-SAFE-01 | Phase 6 | Pending |
-| P6-OLL-REPT-01 | Phase 6 | Pending |
+| P6-OLL-CAN-01 | Phase 6 | Complete |
+| P6-OLL-SAFE-01 | Phase 6 | Complete with accepted governance debt |
+| P6-OLL-REPT-01 | Phase 6 | Complete |
 | BASE-01 | Phase 0 | Pending |
 | BASE-02 | Phase 0 | Pending |
 | BASE-03 | Phase 0 | Pending |

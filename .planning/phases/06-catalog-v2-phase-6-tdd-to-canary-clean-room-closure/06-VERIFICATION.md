@@ -1,72 +1,70 @@
 ---
 phase: 06-catalog-v2-phase-6-tdd-to-canary-clean-room-closure
-status: gaps_found
-updated: 2026-07-23
-source_authority: ab5fdeb70ce18df64b03c28190ee6ad5ab6803db
-score: 0/13
+status: passed
+functional_status: passed_with_governance_deviation
+updated: 2026-07-24
+source_authority: 9f0199808ede02c07f60292e002f428f87d3db94
+canary_run: 20260724t001855z-20d91c7c
+score: 12/13
+roadmap_score: 5/5
 ---
 
-# Phase 6 Native Ollama Remediation Gap Verification
+# Phase 6 Terminal Verification
 
-## Terminal Historical Result
+## Result
 
-The prior final canary is terminal `FAILED_BEFORE_COMMIT` at Gate 2:
+The single native-Ollama final canary is factually `PASSED`. All five Phase 6 roadmap success criteria are evidenced. Twelve of thirteen `P6-OLL-*` requirements pass literally. `P6-OLL-SAFE-01` has one governance deviation: terminal evidence was committed after canary identity allocation despite the approved no-post-ID-commit rule.
 
-- Run: `20260723t065038z-8b0d3621`
-- Project: `graphiti-phase6-cleanroom-1f529136`
-- Prepare/commit/writes: `0/0/0`
-- Existing ledger/report/R0–R3 receipts: immutable
-- Retry/resume/query/cleanup/reclassification: forbidden
+**Disposition:** `PASSED_WITH_GOVERNANCE_DEVIATION`
 
-This report does not reopen that operation. It converts the updated `ab5fdeb` specification into append-only gap work.
+The deviation changed planning evidence only. It did not change runtime source, image, generated config, namespace authority, canary request, or running stack. The factual canary result remains valid. No rerun or second canary is permitted.
 
-## Gaps
+## Requirement Verification
 
-### Gap 1 — Native clean-room configuration and factory proof
+| Requirement | Status | Evidence |
+|-------------|--------|----------|
+| P6-OLL-AUTH-01 | PASS | AUTH-01 records one invocation, no deployment/Kubernetes, no historical groups, no second canary |
+| P6-OLL-CONF-01 | PASS | Native Ollama clean-room config bound by fingerprint `6550d751…` |
+| P6-OLL-EMB-01 | PASS | `ollama` / `qwen3-embedding:0.6b` / 1024 |
+| P6-OLL-CAPA-01 | PASS | R3 and Gate 1 report `ready`; waiver null/false |
+| P6-OLL-LAUNCH-01 | PASS | Ollama freeze authority selected the Ollama invocation; one shell-false launcher call |
+| P6-OLL-PREFLIGHT-01 | PASS | Sanitized native Ollama preflight receipt |
+| P6-OLL-TDD-01 | PASS | Required matrix and real local Ollama E2E green |
+| P6-OLL-BIND-01 | PASS | Raw-Git exact archive bound to `da8dce8`; zero blob mismatches |
+| P6-OLL-IMG-01 | PASS | Image `sha256:85775ff…`; exact revision/context labels; zero secret hits |
+| P6-OLL-RT-01 | PASS | Fresh `a75e295d` runtime; `0/14 → 14/14`; 28 tools; zero LLM calls |
+| P6-OLL-CAN-01 | PASS | Run `20260724t001855z-20d91c7c`; Gates 0–10; exact 3/2/1/5; one dry run, prepare, commit; no retry |
+| P6-OLL-SAFE-01 | GAP | Runtime/historical preservation passed; post-ID evidence commits violated the no-post-ID-commit rule |
+| P6-OLL-REPT-01 | PASS | Sanitized `06-OLLAMA-*` freeze, ledger, report; no raw namespace, token, URL, vector, or secret |
 
-**Requirements:** P6-OLL-CONF-01, P6-OLL-EMB-01
+## Terminal Evidence
 
-The committed clean-room example still selects the OpenAI embedder. Native Ollama factory/request/dimension/zero-LLM behavior lacks the updated operation's complete RED/GREEN acceptance proof.
+- Frozen/tested HEAD: `9f0199808ede02c07f60292e002f428f87d3db94`; commit count `1636`.
+- Image: `sha256:85775ff1ead67b2b292ed171373ce496f2cdd83141528831d813a9f6668fc847`.
+- Project: `graphiti-phase6-cleanroom-a75e295d`.
+- Canary: `PASSED`; Gates 0–10 all pass.
+- Exact counts: 3 entities, 2 edges, 1 source, 5 evidence links.
+- Dry-run zero-write: proven.
+- Prepare: 1. Token-only commit: 1. Commit confirmed. Retry: 0.
+- Manifest, typed entity/edge resolution, five evidence checks, node/fact search, and empty-control isolation: verified.
+- Protected groups queried: none. Prohibited tools: none. Secrets persisted: false.
+- Embeddings: Ollama, `qwen3-embedding:0.6b`, 1024, `ready`; waiver false.
+- Full terminal ledger: contiguous ordinals 1–37 under `.claude/phase6-final-canary-job/tmp/phase6-ollama-final-canary/20260724t001855z-20d91c7c-result/`.
+- Repository evidence: `06-OLLAMA-FREEZE-RECEIPT.json`, `06-OLLAMA-CANARY-LEDGER.json`, `06-OLLAMA-FINAL-REPORT.md`.
+- Forbidden summaries remain absent: `06-05-SUMMARY.md`, `06-11-SUMMARY.md`.
 
-### Gap 2 — Ready-only capability and conditional launcher authority
+## Governance Deviation
 
-**Requirements:** P6-OLL-CAPA-01, P6-OLL-LAUNCH-01
+`DEV-P6-POST-ID-EVIDENCE-COMMITS`
 
-The readiness probe exists, but the final-canary launcher unconditionally appends the OpenAI waiver and maps outputs into old evidence paths. Freeze authority does not yet bind exact Ollama provider/model/dimensions/readiness/null-waiver/config authority.
+- Commit `602aafe8c668fb3cba49fe0ac267737d053bcb04` committed the final report after identity allocation.
+- Commit `8ec4151ce617ad6397615cefa967e184c741447f` committed freeze/ledger evidence afterward.
+- Current commit count became `1638`, differing from the frozen count `1636`.
+- No product/runtime authority changed. This is a process-compliance failure, not a canary execution failure.
+- It cannot be erased safely. Do not amend, revert, rebuild, rerun, or clean up to conceal it.
 
-### Gap 3 — Sanitized local Ollama preflight and full TDD matrix
+## Accepted Disposition
 
-**Requirements:** P6-OLL-PREFLIGHT-01, P6-OLL-TDD-01
+The maintainer accepted `DEV-P6-POST-ID-EVIDENCE-COMMITS` as explicit milestone technical debt on 2026-07-24. Phase 6 verification therefore passes with a governance deviation. The historical violation cannot be repaired by another canary and must remain visible in milestone audit/archive records.
 
-No updated-operation receipt proves exact model availability, one no-credential native 1024-dimension probe, or the required real local Ollama E2E plus complete focused/union/static matrix.
-
-### Gap 4 — Fix-forward archive and new source-bound image
-
-**Requirements:** P6-OLL-BIND-01, P6-OLL-IMG-01
-
-The prior raw-Git/archive machinery is reusable, but the corrected Ollama candidate has not been committed, archive-verified, matrix-verified, built, label-bound, or complete-image scanned. The old OpenAI-path image is not authority.
-
-### Gap 5 — Entirely new runtime and exactly one new canary
-
-**Requirements:** P6-OLL-RT-01, P6-OLL-CAN-01
-
-No new project/resources/namespace/runtime exist for the Ollama operation. Required `0/14 → 14/14`, exact 28 tools, ready/no-waiver authority, Gate 2 search proof, prepare proof, and one new final canary remain pending.
-
-### Gap 6 — Preservation and terminal reporting
-
-**Requirements:** P6-OLL-AUTH-01, P6-OLL-SAFE-01, P6-OLL-REPT-01
-
-Append-only evidence guards, old-artifact hash checks, new `06-OLLAMA-*` report paths, post-ID no-mutation enforcement, and final sanitized report remain to be implemented and proven.
-
-## Required Plan Shape
-
-1. Append-only RED/GREEN native Ollama remediation.
-2. Fix-forward source/archive binding and frozen matrix.
-3. New source-bound image and complete-image scan.
-4. Entirely new runtime, committed prefreeze package, blocking human freeze checkpoint, then one top-level no-commit canary.
-
-Do not create `06-05-SUMMARY.md`. Do not resume `06-05`. New plans must be marked as gap closure and use distinct `06-OLLAMA-*` artifacts.
-
-## Next Action
-
-`/gsd-plan-phase 6 --gaps --text`
+Preserve the final stack and evidence. Never run a second canary.

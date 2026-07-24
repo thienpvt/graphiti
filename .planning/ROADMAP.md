@@ -26,14 +26,14 @@ Archives: [v1.0 roadmap](milestones/v1.0-ROADMAP.md) · [v1.0 requirements](mile
 
 - [x] **v1.0 Phase 1: Typed Catalog Primitives** - Config, identity, entity/edge upsert, resolve, verify (shipped)
 - [x] **v1.0 Phase 2: Provenance and Atomic Batch** - Provenance, batch status, atomic batch, docs (shipped)
-- [ ] **Phase 0: Baseline, Inventory, and Compatibility Policy** - Live baseline, isolation policy, worktree/remote safety
-- [ ] **Phase 1: Strict Contracts and Catalog-v2 Identity** - Recursive forbid contracts, FE/BO/COMMON grammar, fail-closed identity
+- [x] **Phase 0: Baseline, Inventory, and Compatibility Policy** - Live baseline, isolation policy, worktree/remote safety
+- [x] **Phase 1: Strict Contracts and Catalog-v2 Identity** - Recursive forbid contracts, FE/BO/COMMON grammar, fail-closed identity
 - [x] **Phase 2: Topology Authority, Evidence Contract, Hashes, Capabilities** - Endpoint map, exact evidence schema, authoritative hashes, capabilities; local gate ready_for_phase_3a=true
 - [x] **Phase 3A: Immutable Prepare/Commit Control Plane** - Prepare/discard/token, immutable payload, zero domain write on prepare; local gate ready_for_phase_3b=true
 - [x] **Phase 3B: Atomic Catalog, Exact Evidence, Durable Manifest Writes** - Domain+evidence+manifest co-commit, rollback, search interop
 - [x] **Phase 4: Manifest-Backed Verification and Read-Only Diagnostics** - Manifest reads, verify, edge resolve, split gates (completed 2026-07-18)
 - [x] **Phase 5: Verification, Security, Compatibility, and Migration Docs** - Exhaustive tests, isolation, docs, final report without canary (completed 2026-07-19)
-- [ ] **Phase 6: Catalog-v2 TDD-to-Canary Clean-Room Closure** - Test-first harness closure, exact source/image binding, isolated runtime staging, exactly one final canary
+- [x] **Phase 6: Catalog-v2 TDD-to-Canary Clean-Room Closure** - Test-first harness closure, exact source/image binding, isolated runtime staging, exactly one final canary (completed 2026-07-24 with accepted governance debt)
 
 ## Hard Gates
 
@@ -309,9 +309,9 @@ v1.0 Phase 1 → v1.0 Phase 2 (shipped) → Phase 0 → 1 → 2 → 3A → 3B �
 | Phase 3B. Atomic Catalog, Exact Evidence, Durable Manifest Writes | 6/6 | Complete; ready_for_phase_4=true | 2026-07-18 |
 | Phase 4. Manifest-Backed Verification and Read-Only Diagnostics | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true | 2026-07-18 |
 | Phase 5. Verification, Security, Compatibility, and Migration Docs | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true; canary_executed=false | 2026-07-19 |
-| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 9/11 | 06-11 blocking-human freeze checkpoint; top-level handoff pending; 06-05 sealed | — |
+| Phase 6. Catalog-v2 TDD-to-Canary Clean-Room Closure | 9/11 intentional | Complete; final Ollama canary PASSED; `DEV-P6-POST-ID-EVIDENCE-COMMITS` accepted | 2026-07-24 |
 
-**Active-plan progress:** 53/55 complete. Phase 6: 9/11 complete; 06-05 sealed; 06-11 intentionally incomplete at the blocking-human checkpoint.
+**Active-plan progress:** 53/55 complete by design. Phase 6 goal verified 5/5; 06-05 and 06-11 remain intentionally summary-free terminal plans.
 
 ## Coverage
 

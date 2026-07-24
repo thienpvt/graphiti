@@ -39,13 +39,18 @@ A catalog item can be retried safely and commits as exactly one deterministic, c
 - ✓ `group_id` already partitions Graphiti graph data and search — existing
 - ✓ Existing entity, edge, episodic, and provenance models provide the installed schema baseline — existing
 
+### Validated in v1.1
+
+- ✓ Agents can prepare, commit, replay, and discard bounded restart-safe immutable batch plans — Phases 3A–3B
+- ✓ Every committed batch has a durable exact manifest and manifest-backed verification — Phases 3B–4
+- ✓ Read-only catalog diagnostics remain usable while catalog mutation is disabled — Phase 4
+- ✓ Existing legacy MCP contracts, deterministic guarantees, search interoperability, and graph isolation remain intact — Phase 5
+- ✓ Source-bound native-Ollama clean-room runtime and exactly one final canary passed — Phase 6
+
 ### Active
 
-- [ ] Agents can prepare, commit, replay, and discard bounded restart-safe immutable batch plans
-- [ ] Every committed batch has a durable exact manifest and manifest-backed verification
-- [ ] Read-only catalog diagnostics remain usable while catalog mutation is disabled
-- [ ] Existing legacy MCP contracts, deterministic guarantees, search interoperability, and graph isolation remain intact
-- [ ] Catalog-v2 migration and regenerated-canary guidance are complete without executing a canary
+- [ ] Production promotion of the tested image digest under a separately approved rollout
+- [ ] Preserve accepted governance debt `DEV-P6-POST-ID-EVIDENCE-COMMITS` in milestone archives
 
 ### Delivered in v1.0
 
@@ -152,6 +157,8 @@ Existing unrelated working-tree changes in `mcp_server/k8s/graphiti-neo4j.yaml`,
 | Replace catalog-v2 Cartesian provenance with explicit one-source/one-target evidence links | Prevent implicit or inflated provenance while preserving standalone legacy behavior until Phase 3B | ✓ Phase 2 |
 | Hash the complete canonical batch domain under one versioned recipe | Omitted fields would create false idempotence and unsafe prepare/commit replay | ✓ Phase 2 |
 | Keep capability discovery mutation-free and available while writes are disabled | Agents need safe contract discovery before attempting writes | ✓ Phase 2 |
+| Promote only an already-tested source-bound image digest | Rebuilding after canary would sever tested-image authority | ✓ Phase 6 image/canary evidence |
+| Accept `DEV-P6-POST-ID-EVIDENCE-COMMITS` as visible governance debt | Evidence-only commits violated the no-post-ID rule but did not alter tested product/runtime authority | ⚠ Accepted 2026-07-24 |
 
 ## Evolution
 
@@ -171,4 +178,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-18 after Phase 2*
+*Last updated: 2026-07-24 after Phase 6*

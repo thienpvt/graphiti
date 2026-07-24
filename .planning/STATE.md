@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
 status: in_progress
-stopped_at: 06-11 blocking-human freeze checkpoint; pending top-level handoff
-last_updated: "2026-07-23T16:45:44.085Z"
+stopped_at: Phase 6 verified; accepted governance debt recorded; milestone audit pending.
+last_updated: "2026-07-24T02:20:00.000Z"
 progress:
   total_phases: 8
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 55
   completed_plans: 53
-  percent: 96
-current_phase: 06
-current_phase_name: Catalog-v2 TDD-to-Canary Clean-Room Closure
-last_activity: 2026-07-23
-last_activity_desc: 06-11 Task 1 complete; blocking-human freeze checkpoint; top-level handoff pending
+  percent: 100
+current_phase: null
+current_phase_name: null
+last_activity: 2026-07-24
+last_activity_desc: Phase 6 native Ollama canary PASSED; verification passed with accepted post-ID evidence-commit debt; audit pending
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md`
 
 ## Current Position
 
-Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. Native Ollama remediation reached the 06-11 blocking-human freeze checkpoint after Task 1 on fresh project a75e295d. Phase 6 itemized progress remains 9/11: 06-05 is sealed; 06-11 is intentionally incomplete pending top-level handoff.
+Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. Native Ollama remediation completed with one approved final canary on fresh project a75e295d. Phase 6 goal verified 5/5; plans 06-05 and 06-11 remain intentionally summary-free terminal plans; post-ID evidence commits are accepted governance debt.
 
 ### Phase 6 — OpenAI path (immutable terminal; never resume 06-05)
 
@@ -43,17 +43,17 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 - `canary_ids_allocated` for OpenAI path was true for that one run; result failed before commit; no second OpenAI canary
 - Dirty overlay `mcp_server/config/config-docker-neo4j.yaml` remains user-owned, unstaged, excluded from projection/image (dims 1536 vs qwen3 max 1024 noted; do not stage)
 
-### Phase 6 — Native Ollama remediation (06-11 blocking-human checkpoint)
+### Phase 6 — Native Ollama remediation (terminal PASSED)
 
 - Gap authority: `ab5fdeb:spec/new-phase.md` (native Ollama operation).
-- Itemized plans complete: **06-01..06-04 and 06-06..06-10 = 9/11**. **06-05 intentionally incomplete**; 06-11 intentionally incomplete at its blocking-human checkpoint.
+- Plans complete by contract: **06-01..06-04 and 06-06..06-10 = 9/11**. 06-05 and 06-11 remain intentionally summary-free terminal plans.
 - Historical projects `graphiti-phase6-cleanroom-1f529136` and `graphiti-phase6-cleanroom-d19a171e` remain untouched.
 - Image authority `sha256:85775ff1ead67b2b292ed171373ce496f2cdd83141528831d813a9f6668fc847` / bind `da8dce8` / context `5284da1b…`.
-- Fresh runtime project `graphiti-phase6-cleanroom-a75e295d`; ns_fp `36d75a3ff057e090`; config_fp `6550d751…`; ports 19474/19687/20000; stack remains running.
+- Final runtime project `graphiti-phase6-cleanroom-a75e295d`; ns_fp `36d75a3ff057e090`; config_fp `6550d751…`; ports 19474/19687/20000; stack remains running.
 - R0–R3 GREEN: schema 0/14→14/14 once; 28 tools; embeddings ollama / qwen3-embedding:0.6b / 1024 / ready / null waiver; prepare_called=false; llm_calls=0.
-- 06-11 Task 1 complete: prefreeze consistency revalidated; ignored host authority synchronized byte-for-byte with the live runtime; no source/image/runtime change.
-- No FREEZE receipt yet; no canary IDs; no prepare/commit/Catalog writes. Protected config remains modified and unstaged.
-- Blocking-human checkpoint reached. Execute-phase returned control. Never resume 06-05, 06-11, or GSD executor. Top-level alone writes the uncommitted freeze receipt, obtains genuine human approval, then runs exactly one canary outside GSD.
+- Final canary `20260724t001855z-20d91c7c`: PASSED; Gates 0–10; exact 3/2/1/5; one dry run, one prepare, one token-only commit; no retry; stack preserved.
+- Frozen/tested HEAD `9f01998`, count 1636. Later evidence-only commits `602aafe` and `8ec4151` violated the no-post-ID-commit rule without changing product/runtime authority.
+- Maintainer accepted `DEV-P6-POST-ID-EVIDENCE-COMMITS` as explicit governance debt. Never rerun canary, rewrite history, or clean final/historical stacks.
 
 ### Phase 5 (preserved historical facts)
 
@@ -87,7 +87,7 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 | Phase 3B | 6/6 | Complete |
 | Phase 4 | 6/6 | Complete; ready_for_phase_5=true; manifest_verification=true |
 | Phase 5 | 7/7 | Complete; final proof verified; ready_to_regenerate_canary=true |
-| Phase 6 | 9/11 | 06-11 blocking-human freeze checkpoint; top-level handoff pending; 06-05 sealed |
+| Phase 6 | 9/11 intentional | Complete; canary PASSED; accepted governance debt |
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
@@ -133,16 +133,15 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 
 ### Pending Todos
 
-- Top-level Phase A: write uncommitted `06-OLLAMA-FREEZE-RECEIPT.json` from actual post-Task-1 HEAD/count, then present the sanitized package for genuine human approval.
-- After approval only: run exactly one Ollama canary outside GSD executor. Never resume 06-05, 06-11, or execute-phase.
-- Never reuse/reclassify historical failed runtime attempts (1f529136 / d19a171e).
+- Run milestone audit. Carry `DEV-P6-POST-ID-EVIDENCE-COMMITS` into audit/archive as accepted governance debt.
+- Never rerun the final canary or reuse/reclassify historical failed runtime attempts (1f529136 / d19a171e).
 
 ### Blockers/Concerns
 
-- `P6-OLL-RT-01` met (06-10). `P6-OLL-CAN-01` and `P6-OLL-REPT-01` remain unmet until freeze/canary. `P6-OLL-SAFE-01` partial — preservation evidence exists; terminal preservation proof still pending.
+- Accepted debt: post-ID evidence commits violated the Phase 6 governance rule; factual canary result remains valid because product/runtime authority did not change.
 - Preserve unrelated working-tree changes: `.planning/config.json`, prior phase artifacts, Docker/Kubernetes configs, `.codegraph/`, `catalog/`, `mcp_server/sample_catalog.json`.
 - Unrelated `mcp_server/config/config-docker-neo4j.yaml` defaults `qwen3-embedding:0.6b` to 1536 dimensions although official maximum is 1024; intentionally untouched (P6-PRES-01).
-- Never clean, reuse, reconfigure, retry, or reclassify `graphiti-phase6-cleanroom-d19a171e`.
+- Never clean, reuse, reconfigure, retry, or reclassify final/historical clean-room stacks.
 - Never weaken a real product, transaction, validation, security, test, or hard gate.
 - No remote-state mutation without separate approval.
 
@@ -171,8 +170,8 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 
 ## Session Continuity
 
-**Last session:** 2026-07-23T16:45:44.085Z
+**Last session:** 2026-07-24T02:20:00.000Z
 **Resume file:** None
 
-Stopped at: 06-11 terminal blocking-human freeze checkpoint after Task 1.
-Next: top-level writes the uncommitted freeze receipt, presents sanitized authority, awaits genuine human approval. Never resume 06-05, 06-11, or execute-phase.
+Stopped at: Phase 6 verified complete with accepted governance debt.
+Next: milestone audit. Preserve final/historical stacks; never rerun canary.
