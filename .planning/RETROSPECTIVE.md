@@ -55,4 +55,45 @@
 - Design backend expansion only after proving equivalent transaction and provenance semantics.
 - Keep `clear_graph` and existing-data deletion outside catalog workflows.
 
+## v1.1 — Catalog-v2 Pre-Canary Hardening
+
+**Shipped:** 2026-07-24
+**Scope:** 8 phases, 53/55 plans by terminal-plan contract, 215 requirements
+
+### What Was Built
+
+- Strict catalog-v2 recursive contracts, FE/BO/COMMON identity, topology, hashes, capabilities, prepare/commit, evidence, manifests, diagnostics, compatibility, security, and migration guidance.
+- Raw-Git exact source binding, source-bound OCI image, isolated Compose runtime, exact 0/14 → 14/14 schema bootstrap, and exact 28-tool readiness.
+- One approved native-Ollama canary passed Gates 0–10 with exact 3/2/1/5 dry-run counts, one prepare, one token-only commit, and no retry.
+
+### What Worked
+
+- Freeze-before-allocation plus immutable image/runtime receipts kept the canary authority explicit.
+- Native Ollama removed the external credential dependency while preserving embedding-before-transaction semantics.
+- Exact manifests, contiguous ledgers, and group isolation made terminal evidence auditable without exposing secrets.
+
+### What Needed Rework
+
+- The first OpenAI-proxy path failed before commit and required a separate native-Ollama remediation path.
+- Evidence-only post-ID commits violated the freeze governance rule; retained as explicit accepted debt rather than concealed or repaired with a rerun.
+- Milestone requirement totals required reconciliation after additive Ollama requirements were incorporated.
+
+### Patterns Established
+
+- Never rebuild or rerun to repair a post-ID evidence-boundary defect.
+- Treat raw Git object bytes, image digest, generated config fingerprint, runtime project, and canary ledger as one authority chain.
+- Preserve terminal and historical runtime resources unless separately authorized for cleanup.
+
+### Key Lessons
+
+- Allocate irreversible IDs only after every source, image, and runtime gate is complete.
+- Keep evidence writes pre-boundary, or document the deviation immediately and retain it permanently.
+- Separate product readiness from production promotion; a passed isolated canary does not authorize deployment.
+
+### Technical Debt
+
+- `DEV-P6-POST-ID-EVIDENCE-COMMITS` accepted.
+- Phase 1 WR-R01/WR-R02 and Phase 2 PR-02-02-RED-COMMIT accepted.
+- Production promotion, full catalog ingest, migration, and non-Neo4j portability remain future work.
+
 ---

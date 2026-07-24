@@ -2,9 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Catalog-v2 Pre-Canary Hardening
-status: in_progress
-stopped_at: Phase 6 verified; accepted governance debt recorded; milestone audit pending.
-last_updated: "2026-07-24T02:20:00.000Z"
+status: Awaiting next milestone
+stopped_at: Milestone v1.1 completed and archived locally; accepted governance debt retained.
+last_updated: "2026-07-24T02:38:22.194Z"
+last_activity: 2026-07-24
+last_activity_desc: Milestone v1.1 completed and archived locally
 progress:
   total_phases: 8
   completed_phases: 8
@@ -13,8 +15,6 @@ progress:
   percent: 100
 current_phase: null
 current_phase_name: null
-last_activity: 2026-07-24
-last_activity_desc: Phase 6 native Ollama canary PASSED; verification passed with accepted post-ID evidence-commit debt; audit pending
 ---
 
 # Project State
@@ -24,16 +24,19 @@ last_activity_desc: Phase 6 native Ollama canary PASSED; verification passed wit
 See: `.planning/PROJECT.md`
 
 **Core value:** A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
-**Current focus:** Phase 06 — catalog-v2-phase-6-tdd-to-canary-clean-room-closure
+**Current focus:** Planning the next milestone
 
 ## Current Position
 
-Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. Native Ollama remediation completed with one approved final canary on fresh project a75e295d. Phase 6 goal verified 5/5; plans 06-05 and 06-11 remain intentionally summary-free terminal plans; post-ID evidence commits are accepted governance debt.
+Phase: Milestone v1.1 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-24 — Milestone v1.1 completed and archived
 
 ### Phase 6 — OpenAI path (immutable terminal; never resume 06-05)
 
 - Authority (original): `e52c1b5:spec/new-phase.md`
-- Requirements ingested: **64/64** P6-* IDs + **13/13** P6-OLL-* gap IDs (pending)
+- Requirements completed: **64/64** original P6-* IDs + **13/13** P6-OLL-* remediation IDs
 - Plans on disk: **11** (`06-01`…`06-05` original; `06-06`…`06-11` Ollama gap_closure)
 - Plan 06-01..06-04 complete (archive/classification/bind/image)
 - Candidate `60d270d` / image `3602956…` remain historical OpenAI-path authority only
@@ -105,36 +108,17 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 
 ### Decisions
 
-- Active v1.1 spine Phase 0 / 1 / 2 / 3A / 3B / 4 / 5 is complete.
-- Phase 6 authorized by `e52c1b5`; 64 P6-* requirements ingested; five-wave plans written (06-01 archive TDD → 06-02 classification/auth/replay TDD → 06-03 bind/matrix → 06-04 image → 06-05 R0–R3/freeze/handoff).
-- Phase 6 Plans 06-01 through 06-04 complete (4/5); IMAGE green; no runtime/IDs/canary.
-- [Phase 06]: Latest bound image authority is commit `60d270dfad329ca19508300308066776edeead23`, tree `ea6f5f3af0decf5c1d48ffc7c37eefd089c8d2ce`, context `0c24ce0aba2c1c316c69e7ff1b8ec47b5f74b1977ad83ca9f519a435fb4dc38a`; image `3602956…` is complete-image zero-hit green. Invalidated candidates/images remain preserved.
-- No automatic catalog-v1 migration, deployment, push, merge, tag, graph clear, or existing-data deletion.
-- Development/live tests use only `oracle-catalog-tool-test`.
-- Never query or mutate `oracle-catalog-v2`.
-- Phase 3B uses two-axis safety: permanent historical audit for `a67789a`; independent current safety. Historical event class `test_policy`, scope `local_neo4j_no_corresponding_data`.
-- `features.manifests=true`; `manifest_verification=true`.
-- `canary_executed=false` remains hard truth until Phase 6 top-level handoff.
-- Post-ID canary classes only: PASSED | FAILED_BEFORE_COMMIT | FAILED_AFTER_COMMIT (never post-ID BLOCKED).
-- P6-CAN-04/05: one primary token-only commit; committed harness replay gate (no second commit).
-- P6-PROV-03: contract-safe auth sentinel path; no CatalogErrorCode expansion (P6-HARN-19).
-- [Phase 06]: Git object bytes are source authority; checkout and git-archive EOL behavior is excluded.
-- [Phase 06]: Canonical context hash preserves ls-tree order and excludes mode/object ID from the aggregate.
-- [Phase 06]: 06-06: native Ollama clean-room example is ollama/qwen3-embedding:0.6b/1024; reuse OllamaEmbedder; omit api_key
-- [Phase 06]: 06-07: Ollama tags-only readiness, null waiver, freeze authority, config fingerprint, and Gate 1 observed binding verified
-- [Phase 06]: 06-08: protected config-docker-neo4j.yaml deferred unstaged; clean-room example Ollama authority
-- [Phase 06]: 06-08: preflight pulled exact qwen3-embedding:0.6b; native embed 1024; credential_used=false
-- [Phase 06]: 06-08: MATRIX_GREEN 18 checks + required E2E; no image/runtime/canary IDs
-- [Phase 06]: Historical 06-09 authority `3b349dd` / `sha256:431a246…` remains preserved but is superseded for future execution.
-- [Phase 06]: Fresh 06-09 authority: candidate `da8dce8`, tree `47506ef0`, context `5284da1b…`; archive 812/812 exact; matrix 21/21; image `sha256:85775ff…`; scan zero; build_count=1.
-- [Phase 06]: Rebound 06-09 performed zero runtime starts, IDs, launcher invocations, prepare, commit, or Catalog writes. Previous failed runtime resources/evidence remain immutable.
-- [Phase 06]: 06-10 complete — fresh a75e295d Ollama R0–R3 GREEN + prefreeze; 06-05 remains intentionally incomplete.
-- [Phase 06]: 06-11 Task 1 complete; terminal blocking-human checkpoint reached; SUMMARY suppressed; top-level freeze/canary handoff pending; executor resume forbidden.
+- v1.1 Phase 0 / 1 / 2 / 3A / 3B / 4 / 5 / 6 is complete and archived.
+- `features.manifests=true`; `manifest_verification=true`; exact 14 legacy + 14 catalog tools verified.
+- Final native-Ollama canary `20260724t001855z-20d91c7c` passed Gates 0–10 with one dry run, one prepare, one token-only commit, and no retry.
+- Git object bytes, image digest, generated config fingerprint, runtime project, and terminal ledger form the tested authority chain.
+- `DEV-P6-POST-ID-EVIDENCE-COMMITS` remains accepted governance debt; never amend, rebuild, rerun, or clean up to conceal it.
+- No automatic catalog-v1 migration, deployment, push, tag, graph clear, existing-data deletion, or final/historical runtime cleanup.
 
 ### Pending Todos
 
-- Run milestone audit. Carry `DEV-P6-POST-ID-EVIDENCE-COMMITS` into audit/archive as accepted governance debt.
-- Never rerun the final canary or reuse/reclassify historical failed runtime attempts (1f529136 / d19a171e).
+- Define the next milestone with `/gsd-new-milestone`.
+- Production promotion requires separate explicit approval; promote the tested digest without claiming a rebuild is equivalent.
 
 ### Blockers/Concerns
 
@@ -163,15 +147,19 @@ Phase 5 complete (historical). Phase 6 OpenAI-path canary failed before commit. 
 
 | Category | Item | Status |
 |----------|------|--------|
-| Canary | Phase 6 production/regenerated canary | Separate approval |
+| Promotion | Production rollout of tested image digest | Separate approval |
 | Migration | Automatic catalog-v1 → catalog-v2 migration | Out of scope |
 | Backend | FalkorDB/Kuzu/Neptune catalog portability | Deferred |
 | Product | Oracle extraction, parser, path/impact, delta/retirement | Deferred |
 
 ## Session Continuity
 
-**Last session:** 2026-07-24T02:20:00.000Z
+**Last session:** 2026-07-24
 **Resume file:** None
 
-Stopped at: Phase 6 verified complete with accepted governance debt.
-Next: milestone audit. Preserve final/historical stacks; never rerun canary.
+Stopped at: v1.1 archived locally with accepted governance debt.
+Next: `/gsd-new-milestone`. Preserve final/historical stacks; never rerun canary.
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

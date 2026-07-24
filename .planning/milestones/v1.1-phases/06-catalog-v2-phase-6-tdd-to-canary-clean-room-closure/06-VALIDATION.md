@@ -1,11 +1,11 @@
 ---
 phase: 6
 slug: catalog-v2-phase-6-tdd-to-canary-clean-room-closure
-status: planned
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-07-22
-updated: 2026-07-23
+updated: 2026-07-24
 plans: 11
 ---
 
@@ -48,24 +48,24 @@ plans: 11
 | 06-02-02 | 02 | 2 | same + P6-PRES-01/02, P6-CONT-01, P6-CAN-01..06 | GREEN early-terminal helper; classifier; prepare/search sentinel; prompt Gate 0/10/Terminal; counts from validated manifest only; final-canary launcher job-tmp env expansion + unit tests GREEN (pre-BIND) | unit | harness 57 passed; catalog matrix 309 passed; Ruff + compile green; no live MCP/Docker/canary | present | GREEN |
 | 06-03-01 | 03 | 3 | P6-BASE-01/03, P6-HARN-01..19, P6-TDD-04, P6-PRES-01/02, P6-CONT-01 | Source-complete PREBIND matrix incl. final-canary launcher suite; HARN-01..19 harn_checklist offline/live/deferred; job-tmp workspaces; no unsupported skip | offline matrix | `06-PREBIND-MATRIX-RECEIPT.json`: 58 focused + 80 Phase5 + 475 warning-strict union + 1556 complete catalog + 84 direct + 134 combined; Ruff/format/Pyright/compile green | present | GREEN |
 | 06-03-02 | 03 | 3 | P6-BIND-01..06, P6-HARN-01..19, P6-TDD-04 | Freeze HEAD; exact archive bind under `$CLAUDE_JOB_DIR/tmp/phase6-bind-archive-*`; frozen matrix from archive (launcher in candidate); HARN checklist complete for pre-canary offline IDs | offline matrix + bind | `06-BIND-RECEIPT.json` + `06-MATRIX-RECEIPT.json`: candidate `d54abe9`; 756 exact files; 0 missing/extra/mismatch; 134 focused + 80 Phase5 + 475 union + 1556 complete + 84 direct + 8 archive; HARN map complete | present | GREEN |
-| 06-04-01 | 04 | 4 | P6-IMG-01..05, P6-BASE-02, P6-RT-00, P6-PRES-01/02 | Gate precheck; OCI labels via `docker build --label` only; **no Dockerfile/source edits**; no Plan 03 re-run; no runtime | Docker inspect strategy | plan-04 task verify; Dockerfile porcelain clean | planned | planned |
-| 06-04-02 | 04 | 4 | P6-IMG-01..05 | Filtered archive-derived build under job tmp; deny-list; secret scan via symbol+blob/hash authority (not line range); IMAGE receipt; labels via --label only | Docker build/inspect | `06-IMAGE-RECEIPT.json` | planned | planned |
-| 06-05-01 | 05 | 5 | P6-RT-00/R0/R1, P6-HARN-03/04/09..14, P6-SAFE-01, P6-PRES-03 | R0 isolation render + R1 Neo4j; no canary IDs | live Docker | `06-R0-RECEIPT.json` + `06-R1-RECEIPT.json` | planned | planned |
-| 06-05-02 | 05 | 5 | P6-RT-R2/R3, P6-PROV-01, P6-HARN-05/06/08/17 | R2 one-shot schema; R3 MCP readiness only | live Docker/MCP | `06-R2-RECEIPT.json` + `06-R3-RECEIPT.json` | planned | planned |
-| 06-05-03 | 05 | 5 | P6-CAN-01, P6-PRES-01 | Prefreeze package + `06-POST-APPROVAL-INVOCATION.json` with argv_template tokens `{CLAUDE_JOB_TMP}` (no `$CLAUDE_JOB_DIR` literals) + argv_expansion contract; no SUMMARY; no final FREEZE; no IDs | artifact | `06-PREFREEZE-HANDOFF.md` + `06-FREEZE-INPUTS.json` + `06-POST-APPROVAL-INVOCATION.json` (assert no `$` in argv_template; argv_expansion present) | planned | planned |
-| 06-05-04 | 05 | 5 | P6-CAN-01..06, P6-TERM-*, P6-REPT-01, P6-PROV-03, P6-AUTH-01, P6-SAFE-02 | Terminal freeze STOP + checkpoint_contract; top-level FREEZE then expand argv per argv_expansion and run exact validated expanded argv once shell=False; dry-run counts 3/2/1/5; AUTH-01; no gsd-executor resume | live handoff (top-level) | uncommitted FREEZE + expanded launcher invocation + CANARY ledger + FINAL REPORT; incomplete plan is success | planned | planned |
-| 06-06-01 | 06 | 6 | P6-OLL-AUTH-01, P6-OLL-CONF-01, P6-OLL-EMB-01 | RED Stage A/B native Ollama config/factory/dim + no-LLM prepare/commit spy; no production config change | unit | `uv run --project mcp_server pytest mcp_server/tests/test_catalog_ollama_cleanroom_config.py mcp_server/tests/test_factories.py -q`; `uv run pytest tests/embedder/test_ollama.py -q` (exit 1 intentional RED) | planned | planned |
-| 06-06-02 | 06 | 6 | P6-OLL-CONF-01, P6-OLL-EMB-01 | GREEN catalog-local.example ollama/qwen3/1024; factory native path; dirty overlay unstaged | unit | same focused suites green; `git status --short mcp_server/config/config-docker-neo4j.yaml` shows unstaged | planned | planned |
-| 06-07-01 | 07 | 7 | P6-OLL-CAPA-01, P6-OLL-LAUNCH-01 | RED capability waiver + final-canary freeze/argv Ollama contracts | unit | `uv run --project mcp_server pytest mcp_server/tests/test_catalog_capabilities.py -q`; `uv run pytest tests/script/test_run_catalog_phase6_final_canary.py -q` (exit 1 intentional RED) | planned | planned |
-| 06-07-02 | 07 | 7 | P6-OLL-CAPA-01, P6-OLL-LAUNCH-01 | GREEN tags-ready/no OpenAI waiver; conditional launcher argv; freeze field authority | unit | same suites green | planned | planned |
-| 06-08-01 | 08 | 8 | P6-OLL-SAFE-01, P6-OLL-PREFLIGHT-01 | Config safety; sanitized host Ollama preflight receipt | runtime preflight | `06-OLLAMA-PREFLIGHT.json`: daemon_reachable, model_present, native_endpoint_successful, observed_dimension=1024, credential_used=false | planned | planned |
-| 06-08-02 | 08 | 8 | P6-OLL-TDD-01 | Complete remediation matrix + required Ollama E2E; zero unexplained skip/deselect | offline matrix + E2E | `06-OLLAMA-MATRIX-RECEIPT.json`: required suite inventory; skip_count=0; deselect_count=0; E2E env model/dim proof | planned | planned |
-| 06-09-01 | 09 | 9 | P6-OLL-BIND-01 | Candidate commit + raw-Git exact archive bind | bind | `06-OLLAMA-BIND-RECEIPT.json` | planned | planned |
-| 06-09-02 | 09 | 9 | P6-OLL-IMG-01 | New source-bound Ollama image; prior OpenAI image historical only | Docker build/inspect | `06-OLLAMA-IMAGE-RECEIPT.json` | planned | planned |
-| 06-10-01 | 10 | 10 | P6-OLL-RT-01 | New clean-room R0–R3: exact 0/14→14/14, 28 tools, exact image ID, ollama/qwen3/1024/ready/null waiver | live Docker/MCP | `06-OLLAMA-R0..R3-RECEIPT.json` with schema/tool/image/provider assertions | planned | planned |
-| 06-10-02 | 10 | 10 | P6-OLL-RT-01 | Prefreeze package under 06-OLLAMA-*; no IDs/SUMMARY/FREEZE finalize | artifact | `06-OLLAMA-PREFREEZE-HANDOFF.md` + FREEZE-INPUTS + POST-APPROVAL-INVOCATION + FINAL-REPORT shell | planned | planned |
-| 06-11-01 | 11 | 11 | P6-OLL-CAN-01, P6-OLL-SAFE-01, P6-OLL-AUTH-01 | Prefreeze completeness commit; markers PENDING_TOP_LEVEL_HANDOFF; no SUMMARY | artifact | prefreeze package present; no 06-11-SUMMARY.md | planned | planned |
-| 06-11-02 | 11 | 11 | P6-OLL-CAN-01, P6-OLL-REPT-01, P6-OLL-SAFE-01 | Terminal human-action blocking-human STOP; top-level FREEZE + one Ollama canary; SUMMARY suppressed | live handoff (top-level) | uncommitted `06-OLLAMA-FREEZE-RECEIPT.json` + CANARY ledger + FINAL REPORT; incomplete plan is success | planned | planned |
+| 06-04-01 | 04 | 4 | P6-IMG-01..05, P6-BASE-02, P6-RT-00, P6-PRES-01/02 | Gate precheck; OCI labels via `docker build --label` only; **no Dockerfile/source edits**; no Plan 03 re-run; no runtime | Docker inspect strategy | plan-04 task verify; Dockerfile porcelain clean | present | GREEN |
+| 06-04-02 | 04 | 4 | P6-IMG-01..05 | Filtered archive-derived build under job tmp; deny-list; secret scan via symbol+blob/hash authority (not line range); IMAGE receipt; labels via --label only | Docker build/inspect | `06-IMAGE-RECEIPT.json` | present | GREEN |
+| 06-05-01 | 05 | 5 | P6-RT-00/R0/R1, P6-HARN-03/04/09..14, P6-SAFE-01, P6-PRES-03 | Historical OpenAI-path R0/R1 evidence only | live Docker | `06-R0-RECEIPT.json` + `06-R1-RECEIPT.json` | present | GREEN historical |
+| 06-05-02 | 05 | 5 | P6-RT-R2/R3, P6-PROV-01, P6-HARN-05/06/08/17 | Historical OpenAI-path R2/R3 evidence only | live Docker/MCP | `06-R2-RECEIPT.json` + `06-R3-RECEIPT.json` | present | GREEN historical |
+| 06-05-03 | 05 | 5 | P6-CAN-01, P6-PRES-01 | Historical OpenAI prefreeze package; no SUMMARY | artifact | `06-PREFREEZE-HANDOFF.md` + inputs/invocation | present | GREEN historical |
+| 06-05-04 | 05 | 5 | P6-CAN-01..06, P6-TERM-*, P6-REPT-01, P6-PROV-03, P6-AUTH-01, P6-SAFE-02 | Historical OpenAI canary terminal FAILED_BEFORE_COMMIT; never retried | live handoff | immutable old ledger/report | present | terminal historical |
+| 06-06-01 | 06 | 6 | P6-OLL-AUTH-01, P6-OLL-CONF-01, P6-OLL-EMB-01 | RED Stage A/B native Ollama config/factory/dim + no-LLM prepare/commit spy | unit | focused suites intentional RED | present | RED |
+| 06-06-02 | 06 | 6 | P6-OLL-CONF-01, P6-OLL-EMB-01 | GREEN catalog-local.example ollama/qwen3/1024; factory native path | unit | focused suites green | present | GREEN |
+| 06-07-01 | 07 | 7 | P6-OLL-CAPA-01, P6-OLL-LAUNCH-01 | RED capability waiver + final-canary freeze/argv Ollama contracts | unit | focused suites intentional RED | present | RED |
+| 06-07-02 | 07 | 7 | P6-OLL-CAPA-01, P6-OLL-LAUNCH-01 | GREEN tags-ready/no OpenAI waiver; conditional launcher argv | unit | focused suites green | present | GREEN |
+| 06-08-01 | 08 | 8 | P6-OLL-SAFE-01, P6-OLL-PREFLIGHT-01 | Config safety; sanitized host Ollama preflight receipt | runtime preflight | `06-OLLAMA-PREFLIGHT.json` | present | GREEN |
+| 06-08-02 | 08 | 8 | P6-OLL-TDD-01 | Complete remediation matrix + required Ollama E2E | offline matrix + E2E | `06-OLLAMA-MATRIX-RECEIPT.json` | present | GREEN |
+| 06-09-01 | 09 | 9 | P6-OLL-BIND-01 | Candidate commit + raw-Git exact archive bind | bind | `06-OLLAMA-BIND-RECEIPT.json` | present | GREEN |
+| 06-09-02 | 09 | 9 | P6-OLL-IMG-01 | New source-bound Ollama image; prior OpenAI image historical only | Docker build/inspect | `06-OLLAMA-IMAGE-RECEIPT.json` | present | GREEN |
+| 06-10-01 | 10 | 10 | P6-OLL-RT-01 | New clean-room R0–R3: exact 0/14→14/14, 28 tools, exact image ID, ollama/qwen3/1024/ready/null waiver | live Docker/MCP | `06-OLLAMA-R0..R3-RECEIPT.json` | present | GREEN |
+| 06-10-02 | 10 | 10 | P6-OLL-RT-01 | Prefreeze package under 06-OLLAMA-* | artifact | handoff + inputs + invocation + report shell | present | GREEN |
+| 06-11-01 | 11 | 11 | P6-OLL-CAN-01, P6-OLL-SAFE-01, P6-OLL-AUTH-01 | Prefreeze completeness; no SUMMARY | artifact | package present; forbidden summaries absent | present | GREEN |
+| 06-11-02 | 11 | 11 | P6-OLL-CAN-01, P6-OLL-REPT-01, P6-OLL-SAFE-01 | One approved top-level canary; SUMMARY suppressed | live handoff | freeze + ledger + final report; run `20260724t001855z-20d91c7c` | present | GREEN with accepted governance debt |
 
 *Status legend: planned · planned/RED · GREEN (execution only) · ⚠️ flaky*
 
@@ -80,15 +80,15 @@ plans: 11
 - [x] One primary commit; committed harness replay (no second commit)
 - [x] Sanitized final-report `counts` {entities,edges,sources,evidence_links} + `dry_run_zero_write_proven`
 - [x] Final-canary launcher RED stub+tests in plan 02 Task 1; GREEN in Task 2 (pre-BIND); env unset/relative/outside-boundary/leftover-token fail closed
-- [ ] Plan 04: no Dockerfile/source edits; labels via `--label` only
-- [ ] Plan 05: `06-POST-APPROVAL-INVOCATION.json` with `{CLAUDE_JOB_TMP}` + argv_expansion (no `$CLAUDE_JOB_DIR` in argv_template) + Task 4 checkpoint_contract
+- [x] Plan 04: no Dockerfile/source edits; labels via `--label` only
+- [x] Plan 05: historical OpenAI path terminal evidence preserved; never resumed
 - [x] Prompt Gate 0 / Terminal / Gate 10 contracts
-- [ ] Plan 06: RED/GREEN native Ollama clean-room config + factory/dim + no-LLM prepare/commit spy
-- [ ] Plan 07: RED/GREEN capability waiver + final-canary freeze/argv Ollama authority
-- [ ] Plan 08: preflight receipt + complete matrix/E2E with zero unexplained skips
-- [ ] Plan 09: Ollama bind receipt + new image receipt
-- [ ] Plan 10: new R0–R3 exact schema/tool/image/provider proofs + prefreeze package
-- [ ] Plan 11: freeze STOP; SUMMARY suppressed; top-level one canary only
+- [x] Plan 06: RED/GREEN native Ollama clean-room config + factory/dim + no-LLM prepare/commit spy
+- [x] Plan 07: RED/GREEN capability waiver + final-canary freeze/argv Ollama authority
+- [x] Plan 08: preflight receipt + complete matrix/E2E with zero unexplained skips
+- [x] Plan 09: Ollama bind receipt + new image receipt
+- [x] Plan 10: new R0–R3 exact schema/tool/image/provider proofs + prefreeze package
+- [x] Plan 11: freeze STOP; SUMMARY suppressed; exactly one top-level canary PASSED
 
 Existing H1–H7 tests remain offline authority for already-closed launcher/materializer/bootstrap/registry contracts.
 
@@ -113,12 +113,12 @@ Existing H1–H7 tests remain offline authority for already-closed launcher/mate
 
 ## Validation Sign-Off
 
-- [ ] All tasks have automated verification or explicit runtime-gated proof
-- [ ] No three consecutive source tasks lack a focused automated check
-- [ ] Wave 0 / RED scaffolding complete before GREEN dependents
-- [ ] No watch-mode, hidden retries, skipped contracts, or deselection
-- [ ] Exact committed archive passes frozen matrix before image
-- [ ] Canary freeze recorded before any run/group/control/batch ID allocation
-- [ ] `nyquist_compliant: true` only after every required proof is mapped **and executed green**
+- [x] All tasks have automated verification or explicit runtime-gated proof
+- [x] No three consecutive source tasks lack a focused automated check
+- [x] Wave 0 / RED scaffolding complete before GREEN dependents
+- [x] No watch-mode, hidden retries, skipped contracts, or unexplained deselection
+- [x] Exact committed archive passes frozen matrix before image
+- [x] Canary freeze recorded before any run/group/control/batch ID allocation
+- [x] `nyquist_compliant: true` only after every required proof is mapped **and executed green**
 
-**Approval:** pending (planning only; not green)
+**Approval:** validated 2026-07-24. Final canary passed. `DEV-P6-POST-ID-EVIDENCE-COMMITS` remains accepted governance debt, not hidden compliance.

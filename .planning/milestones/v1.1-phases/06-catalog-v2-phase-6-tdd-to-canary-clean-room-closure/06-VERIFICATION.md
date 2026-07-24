@@ -21,6 +21,27 @@ The deviation changed planning evidence only. It did not change runtime source, 
 
 ## Requirement Verification
 
+### Original Phase 6 contract (64/64)
+
+| Requirement cluster | Status | Evidence |
+|---------------------|--------|----------|
+| P6-AUTH-01 | PASS | Exactly one authorized final clean-room operation; no deployment, historical group, Kubernetes, or second canary |
+| P6-BASE-01, P6-BASE-02, P6-BASE-03 | PASS | Baseline authority retained; old image historical; source blockers closed before runtime |
+| P6-PRES-01, P6-PRES-02, P6-PRES-03 | PASS WITH DEBT | Dirty config and historical resources preserved; post-ID evidence commits recorded as accepted deviation |
+| P6-PROV-01, P6-PROV-02, P6-PROV-03 | PASS | Zero generative LLM; embedding proof via search/prepare; auth terminal classification contract verified |
+| P6-HARN-01..P6-HARN-19 | PASS | Validated fixed launcher, project/volume/namespace authority, bootstrap, exact image/tool/manifest contracts, sanitized contiguous ledgers |
+| P6-TDD-01, P6-TDD-02, P6-TDD-03, P6-TDD-04 | PASS | RED-first minimal GREEN iterations; frozen matrix green without unexplained skip/deselect |
+| P6-BIND-01..P6-BIND-06 | PASS | Task-owned commits; raw-Git exact archive; exact membership/modes/blobs/context; archive matrix; fix-forward preservation |
+| P6-IMG-01..P6-IMG-05 | PASS | Exact archive-derived image, commit tag/labels, no pull/push/retag, zero secret hits, sanitized image receipt |
+| P6-RT-00, P6-RT-R0, P6-RT-R1, P6-RT-R2, P6-RT-R3, P6-RT-DISP | PASS | Activation after gates; absent resources; Neo4j-only; 0/14→14/14 once; exact image/28 tools; failed candidates preserved |
+| P6-CAN-01..P6-CAN-06 | PASS WITH DEBT | Frozen authority; exactly one new canary; 3/2/1/5 zero-write dry run; one prepare/commit; manifest/search/control reconciliation; no retry |
+| P6-SAFE-01, P6-SAFE-02 | PASS WITH DEBT | No prune/clear/delete/Kubernetes; final stack preserved; evidence-commit deviation accepted |
+| P6-TERM-01, P6-TERM-02, P6-TERM-03, P6-TERM-04 | PASS | Final `PASSED`; pre/post-ID terminal allowlists held; no API-key blocker classification |
+| P6-REPT-01 | PASS | Sanitized complete terminal evidence; raw namespace/credentials/tokens/environment/endpoints excluded |
+| P6-CONT-01 | PASS | Prior H1–H7 evidence reused; completed work rerun only for authoritative gates/fixes |
+
+### Native Ollama remediation (13/13; one accepted debt)
+
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
 | P6-OLL-AUTH-01 | PASS | AUTH-01 records one invocation, no deployment/Kubernetes, no historical groups, no second canary |

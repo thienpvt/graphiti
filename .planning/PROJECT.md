@@ -10,16 +10,19 @@ The v1.0 implementation preserves existing Graphiti and MCP behavior. It deliver
 
 A catalog item can be retried safely and commits as exactly one deterministic, correctly typed, searchable Neo4j object without LLM-derived or implicit graph mutations.
 
-## Current Milestone: v1.1 Catalog-v2 Pre-Canary Hardening
+## Current State
 
-**Goal:** Harden deterministic catalog identity, validation, provenance, prepare/commit, manifest, and verification contracts before any regenerated canary is executed.
+**Shipped:** v1.1 Catalog-v2 Pre-Canary Hardening on 2026-07-24.
 
-**Target features:**
-- Strict recursive catalog request contracts and fail-closed catalog-v2 FE/BO identity grammar
-- Server-owned edge endpoint maps plus authoritative batch hashing and capabilities discovery
-- Restart-safe immutable prepare/commit/discard protocol with exact evidence links
-- Durable batch manifests, manifest-backed verification, typed edge resolution, and split read/write gates
-- Exhaustive unit, service, store, MCP, concurrency, live Neo4j, security, compatibility, and documentation coverage
+Delivered strict catalog-v2 contracts and identity, server-owned topology and hashing, immutable prepare/commit, exact evidence, durable manifests, read-only diagnostics, compatibility/security coverage, source-bound clean-room orchestration, and exactly one approved native-Ollama final canary. The canary passed Gates 0–10 with exact 3/2/1/5 dry-run counts, one prepare, one token-only commit, and no retry.
+
+**Archive:** `.planning/milestones/v1.1-ROADMAP.md`, `.planning/milestones/v1.1-REQUIREMENTS.md`, `.planning/milestones/v1.1-MILESTONE-AUDIT.md`, `.planning/milestones/v1.1-phases/`.
+
+**Accepted debt:** `DEV-P6-POST-ID-EVIDENCE-COMMITS`, Phase 1 WR-R01/WR-R02, and Phase 2 PR-02-02-RED-COMMIT remain visible. Final and historical runtime resources remain preserved.
+
+## Next Milestone Goals
+
+Not defined. Production promotion of the tested image digest requires a separate approved rollout. Start future planning with `/gsd-new-milestone`.
 
 ## Requirements
 
@@ -50,7 +53,10 @@ A catalog item can be retried safely and commits as exactly one deterministic, c
 ### Active
 
 - [ ] Production promotion of the tested image digest under a separately approved rollout
-- [ ] Preserve accepted governance debt `DEV-P6-POST-ID-EVIDENCE-COMMITS` in milestone archives
+
+### Archived in v1.1
+
+- ✓ Accepted governance debt `DEV-P6-POST-ID-EVIDENCE-COMMITS` is preserved in the v1.1 milestone audit and archive
 
 ### Delivered in v1.0
 
@@ -178,4 +184,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-24 after Phase 6*
+*Last updated: 2026-07-24 after v1.1 milestone completion*
