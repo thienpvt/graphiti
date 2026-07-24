@@ -1,10 +1,10 @@
 # Phase 6 Native Ollama Terminal Report (shell)
 
-**status:** PREFREEZE_READY
-**classification:** R0_R3_GREEN_PENDING_FREEZE
-**canary_executed:** false
-**canary_ids_allocated:** false
-**freeze_receipt_written:** false
+**status:** TERMINAL_PASSED
+**classification:** PASSED
+**canary_executed:** true
+**canary_ids_allocated:** true
+**freeze_receipt_written:** true
 
 ## Authority
 
@@ -25,42 +25,58 @@
 | R1 | GREEN — Neo4j-only authority; MCP absent |
 | R2 | GREEN — first inspection `0/14`; one bootstrap; first postflight `14/14`; retry count `0` |
 | R3 | GREEN — Compose MCP healthy; image match; 28 tools; ollama/qwen3-embedding:0.6b/1024/ready; waiver null |
-| Prefreeze | COMMITTED under 06-OLLAMA-* (no freeze finalize) |
-| Final canary | NOT RUN |
+| Prefreeze | COMMITTED under 06-OLLAMA-* |
+| Freeze | APPROVED — HEAD `9f0199808ede02c07f60292e002f428f87d3db94`, count `1636` |
+| Final canary | PASSED — Gates 0–10; zero LLM; null waiver |
 
-## Live markers (empty until canary)
+## Live markers
 
-| Marker | Value |
-|--------|-------|
-| freeze_head | |
-| freeze_commit_count | |
-| canary_run_id | |
-| prepare_count | 0 |
-| commit_count | 0 |
-| catalog_write_count | 0 |
-| search_nodes_embedding_proof | |
-| terminal_status | |
+<!-- phase6-final-canary-live:start -->
+- Classification: `PASSED`
+- Run ID: `20260724t001855z-20d91c7c`
+- Group ID: `oracle-catalog-v2-canary-20260724t001855z-20d91c7c`
+- Control group ID: `oracle-catalog-v2-canary-20260724t001855z-20d91c7c-empty-control`
+- Batch ID: `accept-tab-catalog-v2-canary-20260724t001855z-20d91c7c`
+- Counts: `{"edges": 2, "entities": 3, "evidence_links": 5, "sources": 1}`
+- Dry-run zero-write proven: `true`
+- Replay: `skipped`
+- Tool calls: `37`
+- Final ordinal: `37`
+- AUTH-01: `{"canary_invocation_count": 1, "deployment_applied": false, "historical_group_ids_used": false, "kubernetes_applied": false, "mode": "iterative_tdd_plus_one_final_clean_room_canary", "second_canary": false}`
+- Stack preserved: `true`
+<!-- phase6-final-canary-live:end -->
 
 ## Counts
 
 | Operation | Count |
 |-----------|------:|
-| Canary identity allocation | 0 |
-| Final-canary launcher invocation | 0 |
-| `prepare_catalog_batch` | 0 |
-| `commit_catalog_batch` | 0 |
-| Catalog writes | 0 |
+| Canary identity allocation | 1 |
+| Final-canary launcher invocation | 1 |
+| Dry-run `upsert_catalog_batch` | 1 |
+| `prepare_catalog_batch` | 1 |
+| `commit_prepared_catalog_batch` | 1 |
+| Committed catalog batch | 1 |
 | Cleanup operations | 0 |
 
 ## Preservation
 
 - Historical OpenAI-path evidence and stack remain unchanged.
 - Prior failed Ollama project `graphiti-phase6-cleanroom-d19a171e` remains intact.
-- Fresh project containers, network, and volumes remain running for 06-11.
+- Final project containers, network, and volumes remain running after terminal success.
 - Protected user-owned config remains modified, unstaged, and uncommitted.
 - No deployment, Kubernetes action, graph clear, data deletion, prune, or volume removal occurred.
 - No raw namespace, credential, token, vector, full environment, raw endpoint, or sensitive endpoint parameter is recorded here.
 
+## Terminal verification
+
+- Gates 0–10: all pass.
+- Exact dry run: 3 entities / 2 edges / 1 source / 5 evidence links; zero-write proven.
+- Prepare count: 1. Token-only commit count: 1. Commit confirmed. Retry count: 0.
+- Manifest, typed entity/edge resolution, five evidence links, node/fact search, control isolation: verified.
+- Embeddings: ollama / qwen3-embedding:0.6b / 1024 / ready; waiver false; config fingerprint matched freeze.
+- Protected groups queried: none. Prohibited tools called: none. Secrets persisted: false.
+- Source HEAD and commit count remained frozen. Stack preserved. No cleanup.
+
 ## Disposition
 
-R0–R3 green on native Ollama. Prefreeze package committed. Freeze finalize and final canary deferred to 06-11 via `/gsd-execute-phase 6 --gaps-only --wave 6 --no-transition`.
+Exactly one native-Ollama final canary passed. Run `20260724t001855z-20d91c7c`; terminal evidence remains uncommitted. No second canary. No GSD executor resume. No verify/complete/tag/cleanup lifecycle.
