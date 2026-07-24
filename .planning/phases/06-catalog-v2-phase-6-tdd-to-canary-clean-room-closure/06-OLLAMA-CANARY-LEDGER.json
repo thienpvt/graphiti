@@ -1,0 +1,34 @@
+{
+  "allow_unknown_embedding_provider": null,
+  "auth_01": {
+    "canary_invocation_count": 1,
+    "deployment_applied": false,
+    "historical_group_ids_used": false,
+    "kubernetes_applied": false,
+    "mode": "iterative_tdd_plus_one_final_clean_room_canary",
+    "second_canary": false
+  },
+  "batch_id": "accept-tab-catalog-v2-canary-20260724t001855z-20d91c7c",
+  "classification": "PASSED",
+  "config_fingerprint": "6550d751de6d2373506b0a1d64be6cdba9ef08f74d90d073d57cb07f31735633",
+  "control_group_id": "oracle-catalog-v2-canary-20260724t001855z-20d91c7c-empty-control",
+  "counts": {
+    "edges": 2,
+    "entities": 3,
+    "evidence_links": 5,
+    "sources": 1
+  },
+  "dry_run_zero_write_proven": true,
+  "embedding_dimensions": 1024,
+  "embedding_model": "qwen3-embedding:0.6b",
+  "embedding_provider": "ollama",
+  "embedding_readiness": "ready",
+  "error_code": null,
+  "error_type": null,
+  "final_ordinal": 37,
+  "group_id": "oracle-catalog-v2-canary-20260724t001855z-20d91c7c",
+  "replay": "skipped",
+  "run_id": "20260724t001855z-20d91c7c",
+  "stack_preserved": true,
+  "tool_call_count": 37
+}
